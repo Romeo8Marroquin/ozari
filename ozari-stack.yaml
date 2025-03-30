@@ -1,0 +1,163 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Plantilla de CloudFormation free-tier para crear una VPC con dos subredes públicas,
+  un grupo de seguridad que permite el acceso al puerto 5432 solo desde una IP específica,
+  y una instancia RDS PostgreSQL free-tier (última versión) para conexión local.
+
+Parameters:
+  DBName:
+    Description: "Nombre de la base de datos"
+    Type: String
+    Default: OzariDev
+  DBUser:
+    Description: "Usuario administrador de la base de datos"
+    Type: String
+    Default: postgres
+  DBPassword:
+    Description: "Contraseña del usuario administrador"
+    Type: String
+    NoEcho: true
+  DBInstanceClass:
+    Description: "Tipo de instancia RDS (free-tier eligible: db.t4g.micro)"
+    Type: String
+    Default: db.t4g.micro
+  DBAllocatedStorage:
+    Description: "Espacio asignado a la base de datos (en GB, hasta 20GB free-tier)"
+    Type: Number
+    Default: 20
+  AllowedIP:
+    Description: "IP (en notación CIDR) que tendrá acceso a la base de datos (ejemplo: 200.119.180.214/32)"
+    Type: String
+    Default: "200.119.180.214/32"
+  DBEngine:
+    Description: "Motor de base de datos"
+    Type: String
+    Default: postgres
+
+Resources:
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MyVPC
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: PublicSubnet1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyVPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: PublicSubnet2
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MyVPC-IGW
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MyVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: PublicRouteTable
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  SubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: "Grupo de subredes para la instancia RDS"
+      SubnetIds:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: MyRDSSubnetGroup
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Permite acceso al puerto 5432 solo desde la IP especificada"
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: !Ref AllowedIP
+      Tags:
+        - Key: Name
+          Value: RDSAccessSG
+
+  MyRDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: !Ref DBAllocatedStorage
+      DBInstanceClass: !Ref DBInstanceClass
+      Engine: !Ref DBEngine
+      MasterUsername: !Ref DBUser
+      MasterUserPassword: !Ref DBPassword
+      DBName: !Ref DBName
+      VPCSecurityGroups:
+        - !GetAtt RDSSecurityGroup.GroupId
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: true
+      MultiAZ: false
+      StorageType: gp2
+      BackupRetentionPeriod: 7
+      DeletionProtection: false
+      Tags:
+        - Key: Name
+          Value: MyRDSInstance
+
+Outputs:
+  RDSEndpoint:
+    Description: "Endpoint de la instancia RDS"
+    Value: !GetAtt MyRDSInstance.Endpoint.Address
+  RDSPort:
+    Description: "Puerto de la instancia RDS"
+    Value: !GetAtt MyRDSInstance.Endpoint.Port
