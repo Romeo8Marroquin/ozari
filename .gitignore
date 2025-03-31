@@ -32,4 +32,3 @@ coverage/
 
 # DB
 DML.*
-schema.prisma
