@@ -1,6 +1,5 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "./database"
 }
 
 datasource db {
@@ -22,22 +21,23 @@ model UserRole {
 }
 
 model User {
-  id           Int       @id @default(autoincrement())
-  fullNameKms  String?   @map("full_name_kms")
-  emailSha     String?   @unique @map("email_sha")
-  emailKms     String    @map("email_kms")
-  roleId       Int       @map("role_id")
-  passwordSha  String    @map("password_sha")
-  passwordKms  String    @map("password_kms")
-  isActive     Boolean   @default(true) @map("is_active")
-  updatedAt    DateTime? @updatedAt @map("updated_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  id            Int       @id @default(autoincrement())
+  fullNameKms   String?   @map("full_name_kms")
+  emailSha      String?   @unique @map("email_sha")
+  emailKms      String    @map("email_kms")
+  roleId        Int       @map("role_id")
+  passwordSha   String    @map("password_sha")
+  passwordKms   String    @map("password_kms")
+  termsAccepted Boolean   @default(false) @map("terms_accepted")
+  isActive      Boolean   @default(true) @map("is_active")
+  updatedAt     DateTime? @updatedAt @map("updated_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
   
-  role         UserRole  @relation(fields: [roleId], references: [id])
-  blacklists   Blacklist[]
-  userPhones   UserPhone[]
-  addresses    Address[]
-  services     Service[]
+  role          UserRole  @relation(fields: [roleId], references: [id])
+  blacklists    Blacklist[]
+  userPhones    UserPhone[]
+  addresses     Address[]
+  services      Service[]
   
   @@map("users")
 }

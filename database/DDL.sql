@@ -21,6 +21,7 @@ CREATE TABLE users (
   role_id INT NOT NULL,
   password_sha VARCHAR(256) NOT NULL,
   password_kms TEXT NOT NULL,
+  terms_accepted BOOLEAN NOT NULL DEFAULT false,
   is_active BOOLEAN NOT NULL DEFAULT true,
   updated_at TIMESTAMP,
   created_at TIMESTAMP NOT NULL DEFAULT now(),

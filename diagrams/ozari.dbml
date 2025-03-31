@@ -15,6 +15,7 @@ Table users {
   role_id int [not null]
   password_sha varchar(256) [not null]
   password_kms text [not null]
+  terms_accepted boolean [not null]
   is_active boolean [not null]
   updated_at timestamp
   created_at timestamp [not null]
