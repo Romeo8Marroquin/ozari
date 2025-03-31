@@ -1,6 +1,9 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
-import { CreateUserRequestModel } from "../models/request/userModels";
+import {
+  CreateUserRequestModel,
+  SignInUserRequestModel,
+} from "../models/request/userModels";
 import { encryptKmsAsync, encryptSha256Sync } from "../helpers/encryption";
 import { Roles } from "../models/enums/roles";
 
@@ -48,7 +51,7 @@ export const createUser = async (
     if (existingUser) {
       res
         .status(409)
-        .json({ error: "El usuario ya existe, por favor intentalo de nuevo" });
+        .json({ error: "Ha ocurrido un error, por favor intente de nuevo" });
       return;
     }
     const encryptedPassword = await encryptKmsAsync(password);
@@ -67,7 +70,36 @@ export const createUser = async (
     });
     res.status(201).json({ message: "Usuario creado exitosamente" });
   } catch (error) {
+    console.log(error);
     res.status(500).json({ error: "Error al crear el usuario" });
+  }
+};
+
+export const signInUser = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  const { email, password } = req.body as SignInUserRequestModel;
+
+  try {
+    const emailSha = encryptSha256Sync(email);
+    const user = await prismaClient.user.findUnique({
+      where: { emailSha, isActive: true },
+    });
+    if (!user) {
+      res.status(401).json({ error: "Credenciales inválidas" });
+      return;
+    }
+
+    const inputPasswordHash = encryptSha256Sync(password);
+    if (inputPasswordHash !== user.passwordSha) {
+      res.status(401).json({ error: "Credenciales inválidas" });
+      return;
+    }
+
+    res.json({ message: "Login exitoso" });
+  } catch (error) {
+    res.status(500).json({ error: "Error al iniciar sesión" });
   }
 };
 

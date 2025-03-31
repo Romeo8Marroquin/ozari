@@ -5,3 +5,8 @@ export interface CreateUserRequestModel {
   confirmPassword: string;
   termsAccepted: boolean;
 }
+
+export interface SignInUserRequestModel {
+  email: string;
+  password: string;
+}

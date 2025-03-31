@@ -15,7 +15,6 @@ app.use(
   cors({
     origin: (origin, callback) => {
       const allowedOrigin = process.env.CORS_ORIGIN;
-
       if (!allowedOrigin) {
         return callback(
           new Error("CORS no permitido: origen no configurado"),
