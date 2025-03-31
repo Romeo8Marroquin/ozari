@@ -41,7 +41,7 @@ CREATE TABLE blacklist_types (
 CREATE TABLE blacklist (
   id SERIAL PRIMARY KEY,
   user_id INT NOT NULL,
-  blacklist_types_id INT NOT NULL,
+  blacklist_type_id INT NOT NULL,
   reason TEXT NOT NULL,
   is_active BOOLEAN NOT NULL DEFAULT true,
   updated_at TIMESTAMP,
