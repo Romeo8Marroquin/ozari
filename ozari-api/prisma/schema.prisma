@@ -22,8 +22,8 @@ model UserRole {
 
 model User {
   id            Int       @id @default(autoincrement())
-  fullNameKms   String?   @map("full_name_kms")
-  emailSha      String?   @unique @map("email_sha")
+  fullNameKms   String    @map("full_name_kms")
+  emailSha      String    @unique @map("email_sha")
   emailKms      String    @map("email_kms")
   roleId        Int       @map("role_id")
   passwordSha   String    @map("password_sha")

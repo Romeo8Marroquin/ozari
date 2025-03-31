@@ -13,8 +13,8 @@ CREATE TABLE "user_roles" (
 -- CreateTable
 CREATE TABLE "users" (
     "id" SERIAL NOT NULL,
-    "full_name_kms" TEXT,
-    "email_sha" TEXT,
+    "full_name_kms" TEXT NOT NULL,
+    "email_sha" TEXT NOT NULL,
     "email_kms" TEXT NOT NULL,
     "role_id" INTEGER NOT NULL,
     "password_sha" TEXT NOT NULL,

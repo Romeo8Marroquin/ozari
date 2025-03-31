@@ -15,8 +15,8 @@ CREATE TABLE user_roles (
 -- Tabla: users
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
-  full_name_kms TEXT,
-  email_sha VARCHAR(256) UNIQUE,
+  full_name_kms TEXT NOT NULL,
+  email_sha VARCHAR(256) UNIQUE NOT NULL,
   email_kms TEXT NOT NULL,
   role_id INT NOT NULL,
   password_sha VARCHAR(256) NOT NULL,

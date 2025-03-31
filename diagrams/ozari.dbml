@@ -9,8 +9,8 @@ Table user_roles {
 
 Table users {
   id int [pk, increment]
-  full_name_kms text
-  email_sha varchar(256) [unique]
+  full_name_kms text [not null]
+  email_sha varchar(256) [unique, not null]
   email_kms text [not null]
   role_id int [not null]
   password_sha varchar(256) [not null]
