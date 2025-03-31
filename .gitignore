@@ -1,0 +1,34 @@
+# Node modules
+node_modules/
+
+# Directorios de salida de TypeScript y builds
+dist/
+build/
+out/
+
+# Archivos de logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Archivos de entorno (variables sensibles)
+.env
+.env.*.local
+
+# Archivos generados por el sistema operativo
+.DS_Store
+Thumbs.db
+
+# Archivos de configuración de editores/IDEs
+.vscode/
+.idea/
+
+# Archivos de TypeScript
+*.tsbuildinfo
+
+# Directorios de cobertura de tests (si usas alguna herramienta de coverage)
+coverage/
+
+# DB
+DML.*
