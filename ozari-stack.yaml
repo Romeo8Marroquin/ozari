@@ -1,38 +1,17 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Plantilla de CloudFormation free-tier para crear una VPC con dos subredes públicas,
   un grupo de seguridad que permite el acceso al puerto 5432 solo desde una IP específica,
   y una instancia RDS PostgreSQL free-tier (última versión) para conexión local.
 
 Parameters:
-  DBName:
-    Description: "Nombre de la base de datos"
+  AllowedIP:
+    Description: "IP (en notación CIDR) que tendrá acceso a la base de datos"
     Type: String
-    Default: OzariDev
-  DBUser:
-    Description: "Usuario administrador de la base de datos"
-    Type: String
-    Default: postgres
   DBPassword:
     Description: "Contraseña del usuario administrador"
     Type: String
     NoEcho: true
-  DBInstanceClass:
-    Description: "Tipo de instancia RDS (free-tier eligible: db.t4g.micro)"
-    Type: String
-    Default: db.t4g.micro
-  DBAllocatedStorage:
-    Description: "Espacio asignado a la base de datos (en GB, hasta 20GB free-tier)"
-    Type: Number
-    Default: 20
-  AllowedIP:
-    Description: "IP (en notación CIDR) que tendrá acceso a la base de datos (ejemplo: 200.119.180.214/32)"
-    Type: String
-    Default: "200.119.180.214/32"
-  DBEngine:
-    Description: "Motor de base de datos"
-    Type: String
-    Default: postgres
 
 Resources:
   MyVPC:
@@ -50,7 +29,7 @@ Resources:
     Properties:
       VpcId: !Ref MyVPC
       CidrBlock: 10.0.1.0/24
-      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      AvailabilityZone: !Select [0, !GetAZs ""]
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -61,7 +40,7 @@ Resources:
     Properties:
       VpcId: !Ref MyVPC
       CidrBlock: 10.0.2.0/24
-      AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      AvailabilityZone: !Select [1, !GetAZs ""]
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -136,12 +115,12 @@ Resources:
   MyRDSInstance:
     Type: AWS::RDS::DBInstance
     Properties:
-      AllocatedStorage: !Ref DBAllocatedStorage
-      DBInstanceClass: !Ref DBInstanceClass
-      Engine: !Ref DBEngine
-      MasterUsername: !Ref DBUser
+      AllocatedStorage: 20
+      DBInstanceClass: db.t4g.micro
+      Engine: postgres
+      MasterUsername: postgres
       MasterUserPassword: !Ref DBPassword
-      DBName: !Ref DBName
+      DBName: OzariDev
       VPCSecurityGroups:
         - !GetAtt RDSSecurityGroup.GroupId
       DBSubnetGroupName: !Ref DBSubnetGroup
