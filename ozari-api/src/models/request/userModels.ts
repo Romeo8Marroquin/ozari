@@ -1,8 +1,8 @@
 export interface CreateUserRequestModel {
-  fullName: string;
-  email: string;
-  password: string;
   confirmPassword: string;
+  email: string;
+  fullName: string;
+  password: string;
   termsAccepted: boolean;
 }
 

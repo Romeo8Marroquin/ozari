@@ -1,52 +1,53 @@
-import { Request, Response, NextFunction } from "express";
-import { emailRegex, fullNameRegex, passwordRegex } from "../helpers/regex";
-import { CreateUserRequestModel } from "../models/request/userModels";
+import { NextFunction, Request, Response } from 'express';
+
+import { emailRegex, fullNameRegex, passwordRegex } from '../helpers/regex';
+import { CreateUserRequestModel } from '../models/request/userModels';
 
 export function validateCreateUser(
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): void {
-  const { fullName, email, password, confirmPassword, termsAccepted } =
-    req.body;
+  const { confirmPassword, email, fullName, password, termsAccepted } =
+    req.body as CreateUserRequestModel;
 
   if (
-    typeof fullName !== "string" ||
-    fullName.trim() === "" ||
+    typeof fullName !== 'string' ||
+    fullName.trim() === '' ||
     !fullNameRegex.test(fullName)
   ) {
-    res.status(400).json({ error: "El nombre es requerido y debe ser válido" });
+    res.status(400).json({ error: 'El nombre es requerido y debe ser válido' });
     return;
   }
 
-  if (typeof email !== "string" || !emailRegex.test(email)) {
-    res.status(400).json({ error: "El correo debe ser válido." });
+  if (typeof email !== 'string' || !emailRegex.test(email)) {
+    res.status(400).json({ error: 'El correo debe ser válido.' });
     return;
   }
 
-  if (typeof password !== "string" || !passwordRegex.test(password)) {
+  if (typeof password !== 'string' || !passwordRegex.test(password)) {
     res.status(400).json({
       error:
-        "Password debe tener al menos 6 caracteres, incluyendo letras, símbolos y números.",
+        'Password debe tener al menos 6 caracteres, incluyendo letras, símbolos y números.',
     });
     return;
   }
 
   if (password !== confirmPassword) {
-    res.status(400).json({ error: "Las contraseñas no coinciden." });
+    res.status(400).json({ error: 'Las contraseñas no coinciden.' });
     return;
   }
 
-  if (typeof termsAccepted !== "boolean" || termsAccepted !== true) {
-    res.status(400).json({ error: "termsAccepted debe ser verdadero." });
+  if (typeof termsAccepted !== 'boolean' || !termsAccepted) {
+    res.status(400).json({ error: 'termsAccepted debe ser verdadero.' });
     return;
   }
 
   const validatedBody: CreateUserRequestModel = {
-    fullName: fullName.trim(),
-    email,
-    password,
     confirmPassword,
+    email,
+    fullName: fullName.trim(),
+    password,
     termsAccepted,
   };
 
