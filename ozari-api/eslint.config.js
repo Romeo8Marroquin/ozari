@@ -17,6 +17,9 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    rules: {
+      strict: ['error', 'global'],
+    },
   },
   perfectionist.configs['recommended-natural'],
   sonarjs.configs['recommended'],

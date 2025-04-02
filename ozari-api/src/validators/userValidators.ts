@@ -1,21 +1,13 @@
 import { NextFunction, Request, Response } from 'express';
 
-import { emailRegex, fullNameRegex, passwordRegex } from '../helpers/regex';
-import { CreateUserRequestModel } from '../models/request/userModels';
+import { emailRegex, fullNameRegex, passwordRegex } from '../helpers/regex.js';
+import { CreateUserRequestModel } from '../models/request/userModels.js';
 
-export function validateCreateUser(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): void {
+export function validateCreateUser(req: Request, res: Response, next: NextFunction): void {
   const { confirmPassword, email, fullName, password, termsAccepted } =
     req.body as CreateUserRequestModel;
 
-  if (
-    typeof fullName !== 'string' ||
-    fullName.trim() === '' ||
-    !fullNameRegex.test(fullName)
-  ) {
+  if (typeof fullName !== 'string' || fullName.trim() === '' || !fullNameRegex.test(fullName)) {
     res.status(400).json({ error: 'El nombre es requerido y debe ser válido' });
     return;
   }
@@ -27,8 +19,7 @@ export function validateCreateUser(
 
   if (typeof password !== 'string' || !passwordRegex.test(password)) {
     res.status(400).json({
-      error:
-        'Password debe tener al menos 6 caracteres, incluyendo letras, símbolos y números.',
+      error: 'Password debe tener al menos 6 caracteres, incluyendo letras, símbolos y números.',
     });
     return;
   }

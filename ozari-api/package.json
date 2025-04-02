@@ -1,11 +1,10 @@
 {
   "name": "ozari-api",
   "version": "1.0.0",
-  "main": "index.ts",
   "type": "module",
   "scripts": {
-    "start": "node dist/index.js",
-    "dev": "nodemon",
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
     "lint": "eslint",
     "lint:fix": "eslint --fix"
   },
@@ -15,12 +14,20 @@
   "description": "",
   "dependencies": {
     "@aws-sdk/client-kms": "^3.777.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-node": "^0.57.0",
+    "@opentelemetry/sdk-metrics": "^2.0.0",
+    "@opentelemetry/sdk-node": "^0.200.0",
+    "@opentelemetry/sdk-trace-node": "^2.0.0",
     "@prisma/client": "^6.5.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
-    "helmet": "^8.1.0"
+    "helmet": "^8.1.0",
+    "i18next": "^24.2.3",
+    "i18next-fs-backend": "^2.6.0",
+    "i18next-http-middleware": "^3.7.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.23.0",
@@ -32,9 +39,8 @@
     "eslint": "^9.23.0",
     "eslint-plugin-perfectionist": "^4.10.1",
     "eslint-plugin-sonarjs": "^3.0.2",
-    "nodemon": "^3.1.9",
     "prisma": "^6.5.0",
-    "ts-node": "^10.9.2",
+    "tsx": "^4.19.3",
     "typescript": "^5.8.2",
     "typescript-eslint": "^8.29.0"
   }

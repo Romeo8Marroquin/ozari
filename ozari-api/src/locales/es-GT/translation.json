@@ -1,0 +1,29 @@
+{
+  "api": {
+    "cors": {
+      "originUndefined": "El origen no está definido.",
+      "originInvalid": "El origen no es válido.",
+      "logs": {
+        "originBlocked": "El origen <{{origin}}> fue bloqueado al no ser reconocido."
+      }
+    },
+    "logs": {
+      "serverRunning": "Servidor backend ejecutándose en <{{-host}}:{{port}}>.",
+      "dbDisconnection": "Desconectando la base de datos.",
+      "serverClosed": "Servidor backend cerrado exitosamente.",
+
+      "hostError": "No se encontró el host <{{host}}>.",
+      "portError": "No se encontró el puerto <{{port}}>.",
+      "databaseShutdownError": "Error al cerrar la base de datos: {{error}}."
+    }
+  },
+  "userController": {
+    "createUser": {
+      "success": "Usuario creado exitosamente.",
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo.",
+      "logs": {
+        "internalServerError": "Error al crear usuario: {{error}}."
+      }
+    }
+  }
+}

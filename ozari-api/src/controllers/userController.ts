@@ -1,12 +1,10 @@
 import { PrismaClient } from '@prisma/client';
 import { Request, Response } from 'express';
+import i18next from 'i18next';
 
-import { encryptKmsAsync, encryptSha256Sync } from '../helpers/encryption';
-import { Roles } from '../models/enums/roles';
-import {
-  CreateUserRequestModel,
-  SignInUserRequestModel,
-} from '../models/request/userModels';
+import { encryptKmsAsync, encryptSha256Sync } from '../helpers/encryption.js';
+import { RolesEnum } from '../models/enums/rolesEnum.js';
+import { CreateUserRequestModel, SignInUserRequestModel } from '../models/request/userModels.js';
 
 export const prismaClient = new PrismaClient();
 
@@ -37,12 +35,8 @@ export const getUser = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-export const createUser = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
-  const { email, fullName, password, termsAccepted } =
-    req.body as CreateUserRequestModel;
+export const createUser = async (req: Request, res: Response): Promise<void> => {
+  const { email, fullName, password, termsAccepted } = req.body as CreateUserRequestModel;
 
   try {
     const emailSha = encryptSha256Sync(email);
@@ -50,9 +44,7 @@ export const createUser = async (
       where: { emailSha },
     });
     if (existingUser) {
-      res
-        .status(409)
-        .json({ error: 'Ha ocurrido un error, por favor intente de nuevo' });
+      res.status(409).json({ error: i18next.t('api.userController.createUser.genericError') });
       return;
     }
     const encryptedPassword = await encryptKmsAsync(password);
@@ -65,21 +57,18 @@ export const createUser = async (
         fullNameKms: encryptedName,
         passwordKms: encryptedPassword,
         passwordSha: encryptSha256Sync(password),
-        roleId: Roles.Client,
+        roleId: RolesEnum.Client,
         termsAccepted,
       },
     });
-    res.status(201).json({ message: 'Usuario creado exitosamente' });
+    res.status(201).json({ message: i18next.t('api.userController.createUser.userCreated') });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ error: 'Error al crear el usuario' });
+    console.log(i18next.t('api.userController.createUser.logs.serverError'), error);
+    res.status(500).json({ error: i18next.t('api.userController.createUser.genericError') });
   }
 };
 
-export const signInUser = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
+export const signInUser = async (req: Request, res: Response): Promise<void> => {
   const { email, password } = req.body as SignInUserRequestModel;
 
   try {
@@ -121,10 +110,7 @@ export const signInUser = async (
 //   }
 // };
 
-export const deleteUser = async (
-  req: Request,
-  res: Response,
-): Promise<void> => {
+export const deleteUser = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
   try {
     const deletedUser = await prismaClient.user.update({

@@ -6,9 +6,9 @@ import {
   getUser,
   getUsers,
   // updateUser,
-} from '../controllers/userController';
-import { disableEndpoint } from '../middlewares/disabledMiddleware';
-import { validateCreateUser } from '../validators/userValidators';
+} from '../controllers/userController.js';
+import { disableEndpoint } from '../middlewares/disabledMiddleware.js';
+import { validateCreateUser } from '../validators/userValidators.js';
 
 const router = Router();
 
