@@ -3,4 +3,6 @@ export enum ProcessesEnum {
   HOST_ERROR,
   PORT_ERROR,
   DB_DISCONNECTION_ERROR,
+  CORS_ORIGIN_ERROR,
+  APP_HOST_ERROR,
 }

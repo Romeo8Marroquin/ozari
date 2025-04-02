@@ -8,22 +8,12 @@ import * as i18nmiddleware from 'i18next-http-middleware';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 
+import { ProcessesEnum } from './models/enums/processesEnum.js';
 import usersRouter from './routes/userRoute.js';
 const app = express();
 
 // region Middlewares
-const frontendDomain = process.env.APP_HOST ?? 'http://localhost:3001';
-const allowedOrigin = process.env.CORS_ORIGIN;
-const cspDirectives = {
-  connectSrc: ["'self'", frontendDomain],
-  defaultSrc: ["'self'"],
-  fontSrc: ["'self'", 'data:'],
-  frameAncestors: ["'self'"],
-  imgSrc: ["'self'", frontendDomain, 'data:'],
-  objectSrc: ["'none'"],
-  scriptSrc: ["'self'", frontendDomain],
-  styleSrc: ["'self'", frontendDomain],
-};
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -44,6 +34,27 @@ await i18next
   });
 
 app.use(i18nmiddleware.handle(i18next, {}));
+const allowedOrigin = process.env.API_HOST;
+const frontendDomain = process.env.APP_HOST;
+if (!allowedOrigin) {
+  console.error(i18next.t('api.cors.logs.originNotDefined'));
+  process.exit(ProcessesEnum.CORS_ORIGIN_ERROR);
+}
+if (!frontendDomain) {
+  console.error(i18next.t('api.server.logs.appHostError', { host: frontendDomain }));
+  process.exit(ProcessesEnum.APP_HOST_ERROR);
+}
+const cspDirectives = {
+  connectSrc: ["'self'", frontendDomain],
+  defaultSrc: ["'self'"],
+  fontSrc: ["'self'", 'data:'],
+  frameAncestors: ["'self'"],
+  imgSrc: ["'self'", frontendDomain, 'data:'],
+  objectSrc: ["'none'"],
+  scriptSrc: ["'self'", frontendDomain],
+  styleSrc: ["'self'", frontendDomain],
+};
+
 app.use(
   helmet({
     contentSecurityPolicy: { directives: cspDirectives },
@@ -58,10 +69,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!allowedOrigin) {
-        callback(new Error(i18next.t('api.cors.originUndefined')), false);
-        return;
-      }
       if (origin === allowedOrigin) {
         callback(null, true);
         return;

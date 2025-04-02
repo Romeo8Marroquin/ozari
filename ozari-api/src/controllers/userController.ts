@@ -1,12 +1,10 @@
-import { PrismaClient } from '@prisma/client';
 import { Request, Response } from 'express';
 import i18next from 'i18next';
 
+import { prismaClient } from '../database/databaseClient.js';
 import { encryptKmsAsync, encryptSha256Sync } from '../helpers/encryption.js';
 import { RolesEnum } from '../models/enums/rolesEnum.js';
 import { CreateUserRequestModel, SignInUserRequestModel } from '../models/request/userModels.js';
-
-export const prismaClient = new PrismaClient();
 
 export const getUsers = async (req: Request, res: Response): Promise<void> => {
   try {
