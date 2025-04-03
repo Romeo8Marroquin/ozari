@@ -13,7 +13,8 @@ import { fileURLToPath } from 'url';
 import { logger } from './logs/winstonConfig.js';
 import { ProcessesEnum } from './models/enums/processesEnum.js';
 import { LoggerStorage } from './models/logger/logModel.js';
-import usersRouter from './routes/userRoute.js';
+import productsRouter from './routes/productsRoutes.js';
+import usersRouter from './routes/userRoutes.js';
 export const app = express();
 
 // region Middlewares
@@ -66,6 +67,7 @@ export const asyncLocalStorage = new AsyncLocalStorage<LoggerStorage>();
 
 app.use((req, _, next) => {
   const context: LoggerStorage = {
+    body: req.body as object,
     hostname: req.hostname,
     ips: req.ips,
     method: req.method,
@@ -112,6 +114,8 @@ app.use(
 const apiRouter = Router();
 
 apiRouter.use('/user', usersRouter);
+apiRouter.use('/products', productsRouter);
+
 app.use('/api', apiRouter);
 // endregion
 

@@ -1,6 +1,7 @@
 import { UUID } from 'node:crypto';
 
 export interface LoggerStorage {
+  body: object;
   hostname: string;
   ips: string[];
   method: string;

@@ -14,8 +14,11 @@ import { validateCreateUser, validateSignIn } from '../validators/userValidators
 
 const router = Router();
 
-// region Protected Routes
+//region Role Protected Routes
 router.get('/all', verifyJwt, isGrantedRoles([RolesEnum.Admin]), getAllUsers);
+// endregion
+
+// region Protected Routes
 router.get('/signout', verifyJwt, signOutUser);
 // endregion
 

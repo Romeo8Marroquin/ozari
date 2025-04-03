@@ -10,6 +10,8 @@ export const applicationConfig = {
     sameSite: true,
     secure: true,
   },
+  maxGlobalAmount: 1000000,
+  maxGlobalQuantity: 5000,
   refreshToken: {
     algorithm: 'HS256',
     audience: 'platform-users',

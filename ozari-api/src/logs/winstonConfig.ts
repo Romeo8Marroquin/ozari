@@ -32,6 +32,7 @@ const customCliFormat = printf((info) => {
     method && originalUrl ? `\n  → ${method as string} ${originalUrl as string}` : '',
     hostname ? `\n  → Host: ${hostname as string}` : '',
     userAgent ? `\n  → User-Agent: ${userAgent as string}` : '',
+    info.body ? `\n  → Body: ${JSON.stringify(info.body)}` : '',
     info.params ? `\n  → Params: ${JSON.stringify(info.params)}` : '',
     info.query ? `\n  → Query: ${JSON.stringify(info.query)}` : '',
     info.ips ? `\n  → IPs: ${JSON.stringify(info.ips)}` : '',

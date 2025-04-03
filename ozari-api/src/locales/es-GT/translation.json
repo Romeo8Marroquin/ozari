@@ -116,31 +116,72 @@
     "disabled": {
       "defaultMessage": "Esta ruta está deshabilitada temporalmente.",
       "logs": {
-        "defaultMessage": "Este endpoint <{{-method}} {{-url}}> está deshabilitado temporalmente."
+        "defaultMessage": "[middleware] Este endpoint <{{-method}} {{-url}}> está deshabilitado temporalmente."
       }
     },
     "auth": {
       "defaultMessage": "Acceso denegado.",
       "logs": {
-        "jwtMismatch": "El jti <{{-received}}> del token recibido no coincide con el jti esperado <{{-expected}}> de sesión activa.",
-        "successAuth": "Usuario con el id <{{-userId}}> y rol <{{-role}}> autenticado exitosamente.",
-        "jwtRegisterError": "Se encontraron <{{-count}}> tokens activos en base de datos para el token jti <{{-jti}}>.",
-        "jwtSecretMissing": "JWT Secret no definido.",
-        "jwtRefreshSecretMissing": "JWT Refresh Secret no definido.",
-        "invalidTokenType": "Tipo de token inválido, se esperaba <{{-expected}}> pero se recibió <{{-received}}>.",
-        "unauthorized": "No autorizado, token <{{-token}}> no proporcionado o inválido.",
-        "internalServerError": "Error al validar el token en el middleware de autenticación: {{-error}}."
+        "jwtMismatch": "[middleware] El jti <{{-received}}> del token recibido no coincide con el jti esperado <{{-expected}}> de sesión activa.",
+        "successAuth": "[middleware] Usuario con el id <{{-userId}}> y rol <{{-role}}> autenticado exitosamente.",
+        "jwtRegisterError": "[middleware] Se encontraron <{{-count}}> tokens activos en base de datos para el token jti <{{-jti}}>.",
+        "jwtSecretMissing": "[middleware] JWT Secret no definido.",
+        "jwtRefreshSecretMissing": "[middleware] JWT Refresh Secret no definido.",
+        "invalidTokenType": "[middleware] Tipo de token inválido, se esperaba <{{-expected}}> pero se recibió <{{-received}}>.",
+        "unauthorized": "[middleware] No autorizado, token <{{-token}}> no proporcionado o inválido.",
+        "internalServerError": "[middleware] Error al validar el token en el middleware de autenticación: {{-error}}."
       }
     },
     "isGranted": {
       "defaultMessage": "Acceso denegado.",
       "logs": {
-        "successAuth": "Usuario con el id <{{-userId}}> y rol <{{-role}}> autenticado exitosamente.",
-        "unauthorized": "Usuario <{{-user}}> no autorizado o inválido.",
-        "forbidden": "Acceso denegado, el usuario con id <{{-userId}}> no tiene acceso al recurso <{{-method}} {{-url}}> con el rol <{{-role}}>.",
-        "internalServerError": "Error al validar el token en el middleware de permisos: {{-error}}."
+        "successAuth": "[middleware] Usuario con el id <{{-userId}}> y rol <{{-role}}> autenticado exitosamente.",
+        "unauthorized": "[middleware] Usuario <{{-user}}> no autorizado o inválido.",
+        "forbidden": "[middleware] Acceso denegado, el usuario con id <{{-userId}}> no tiene acceso al recurso <{{-method}} {{-url}}> con el rol <{{-role}}>.",
+        "internalServerError": "[middleware] Error al validar el token en el middleware de permisos: {{-error}}."
       }
     }
   },
-  "products": {}
+  "products": {
+    "getAllProducts": {
+      "productsFetched": "Productos obtenidos exitosamente.",
+
+      "errorFetchingProducts": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "productsFetched": "Productos obtenidos exitosamente, total de productos <{{-count}}>.",
+
+        "errorFetchingProducts": "Error al obtener productos: {{-error}}."
+      }
+    },
+    "createProduct": {
+      "validators": {
+        "invalidBusinessTypeId": "El tipo de negocio es requerido y debe ser válido.",
+        "invalidCategoryId": "La categoría es requerida y debe ser válida.",
+        "invalidCurrencyId": "La moneda es requerida y debe ser válida.",
+        "invalidDescription": "La descripción debe ser válida.",
+        "invalidImageUrl": "La imagen debe ser válida.",
+        "invalidName": "El nombre es requerido y debe ser válido.",
+        "invalidDetailTypeId": "El tipo de un detalle no es válido.",
+        "invalidDetail": "El nombre de un detalle no es válido.",
+        "invalidQuantity": "La cantidad es requerida y debe ser válida.",
+        "invalidRentPrice": "El precio de renta debe ser válido.",
+        "invalidSellPrice": "El precio de venta debe ser válido.",
+        "invalidRentAndSellPrice": "El precio de renta y el precio de venta no pueden ser vacíos al mismo tiempo.",
+        "logs": {
+          "invalidBusinessTypeId": "El id del tipo de negocio <{{-businessTypeId}}> no es válido.",
+          "invalidCategoryId": "El id de la categoría <{{-categoryId}}> no es válido.",
+          "invalidCurrencyId": "El id de la moneda <{{-currencyId}}> no es válido.",
+          "invalidDescription": "La descripción <{{-description}}> no es válida.",
+          "invalidImageUrl": "La imagen <{{-imageUrl}}> no es válida.",
+          "invalidName": "El nombre <{{-name}}> no es válido.",
+          "invalidDetailTypeId": "El id del tipo de detalle <{{-detailTypeId}}> no es válido.",
+          "invalidDetail": "El nombre del detalle <{{-detail}}> no es válido.",
+          "invalidQuantity": "La cantidad <{{-quantity}}> no es válida.",
+          "invalidRentPrice": "El precio de renta <{{-rentPrice}}> no es válido.",
+          "invalidSellPrice": "El precio de venta <{{-sellPrice}}> no es válido.",
+          "invalidRentAndSellPrice": "El precio de renta <{{-rentPrice}}> y el precio de venta <{{-sellPrice}}> no pueden ser vacíos al mismo tiempo."
+        }
+      }
+    }
+  }
 }
