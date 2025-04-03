@@ -34,12 +34,42 @@ model User {
   createdAt     DateTime  @default(now()) @map("created_at")
   
   role          UserRole  @relation(fields: [roleId], references: [id])
+  jwtSessions   JwtSession[]
   blacklists    Blacklist[]
   userPhones    UserPhone[]
   addresses     Address[]
   services      Service[]
   
   @@map("users")
+}
+
+model TokenType {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  isActive    Boolean   @default(true) @map("is_active")
+  updatedAt   DateTime? @updatedAt @map("updated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  jwtSessions JwtSession[]
+
+  @@map("token_types")
+}
+
+model JwtSession {
+  id          Int       @id @default(autoincrement())
+  jti         String
+  deviceUuid  String    @map("device_uuid")
+  userId      Int       @map("user_id")
+  tokenTypeId Int       @map("token_type_id")
+  issuedAt    DateTime  @map("issued_at")
+  expiresAt   DateTime  @map("expires_at")
+  isActive    Boolean   @default(true) @map("is_active")
+
+  user        User      @relation(fields: [userId], references: [id])
+  tokenType   TokenType @relation(fields: [tokenTypeId], references: [id])
+
+  @@map("jwt_sessions")
 }
 
 model BlacklistType {

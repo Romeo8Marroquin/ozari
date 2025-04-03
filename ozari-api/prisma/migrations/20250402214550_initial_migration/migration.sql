@@ -28,6 +28,32 @@ CREATE TABLE "users" (
 );
 
 -- CreateTable
+CREATE TABLE "token_types" (
+    "id" SERIAL NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "updated_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "token_types_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "jwt_sessions" (
+    "id" SERIAL NOT NULL,
+    "jti" TEXT NOT NULL,
+    "device_uuid" TEXT NOT NULL,
+    "user_id" INTEGER NOT NULL,
+    "token_type_id" INTEGER NOT NULL,
+    "issued_at" TIMESTAMP(3) NOT NULL,
+    "expires_at" TIMESTAMP(3) NOT NULL,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+
+    CONSTRAINT "jwt_sessions_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "blacklist_types" (
     "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
@@ -313,6 +339,12 @@ CREATE UNIQUE INDEX "users_email_sha_key" ON "users"("email_sha");
 
 -- AddForeignKey
 ALTER TABLE "users" ADD CONSTRAINT "users_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "user_roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "jwt_sessions" ADD CONSTRAINT "jwt_sessions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "jwt_sessions" ADD CONSTRAINT "jwt_sessions_token_type_id_fkey" FOREIGN KEY ("token_type_id") REFERENCES "token_types"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "blacklist" ADD CONSTRAINT "blacklist_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

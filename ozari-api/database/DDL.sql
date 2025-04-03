@@ -28,6 +28,30 @@ CREATE TABLE users (
   CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES user_roles(id)
 );
 
+-- Tabla: token_types
+CREATE TABLE token_types (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  updated_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Tabla: jwt_sessions
+CREATE TABLE jwt_sessions (
+  id SERIAL PRIMARY KEY,
+  jti TEXT NOT NULL,
+  device_uuid TEXT NOT NULL,
+  user_id INT NOT NULL,
+  token_type_id INT NOT NULL,
+  issued_at TIMESTAMP NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id),
+  CONSTRAINT fk_token_type FOREIGN KEY (token_type_id) REFERENCES token_types(id)
+);
+
 -- Tabla: blacklist_types
 CREATE TABLE blacklist_types (
   id SERIAL PRIMARY KEY,
@@ -48,7 +72,7 @@ CREATE TABLE blacklist (
   updated_at TIMESTAMP,
   created_at TIMESTAMP NOT NULL DEFAULT now(),
   CONSTRAINT fk_blacklist_user FOREIGN KEY (user_id) REFERENCES users(id),
-  CONSTRAINT fk_blacklist_types FOREIGN KEY (blacklist_types_id) REFERENCES blacklist_types(id)
+  CONSTRAINT fk_blacklist_types FOREIGN KEY (blacklist_type_id) REFERENCES blacklist_types(id)
 );
 
 -- Tabla: user_phone_types
