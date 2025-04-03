@@ -1,3 +1,4 @@
+import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
@@ -8,6 +9,7 @@ import * as i18nmiddleware from 'i18next-http-middleware';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 
+import { logger } from './logs/winstonConfig.js';
 import { ProcessesEnum } from './models/enums/processesEnum.js';
 import usersRouter from './routes/userRoute.js';
 const app = express();
@@ -35,13 +37,18 @@ await i18next
 
 app.use(i18nmiddleware.handle(i18next, {}));
 const allowedOrigin = process.env.API_HOST;
+const allowedPort = process.env.API_PORT;
 const frontendDomain = process.env.APP_HOST;
 if (!allowedOrigin) {
-  console.error(i18next.t('api.cors.logs.originNotDefined'));
+  logger.error(i18next.t('api.cors.logs.originNotDefined', { origin: allowedOrigin }));
   process.exit(ProcessesEnum.CORS_ORIGIN_ERROR);
 }
+if (!allowedPort) {
+  logger.error(i18next.t('api.cors.logs.portError', { port: allowedPort }));
+  process.exit(ProcessesEnum.PORT_ERROR);
+}
 if (!frontendDomain) {
-  console.error(i18next.t('api.server.logs.appHostError', { host: frontendDomain }));
+  logger.error(i18next.t('api.server.logs.appHostError', { host: frontendDomain }));
   process.exit(ProcessesEnum.APP_HOST_ERROR);
 }
 const cspDirectives = {
@@ -64,16 +71,17 @@ app.use(
 app.use(helmet.noSniff());
 app.use(helmet.frameguard({ action: 'deny' }));
 app.use(rateLimit({ max: 100, windowMs: 15 * 60 * 1000 }));
+app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (origin === allowedOrigin) {
+      if (origin === `${allowedOrigin}:${allowedPort}`) {
         callback(null, true);
         return;
       }
-      console.error(i18next.t('api.cors.logs.originBlocked', { origin }));
+      logger.error(i18next.t('api.cors.logs.originBlocked', { origin }));
       callback(new Error(i18next.t('api.cors.originInvalid')), false);
     },
   }),

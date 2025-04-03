@@ -4,35 +4,142 @@
       "originUndefined": "El origen no está definido.",
       "originInvalid": "El origen no es válido.",
       "logs": {
-        "originNotDefined": "El origen no está definido.",
-        "originBlocked": "El origen <{{origin}}> fue bloqueado al no ser reconocido."
+        "portError": "El puerto <{{-port}}> no está definido.",
+        "originNotDefined": "El origen <{{-origin}}> no está definido.",
+        "originBlocked": "El origen <{{-origin}}> fue bloqueado al no ser reconocido."
       }
     },
     "database": {
+      "connected": "Servidor de base de datos conectado exitosamente",
       "logs": {
         "dbDisconnection": "Desconectando la base de datos.",
 
-        "databaseShutdownError": "Error al cerrar la base de datos: {{error}}."
+        "databaseConnectionError": "Error al conectar la base de datos: {{-error}}.",
+        "databaseShutdownError": "Error al cerrar la base de datos: {{-error}}."
       }
     },
     "server": {
       "logs": {
-        "serverRunning": "Servidor backend ejecutándose en <{{-host}}:{{port}}>.",
+        "serverRunning": "Servidor backend ejecutándose en <{{-host}}:{{-port}}>.",
         "serverClosed": "Servidor backend cerrado exitosamente.",
 
-        "hostError": "No se encontró el host <{{host}}>.",
-        "appHostError": "No se encontró el host del frontend <{{host}}>.",
-        "portError": "No se encontró el puerto <{{port}}>."
+        "hostError": "No se encontró el host <{{-host}}>.",
+        "appHostError": "No se encontró el host del frontend <{{-host}}>.",
+        "portError": "No se encontró el puerto <{{-port}}>."
       }
     }
   },
-  "userController": {
+  "user": {
     "createUser": {
-      "success": "Usuario creado exitosamente.",
-      "genericError": "Ha ocurrido un error, por favor intente de nuevo.",
+      "userCreated": "Usuario creado exitosamente.",
+
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidFullName": "El nombre es requerido y debe ser válido",
+        "invalidEmail": "El correo electrónico es requerido y debe ser válido.",
+        "invalidPassword": "La contraseña debe tener al menos 10 caracteres, incluyendo letras, símbolos y números.",
+        "passwordsDoNotMatch": "Las contraseñas no coinciden.",
+        "termsNotAccepted": "Debes aceptar los términos y condiciones.",
+        "logs": {
+          "invalidFullName": "El nombre <{{-fullName}}> no es válido.",
+          "invalidEmail": "El correo electrónico <{{-email}}> no es válido.",
+          "invalidPassword": "La contraseña <{{-password}}> no es válida.",
+          "passwordsDoNotMatch": "Las contraseñas <{{-password}}> y <{{-confirmPassword}}> no coinciden.",
+          "termsNotAccepted": "Los términos y condiciones no han sido aceptados."
+        }
+      },
       "logs": {
-        "internalServerError": "Error al crear usuario: {{error}}."
+        "userCreated": "Usuario creado exitosamente con el correo <{{-email}}> y el nombre <{{-fullName}}>.",
+        "userAlreadyExists": "El usuario con el correo <{{-email}}> ya existe.",
+        "internalServerError": "Error al crear usuario: {{-error}}."
+      }
+    },
+    "signInUser": {
+      "userAuthenticated": "Usuario autenticado exitosamente.",
+
+      "genericError": "Credenciales inválidas",
+      "internalServerError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "deviceUuidMissing": "El identificador del dispositivo es requerido y debe ser válido.",
+        "invalidEmail": "El correo electrónico es requerido y debe ser válido.",
+        "invalidPassword": "La contraseña es requerida y debe ser válida.",
+        "logs": {
+          "deviceUuidMissing": "El UUID del dispositivo <{{-uuid}}> no es válido.",
+          "invalidEmail": "El correo electrónico <{{-email}}> no es válido.",
+          "invalidPassword": "La contraseña <{{-password}}> no es válida."
+        }
+      },
+      "logs": {
+        "userAuthenticated": "Usuario con el correo <{{-email}}> y el id <{{-userId}}> autenticado exitosamente.",
+
+        "userNotFound": "El usuario con el correo <{{-email}}> no fue encontrado.",
+        "invalidCredentials": "La contraseña del usuario id <{{-userId}}> y email <{{-email}}> es inválida.",
+        "invalidPassword": "La contraseña es inválida.",
+        "internalServerError": "Error al iniciar sesión: {{-error}}."
+      }
+    },
+    "refreshToken": {
+      "tokenRefreshed": "Sesión actualizada exitosamente.",
+
+      "genericError": "Acceso denegado.",
+      "logs": {
+        "tokenRefreshed": "Sesión del usuario id <{{-userId}}> y rol <{{-userRole}}> actualizada exitosamente.",
+
+        "invalidTokenType": "Tipo de token inválido, se esperaba <{{-expected}}> pero se recibió <{{-received}}>.",
+        "noRefreshToken": "No se encontró el token de actualización <{{-refreshToken}}> en la petición.",
+        "internalServerError": "Error al refrescar el token: {{-error}}."
+      }
+    },
+    "signOutUser": {
+      "userSignedOut": "Sesión finalizada exitosamente.",
+
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "userSignedOut": "Sesión del usuario id <{{-userId}}> y rol <{{-userRole}}> finalizada exitosamente, all devices <{{-allDevices}}>.",
+
+        "internalServerError": "Error al cerrar sesión: {{-error}}."
+      }
+    },
+    "getAllUsers": {
+      "usersFetched": "Usuarios obtenidos exitosamente.",
+
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "usersFetched": "Usuarios obtenidos exitosamente, total de usuarios <{{-count}}>.",
+
+        "internalServerError": "Error al obtener usuarios: {{-error}}."
       }
     }
-  }
+  },
+  "middlewares": {
+    "disabled": {
+      "defaultMessage": "Esta ruta está deshabilitada temporalmente.",
+      "logs": {
+        "defaultMessage": "Este endpoint <{{-method}} {{-url}}> está deshabilitado temporalmente."
+      }
+    },
+    "auth": {
+      "defaultMessage": "Acceso denegado.",
+      "logs": {
+        "jwtMismatch": "El jti <{{-received}}> del token recibido no coincide con el jti esperado <{{-expected}}> de sesión activa.",
+        "successAuth": "Usuario con el id <{{-userId}}> y rol <{{-role}}> autenticado exitosamente.",
+        "jwtRegisterError": "Se encontraron <{{-count}}> tokens activos en base de datos para el token jti <{{-jti}}>.",
+        "jwtSecretMissing": "JWT Secret no definido.",
+        "jwtRefreshSecretMissing": "JWT Refresh Secret no definido.",
+        "invalidTokenType": "Tipo de token inválido, se esperaba <{{-expected}}> pero se recibió <{{-received}}>.",
+        "unauthorized": "No autorizado, token <{{-token}}> no proporcionado o inválido.",
+        "internalServerError": "Error al validar el token en el middleware de autenticación: {{-error}}."
+      }
+    },
+    "isGranted": {
+      "defaultMessage": "Acceso denegado.",
+      "logs": {
+        "successAuth": "Usuario con el id <{{-userId}}> y rol <{{-role}}> autenticado exitosamente.",
+        "unauthorized": "Usuario <{{-user}}> no autorizado o inválido.",
+        "forbidden": "Acceso denegado, el usuario con id <{{-userId}}> no tiene acceso al recurso <{{-method}} {{-url}}> con el rol <{{-role}}>.",
+        "internalServerError": "Error al validar el token en el middleware de permisos: {{-error}}."
+      }
+    }
+  },
+  "products": {}
 }

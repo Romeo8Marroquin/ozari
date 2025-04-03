@@ -2,20 +2,27 @@ import { Router } from 'express';
 
 import {
   createUser,
-  deleteUser,
-  getUser,
-  getUsers,
-  // updateUser,
+  getAllUsers,
+  refreshToken,
+  signInUser,
+  signOutUser,
 } from '../controllers/userController.js';
-import { disableEndpoint } from '../middlewares/disabledMiddleware.js';
-import { validateCreateUser } from '../validators/userValidators.js';
+import { verifyJwt } from '../middlewares/authMiddleware.js';
+import { isGrantedRoles } from '../middlewares/roleMiddleware.js';
+import { RolesEnum } from '../models/enums/rolesEnum.js';
+import { validateCreateUser, validateSignIn } from '../validators/userValidators.js';
 
 const router = Router();
 
-router.get('/', disableEndpoint, getUsers);
-router.get('/:id', disableEndpoint, getUser);
+// region Protected Routes
+router.get('/all', verifyJwt, isGrantedRoles([RolesEnum.Admin]), getAllUsers);
+router.get('/signout', verifyJwt, signOutUser);
+// endregion
+
+// region Public Routes
 router.post('/', validateCreateUser, createUser);
-// router.put("/:id", disableEndpoint, updateUser);
-router.delete('/:id', disableEndpoint, deleteUser);
+router.post('/signin', validateSignIn, signInUser);
+router.get('/refresh', refreshToken);
+// endregion
 
 export default router;
