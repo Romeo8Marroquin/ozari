@@ -1,16 +1,71 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import winston from 'winston';
+
+import { asyncLocalStorage } from '../app.js';
 
 const { cli, colorize, combine, json, printf, timestamp } = winston.format;
 
+const customCliFormat = printf((info) => {
+  const {
+    firstLog,
+    hostname,
+    level,
+    message,
+    method,
+    originalUrl,
+    requestUuid,
+    timestamp,
+    userAgent,
+  } = info;
+  const shortUuid = requestUuid ? (requestUuid as string).slice(0, 8) : '';
+  const formattedLog = [
+    `[${timestamp as string}]`,
+    !firstLog && requestUuid ? `[${shortUuid}]` : '',
+    `[${level}]`,
+    message as string,
+  ];
+  if (!firstLog) return formattedLog.filter(Boolean).join(' ');
+  const contextLogs = [
+    requestUuid ? `\n  → RequestUuid: ${requestUuid as string}` : '',
+    info.protocol ? `\n  → Protocol: ${info.protocol as string}` : '',
+    method && originalUrl ? `\n  → ${method as string} ${originalUrl as string}` : '',
+    hostname ? `\n  → Host: ${hostname as string}` : '',
+    userAgent ? `\n  → User-Agent: ${userAgent as string}` : '',
+    info.params ? `\n  → Params: ${JSON.stringify(info.params)}` : '',
+    info.query ? `\n  → Query: ${JSON.stringify(info.query)}` : '',
+    info.ips ? `\n  → IPs: ${JSON.stringify(info.ips)}` : '',
+  ];
+  return [...formattedLog, ...contextLogs].filter(Boolean).join(' ');
+});
+
+const addContextFormat = winston.format((info) => {
+  const context = asyncLocalStorage.getStore();
+  if (context) {
+    info.requestUuid = context.requestUuid;
+    info.method = context.method;
+    info.originalUrl = context.originalUrl;
+    info.hostname = context.hostname;
+    info.ips = context.ips;
+    info.timestamp = context.timestamp;
+    info.userAgent = context.userAgent;
+  }
+  return info;
+});
+
 const cliFormat = combine(
-  colorize({ all: true }),
+  addContextFormat(),
   timestamp({ format: 'DD/MM/YYYY hh:mm:ss.SSS A' }),
   cli(),
-  printf((info) => `[${info.timestamp as string}] ${info.level}: ${info.message as string}`),
+  customCliFormat,
+  colorize({ all: true }),
 );
 
-const jsonFormat = combine(timestamp({ format: 'DD/MM/YYYY hh:mm:ss.SSS A' }), json());
-
+const jsonFormat = combine(
+  addContextFormat(),
+  timestamp({ format: 'DD/MM/YYYY hh:mm:ss.SSS A' }),
+  json(),
+);
 /**
  * Winston logger configuration.
  * @method error   level {0}

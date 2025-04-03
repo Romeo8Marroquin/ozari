@@ -22,6 +22,7 @@
       "logs": {
         "serverRunning": "Servidor backend ejecutándose en <{{-host}}:{{-port}}>.",
         "serverClosed": "Servidor backend cerrado exitosamente.",
+        "initRequest": "Iniciando la petición",
 
         "hostError": "No se encontró el host <{{-host}}>.",
         "appHostError": "No se encontró el host del frontend <{{-host}}>.",

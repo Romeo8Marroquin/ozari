@@ -22,13 +22,13 @@ export const verifyJwt = async (req: CustomRequest, res: Response, next: NextFun
   try {
     const token = req.header('Authorization')?.split(' ')[1];
     if (!token) {
-      logger.info(i18next.t('middlewares.auth.logs.unauthorized', { token }));
+      logger.error(i18next.t('middlewares.auth.logs.unauthorized', { token }));
       sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('middlewares.auth.defaultMessage'));
       return;
     }
     const jwtPayload = jwt.verify(token, jwtSecret) as JwtPayloadModel;
     if (jwtPayload.tokenType !== TokenEnum.ACCESS_TOKEN) {
-      logger.info(
+      logger.error(
         i18next.t('middlewares.auth.logs.invalidTokenType', {
           expected: TokenEnum[TokenEnum.ACCESS_TOKEN],
           received: TokenEnum[jwtPayload.tokenType],
@@ -48,7 +48,7 @@ export const verifyJwt = async (req: CustomRequest, res: Response, next: NextFun
     });
 
     if (jwtActiveTokens.length !== 1) {
-      logger.info(
+      logger.error(
         i18next.t('middlewares.auth.logs.jwtRegisterError', {
           count: jwtActiveTokens.length,
           jti: jwtPayload.jti,
@@ -59,7 +59,7 @@ export const verifyJwt = async (req: CustomRequest, res: Response, next: NextFun
     }
 
     if (jwtActiveTokens[0].jti !== jwtPayload.jti) {
-      logger.info(
+      logger.error(
         i18next.t('middlewares.auth.logs.jwtMismatch', {
           expected: jwtActiveTokens[0].jti,
           received: jwtPayload.jti,

@@ -1,6 +1,7 @@
+import { AsyncLocalStorage } from 'async_hooks';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import express from 'express';
+import express, { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import i18next from 'i18next';
@@ -11,11 +12,11 @@ import { fileURLToPath } from 'url';
 
 import { logger } from './logs/winstonConfig.js';
 import { ProcessesEnum } from './models/enums/processesEnum.js';
+import { LoggerStorage } from './models/logger/logModel.js';
 import usersRouter from './routes/userRoute.js';
-const app = express();
+export const app = express();
 
 // region Middlewares
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -61,7 +62,26 @@ const cspDirectives = {
   scriptSrc: ["'self'", frontendDomain],
   styleSrc: ["'self'", frontendDomain],
 };
+export const asyncLocalStorage = new AsyncLocalStorage<LoggerStorage>();
 
+app.use((req, _, next) => {
+  const context: LoggerStorage = {
+    hostname: req.hostname,
+    ips: req.ips,
+    method: req.method,
+    originalUrl: req.originalUrl,
+    params: req.params,
+    protocol: req.protocol,
+    query: req.query,
+    requestUuid: crypto.randomUUID(),
+    timestamp: new Date(),
+    userAgent: req.headers['user-agent'],
+  };
+  asyncLocalStorage.run(context, () => {
+    logger.verbose(i18next.t('api.server.logs.initRequest'), { ...context, firstLog: true });
+    next();
+  });
+});
 app.use(
   helmet({
     contentSecurityPolicy: { directives: cspDirectives },
@@ -89,7 +109,10 @@ app.use(
 // endregion
 
 // region Routes
-app.use('/user', usersRouter);
+const apiRouter = Router();
+
+apiRouter.use('/user', usersRouter);
+app.use('/api', apiRouter);
 // endregion
 
 export default app;

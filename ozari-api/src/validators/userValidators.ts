@@ -15,7 +15,7 @@ export function validateCreateUser(req: Request, res: Response, next: NextFuncti
     req.body as CreateUserRequestModel;
 
   if (typeof fullName !== 'string' || fullName.trim() === '' || !fullNameRegex.test(fullName)) {
-    logger.info(i18next.t('user.createUser.validators.logs.invalidFullName', { fullName }));
+    logger.warn(i18next.t('user.createUser.validators.logs.invalidFullName', { fullName }));
     sendOzariError(
       res,
       HttpEnum.BAD_REQUEST,
@@ -25,13 +25,13 @@ export function validateCreateUser(req: Request, res: Response, next: NextFuncti
   }
 
   if (typeof email !== 'string' || !emailRegex.test(email)) {
-    logger.info(i18next.t('user.createUser.validators.logs.invalidEmail', { email }));
+    logger.warn(i18next.t('user.createUser.validators.logs.invalidEmail', { email }));
     sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t('user.createUser.validators.invalidEmail'));
     return;
   }
 
   if (typeof password !== 'string' || !passwordRegex.test(password)) {
-    logger.info(i18next.t('user.createUser.validators.logs.invalidPassword', { password }));
+    logger.warn(i18next.t('user.createUser.validators.logs.invalidPassword', { password }));
     sendOzariError(
       res,
       HttpEnum.BAD_REQUEST,
@@ -41,7 +41,7 @@ export function validateCreateUser(req: Request, res: Response, next: NextFuncti
   }
 
   if (password !== confirmPassword) {
-    logger.info(
+    logger.warn(
       i18next.t('user.createUser.validators.logs.passwordsDoNotMatch', {
         confirmPassword,
         password,
@@ -56,7 +56,7 @@ export function validateCreateUser(req: Request, res: Response, next: NextFuncti
   }
 
   if (typeof termsAccepted !== 'boolean' || !termsAccepted) {
-    logger.info(i18next.t('user.createUser.validators.logs.termsNotAccepted', { termsAccepted }));
+    logger.warn(i18next.t('user.createUser.validators.logs.termsNotAccepted', { termsAccepted }));
     sendOzariError(
       res,
       HttpEnum.BAD_REQUEST,
@@ -81,7 +81,7 @@ export function validateSignIn(req: Request, res: Response, next: NextFunction):
   const { email, password } = req.body as SignInUserRequestModel;
   const deviceUuid = req.headers['device-uuid'] as string | undefined;
   if (!deviceUuid || !genericUuidRegex.test(deviceUuid)) {
-    logger.info(
+    logger.warn(
       i18next.t('user.signInUser.validators.logs.deviceUuidMissing', { uuid: deviceUuid }),
     );
     sendOzariError(
@@ -93,13 +93,13 @@ export function validateSignIn(req: Request, res: Response, next: NextFunction):
   }
 
   if (typeof email !== 'string' || !emailRegex.test(email)) {
-    logger.info(i18next.t('user.signInUser.validators.logs.invalidEmail', { email }));
+    logger.warn(i18next.t('user.signInUser.validators.logs.invalidEmail', { email }));
     sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t('user.signInUser.validators.invalidEmail'));
     return;
   }
 
   if (typeof password !== 'string' || !passwordRegex.test(password)) {
-    logger.info(i18next.t('user.signInUser.validators.logs.invalidPassword', { password }));
+    logger.warn(i18next.t('user.signInUser.validators.logs.invalidPassword', { password }));
     sendOzariError(
       res,
       HttpEnum.BAD_REQUEST,

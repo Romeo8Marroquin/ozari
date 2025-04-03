@@ -66,7 +66,7 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
       where: { emailSha },
     });
     if (existingUser) {
-      logger.info(i18next.t('user.createUser.logs.userAlreadyExists', { email }));
+      logger.warn(i18next.t('user.createUser.logs.userAlreadyExists', { email }));
       sendOzariError(res, HttpEnum.CONFLICT, i18next.t('user.createUser.genericError'));
       return;
     }
@@ -87,7 +87,7 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
     logger.info(i18next.t('user.createUser.logs.userCreated', { email, fullName }));
     sendOzariSuccess(res, HttpEnum.CREATED, i18next.t('user.createUser.userCreated'));
   } catch (error) {
-    logger.info(i18next.t('user.createUser.logs.internalServerError'), error);
+    logger.error(i18next.t('user.createUser.logs.internalServerError'), error);
     sendOzariError(res, HttpEnum.INTERNAL_SERVER_ERROR, i18next.t('user.createUser.genericError'));
   }
 };
@@ -102,14 +102,14 @@ export const signInUser = async (req: Request, res: Response): Promise<void> => 
       where: { emailSha, isActive: true },
     });
     if (!user) {
-      logger.info(i18next.t('user.signInUser.logs.userNotFound', { email }));
+      logger.warn(i18next.t('user.signInUser.logs.userNotFound', { email }));
       sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('user.signInUser.genericError'));
       return;
     }
 
     const inputPasswordHash = encryptSha256Sync(password);
     if (inputPasswordHash !== user.passwordSha) {
-      logger.info(i18next.t('user.signInUser.logs.invalidCredentials', { email, userId: user.id }));
+      logger.warn(i18next.t('user.signInUser.logs.invalidCredentials', { email, userId: user.id }));
       sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('user.signInUser.genericError'));
       return;
     }
@@ -184,13 +184,13 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
   try {
     const refreshToken = req.cookies['refresh-token'] as string | undefined;
     if (!refreshToken) {
-      logger.info(i18next.t('user.refreshToken.logs.noRefreshToken', { refreshToken }));
+      logger.error(i18next.t('user.refreshToken.logs.noRefreshToken', { refreshToken }));
       sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('user.refreshToken.genericError'));
       return;
     }
     const payload = jwt.verify(refreshToken, jwtRefreshSecret) as UserJwtPayloadModel;
     if (payload.tokenType !== TokenEnum.REFRESH_TOKEN) {
-      logger.info(
+      logger.error(
         i18next.t('user.refreshToken.logs.invalidTokenType', {
           expected: TokenEnum[TokenEnum.REFRESH_TOKEN],
           received: TokenEnum[payload.tokenType],

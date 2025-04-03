@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import './telemetry/openTelemetry.js';
 import i18next from 'i18next';
 

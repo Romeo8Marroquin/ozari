@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api';
 // enable import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 // enable import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
