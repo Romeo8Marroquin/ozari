@@ -15,3 +15,12 @@ export interface CreateProductRequestModel {
   rentPrice?: number;
   sellPrice?: number;
 }
+
+export interface UpdateProductDetailRequestModel extends CreateProductDetailRequestModel {
+  id: number;
+}
+
+export interface UpdateProductRequestModel extends CreateProductRequestModel {
+  id: number;
+  productDetails: UpdateProductDetailRequestModel[];
+}

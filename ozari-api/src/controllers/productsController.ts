@@ -1,14 +1,17 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import i18next from 'i18next';
 
 import { prismaClient } from '../database/databaseClient.js';
 import { logger } from '../logs/winstonConfig.js';
 import { HttpEnum } from '../models/enums/httpEnum.js';
 import { sendOzariSuccess } from '../models/http/ozariSuccessModel.js';
-import { CustomRequest } from '../models/middlewares/customRequestModel.js';
+import {
+  CreateProductRequestModel,
+  UpdateProductRequestModel,
+} from '../models/request/productsRequestModels.js';
 import { BaseProductResponseModel } from '../models/response/productsResponseModel.js';
 
-export const getAllProducts = async (_: CustomRequest, res: Response): Promise<void> => {
+export const getAllProducts = async (_: Request, res: Response): Promise<void> => {
   try {
     const rawProducts = await prismaClient.product.findMany({
       include: {
@@ -71,102 +74,162 @@ export const getAllProducts = async (_: CustomRequest, res: Response): Promise<v
   }
 };
 
-export const getProductById = async (req: CustomRequest, res: Response): Promise<void> => {
-  const { id } = req.params;
+export const createProduct = async (req: Request, res: Response): Promise<void> => {
+  const {
+    businessTypeId,
+    categoryId,
+    currencyId,
+    description,
+    imageUrl,
+    name,
+    productDetails,
+    quantity,
+    rentPrice,
+    sellPrice,
+  } = req.body as CreateProductRequestModel;
   try {
-    const product = await prismaClient.product.findUnique({
-      where: {
-        id: parseInt(id),
+    const createdProduct = await prismaClient.product.create({
+      data: {
+        currencyId: currencyId,
+        description,
+        imageUrl,
+        name,
+        productBusinessTypeId: businessTypeId,
+        productCategoryId: categoryId,
+        productDetails: {
+          create: productDetails.map((detail) => ({
+            detail: detail.detail,
+            productDetailTypeId: detail.detailTypeId,
+          })),
+        },
+        quantity,
+        rentPrice,
+        sellPrice,
+      },
+      include: {
+        businessType: { select: { name: true } },
+        category: { select: { name: true } },
+        currency: { select: { id: true, iso4217Code: true, name: true, symbol: true } },
+        productDetails: {
+          select: {
+            detail: true,
+            detailType: { select: { name: true } },
+            id: true,
+          },
+          where: { isActive: true },
+        },
       },
     });
-    if (!product) {
-      res.status(404).json({ message: 'Product not found' });
-      return;
-    }
-    res.status(200).json(product);
+    const responseProduct: BaseProductResponseModel = {
+      businessType: createdProduct.businessType.name,
+      category: createdProduct.category.name,
+      currency: {
+        id: createdProduct.currency.id,
+        iso4217Code: createdProduct.currency.iso4217Code,
+        name: createdProduct.currency.name,
+        symbol: createdProduct.currency.symbol,
+      },
+      description: createdProduct.description ?? undefined,
+      details: createdProduct.productDetails.map((detail) => ({
+        detail: detail.detail,
+        detailType: detail.detailType.name,
+        id: detail.id,
+      })),
+      id: createdProduct.id,
+      imageUrl: createdProduct.imageUrl ?? undefined,
+      name: createdProduct.name,
+      quantity: createdProduct.quantity,
+      rentPrice: createdProduct.rentPrice ? Number(createdProduct.rentPrice) : undefined,
+      sellPrice: createdProduct.sellPrice ? Number(createdProduct.sellPrice) : undefined,
+    };
+    logger.info(i18next.t('products.createProduct.logs.productCreated', { id: createdProduct.id }));
+    sendOzariSuccess(res, HttpEnum.CREATED, i18next.t('products.createProduct.productCreated'), {
+      product: responseProduct,
+    });
   } catch (error) {
-    res.status(500).json({ message: 'Error retrieving product', error });
+    logger.error(i18next.t('products.createProduct.logs.errorCreatingProduct', { error }));
+    sendOzariSuccess(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t('products.createProduct.errorCreatingProduct'),
+    );
   }
 };
 
-export const createProduct = async (req: CustomRequest, res: Response): Promise<void> => {
-  // const {
-  //   name,
-  //   description,
-  //   imageUrl,
-  //   productBusinessTypeId,
-  //   productCategoryId,
-  //   rentPrice,
-  //   sellPrice,
-  //   currencyId,
-  //   quantity,
-  // } = req.body;
-  // try {
-  //   const newProduct = await prismaClient.product.create({
-  //     data: {
-  //       name,
-  //       description,
-  //       imageUrl,
-  //       productBusinessTypeId,
-  //       productCategoryId,
-  //       rentPrice,
-  //       sellPrice,
-  //       currencyId,
-  //       quantity,
-  //     },
-  //   });
-  res.status(201).json({});
-  // } catch (error) {
-  //   res.status(500).json({ message: 'Error creating product', error });
-  // }
-};
-
-export const updateProduct = async (req: CustomRequest, res: Response): Promise<void> => {
-  // const { id } = req.params;
-  // const {
-  //   name,
-  //   description,
-  //   imageUrl,
-  //   productBusinessTypeId,
-  //   productCategoryId,
-  //   rentPrice,
-  //   sellPrice,
-  //   currencyId,
-  //   quantity,
-  // } = req.body;
-  // try {
-  //   const updatedProduct = await prismaClient.product.update({
-  //     where: {
-  //       id: parseInt(id),
-  //     },
-  //     data: {
-  //       name,
-  //       description,
-  //       imageUrl,
-  //       productBusinessTypeId,
-  //       productCategoryId,
-  //       rentPrice,
-  //       sellPrice,
-  //       currencyId,
-  //       quantity,
-  //     },
-  //   });
-  res.status(200).json({});
-  // } catch (error) {
-  //   res.status(500).json({ message: 'Error updating product', error });
-  // }
-};
-
-export const deleteProduct = async (req: CustomRequest, res: Response): Promise<void> => {
-  const { id } = req.params;
+export const updateProduct = async (req: Request, res: Response): Promise<void> => {
+  const {
+    businessTypeId,
+    categoryId,
+    currencyId,
+    description,
+    id,
+    imageUrl,
+    name,
+    productDetails,
+    quantity,
+    rentPrice,
+    sellPrice,
+  } = req.body as UpdateProductRequestModel;
   try {
-    const deletedProduct = await prismaClient.product.delete({
-      where: {
-        id: parseInt(id),
+    const createdProduct = await prismaClient.product.update({
+      data: {
+        currencyId: currencyId,
+        description,
+        imageUrl,
+        name,
+        productBusinessTypeId: businessTypeId,
+        productCategoryId: categoryId,
+        productDetails: {
+          updateMany: productDetails.map((detail) => ({
+            data: {
+              detail: detail.detail,
+              productDetailTypeId: detail.detailTypeId,
+            },
+            where: { id: detail.id },
+          })),
+        },
+        quantity,
+        rentPrice,
+        sellPrice,
       },
+      where: { id },
     });
-    res.status(200).json(deletedProduct);
+    logger.info(i18next.t('products.updateProduct.logs.productUpdated', { id: createdProduct.id }));
+    sendOzariSuccess(res, HttpEnum.OK, i18next.t('products.updateProduct.productUpdated'));
   } catch (error) {
-    res.status(500).json({ message: 'Error deleting product', error });
+    logger.error(i18next.t('products.updateProduct.logs.genericError', { error }));
+    sendOzariSuccess(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t('products.updateProduct.genericError'),
+    );
+  }
+};
+
+export const deleteProduct = async (req: Request, res: Response): Promise<void> => {
+  const { id } = req.query;
+  const parsedId = Number(id);
+  try {
+    await prismaClient.product.update({
+      data: {
+        isActive: false,
+        productDetails: {
+          updateMany: {
+            data: { isActive: false },
+            where: {},
+          },
+        },
+      },
+      where: { id: parsedId },
+    });
+    logger.info(i18next.t('products.deleteProduct.logs.productDeleted', { id }));
+    sendOzariSuccess(res, HttpEnum.OK, i18next.t('products.deleteProduct.productDeleted'));
+  } catch (error) {
+    logger.error(i18next.t('products.deleteProduct.logs.genericError', { error }));
+    sendOzariSuccess(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t('products.deleteProduct.genericError'),
+    );
   }
 };

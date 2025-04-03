@@ -65,25 +65,6 @@ const cspDirectives = {
 };
 export const asyncLocalStorage = new AsyncLocalStorage<LoggerStorage>();
 
-app.use((req, _, next) => {
-  const context: LoggerStorage = {
-    body: req.body as object,
-    hostname: req.hostname,
-    ips: req.ips,
-    method: req.method,
-    originalUrl: req.originalUrl,
-    params: req.params,
-    protocol: req.protocol,
-    query: req.query,
-    requestUuid: crypto.randomUUID(),
-    timestamp: new Date(),
-    userAgent: req.headers['user-agent'],
-  };
-  asyncLocalStorage.run(context, () => {
-    logger.verbose(i18next.t('api.server.logs.initRequest'), { ...context, firstLog: true });
-    next();
-  });
-});
 app.use(
   helmet({
     contentSecurityPolicy: { directives: cspDirectives },
@@ -108,6 +89,25 @@ app.use(
     },
   }),
 );
+app.use((req, _, next) => {
+  const context: LoggerStorage = {
+    body: req.body as object,
+    hostname: req.hostname,
+    ips: req.ips,
+    method: req.method,
+    originalUrl: req.originalUrl,
+    params: req.params,
+    protocol: req.protocol,
+    query: req.query,
+    requestUuid: crypto.randomUUID(),
+    timestamp: new Date(),
+    userAgent: req.headers['user-agent'],
+  };
+  asyncLocalStorage.run(context, () => {
+    logger.verbose(i18next.t('api.server.logs.initRequest'), { ...context, firstLog: true });
+    next();
+  });
+});
 // endregion
 
 // region Routes

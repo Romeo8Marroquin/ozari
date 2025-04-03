@@ -154,6 +154,9 @@
       }
     },
     "createProduct": {
+      "productCreated": "Producto creado exitosamente.",
+
+      "errorCreatingProduct": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "validators": {
         "invalidBusinessTypeId": "El tipo de negocio es requerido y debe ser válido.",
         "invalidCategoryId": "La categoría es requerida y debe ser válida.",
@@ -161,12 +164,13 @@
         "invalidDescription": "La descripción debe ser válida.",
         "invalidImageUrl": "La imagen debe ser válida.",
         "invalidName": "El nombre es requerido y debe ser válido.",
-        "invalidDetailTypeId": "El tipo de un detalle no es válido.",
-        "invalidDetail": "El nombre de un detalle no es válido.",
+        "invalidDetailTypeId": "El tipo de un detalle del producto no es válido.",
+        "invalidDetail": "El nombre de un detalle del producto no es válido.",
         "invalidQuantity": "La cantidad es requerida y debe ser válida.",
         "invalidRentPrice": "El precio de renta debe ser válido.",
         "invalidSellPrice": "El precio de venta debe ser válido.",
         "invalidRentAndSellPrice": "El precio de renta y el precio de venta no pueden ser vacíos al mismo tiempo.",
+        "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
           "invalidBusinessTypeId": "El id del tipo de negocio <{{-businessTypeId}}> no es válido.",
           "invalidCategoryId": "El id de la categoría <{{-categoryId}}> no es válido.",
@@ -174,13 +178,57 @@
           "invalidDescription": "La descripción <{{-description}}> no es válida.",
           "invalidImageUrl": "La imagen <{{-imageUrl}}> no es válida.",
           "invalidName": "El nombre <{{-name}}> no es válido.",
-          "invalidDetailTypeId": "El id del tipo de detalle <{{-detailTypeId}}> no es válido.",
-          "invalidDetail": "El nombre del detalle <{{-detail}}> no es válido.",
+          "invalidDetailTypeId": "El id del tipo de detalle <{{-detailTypeId}}> del producto no es válido.",
+          "invalidDetail": "El nombre del detalle <{{-detail}}> del producto no es válido.",
           "invalidQuantity": "La cantidad <{{-quantity}}> no es válida.",
           "invalidRentPrice": "El precio de renta <{{-rentPrice}}> no es válido.",
           "invalidSellPrice": "El precio de venta <{{-sellPrice}}> no es válido.",
-          "invalidRentAndSellPrice": "El precio de renta <{{-rentPrice}}> y el precio de venta <{{-sellPrice}}> no pueden ser vacíos al mismo tiempo."
+          "invalidRentAndSellPrice": "El precio de renta <{{-rentPrice}}> y el precio de venta <{{-sellPrice}}> no pueden ser vacíos al mismo tiempo.",
+          "validationError": "Error de validación: {{-error}}."
         }
+      },
+      "logs": {
+        "productCreated": "Producto id <{{-id}}> creado exitosamente.",
+
+        "errorCreatingProduct": "Error al crear producto: {{-error}}."
+      }
+    },
+    "updateProduct": {
+      "productUpdated": "Producto actualizado exitosamente.",
+
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidId": "El id del producto es requerido y debe ser válido.",
+        "invalidDetailId": "El id de un detalle del producto no es válido.",
+        "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+        "logs": {
+          "invalidId": "El id del producto <{{-id}}> no es válido.",
+          "invalidDetailId": "El id del detalle <{{-detailId}}> del producto no es válido.",
+          "validationError": "Error de validación: {{-error}}."
+        }
+      },
+      "logs": {
+        "productUpdated": "Producto id <{{-id}}> actualizado exitosamente.",
+
+        "genericError": "Error al actualizar producto: {{-error}}."
+      }
+    },
+    "deleteProduct": {
+      "productDeleted": "Producto eliminado exitosamente.",
+
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidId": "El id del producto es requerido y debe ser válido.",
+        "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+        "logs": {
+          "invalidId": "El id del producto <{{-id}}> no es válido.",
+          "validationError": "Error de validación: {{-error}}."
+        }
+      },
+      "logs": {
+        "productDeleted": "Producto id <{{-id}}> eliminado exitosamente.",
+
+        "genericError": "Error al eliminar producto: {{-error}}."
       }
     }
   }
