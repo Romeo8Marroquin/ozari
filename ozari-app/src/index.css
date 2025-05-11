@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --breakpoint-xs: 360px;
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+  --breakpoint-3xl: 1920px;
+
+  --charcoal: #262626;
+  --espresso: #451500;
+  --midnight: #000061;
+  --slate: #87a7a5;
+  --olive: #7d7550;
+  --plum: #7d5076;
+  --blossom: #fca7f0;
+  --cream: #fceda7;
+  --aqua: #a8fdf8;
+
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
