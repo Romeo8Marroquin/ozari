@@ -1,3 +1,7 @@
 {
-  "test": "Hola mundo"
+  "components": {
+    "pageLoader": {
+      "logo": "Logo Party Rentals"
+    }
+  }
 }

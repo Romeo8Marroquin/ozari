@@ -11,14 +11,23 @@
 // Import Routes
 
 import { Route as rootRoute } from './routes/__root'
-import { Route as AboutImport } from './routes/about'
+import { Route as SesionImport } from './routes/sesion'
+import { Route as SplatImport } from './routes/$'
 import { Route as IndexImport } from './routes/index'
+import { Route as SesionInicioImport } from './routes/sesion/inicio'
+import { Route as SesionSplatImport } from './routes/sesion/$'
 
 // Create/Update Routes
 
-const AboutRoute = AboutImport.update({
-  id: '/about',
-  path: '/about',
+const SesionRoute = SesionImport.update({
+  id: '/sesion',
+  path: '/sesion',
+  getParentRoute: () => rootRoute,
+} as any)
+
+const SplatRoute = SplatImport.update({
+  id: '/$',
+  path: '/$',
   getParentRoute: () => rootRoute,
 } as any)
 
@@ -26,6 +35,18 @@ const IndexRoute = IndexImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRoute,
+} as any)
+
+const SesionInicioRoute = SesionInicioImport.update({
+  id: '/inicio',
+  path: '/inicio',
+  getParentRoute: () => SesionRoute,
+} as any)
+
+const SesionSplatRoute = SesionSplatImport.update({
+  id: '/$',
+  path: '/$',
+  getParentRoute: () => SesionRoute,
 } as any)
 
 // Populate the FileRoutesByPath interface
@@ -39,51 +60,96 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexImport
       parentRoute: typeof rootRoute
     }
-    '/about': {
-      id: '/about'
-      path: '/about'
-      fullPath: '/about'
-      preLoaderRoute: typeof AboutImport
+    '/$': {
+      id: '/$'
+      path: '/$'
+      fullPath: '/$'
+      preLoaderRoute: typeof SplatImport
       parentRoute: typeof rootRoute
+    }
+    '/sesion': {
+      id: '/sesion'
+      path: '/sesion'
+      fullPath: '/sesion'
+      preLoaderRoute: typeof SesionImport
+      parentRoute: typeof rootRoute
+    }
+    '/sesion/$': {
+      id: '/sesion/$'
+      path: '/$'
+      fullPath: '/sesion/$'
+      preLoaderRoute: typeof SesionSplatImport
+      parentRoute: typeof SesionImport
+    }
+    '/sesion/inicio': {
+      id: '/sesion/inicio'
+      path: '/inicio'
+      fullPath: '/sesion/inicio'
+      preLoaderRoute: typeof SesionInicioImport
+      parentRoute: typeof SesionImport
     }
   }
 }
 
 // Create and export the route tree
 
+interface SesionRouteChildren {
+  SesionSplatRoute: typeof SesionSplatRoute
+  SesionInicioRoute: typeof SesionInicioRoute
+}
+
+const SesionRouteChildren: SesionRouteChildren = {
+  SesionSplatRoute: SesionSplatRoute,
+  SesionInicioRoute: SesionInicioRoute,
+}
+
+const SesionRouteWithChildren =
+  SesionRoute._addFileChildren(SesionRouteChildren)
+
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/about': typeof AboutRoute
+  '/$': typeof SplatRoute
+  '/sesion': typeof SesionRouteWithChildren
+  '/sesion/$': typeof SesionSplatRoute
+  '/sesion/inicio': typeof SesionInicioRoute
 }
 
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/about': typeof AboutRoute
+  '/$': typeof SplatRoute
+  '/sesion': typeof SesionRouteWithChildren
+  '/sesion/$': typeof SesionSplatRoute
+  '/sesion/inicio': typeof SesionInicioRoute
 }
 
 export interface FileRoutesById {
   __root__: typeof rootRoute
   '/': typeof IndexRoute
-  '/about': typeof AboutRoute
+  '/$': typeof SplatRoute
+  '/sesion': typeof SesionRouteWithChildren
+  '/sesion/$': typeof SesionSplatRoute
+  '/sesion/inicio': typeof SesionInicioRoute
 }
 
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about'
+  fullPaths: '/' | '/$' | '/sesion' | '/sesion/$' | '/sesion/inicio'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about'
-  id: '__root__' | '/' | '/about'
+  to: '/' | '/$' | '/sesion' | '/sesion/$' | '/sesion/inicio'
+  id: '__root__' | '/' | '/$' | '/sesion' | '/sesion/$' | '/sesion/inicio'
   fileRoutesById: FileRoutesById
 }
 
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AboutRoute: typeof AboutRoute
+  SplatRoute: typeof SplatRoute
+  SesionRoute: typeof SesionRouteWithChildren
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AboutRoute: AboutRoute,
+  SplatRoute: SplatRoute,
+  SesionRoute: SesionRouteWithChildren,
 }
 
 export const routeTree = rootRoute
@@ -97,14 +163,30 @@ export const routeTree = rootRoute
       "filePath": "__root.tsx",
       "children": [
         "/",
-        "/about"
+        "/$",
+        "/sesion"
       ]
     },
     "/": {
       "filePath": "index.tsx"
     },
-    "/about": {
-      "filePath": "about.tsx"
+    "/$": {
+      "filePath": "$.tsx"
+    },
+    "/sesion": {
+      "filePath": "sesion.tsx",
+      "children": [
+        "/sesion/$",
+        "/sesion/inicio"
+      ]
+    },
+    "/sesion/$": {
+      "filePath": "sesion/$.tsx",
+      "parent": "/sesion"
+    },
+    "/sesion/inicio": {
+      "filePath": "sesion/inicio.tsx",
+      "parent": "/sesion"
     }
   }
 }

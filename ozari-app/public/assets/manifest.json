@@ -1,0 +1,16 @@
+{
+  "name": "Party Rentals Gt",
+  "short_name": "Party Rentals Gt",
+  "description": "Alquiler de mobiliario para eventos: mesas, sillas, manteles, cubremanteles, decoración y artículos para fiestas. Calidad, puntualidad y precios accesibles en toda Guatemala.",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#a8fdf8",
+  "theme_color": "#a8fdf8",
+  "icons": [
+    {
+      "src": "/assets/media-image.png",
+      "sizes": "465x750",
+      "type": "image/png"
+    }
+  ]
+}
