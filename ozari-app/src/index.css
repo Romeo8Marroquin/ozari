@@ -25,3 +25,18 @@
 
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+input[type='password'] {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+
+input[type='password']::-webkit-textfield-decoration-button {
+  display: none;
+}
+
+input[type='password']::-ms-reveal,
+input[type='password']::-ms-clear {
+  display: none;
+}
