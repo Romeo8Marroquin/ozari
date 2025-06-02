@@ -1,5 +1,6 @@
 import gsap from 'gsap';
 import { forwardRef, useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { HiEye, HiEyeSlash } from 'react-icons/hi2';
 import { twMerge } from 'tailwind-merge';
 
@@ -9,11 +10,21 @@ interface CustomInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   focusColor?: string;
   icon?: React.ReactNode;
   error?: boolean;
+  isRequired?: boolean;
+  optionalLabel?: boolean;
   onIconClick?: () => void;
 }
 
 const bgClass: Record<string, string> = {
   midnight: 'bg-midnight',
+};
+
+const peerFocusTextClass: Record<string, string> = {
+  midnight: 'peer-focus:text-midnight',
+};
+
+const focusTextClass: Record<string, string> = {
+  midnight: 'focus:text-midnight',
 };
 
 const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
@@ -28,6 +39,8 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
       error,
       type,
       disabled,
+      isRequired = false,
+      optionalLabel = false,
       onFocus,
       onBlur,
       onIconClick,
@@ -35,6 +48,7 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
     }: CustomInputProps,
     ref,
   ) => {
+    const { t } = useTranslation();
     const [isFilled, setIsFilled] = useState(Boolean(props.value));
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
     const iconButtonRef = useRef<HTMLDivElement>(null);
@@ -77,7 +91,7 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
     const passwordIcon = isPasswordVisible ? <HiEyeSlash /> : <HiEye />;
     const iconToShow = type === 'password' ? passwordIcon : icon;
     return (
-      <div className="relative flex items-center justify-center w-fit">
+      <div className="relative flex items-center justify-center w-full">
         <input
           ref={ref}
           {...props}
@@ -86,26 +100,32 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
           onBlur={localBlur}
           type={isPasswordVisible ? 'text' : type}
           className={twMerge(
-            `peer w-fit py-2 pr-4 bg-transparent placeholder:opacity-0 placeholder:transition-color placeholder:duration-300 focus:placeholder:opacity-100 text-md placeholder-gray focus:outline-none transition-all duration-300 border-b
+            `peer w-full py-2 pr-4 bg-transparent placeholder:opacity-0 placeholder:transition-color placeholder:duration-300 focus:placeholder:opacity-100 text-md placeholder-gray focus:outline-none transition-all duration-300 border-b
             disabled:text-gray-disabled disabled:placeholder-gray-disabled
             ${error ? 'border-red-600 text-red-600' : 'text-black border-gray'}
-            ${!icon && type !== 'password' ? 'pl-2' : 'pl-10'} focus:text-${focusColor}`,
+            ${!icon && type !== 'password' ? 'pl-2' : 'pl-10'} ${focusTextClass[focusColor]}`,
             className,
           )}
         />
         <label
           htmlFor={id}
-          className={`absolute text-md pointer-events-none transition-all duration-300 origin-left peer-focus:-translate-y-6 peer-disabled:text-gray-disabled
-          ${error ? 'text-red-600' : `text-black peer-focus:text-${focusColor}`}
+          className={`absolute text-md pointer-events-none transition-all duration-300 origin-left peer-focus:-translate-y-6 peer-focus:scale-75 peer-disabled:text-gray-disabled
+          ${error ? 'text-red-600' : `text-black ${peerFocusTextClass[focusColor]}`}
           ${isFilled ? '-translate-y-6 scale-75' : ''}
           ${!icon && type !== 'password' ? 'left-2' : 'left-10'}
         `}
         >
-          {label}
+          <span>{label}</span>
+          {!optionalLabel && isRequired && (
+            <span className="ml-[0.1rem]">{t('components.customInput.requiredField')}</span>
+          )}
+          {optionalLabel && !isRequired && (
+            <span className="ml-[0.1rem]">{t('components.customInput.optionalField')}</span>
+          )}
         </label>
         <button
           className={`absolute text-xl left-2 size-5 transition-colors duration-300 peer-disabled:text-gray-disabled peer-disabled:pointer-events-none
-            ${error ? 'text-red-600' : `peer-focus:text-${focusColor}`}
+            ${error ? 'text-red-600' : peerFocusTextClass[focusColor]}
             ${enablePointerEvents || type === 'password' ? 'cursor-pointer ' : 'pointer-events-none'}`}
           onMouseDown={localOnIconClick}
           onKeyDown={(e) => {

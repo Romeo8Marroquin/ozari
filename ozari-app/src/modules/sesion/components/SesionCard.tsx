@@ -1,12 +1,14 @@
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { useRef } from 'react';
+import { twMerge } from 'tailwind-merge';
 
 interface SesionCardProps {
   children: React.ReactNode;
+  className?: string;
 }
 
-function SesionCard({ children }: Readonly<SesionCardProps>) {
+function SesionCard({ children, className }: Readonly<SesionCardProps>) {
   const cardRef = useRef<HTMLElement>(null);
   useGSAP(
     () => {
@@ -23,7 +25,10 @@ function SesionCard({ children }: Readonly<SesionCardProps>) {
   return (
     <section
       ref={cardRef}
-      className="w-full sm:max-w-3/4 md:max-w-2/3 lg:max-w-1/2 xl:max-w-1/3 3xl:max-w-1/4 p-8 rounded-xl shadow-xl bg-white/50 flex flex-col items-center gap-8"
+      className={twMerge(
+        'w-full sm:max-w-3/4 md:max-w-2/3 lg:max-w-1/2 xl:max-w-1/3 3xl:max-w-1/4 p-8 rounded-xl shadow-xl bg-white/50 flex flex-col items-center gap-8',
+        className,
+      )}
     >
       {children}
     </section>

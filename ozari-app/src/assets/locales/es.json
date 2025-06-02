@@ -2,6 +2,35 @@
   "components": {
     "pageLoader": {
       "logo": "Logo Party Rentals"
+    },
+    "customInput": {
+      "requiredField": "*",
+      "optionalField": "(opcional)"
+    }
+  },
+  "modules": {
+    "sesion": {
+      "login": {
+        "title": "INICIAR SESIÓN",
+        "form": {
+          "emailLabel": "Correo electrónico",
+          "emailPlaceholder": "Ingrese su correo",
+          "requiredEmail": "El correo es obligatorio",
+          "invalidEmail": "El correo debe ser válido",
+          "maxLengthEmail": "El correo es muy largo",
+          "passwordLabel": "Contraseña",
+          "passwordPlaceholder": "Ingrese su contraseña",
+          "requiredPassword": "La contraseña es obligatoria",
+          "uppercaseLetterPassword": "Se debe tener una mayúscula",
+          "lowercaseLetterPassword": "Se debe tener una minúscula",
+          "numberPassword": "Se debe tener un número",
+          "safeSymbolPassword": "Se debe tener un símbolo",
+          "invalidSymbolPassword": "Un símbolo no válido",
+          "minLengthPassword": "La contraseña es muy corta",
+          "maxLengthPassword": "La contraseña es muy larga",
+          "submitButton": "Iniciar Sesión"
+        }
+      }
     }
   }
 }

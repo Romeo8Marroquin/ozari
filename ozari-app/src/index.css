@@ -21,7 +21,10 @@
   --color-plum: #7d5076;
   --color-blossom: #fca7f0;
   --color-cream: #fceda7;
-  --color-aqua: #a8fdf8;
+  --color-sky: #a8fdf8;
+  --color-magenta: #ff01ed;
+  --color-yellow: #ffcc00;
+  --color-aqua: #00ffe2;
 
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 }

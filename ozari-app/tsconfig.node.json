@@ -4,7 +4,9 @@
       "@sesion/*": ["./src/modules/sesion/*"],
       "@assets/*": ["./src/assets/*"],
       "@components/*": ["./src/components/*"],
-      "@constants/*": ["./src/constants/*"]
+      "@constants/*": ["./src/constants/*"],
+      "@functions/*": ["./src/utils/functions/*"],
+      "@contexts/*": ["./src/contexts/*"]
     },
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "target": "ES2022",

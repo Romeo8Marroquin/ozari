@@ -1,0 +1,100 @@
+import { useGSAP } from '@gsap/react';
+import gsap from 'gsap';
+import { useRef, useState } from 'react';
+
+interface CustomButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  text?: string;
+  startIcon?: React.ReactNode;
+  endIcon?: React.ReactNode;
+  buttonType?: 'outlined';
+  buttonColor?: 'magenta' | 'midnight';
+  loading?: boolean;
+}
+
+const buttonClasses = {
+  outlined: {
+    magenta:
+      'border-3 border-magenta text-magenta hover:shadow-[0_0_15px_0.5px_var(--color-magenta)] focus:shadow-[0_0_15px_0.5px_var(--color-magenta)]',
+    midnight:
+      'border-3 border-midnight text-midnight hover:shadow-[0_0_15px_0.5px_var(--color-midnight)] focus:shadow-[0_0_15px_0.5px_var(--color-midnight)]',
+  },
+};
+
+const loaderColors = {
+  magenta: 'border-magenta',
+  midnight: 'border-midnight',
+};
+
+const CustomButton: React.FC<CustomButtonProps> = ({
+  text,
+  startIcon,
+  endIcon,
+  buttonType = 'outlined',
+  buttonColor = 'midnight',
+  loading = false,
+  className,
+  ...props
+}: CustomButtonProps) => {
+  const loadingRef = useRef<HTMLSpanElement>(null);
+  const [showingLoading, setShowingLoading] = useState(false);
+
+  useGSAP(
+    () => {
+      const tl = gsap.timeline({ defaults: { ease: 'power1.inOut', duration: 0.2 } });
+      if (loading) {
+        setShowingLoading(true);
+      } else {
+        tl.to(loadingRef.current, {
+          opacity: 0,
+          width: 0,
+          height: 0,
+          marginRight: 0,
+        }).add(() => {
+          if (!loading) setShowingLoading(false);
+        });
+      }
+    },
+    { dependencies: [loading, setShowingLoading] },
+  );
+
+  useGSAP(
+    () => {
+      const tl = gsap.timeline({
+        defaults: { ease: 'power1.inOut', duration: 0.2 },
+      });
+      if (!showingLoading) return;
+      tl.to(loadingRef.current, {
+        opacity: 1,
+        width: 20,
+        height: 20,
+        marginRight: 8,
+      });
+    },
+    { dependencies: [showingLoading] },
+  );
+
+  return (
+    <button
+      className={`
+        cursor-pointer py-3 px-4 rounded-md text-lg font-semibold outline-none select-none transition-all duration-200 flex items-center
+        disabled:pointer-events-none disabled:text-gray-400 disabled:bg-gray-300 disabled:border-gray-400
+        ${buttonClasses[buttonType]?.[buttonColor]} ${className} ${
+          loading ? 'pointer-events-none' : ''
+        }`}
+      {...props}
+    >
+      {showingLoading && (
+        <span
+          key={`loading-${buttonColor}`}
+          ref={loadingRef}
+          className={`block border-3 border-t-transparent rounded-full animate-spin ${loaderColors[buttonColor]}`}
+        ></span>
+      )}
+      {startIcon && <span className="mr-2">{startIcon}</span>}
+      {text}
+      {endIcon && <span className="ml-2">{endIcon}</span>}
+    </button>
+  );
+};
+
+export default CustomButton;

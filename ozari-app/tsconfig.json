@@ -6,7 +6,9 @@
       "@sesion/*": ["./src/modules/sesion/*"],
       "@assets/*": ["./src/assets/*"],
       "@components/*": ["./src/components/*"],
-      "@constants/*": ["./src/constants/*"]
+      "@constants/*": ["./src/constants/*"],
+      "@functions/*": ["./src/utils/functions/*"],
+      "@contexts/*": ["./src/contexts/*"]
     }
   }
 }

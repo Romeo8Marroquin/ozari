@@ -1,55 +1,25 @@
-import React, { useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { gsap } from 'gsap';
 import { FaUserAlt } from 'react-icons/fa';
 import { useGSAP } from '@gsap/react';
 import SesionCard from '@sesion/components/SesionCard';
 import CustomInputForm from '@components/CustomInputForm';
-import { useForm } from 'react-hook-form';
+import { FormProvider, useForm } from 'react-hook-form';
 import { DevTool } from '@hookform/devtools';
-import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  LOWER_REGEX,
-  NUMBER_REGEX,
-  SAFE_SYMBOL_REGEX,
-  UNSAFE_SYMBOL_REGEX,
-  UPPER_REGEX,
-} from '@constants/Regex';
-
-const loginSchema = z.object({
-  email: z
-    .string()
-    .nonempty('El correo electrónico es obligatorio')
-    .email('El correo electrónico debe tener un formato válido')
-    .max(128, 'El correo electrónico no puede exceder 128 caracteres'),
-
-  password: z
-    .string()
-    .nonempty('La contraseña es obligatoria')
-    .min(12, 'La contraseña debe tener al menos 12 caracteres')
-    .max(128, 'La contraseña no puede exceder 128 caracteres')
-    .refine(
-      (val) => UPPER_REGEX.test(val),
-      'La contraseña debe contener al menos una letra mayúscula',
-    )
-    .refine(
-      (val) => LOWER_REGEX.test(val),
-      'La contraseña debe contener al menos una letra minúscula',
-    )
-    .refine((val) => NUMBER_REGEX.test(val), 'La contraseña debe contener al menos un número')
-    .refine((val) => SAFE_SYMBOL_REGEX.test(val), 'La contraseña debe contener al menos un símbolo')
-    .refine(
-      (val) => !UNSAFE_SYMBOL_REGEX.test(val),
-      'La contraseña no puede contener caracteres inválidos',
-    ),
-});
-
-type LoginFormValues = z.infer<typeof loginSchema>;
+import { loginRequiredPatterns, loginSchema, type LoginType } from './SchemaLogin';
+import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
+import { useTranslation } from 'react-i18next';
+import CustomButton from '@components/CustomButton';
 
 const LoginPage: React.FC = () => {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
-
-  const { control } = useForm<LoginFormValues>({
+  const memorizedRequiredPatterns = useMemo(
+    () => ({ requiredPatterns: loginRequiredPatterns }),
+    [],
+  );
+  const methods = useForm<LoginType>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
       email: '',
@@ -72,55 +42,76 @@ const LoginPage: React.FC = () => {
     { scope: containerRef },
   );
 
+  const onSubmit = () => {};
+
+  const handleAutocomplete = async (event: React.FormEvent<HTMLInputElement>) => {
+    const nativeEvent = event.nativeEvent as InputEvent;
+    if (
+      nativeEvent.inputType === undefined &&
+      nativeEvent.data === undefined &&
+      nativeEvent.dataTransfer === undefined &&
+      nativeEvent.isComposing === undefined &&
+      !methods.formState.isSubmitting
+    ) {
+      const isValid = await methods.trigger();
+      if (isValid) {
+        console.log('Enviando el formulario');
+        methods.handleSubmit(onSubmit)();
+      }
+    }
+  };
+
   return (
     <div ref={containerRef} className="w-full flex justify-center items-center">
-      <SesionCard>
-        <h2 className="stagger text-2xl font-bold text-black select-none">INICIAR SESIÓN</h2>
-        <form className="w-full flex flex-col gap-6">
-          <div className="stagger">
-            <CustomInputForm
-              id="email"
-              data-testid="email-input"
-              autoComplete="email"
-              aria-label="Correo"
-              control={control}
-              name="email"
-              icon={<FaUserAlt />}
-              placeholder="Ingresa tu correo"
-              label="Correo"
-            />
-          </div>
-          <div className="stagger">
-            <CustomInputForm
-              id="password"
-              data-testid="password-input"
-              autoComplete="password"
-              aria-label="Contraseña"
-              control={control}
-              name="password"
-              placeholder="Ingresa tu contraseña"
-              label="Contraseña"
-              type="password"
-            />
-          </div>
-          <button
-            type="submit"
-            className="stagger cursor-pointer mt-2 w-full py-3 rounded-xl bg-blossom text-white font-semibold text-lg shadow-lg hover:bg-plum active:scale-95 focus:outline-none focus:ring-2 focus:ring-blossom"
-          >
-            ENTRAR
-          </button>
-        </form>
-        <button className="stagger cursor-pointer mt-6 text-center">
-          <span className="text-gray">¿Nuevo en eBanking? </span>
-          <a
-            href="/sesion/registro"
-            className="text-blossom font-semibold hover:underline hover:text-plum transition-colors duration-200"
-          >
-            Regístrate aquí
-          </a>
-        </button>
+      <SesionCard className="sm:px-12">
+        <h2 className="stagger text-2xl font-bold text-black select-none">
+          {t('modules.sesion.login.title')}
+        </h2>
+        <RequiredPatternsContext.Provider value={memorizedRequiredPatterns}>
+          <FormProvider {...methods}>
+            <form
+              onSubmit={methods.handleSubmit(onSubmit)}
+              className="w-full flex flex-col items-center gap-6"
+            >
+              <div className="stagger w-full">
+                <CustomInputForm<LoginType>
+                  id="email-input"
+                  data-testid="email-input"
+                  autoComplete="email"
+                  label={t('modules.sesion.login.form.emailLabel')}
+                  placeholder={t('modules.sesion.login.form.emailPlaceholder')}
+                  aria-label={t('modules.sesion.login.form.emailLabel')}
+                  name="email"
+                  autoFocus
+                  icon={<FaUserAlt />}
+                  onInput={handleAutocomplete}
+                />
+              </div>
+              <div className="stagger w-full">
+                <CustomInputForm<LoginType>
+                  id="password"
+                  data-testid="password-input"
+                  autoComplete="password"
+                  aria-label={t('modules.sesion.login.form.passwordLabel')}
+                  placeholder={t('modules.sesion.login.form.passwordPlaceholder')}
+                  label={t('modules.sesion.login.form.passwordLabel')}
+                  name="password"
+                  type="password"
+                  onInput={handleAutocomplete}
+                />
+              </div>
+              <div className="stagger">
+                <CustomButton
+                  text={t('modules.sesion.login.form.submitButton')}
+                  disabled={!methods.formState.isValid}
+                  loading={methods.formState.isSubmitting}
+                />
+              </div>
+            </form>
+          </FormProvider>
+        </RequiredPatternsContext.Provider>
       </SesionCard>
-      <DevTool control={control} />
+      <DevTool control={methods.control} />
     </div>
   );
 };
