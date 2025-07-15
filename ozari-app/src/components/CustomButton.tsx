@@ -14,9 +14,9 @@ interface CustomButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement
 const buttonClasses = {
   outlined: {
     magenta:
-      'border-3 border-magenta text-magenta hover:shadow-[0_0_15px_0.5px_var(--color-magenta)] focus:shadow-[0_0_15px_0.5px_var(--color-magenta)]',
+      'border-3 border-magenta text-magenta hover:shadow-[0_0_10px_0.5px_var(--color-magenta)] focus:shadow-[0_0_15px_0.5px_var(--color-magenta)]',
     midnight:
-      'border-3 border-midnight text-midnight hover:shadow-[0_0_15px_0.5px_var(--color-midnight)] focus:shadow-[0_0_15px_0.5px_var(--color-midnight)]',
+      'border-3 border-midnight text-midnight hover:shadow-[0_0_10px_0.5px_var(--color-midnight)] focus:shadow-[0_0_15px_0.5px_var(--color-midnight)]',
   },
 };
 

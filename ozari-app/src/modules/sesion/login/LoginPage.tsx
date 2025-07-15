@@ -7,7 +7,12 @@ import CustomInputForm from '@components/CustomInputForm';
 import { FormProvider, useForm } from 'react-hook-form';
 import { DevTool } from '@hookform/devtools';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { loginRequiredPatterns, loginSchema, type LoginType } from './SchemaLogin';
+import {
+  loginRequiredPatterns,
+  loginSchema,
+  loginSchemaDefaultValues,
+  type LoginType,
+} from './SchemaLogin';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { useTranslation } from 'react-i18next';
 import CustomButton from '@components/CustomButton';
@@ -21,10 +26,7 @@ const LoginPage: React.FC = () => {
   );
   const methods = useForm<LoginType>({
     resolver: zodResolver(loginSchema),
-    defaultValues: {
-      email: '',
-      password: '',
-    },
+    defaultValues: loginSchemaDefaultValues,
     mode: 'onTouched',
   });
 
@@ -42,7 +44,9 @@ const LoginPage: React.FC = () => {
     { scope: containerRef },
   );
 
-  const onSubmit = () => {};
+  const onSubmit = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+  };
 
   const handleAutocomplete = async (event: React.FormEvent<HTMLInputElement>) => {
     const nativeEvent = event.nativeEvent as InputEvent;
@@ -55,7 +59,6 @@ const LoginPage: React.FC = () => {
     ) {
       const isValid = await methods.trigger();
       if (isValid) {
-        console.log('Enviando el formulario');
         methods.handleSubmit(onSubmit)();
       }
     }
@@ -91,7 +94,7 @@ const LoginPage: React.FC = () => {
                 <CustomInputForm<LoginType>
                   id="password"
                   data-testid="password-input"
-                  autoComplete="password"
+                  autoComplete="current-password"
                   aria-label={t('modules.sesion.login.form.passwordLabel')}
                   placeholder={t('modules.sesion.login.form.passwordPlaceholder')}
                   label={t('modules.sesion.login.form.passwordLabel')}

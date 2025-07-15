@@ -3,6 +3,7 @@ import { forwardRef, useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HiEye, HiEyeSlash } from 'react-icons/hi2';
 import { twMerge } from 'tailwind-merge';
+import useDetectAutofill from '../hooks/DetectAutofill';
 
 interface CustomInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label: string;
@@ -41,17 +42,17 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
       disabled,
       isRequired = false,
       optionalLabel = false,
-      onFocus,
-      onBlur,
       onIconClick,
+      onChange,
       ...props
     }: CustomInputProps,
     ref,
   ) => {
     const { t } = useTranslation();
-    const [isFilled, setIsFilled] = useState(Boolean(props.value));
+    const [isFilledOnChange, setIsFilledOnChange] = useState(Boolean(props.value));
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
     const iconButtonRef = useRef<HTMLDivElement>(null);
+    const { containerRef } = useDetectAutofill();
 
     const localOnIconClick = useCallback(
       (e: React.MouseEvent<HTMLButtonElement> | React.KeyboardEvent<HTMLButtonElement>) => {
@@ -73,31 +74,24 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
       [onIconClick, type, disabled],
     );
 
-    const localFocus = useCallback(
-      (e: React.FocusEvent<HTMLInputElement>) => {
-        setIsFilled(Boolean(e.target.value));
-        onFocus?.(e);
+    const localChange = useCallback(
+      (e: React.ChangeEvent<HTMLInputElement>) => {
+        setIsFilledOnChange(Boolean(e.target.value));
+        onChange?.(e);
       },
-      [onFocus],
-    );
-
-    const localBlur = useCallback(
-      (e: React.FocusEvent<HTMLInputElement>) => {
-        setIsFilled(Boolean(e.target.value));
-        onBlur?.(e);
-      },
-      [onBlur],
+      [onChange],
     );
     const passwordIcon = isPasswordVisible ? <HiEyeSlash /> : <HiEye />;
     const iconToShow = type === 'password' ? passwordIcon : icon;
+    const isFilled = isFilledOnChange || Boolean(props.value);
+
     return (
-      <div className="relative flex items-center justify-center w-full">
+      <div className="relative flex items-center justify-center w-full" ref={containerRef}>
         <input
           ref={ref}
           {...props}
           disabled={disabled}
-          onFocus={localFocus}
-          onBlur={localBlur}
+          onChange={localChange}
           type={isPasswordVisible ? 'text' : type}
           className={twMerge(
             `peer w-full py-2 pr-4 bg-transparent placeholder:opacity-0 placeholder:transition-color placeholder:duration-300 focus:placeholder:opacity-100 text-md placeholder-gray focus:outline-none transition-all duration-300 border-b
@@ -133,7 +127,7 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
               localOnIconClick(e);
             }
           }}
-          tabIndex={0}
+          tabIndex={type === 'password' ? 0 : -1}
           type="button"
         >
           <div ref={iconButtonRef} className="size-full">
