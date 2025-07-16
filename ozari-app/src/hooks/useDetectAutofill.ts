@@ -1,19 +1,17 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef } from 'react';
 
 const useDetectAutofill = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [isAutofilled, setIsAutofilled] = useState(false);
 
   const detectAutofill = useCallback(() => {
     const inputElement = containerRef.current?.querySelector('input');
     const intervalId = setInterval(() => {
-      if (inputElement?.value !== '' && !isAutofilled) {
-        setIsAutofilled(true);
+      if (inputElement?.value !== '') {
         clearInterval(intervalId);
         inputElement?.dispatchEvent(new Event('input', { bubbles: true }));
       }
     }, 200);
-  }, [isAutofilled]);
+  }, []);
 
   useLayoutEffect(() => {
     detectAutofill();

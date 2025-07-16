@@ -8,90 +8,114 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-// Import Routes
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as SesionRouteImport } from './routes/sesion'
+import { Route as SplatRouteImport } from './routes/$'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as SesionInicioRouteImport } from './routes/sesion/inicio'
+import { Route as SesionSplatRouteImport } from './routes/sesion/$'
 
-import { Route as rootRoute } from './routes/__root'
-import { Route as SesionImport } from './routes/sesion'
-import { Route as SplatImport } from './routes/$'
-import { Route as IndexImport } from './routes/index'
-import { Route as SesionInicioImport } from './routes/sesion/inicio'
-import { Route as SesionSplatImport } from './routes/sesion/$'
-
-// Create/Update Routes
-
-const SesionRoute = SesionImport.update({
+const SesionRoute = SesionRouteImport.update({
   id: '/sesion',
   path: '/sesion',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-
-const SplatRoute = SplatImport.update({
+const SplatRoute = SplatRouteImport.update({
   id: '/$',
   path: '/$',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-
-const IndexRoute = IndexImport.update({
+const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-
-const SesionInicioRoute = SesionInicioImport.update({
+const SesionInicioRoute = SesionInicioRouteImport.update({
   id: '/inicio',
   path: '/inicio',
   getParentRoute: () => SesionRoute,
 } as any)
-
-const SesionSplatRoute = SesionSplatImport.update({
+const SesionSplatRoute = SesionSplatRouteImport.update({
   id: '/$',
   path: '/$',
   getParentRoute: () => SesionRoute,
 } as any)
 
-// Populate the FileRoutesByPath interface
+export interface FileRoutesByFullPath {
+  '/': typeof IndexRoute
+  '/$': typeof SplatRoute
+  '/sesion': typeof SesionRouteWithChildren
+  '/sesion/$': typeof SesionSplatRoute
+  '/sesion/inicio': typeof SesionInicioRoute
+}
+export interface FileRoutesByTo {
+  '/': typeof IndexRoute
+  '/$': typeof SplatRoute
+  '/sesion': typeof SesionRouteWithChildren
+  '/sesion/$': typeof SesionSplatRoute
+  '/sesion/inicio': typeof SesionInicioRoute
+}
+export interface FileRoutesById {
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/$': typeof SplatRoute
+  '/sesion': typeof SesionRouteWithChildren
+  '/sesion/$': typeof SesionSplatRoute
+  '/sesion/inicio': typeof SesionInicioRoute
+}
+export interface FileRouteTypes {
+  fileRoutesByFullPath: FileRoutesByFullPath
+  fullPaths: '/' | '/$' | '/sesion' | '/sesion/$' | '/sesion/inicio'
+  fileRoutesByTo: FileRoutesByTo
+  to: '/' | '/$' | '/sesion' | '/sesion/$' | '/sesion/inicio'
+  id: '__root__' | '/' | '/$' | '/sesion' | '/sesion/$' | '/sesion/inicio'
+  fileRoutesById: FileRoutesById
+}
+export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
+  SplatRoute: typeof SplatRoute
+  SesionRoute: typeof SesionRouteWithChildren
+}
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexImport
-      parentRoute: typeof rootRoute
+    '/sesion': {
+      id: '/sesion'
+      path: '/sesion'
+      fullPath: '/sesion'
+      preLoaderRoute: typeof SesionRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/$': {
       id: '/$'
       path: '/$'
       fullPath: '/$'
-      preLoaderRoute: typeof SplatImport
-      parentRoute: typeof rootRoute
+      preLoaderRoute: typeof SplatRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/sesion': {
-      id: '/sesion'
-      path: '/sesion'
-      fullPath: '/sesion'
-      preLoaderRoute: typeof SesionImport
-      parentRoute: typeof rootRoute
-    }
-    '/sesion/$': {
-      id: '/sesion/$'
-      path: '/$'
-      fullPath: '/sesion/$'
-      preLoaderRoute: typeof SesionSplatImport
-      parentRoute: typeof SesionImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/sesion/inicio': {
       id: '/sesion/inicio'
       path: '/inicio'
       fullPath: '/sesion/inicio'
-      preLoaderRoute: typeof SesionInicioImport
-      parentRoute: typeof SesionImport
+      preLoaderRoute: typeof SesionInicioRouteImport
+      parentRoute: typeof SesionRoute
+    }
+    '/sesion/$': {
+      id: '/sesion/$'
+      path: '/$'
+      fullPath: '/sesion/$'
+      preLoaderRoute: typeof SesionSplatRouteImport
+      parentRoute: typeof SesionRoute
     }
   }
 }
-
-// Create and export the route tree
 
 interface SesionRouteChildren {
   SesionSplatRoute: typeof SesionSplatRoute
@@ -106,88 +130,11 @@ const SesionRouteChildren: SesionRouteChildren = {
 const SesionRouteWithChildren =
   SesionRoute._addFileChildren(SesionRouteChildren)
 
-export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/$': typeof SplatRoute
-  '/sesion': typeof SesionRouteWithChildren
-  '/sesion/$': typeof SesionSplatRoute
-  '/sesion/inicio': typeof SesionInicioRoute
-}
-
-export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/$': typeof SplatRoute
-  '/sesion': typeof SesionRouteWithChildren
-  '/sesion/$': typeof SesionSplatRoute
-  '/sesion/inicio': typeof SesionInicioRoute
-}
-
-export interface FileRoutesById {
-  __root__: typeof rootRoute
-  '/': typeof IndexRoute
-  '/$': typeof SplatRoute
-  '/sesion': typeof SesionRouteWithChildren
-  '/sesion/$': typeof SesionSplatRoute
-  '/sesion/inicio': typeof SesionInicioRoute
-}
-
-export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/$' | '/sesion' | '/sesion/$' | '/sesion/inicio'
-  fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/$' | '/sesion' | '/sesion/$' | '/sesion/inicio'
-  id: '__root__' | '/' | '/$' | '/sesion' | '/sesion/$' | '/sesion/inicio'
-  fileRoutesById: FileRoutesById
-}
-
-export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  SplatRoute: typeof SplatRoute
-  SesionRoute: typeof SesionRouteWithChildren
-}
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SplatRoute: SplatRoute,
   SesionRoute: SesionRouteWithChildren,
 }
-
-export const routeTree = rootRoute
+export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-/* ROUTE_MANIFEST_START
-{
-  "routes": {
-    "__root__": {
-      "filePath": "__root.tsx",
-      "children": [
-        "/",
-        "/$",
-        "/sesion"
-      ]
-    },
-    "/": {
-      "filePath": "index.tsx"
-    },
-    "/$": {
-      "filePath": "$.tsx"
-    },
-    "/sesion": {
-      "filePath": "sesion.tsx",
-      "children": [
-        "/sesion/$",
-        "/sesion/inicio"
-      ]
-    },
-    "/sesion/$": {
-      "filePath": "sesion/$.tsx",
-      "parent": "/sesion"
-    },
-    "/sesion/inicio": {
-      "filePath": "sesion/inicio.tsx",
-      "parent": "/sesion"
-    }
-  }
-}
-ROUTE_MANIFEST_END */

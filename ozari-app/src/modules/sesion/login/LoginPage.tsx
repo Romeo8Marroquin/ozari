@@ -16,19 +16,18 @@ import {
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { useTranslation } from 'react-i18next';
 import CustomButton from '@components/CustomButton';
+import useLogin from '../../../hooks/useLogin';
 
 const LoginPage: React.FC = () => {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
-  const memorizedRequiredPatterns = useMemo(
-    () => ({ requiredPatterns: loginRequiredPatterns }),
-    [],
-  );
   const methods = useForm<LoginType>({
     resolver: zodResolver(loginSchema),
     defaultValues: loginSchemaDefaultValues,
     mode: 'onTouched',
   });
+  const { trigger, reset, getValues } = methods;
+  const { login, isLoading, error } = useLogin();
 
   useGSAP(
     () => {
@@ -45,7 +44,16 @@ const LoginPage: React.FC = () => {
   );
 
   const onSubmit = async () => {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    if (isLoading) return;
+    const isValid = await trigger();
+    if (!isValid) return;
+    try {
+      login(getValues());
+      reset();
+    } catch (err) {
+      console.log('Tanstack error:', error);
+      console.error('Login failed:', err);
+    }
   };
 
   const handleAutocomplete = async (event: React.FormEvent<HTMLInputElement>) => {
@@ -64,13 +72,18 @@ const LoginPage: React.FC = () => {
     }
   };
 
+  const requiredPatternsContextValue = useMemo(
+    () => ({ requiredPatterns: loginRequiredPatterns }),
+    [],
+  );
+
   return (
     <div ref={containerRef} className="w-full flex justify-center items-center">
       <SesionCard className="sm:px-12">
         <h2 className="stagger text-2xl font-bold text-black select-none">
           {t('modules.sesion.login.title')}
         </h2>
-        <RequiredPatternsContext.Provider value={memorizedRequiredPatterns}>
+        <RequiredPatternsContext.Provider value={requiredPatternsContextValue}>
           <FormProvider {...methods}>
             <form
               onSubmit={methods.handleSubmit(onSubmit)}

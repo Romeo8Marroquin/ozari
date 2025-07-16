@@ -1,15 +1,11 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react-swc';
 import tailwindcss from '@tailwindcss/vite';
-import { TanStackRouterVite } from '@tanstack/router-plugin/vite';
+import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import path from 'path';
 
 export default defineConfig({
-  plugins: [
-    TanStackRouterVite({ target: 'react', autoCodeSplitting: true }),
-    react(),
-    tailwindcss(),
-  ],
+  plugins: [tanstackRouter({ target: 'react', autoCodeSplitting: true }), react(), tailwindcss()],
   resolve: {
     alias: {
       '@sesion': path.resolve(__dirname, './src/modules/sesion'),
@@ -18,6 +14,7 @@ export default defineConfig({
       '@constants': path.resolve(__dirname, './src/constants'),
       '@functions': path.resolve(__dirname, './src/utils/functions'),
       '@contexts': path.resolve(__dirname, './src/contexts'),
+      '@api': path.resolve(__dirname, './src/api'),
     },
   },
   test: {

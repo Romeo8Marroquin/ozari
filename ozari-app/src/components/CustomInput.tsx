@@ -3,7 +3,7 @@ import { forwardRef, useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HiEye, HiEyeSlash } from 'react-icons/hi2';
 import { twMerge } from 'tailwind-merge';
-import useDetectAutofill from '../hooks/DetectAutofill';
+import useDetectAutofill from '../hooks/useDetectAutofill';
 
 interface CustomInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label: string;
@@ -120,7 +120,9 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
         <button
           className={`absolute text-xl left-2 size-5 transition-colors duration-300 peer-disabled:text-gray-disabled peer-disabled:pointer-events-none
             ${error ? 'text-red-600' : peerFocusTextClass[focusColor]}
-            ${enablePointerEvents || type === 'password' ? 'cursor-pointer ' : 'pointer-events-none'}`}
+            ${
+              enablePointerEvents || type === 'password' ? 'cursor-pointer ' : 'pointer-events-none'
+            }`}
           onMouseDown={localOnIconClick}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {

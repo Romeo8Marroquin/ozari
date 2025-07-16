@@ -8,7 +8,9 @@
       "@components/*": ["./src/components/*"],
       "@constants/*": ["./src/constants/*"],
       "@functions/*": ["./src/utils/functions/*"],
-      "@contexts/*": ["./src/contexts/*"]
-    }
+      "@contexts/*": ["./src/contexts/*"],
+      "@api/*": ["./src/api/*"]
+    },
+    "types": ["vite/client", "node"]
   }
 }
