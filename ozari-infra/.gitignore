@@ -1,0 +1,23 @@
+# Terraform local state
+*.tfstate
+*.tfstate.*
+
+# Directory
+.terraform/
+
+# Sensible data
+*.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Plan outputs
+*.tfplan
+
+# Macros / CR
+crash.log
+
+# IDEs
+.vscode/
+.idea/
