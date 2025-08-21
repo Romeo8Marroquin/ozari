@@ -1,26 +1,31 @@
 terraform {
-  required_version = ">= 1.6, < 1.14"
-  required_providers { aws = { source = "hashicorp/aws", version = ">= 5.0, < 7.0" } }
+  required_version = ">= 1.12.0, < 1.14.0"
+  required_providers { aws = { source = "hashicorp/aws", version = ">= 6.9.0, < 7.0.0" } }
 }
 
+variable "environment" { type = string }
 variable "region" { type = string }
+variable "profile" { type = string }
 variable "vpc_id" { type = string }
 variable "public_subnet_ids" { type = list(string) }
 variable "allowed_ip" { type = string }
+variable "db_name" { type = string }
 variable "db_password" {
   type      = string
   sensitive = true
 }
-variable "db_name" {
-  type    = string
-  default = "OzariDev"
+
+locals {
+  is_prod = lower(var.environment) == "prod"
 }
 
-provider "aws" { region = var.region }
+provider "aws" {
+  region  = var.region
+  profile = var.profile
+}
 
-# SG que abre 5432 solo a tu IP
 resource "aws_security_group" "rds_access" {
-  name        = "dev-rds-sg"
+  name        = "ozari-${var.environment}-rds-sg"
   description = "Allow psql from developer IP"
   vpc_id      = var.vpc_id
 
@@ -39,20 +44,18 @@ resource "aws_security_group" "rds_access" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = { Name = "dev-rds-sg" }
+  tags = { Name = "ozari-${var.environment}-rds-sg" }
 }
 
-# Subnet Group (dos subredes en distinta AZ)
 resource "aws_db_subnet_group" "this" {
-  name        = "dev-rds-subnet-group"
-  description = "Subnets for RDS (public for dev)"
+  name        = "ozari-${var.environment}-rds-subnet-group"
+  description = "Subnets for RDS"
   subnet_ids  = var.public_subnet_ids
-  tags        = { Name = "dev-rds-subnet-group" }
+  tags        = { Name = "ozari-${var.environment}-rds-subnet-group" }
 }
 
-# RDS Postgres para dev (público y barato)
 resource "aws_db_instance" "postgres" {
-  identifier              = "dev-postgres"
+  identifier              = "ozari-${var.environment}-postgres"
   engine                  = "postgres"
   instance_class          = "db.t4g.micro"
   allocated_storage       = 20
@@ -62,13 +65,13 @@ resource "aws_db_instance" "postgres" {
   password                = var.db_password
   db_subnet_group_name    = aws_db_subnet_group.this.name
   vpc_security_group_ids  = [aws_security_group.rds_access.id]
-  publicly_accessible     = true
-  multi_az                = false
-  backup_retention_period = 7
-  deletion_protection     = false
-  skip_final_snapshot     = true
-  apply_immediately       = true
-  tags                    = { Name = "dev-postgres" }
+  publicly_accessible     = !local.is_prod
+  multi_az                = local.is_prod
+  backup_retention_period = local.is_prod ? 7 : 0
+  deletion_protection     = local.is_prod
+  skip_final_snapshot     = !local.is_prod
+  apply_immediately       = !local.is_prod
+  tags                    = { Name = "ozari-${var.environment}-postgres" }
 }
 
 output "rds_endpoint" { value = aws_db_instance.postgres.address }

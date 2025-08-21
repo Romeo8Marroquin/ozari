@@ -11,23 +11,26 @@ terraform {
   }
 }
 
-provider "aws" {
-  region  = var.region
-  profile = "terraform-profile"
+variable "profile" {
+  type    = string
+  default = "terraform-profile"
 }
 
 module "network" {
-  source  = "../../modules/network"
-  region  = var.region
-  profile = "terraform-profile"
+  source      = "../../modules/network"
+  region      = var.region
+  profile     = var.profile
+  environment = "dev"
 }
 
-# module "db" {
-#   source            = "../../modules/db"
-#   region            = var.region
-#   vpc_id            = module.network.vpc_id
-#   public_subnet_ids = module.network.public_subnet_ids
-#   allowed_ip        = var.allowed_ip
-#   db_password       = var.db_password
-#   db_name           = var.db_name
-# }
+module "db" {
+  source            = "../../modules/db"
+  region            = var.region
+  profile           = var.profile
+  vpc_id            = module.network.vpc_id
+  public_subnet_ids = module.network.public_subnet_ids
+  allowed_ip        = var.allowed_ip
+  db_password       = var.db_password
+  db_name           = var.db_name
+  environment       = "dev"
+}

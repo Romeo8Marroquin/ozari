@@ -4,13 +4,14 @@ variable "region" {
 }
 variable "allowed_ip" {
   type        = string
-  description = "Favor ingresar la direccion IP"
-}
-variable "db_password" {
-  type      = string
-  sensitive = true
+  description = "Please provide public IP address"
 }
 variable "db_name" {
-  type    = string
-  default = "OzariDev"
+  type        = string
+  description = "Database name"
+}
+variable "db_password" {
+  type        = string
+  sensitive   = true
+  description = "Database password"
 }

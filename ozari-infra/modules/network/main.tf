@@ -3,10 +3,12 @@ terraform {
   required_providers { aws = { source = "hashicorp/aws", version = ">= 6.9.0, < 7.0.0" } }
 }
 
+variable "environment" { type = string }
 variable "region" { type = string }
-variable "profile" {
+variable "profile" { type = string }
+variable "vpc_cidr" {
   type    = string
-  default = "terraform-profile"
+  default = "10.0.0.0/16"
 }
 
 provider "aws" {
@@ -17,15 +19,15 @@ provider "aws" {
 data "aws_availability_zones" "this" { state = "available" }
 
 resource "aws_vpc" "this" {
-  cidr_block           = "10.0.0.0/16"
+  cidr_block           = var.vpc_cidr
   enable_dns_support   = true
   enable_dns_hostnames = true
-  tags                 = { Name = "dev-vpc" }
+  tags                 = { Name = "ozari-${var.environment}-vpc" }
 }
 
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.this.id
-  tags   = { Name = "dev-igw" }
+  tags   = { Name = "ozari-${var.environment}-igw" }
 }
 
 resource "aws_subnet" "public_a" {
@@ -33,7 +35,7 @@ resource "aws_subnet" "public_a" {
   cidr_block              = "10.0.1.0/24"
   availability_zone       = data.aws_availability_zones.this.names[0]
   map_public_ip_on_launch = true
-  tags                    = { Name = "dev-public-a" }
+  tags                    = { Name = "ozari-${var.environment}-public-a" }
 }
 
 resource "aws_subnet" "public_b" {
@@ -41,12 +43,12 @@ resource "aws_subnet" "public_b" {
   cidr_block              = "10.0.2.0/24"
   availability_zone       = data.aws_availability_zones.this.names[1]
   map_public_ip_on_launch = true
-  tags                    = { Name = "dev-public-b" }
+  tags                    = { Name = "ozari-${var.environment}-public-b" }
 }
 
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.this.id
-  tags   = { Name = "dev-rt-public" }
+  tags   = { Name = "ozari-${var.environment}-rt-public" }
 }
 
 resource "aws_route" "internet" {
