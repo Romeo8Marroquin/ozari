@@ -12,30 +12,15 @@ terraform {
 }
 
 provider "aws" {
-  region  = "us-east-1"
+  region  = var.region
   profile = "terraform-profile"
 }
 
-resource "aws_cloudwatch_log_group" "sanity" {
-  name              = "/ozari/sanity"
-  retention_in_days = 1
-  tags = {
-    Project = "ozari"
-    Env     = "dev"
-  }
+module "network" {
+  source  = "../../modules/network"
+  region  = var.region
+  profile = "terraform-profile"
 }
-
-output "log_group_name" {
-  value = aws_cloudwatch_log_group.sanity.name
-}
-
-# provider "aws" { region = var.region }
-
-# module "network" {
-#   source   = "../../modules/network"
-#   region   = var.region
-#   vpc_cidr = "10.0.0.0/16"
-# }
 
 # module "db" {
 #   source            = "../../modules/db"

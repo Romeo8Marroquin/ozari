@@ -4,7 +4,7 @@ variable "region" {
 }
 variable "allowed_ip" {
   type        = string
-  description = "Tu IP /32"
+  description = "Favor ingresar la direccion IP"
 }
 variable "db_password" {
   type      = string

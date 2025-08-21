@@ -1,20 +1,23 @@
 terraform {
-  required_version = ">= 1.6, < 1.14"
-  required_providers { aws = { source = "hashicorp/aws", version = ">= 5.0, < 7.0" } }
+  required_version = ">= 1.12.0, < 1.14.0"
+  required_providers { aws = { source = "hashicorp/aws", version = ">= 6.9.0, < 7.0.0" } }
 }
 
 variable "region" { type = string }
-variable "vpc_cidr" {
+variable "profile" {
   type    = string
-  default = "10.0.0.0/16"
+  default = "terraform-profile"
 }
 
-provider "aws" { region = var.region }
+provider "aws" {
+  region  = var.region
+  profile = var.profile
+}
 
 data "aws_availability_zones" "this" { state = "available" }
 
 resource "aws_vpc" "this" {
-  cidr_block           = var.vpc_cidr
+  cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
   enable_dns_hostnames = true
   tags                 = { Name = "dev-vpc" }
