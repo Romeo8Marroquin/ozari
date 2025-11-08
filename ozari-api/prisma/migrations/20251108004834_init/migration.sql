@@ -18,13 +18,31 @@ CREATE TABLE "users" (
     "email_kms" TEXT NOT NULL,
     "role_id" INTEGER NOT NULL,
     "password_sha" TEXT NOT NULL,
-    "password_kms" TEXT NOT NULL,
+    "mfa_secret_kms" TEXT,
+    "mfa_last_used_at" TIMESTAMP(3),
     "terms_accepted" BOOLEAN NOT NULL DEFAULT false,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
     "updated_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "user_auth_providers" (
+    "id" SERIAL NOT NULL,
+    "user_id" INTEGER NOT NULL,
+    "provider_name" TEXT NOT NULL,
+    "provider_subject" TEXT NOT NULL,
+    "email_external_kms" TEXT,
+    "email_external_kms_sha" TEXT,
+    "access_token_kms" TEXT,
+    "refresh_token_kms" TEXT,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "updated_at" TIMESTAMP(3),
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "user_auth_providers_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -337,8 +355,17 @@ CREATE TABLE "service_extras" (
 -- CreateIndex
 CREATE UNIQUE INDEX "users_email_sha_key" ON "users"("email_sha");
 
+-- CreateIndex
+CREATE UNIQUE INDEX "user_auth_providers_provider_name_provider_subject_key" ON "user_auth_providers"("provider_name", "provider_subject");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "user_auth_providers_user_id_provider_name_key" ON "user_auth_providers"("user_id", "provider_name");
+
 -- AddForeignKey
 ALTER TABLE "users" ADD CONSTRAINT "users_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "user_roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "user_auth_providers" ADD CONSTRAINT "user_auth_providers_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "jwt_sessions" ADD CONSTRAINT "jwt_sessions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
