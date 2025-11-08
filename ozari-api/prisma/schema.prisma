@@ -27,7 +27,8 @@ model User {
   emailKms      String    @map("email_kms")
   roleId        Int       @map("role_id")
   passwordSha   String    @map("password_sha")
-  passwordKms   String    @map("password_kms")
+  mfaSecretKms  String?   @map("mfa_secret_kms")
+  mfaLastUsedAt DateTime? @map("mfa_last_used_at")
   termsAccepted Boolean   @default(false) @map("terms_accepted")
   isActive      Boolean   @default(true) @map("is_active")
   updatedAt     DateTime? @updatedAt @map("updated_at")
@@ -39,8 +40,29 @@ model User {
   userPhones    UserPhone[]
   addresses     Address[]
   services      Service[]
+  userAuthProviders UserAuthProvider[]
   
   @@map("users")
+}
+
+model UserAuthProvider {
+  id                 Int       @id @default(autoincrement())
+  userId             Int       @map("user_id")
+  providerName       String    @map("provider_name")
+  providerSubject    String    @map("provider_subject")
+  emailExternalKms   String?   @map("email_external_kms")
+  emailExternalKmsSha String?  @map("email_external_kms_sha")
+  accessTokenKms     String?   @map("access_token_kms")
+  refreshTokenKms    String?   @map("refresh_token_kms")
+  isActive           Boolean   @default(true) @map("is_active")
+  updatedAt          DateTime? @updatedAt @map("updated_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("user_auth_providers")
+  @@unique([providerName, providerSubject], name: "uq_user_auth_providers_provider_subject")
+  @@unique([userId, providerName],        name: "uq_user_auth_providers_user_provider")
 }
 
 model TokenType {

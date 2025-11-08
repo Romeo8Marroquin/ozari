@@ -20,12 +20,31 @@ CREATE TABLE users (
   email_kms TEXT NOT NULL,
   role_id INT NOT NULL,
   password_sha VARCHAR(256) NOT NULL,
-  password_kms TEXT NOT NULL,
+  mfa_secret_kms TEXT,
+  mfa_last_used_at TIMESTAMP,
   terms_accepted BOOLEAN NOT NULL DEFAULT false,
   is_active BOOLEAN NOT NULL DEFAULT true,
   updated_at TIMESTAMP,
   created_at TIMESTAMP NOT NULL DEFAULT now(),
   CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES user_roles(id)
+);
+
+-- Tabla: user_auth_providers
+CREATE TABLE user_auth_providers (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL,
+  provider_name TEXT NOT NULL,
+  provider_subject TEXT NOT NULL,
+  email_external_kms TEXT,
+  email_external_kms_sha VARCHAR(256),
+  access_token_kms TEXT,
+  refresh_token_kms TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  updated_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT now(),
+  CONSTRAINT fk_user_auth_providers_user FOREIGN KEY (user_id) REFERENCES users(id),
+  CONSTRAINT uq_user_auth_providers_provider_subject UNIQUE (provider_name, provider_subject),
+  CONSTRAINT uq_user_auth_providers_user_provider UNIQUE (user_id, provider_name)
 );
 
 -- Tabla: token_types
