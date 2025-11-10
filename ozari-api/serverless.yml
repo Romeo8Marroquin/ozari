@@ -1,0 +1,96 @@
+org: rems8
+app: ozari
+service: ozari-api
+
+stages:
+  prod:
+    observability: true
+    params:
+      AWS_REGION: us-east-1
+      NODE_VERSION: nodejs22.x
+      NODE_TARGET: node22
+      LOG_FORMAT: JSON
+      LOG_LEVEL: INFO
+      API_BASE_PATH: /api
+      LAMBDA_SECURITY_GROUP_ID: test
+      SUBNET_A_ID: test
+      SUBNET_B_ID: test
+  default:
+    observability: false
+    params:
+      AWS_REGION: us-east-1
+      NODE_VERSION: nodejs22.x
+      NODE_TARGET: node22
+      LOG_FORMAT: JSON
+      LOG_LEVEL: DEBUG
+      API_BASE_PATH: /api
+      LAMBDA_SECURITY_GROUP_ID: test
+      SUBNET_A_ID: test
+      SUBNET_B_ID: test
+
+provider:
+  name: aws
+  profile: terraform-profile
+  runtime: ${param:NODE_VERSION}
+  region: ${param:AWS_REGION}
+  stage: dev
+  architecture: arm64
+  logRetentionInDays: 30
+  logs:
+    lambda:
+      logFormat: ${param:LOG_FORMAT}
+      applicationLogLevel: ${param:LOG_LEVEL}
+      systemLogLevel: ${param:LOG_LEVEL}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - kms:Encrypt
+            - kms:Decrypt
+          Resource: ${env:AWS_KEY_ARN}
+  # vpc:
+  #   securityGroupIds:
+  #     - ${param:LAMBDA_SECURITY_GROUP_ID}
+  #   subnetIds:
+  #     - ${param:SUBNET_A_ID}
+  #     - ${param:SUBNET_B_ID}
+  environment:
+    AWS_KEY_ARN: ${env:AWS_KEY_ARN}
+    DATABASE_URL: ${env:DATABASE_URL}
+    API_ENV: ${env:API_ENV}
+    API_HOST: ${env:API_HOST}
+    APP_HOST: ${env:APP_HOST}
+    API_PORT: ${env:API_PORT}
+    LOG_LEVEL: ${env:LOG_LEVEL}
+    JWT_SECRET: ${env:JWT_SECRET}
+    JWT_REFRESH_SECRET: ${env:JWT_REFRESH_SECRET}
+  tags:
+    project: ozari-api
+    stage: ${sls:stage}
+
+plugins:
+  - serverless-offline
+
+custom:
+  esbuild:
+    bundle: true
+    minify: false
+    target: ${param:NODE_TARGET}
+    platform: node
+    format: cjs
+    sourcemap: true
+    tsconfig: ./tsconfig.json
+    exclude:
+      - aws-sdk
+
+functions:
+  test:
+    handler: src/index.handler
+    events:
+      - httpApi:
+          method: ANY
+          path: ${param:API_BASE_PATH}/test
+      - httpApi:
+          method: ANY
+          path: ${param:API_BASE_PATH}/test/{proxy+}

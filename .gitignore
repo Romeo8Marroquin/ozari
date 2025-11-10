@@ -23,6 +23,7 @@ Thumbs.db
 # Archivos de configuración de editores/IDEs
 .vscode/
 .idea/
+.serverless/
 
 # Archivos de TypeScript
 *.tsbuildinfo

@@ -2,15 +2,15 @@ import { NextFunction, Response } from 'express';
 import i18next from 'i18next';
 import jwt from 'jsonwebtoken';
 
-import { HttpEnum } from '../models/enums/httpEnum';
-import { ProcessesEnum } from '../models/enums/processesEnum';
-import { RolesEnum } from '../models/enums/rolesEnum';
-import { TokenEnum } from '../models/enums/tokenEnum';
-import { sendOzariError } from '../models/http/ozariErrorModel';
-import { JwtPayloadModel } from '../models/common/authModel';
-import { CustomRequest } from '../models/common/customRequestModel';
-import { logger } from '../dependencies/winstonConfig';
-import { prismaClient } from '../dependencies/prismaClient';
+import { prismaClient } from '../database/databaseClient.js';
+import { logger } from '../logs/winstonConfig.js';
+import { HttpEnum } from '../models/enums/httpEnum.js';
+import { ProcessesEnum } from '../models/enums/processesEnum.js';
+import { RolesEnum } from '../models/enums/rolesEnum.js';
+import { TokenEnum } from '../models/enums/tokenEnum.js';
+import { sendOzariError } from '../models/http/ozariErrorModel.js';
+import { JwtPayloadModel } from '../models/middlewares/authModel.js';
+import { CustomRequest } from '../models/middlewares/customRequestModel.js';
 
 const jwtSecret = process.env.JWT_SECRET;
 if (!jwtSecret) {
@@ -58,10 +58,10 @@ export const verifyJwt = async (req: CustomRequest, res: Response, next: NextFun
       return;
     }
 
-    if (jwtActiveTokens[0]?.jti !== jwtPayload.jti) {
+    if (jwtActiveTokens[0].jti !== jwtPayload.jti) {
       logger.error(
         i18next.t('middlewares.auth.logs.jwtMismatch', {
-          expected: jwtActiveTokens[0]?.jti,
+          expected: jwtActiveTokens[0].jti,
           received: jwtPayload.jti,
         }),
       );

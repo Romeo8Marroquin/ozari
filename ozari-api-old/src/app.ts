@@ -1,4 +1,4 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
+import { AsyncLocalStorage } from 'async_hooks';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express, { Router } from 'express';
@@ -7,35 +7,37 @@ import helmet from 'helmet';
 import i18next from 'i18next';
 import FilesystemBackend from 'i18next-fs-backend';
 import * as i18nmiddleware from 'i18next-http-middleware';
-import path from 'node:path';
-import { logger } from './dependencies/winstonConfig.js';
-import { ProcessesEnum } from './models/enums/processesEnum.js';
-import { LoggerStorage } from './models/common/logModel.js';
-import usersRouter from './modules/user/route';
+import { dirname } from 'path';
+import { fileURLToPath } from 'url';
 
+import { logger } from './logs/winstonConfig.js';
+import { ProcessesEnum } from './models/enums/processesEnum.js';
+import { LoggerStorage } from './models/logger/logModel.js';
+import productsRouter from './routes/productsRoutes.js';
+import usersRouter from './routes/userRoutes.js';
 export const app = express();
 
 // region Middlewares
-async function initI18n() {
-  await i18next
-    .use(FilesystemBackend)
-    .use(i18nmiddleware.LanguageDetector)
-    .init({
-      backend: {
-        loadPath: path.join(__dirname, 'locales', '{{lng}}', '{{ns}}.json'),
-      },
-      detection: {
-        lookupHeader: 'accept-language',
-        order: ['header'],
-      },
-      fallbackLng: 'es-GT',
-      preload: ['es-GT'],
-      supportedLngs: ['es-GT'],
-    });
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-  app.use(i18nmiddleware.handle(i18next, {}));
-}
-void initI18n(); // NOSONAR
+await i18next
+  .use(FilesystemBackend)
+  .use(i18nmiddleware.LanguageDetector)
+  .init({
+    backend: {
+      loadPath: `${__dirname}\\locales\\{{lng}}\\{{ns}}.json`,
+    },
+    detection: {
+      lookupHeader: 'accept-language',
+      order: ['header'],
+    },
+    fallbackLng: 'es-GT',
+    preload: ['es-GT'],
+    supportedLngs: ['es-GT'],
+  });
+
+app.use(i18nmiddleware.handle(i18next, {}));
 const allowedOrigin = process.env.API_HOST;
 const allowedPort = process.env.API_PORT;
 const frontendDomain = process.env.APP_HOST;
@@ -112,7 +114,7 @@ app.use((req, _, next) => {
 const apiRouter = Router();
 
 apiRouter.use('/user', usersRouter);
-// apiRouter.use('/products', productsRouter);
+apiRouter.use('/products', productsRouter);
 
 app.use('/api', apiRouter);
 // endregion

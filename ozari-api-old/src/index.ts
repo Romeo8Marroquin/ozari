@@ -1,11 +1,12 @@
 import dotenv from 'dotenv';
 dotenv.config();
+import './telemetry/openTelemetry.js';
 import i18next from 'i18next';
-import { logger } from './dependencies/winstonConfig';
-import { ProcessesEnum } from './models/enums/processesEnum';
-import { prismaClient } from './dependencies/prismaClient';
-import app from './app';
-import serverless from 'serverless-http';
+
+import app from './app.js';
+import { prismaClient } from './database/databaseClient.js';
+import { logger } from './logs/winstonConfig.js';
+import { ProcessesEnum } from './models/enums/processesEnum.js';
 
 const port = process.env.API_PORT;
 const host = process.env.API_HOST;
@@ -43,5 +44,3 @@ process.on('SIGTERM', () => {
     process.exit(ProcessesEnum.DB_DISCONNECTION_ERROR);
   });
 });
-
-export const handler = serverless(app);
