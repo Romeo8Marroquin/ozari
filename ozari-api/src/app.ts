@@ -1,17 +1,19 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express, { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import i18next from 'i18next';
-import FilesystemBackend from 'i18next-fs-backend';
+import FilesystemBackend from 'i18next-fs-backend/cjs';
 import * as i18nmiddleware from 'i18next-http-middleware';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'node:path';
-import { logger } from './dependencies/winstonConfig.js';
-import { ProcessesEnum } from './models/enums/processesEnum.js';
-import { LoggerStorage } from './models/common/logModel.js';
-import usersRouter from './modules/user/route';
+
+import { logger } from '@deps/winstonConfig.js';
+import { LoggerStorage } from '@models/common/logModel.js';
+import { ProcessesEnum } from '@models/enums/processesEnum.js';
+import authRouter from '@modules/auth/route';
+import { applicationConfig } from './applicationConfig';
 
 export const app = express();
 
@@ -71,6 +73,7 @@ app.use(
 );
 app.use(helmet.noSniff());
 app.use(helmet.frameguard({ action: 'deny' }));
+app.set('trust proxy', 1);
 app.use(rateLimit({ max: 100, windowMs: 15 * 60 * 1000 }));
 app.use(cookieParser());
 app.use(express.json());
@@ -78,6 +81,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
     origin: (origin, callback) => {
+      logger.info('CORS Origin:', { origin });
       if (origin === `${allowedOrigin}:${allowedPort}`) {
         callback(null, true);
         return;
@@ -111,10 +115,10 @@ app.use((req, _, next) => {
 // region Routes
 const apiRouter = Router();
 
-apiRouter.use('/user', usersRouter);
+apiRouter.use('/auth', authRouter);
 // apiRouter.use('/products', productsRouter);
 
-app.use('/api', apiRouter);
+app.use(applicationConfig.basePath, apiRouter);
 // endregion
 
 export default app;

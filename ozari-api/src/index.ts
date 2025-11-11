@@ -1,47 +1,52 @@
 import dotenv from 'dotenv';
-dotenv.config();
 import i18next from 'i18next';
-import { logger } from './dependencies/winstonConfig';
-import { ProcessesEnum } from './models/enums/processesEnum';
-import { prismaClient } from './dependencies/prismaClient';
-import app from './app';
 import serverless from 'serverless-http';
+dotenv.config();
 
-const port = process.env.API_PORT;
-const host = process.env.API_HOST;
-if (!host) {
-  logger.error(i18next.t('api.server.logs.hostError', { host }));
-  process.exit(ProcessesEnum.HOST_ERROR);
-}
-if (!port) {
-  logger.error(i18next.t('api.server.logs.portError', { port }));
-  process.exit(ProcessesEnum.PORT_ERROR);
-}
-const server = app.listen(port, () => {
-  logger.info(i18next.t('api.server.logs.serverRunning', { host, port }));
-});
+import { prismaClient } from '@deps/prismaClient';
+import { logger } from '@deps/winstonConfig';
+import { ProcessesEnum } from '@models/enums/processesEnum';
+import app from '@src/app';
+
+let server: ReturnType<typeof app.listen> | undefined;
 
 const shutdownDatabase = async () => {
   logger.info(i18next.t('api.database.logs.dbDisconnection'));
   await prismaClient.$disconnect();
-  server.close(() => {
+  server?.close(() => {
     logger.info(i18next.t('api.server.logs.serverClosed'));
     process.exit(ProcessesEnum.SUCCESS);
   });
 };
 
-process.on('SIGINT', () => {
-  shutdownDatabase().catch((error: unknown) => {
-    logger.error(i18next.t('api.database.logs.databaseShutdownError', { error }));
-    process.exit(ProcessesEnum.DB_DISCONNECTION_ERROR);
+if (process.env.API_ENV !== 'prod' && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  const port = process.env.API_PORT;
+  const host = process.env.API_HOST;
+  if (!host) {
+    logger.error(i18next.t('api.server.logs.hostError', { host }));
+    process.exit(ProcessesEnum.HOST_ERROR);
+  }
+  if (!port) {
+    logger.error(i18next.t('api.server.logs.portError', { port }));
+    process.exit(ProcessesEnum.PORT_ERROR);
+  }
+  server = app.listen(port, () => {
+    logger.info(i18next.t('api.server.logs.serverRunning', { host, port }));
   });
-});
 
-process.on('SIGTERM', () => {
-  shutdownDatabase().catch((error: unknown) => {
-    logger.error(i18next.t('api.database.logs.databaseShutdownError', { error }));
-    process.exit(ProcessesEnum.DB_DISCONNECTION_ERROR);
+  process.on('SIGINT', () => {
+    shutdownDatabase().catch((error: unknown) => {
+      logger.error(i18next.t('api.database.logs.databaseShutdownError', { error }));
+      process.exit(ProcessesEnum.DB_DISCONNECTION_ERROR);
+    });
   });
-});
 
-export const handler = serverless(app);
+  process.on('SIGTERM', () => {
+    shutdownDatabase().catch((error: unknown) => {
+      logger.error(i18next.t('api.database.logs.databaseShutdownError', { error }));
+      process.exit(ProcessesEnum.DB_DISCONNECTION_ERROR);
+    });
+  });
+}
+
+export const globalHandler = serverless(app);

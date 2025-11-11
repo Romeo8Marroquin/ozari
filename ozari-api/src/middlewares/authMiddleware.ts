@@ -2,15 +2,15 @@ import { NextFunction, Response } from 'express';
 import i18next from 'i18next';
 import jwt from 'jsonwebtoken';
 
-import { HttpEnum } from '../models/enums/httpEnum';
-import { ProcessesEnum } from '../models/enums/processesEnum';
-import { RolesEnum } from '../models/enums/rolesEnum';
-import { TokenEnum } from '../models/enums/tokenEnum';
-import { sendOzariError } from '../models/http/ozariErrorModel';
-import { JwtPayloadModel } from '../models/common/authModel';
-import { CustomRequest } from '../models/common/customRequestModel';
-import { logger } from '../dependencies/winstonConfig';
-import { prismaClient } from '../dependencies/prismaClient';
+import { prismaClient } from '@deps/prismaClient';
+import { logger } from '@deps/winstonConfig';
+import { JwtPayloadModel } from '@models/common/authModel';
+import { CustomRequest } from '@models/common/customRequestModel';
+import { HttpEnum } from '@models/enums/httpEnum';
+import { ProcessesEnum } from '@models/enums/processesEnum';
+import { RolesEnum } from '@models/enums/rolesEnum';
+import { TokenEnum } from '@models/enums/tokenEnum';
+import { sendOzariError } from '@models/http/ozariErrorModel';
 
 const jwtSecret = process.env.JWT_SECRET;
 if (!jwtSecret) {

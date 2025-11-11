@@ -2,19 +2,19 @@ import { Request, Response } from 'express';
 import i18next from 'i18next';
 import jwt from 'jsonwebtoken';
 
-import { decryptKmsAsync, encryptKmsAsync, encryptSha256Sync } from '../../dependencies/kmsClient';
-import { JwtPayloadModel } from '../../models/common/authModel';
-import { CustomRequest, UserJwtPayloadModel } from '../../models/common/customRequestModel';
-import { CreateUserRequestModel, SignInUserRequestModel, GetAllUsersResponseModel } from './models';
-import { prismaClient } from '../../dependencies/prismaClient';
-import { logger } from '../../dependencies/winstonConfig';
-import { HttpEnum } from '../../models/enums/httpEnum';
-import { ProcessesEnum } from '../../models/enums/processesEnum';
-import { RolesEnum } from '../../models/enums/rolesEnum';
-import { TokenEnum } from '../../models/enums/tokenEnum';
-import { sendOzariSuccess } from '../../models/http/ozariSuccessModel.js';
-import { sendOzariError } from '../../models/http/ozariErrorModel.js';
-import { applicationConfig } from '../../applicationConfig';
+import { decryptKmsAsync, encryptKmsAsync, encryptSha256Sync } from '@deps/kmsClient';
+import { prismaClient } from '@deps/prismaClient';
+import { logger } from '@deps/winstonConfig';
+import { JwtPayloadModel } from '@models/common/authModel';
+import { CustomRequest, UserJwtPayloadModel } from '@models/common/customRequestModel';
+import { HttpEnum } from '@models/enums/httpEnum';
+import { ProcessesEnum } from '@models/enums/processesEnum';
+import { RolesEnum } from '@models/enums/rolesEnum';
+import { TokenEnum } from '@models/enums/tokenEnum';
+import { sendOzariError } from '@models/http/ozariErrorModel';
+import { sendOzariSuccess } from '@models/http/ozariSuccessModel';
+import { applicationConfig } from '@src/applicationConfig';
+import { CreateUserRequestModel, GetAllUsersResponseModel, SignInUserRequestModel } from './models';
 
 const jwtSecret = process.env.JWT_SECRET;
 if (!jwtSecret) {

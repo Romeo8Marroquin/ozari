@@ -85,12 +85,12 @@ custom:
       - aws-sdk
 
 functions:
-  test:
-    handler: src/index.handler
+  auth:
+    handler: src/modules/auth/handler.handler
     events:
       - httpApi:
           method: ANY
-          path: ${param:API_BASE_PATH}/test
+          path: ${param:API_BASE_PATH}/auth
       - httpApi:
           method: ANY
-          path: ${param:API_BASE_PATH}/test/{proxy+}
+          path: ${param:API_BASE_PATH}/auth/{proxy+}

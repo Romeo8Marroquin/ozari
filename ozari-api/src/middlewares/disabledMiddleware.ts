@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 import i18next from 'i18next';
 
-import { HttpEnum } from '../models/enums/httpEnum.js';
-import { sendOzariError } from '../models/http/ozariErrorModel.js';
-import { logger } from '../dependencies/winstonConfig.js';
+import { logger } from '@deps/winstonConfig';
+import { HttpEnum } from '@models/enums/httpEnum';
+import { sendOzariError } from '@models/http/ozariErrorModel';
 
 export const disableEndpoint = (req: Request, res: Response) => {
   logger.warn(

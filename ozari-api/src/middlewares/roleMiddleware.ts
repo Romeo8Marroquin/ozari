@@ -1,11 +1,11 @@
 import { NextFunction, Response } from 'express';
 import i18next from 'i18next';
 
-import { HttpEnum } from '../models/enums/httpEnum';
-import { RolesEnum } from '../models/enums/rolesEnum';
-import { sendOzariError } from '../models/http/ozariErrorModel';
-import { CustomRequest } from '../models/common/customRequestModel';
-import { logger } from '../dependencies/winstonConfig.js';
+import { logger } from '@deps/winstonConfig.js';
+import { CustomRequest } from '@models/common/customRequestModel';
+import { HttpEnum } from '@models/enums/httpEnum';
+import { RolesEnum } from '@models/enums/rolesEnum';
+import { sendOzariError } from '@models/http/ozariErrorModel';
 
 export const isGrantedRoles =
   (allowedRoles: RolesEnum[]) => (req: CustomRequest, res: Response, next: NextFunction) => {

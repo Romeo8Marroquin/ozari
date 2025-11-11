@@ -1,11 +1,11 @@
 import { NextFunction, Request, Response } from 'express';
 import i18next from 'i18next';
 
-import { emailRegex, fullNameRegex, genericUuidRegex, passwordRegex } from '../../helpers/regex';
+import { logger } from '@deps/winstonConfig';
+import { emailRegex, fullNameRegex, genericUuidRegex, passwordRegex } from '@helpers/regex';
+import { HttpEnum } from '@models/enums/httpEnum';
+import { sendOzariError } from '@models/http/ozariErrorModel';
 import { CreateUserRequestModel, SignInUserRequestModel } from './models';
-import { logger } from '../../dependencies/winstonConfig.js';
-import { HttpEnum } from '../../models/enums/httpEnum';
-import { sendOzariError } from '../../models/http/ozariErrorModel';
 
 export function validateCreateUser(req: Request, res: Response, next: NextFunction): void {
   const { confirmPassword, email, fullName, password, termsAccepted } =

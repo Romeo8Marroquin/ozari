@@ -1,7 +1,8 @@
 import { PrismaClient } from '@prisma/client';
 import i18next from 'i18next';
+
+import { ProcessesEnum } from '@models/enums/processesEnum';
 import { logger } from './winstonConfig';
-import { ProcessesEnum } from '../models/enums/processesEnum';
 
 export const prismaClient = new PrismaClient();
 prismaClient

@@ -1,5 +1,6 @@
 import winston from 'winston';
-import { asyncLocalStorage } from '../app';
+
+import { asyncLocalStorage } from '@src/app';
 
 const { cli, colorize, combine, json, printf, timestamp } = winston.format;
 
@@ -80,9 +81,9 @@ export const logger = winston.createLogger({
     new winston.transports.Console({
       format: cliFormat,
     }),
-    new winston.transports.File({
-      filename: 'logs/external.log',
-      format: jsonFormat,
-    }),
+    // new winston.transports.File({
+    //   filename: 'logs/external.log',
+    //   format: jsonFormat,
+    // }),
   ],
 });

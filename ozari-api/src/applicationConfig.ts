@@ -18,4 +18,5 @@ export const applicationConfig = {
     expiresIn: '7d',
     issuer: 'ozari',
   },
+  basePath: '/api',
 };
