@@ -6,15 +6,14 @@ import helmet from 'helmet';
 import i18next from 'i18next';
 import FilesystemBackend from 'i18next-fs-backend/cjs';
 import * as i18nmiddleware from 'i18next-http-middleware';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'node:path';
 import serverless from 'serverless-http';
-import fs from 'node:fs';
 
 import { logger } from '@deps/winstonConfig.js';
 import { LoggerStorage } from '@models/common/logModel.js';
 import { ProcessesEnum } from '@models/enums/processesEnum.js';
 import { applicationConfig } from '@src/applicationConfig';
-import { AsyncLocalStorage } from 'node:async_hooks';
 
 export const asyncLocalStorage = new AsyncLocalStorage<LoggerStorage>();
 

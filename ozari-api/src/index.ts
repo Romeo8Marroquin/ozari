@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import i18next from 'i18next';
-import serverless, { Application, Options } from 'serverless-http';
+import serverless from 'serverless-http';
 dotenv.config();
 
 import { prismaClient } from '@deps/prismaClient';

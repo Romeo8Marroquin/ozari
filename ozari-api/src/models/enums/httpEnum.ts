@@ -1,4 +1,3 @@
-/* eslint-disable perfectionist/sort-enums */
 export enum HttpEnum {
   OK = 200,
   CREATED = 201,
