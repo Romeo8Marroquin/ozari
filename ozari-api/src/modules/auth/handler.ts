@@ -1,8 +1,4 @@
-import { createApp } from '@helpers/createApp';
-import serverless from 'serverless-http';
-
+import { createLambdaHandler } from '@helpers/createApp';
 import router from './route';
 
-const app = createApp('/auth', router);
-
-export const handler = serverless(app);
+export const handler = createLambdaHandler('/auth', router);

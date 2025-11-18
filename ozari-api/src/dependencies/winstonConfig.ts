@@ -1,6 +1,6 @@
 import winston from 'winston';
 
-import { asyncLocalStorage } from '@src/app';
+import { asyncLocalStorage } from '@helpers/createApp';
 
 const { cli, colorize, combine, json, printf, timestamp } = winston.format;
 
