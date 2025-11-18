@@ -11,7 +11,7 @@
       }
     },
     "database": {
-      "connected": "Servidor de base de datos conectado exitosamente",
+      "connected": "Servidor de base de datos conectado exitosamente.",
       "logs": {
         "dbDisconnection": "Desconectando la base de datos.",
 
@@ -28,6 +28,14 @@
         "hostError": "No se encontró el host <{{-host}}>.",
         "appHostError": "No se encontró el host del frontend <{{-host}}>.",
         "portError": "No se encontró el puerto <{{-port}}>."
+      }
+    }
+  },
+  "health": {
+    "check": {
+      "serviceHealthy": "El servicio está disponible.",
+      "logs": {
+        "serviceHealthy": "Chequeo de salud exitoso."
       }
     }
   },

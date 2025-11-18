@@ -5,7 +5,7 @@ import { logger } from '@deps/winstonConfig';
 import { emailRegex, fullNameRegex, genericUuidRegex, passwordRegex } from '@helpers/regex';
 import { HttpEnum } from '@models/enums/httpEnum';
 import { sendOzariError } from '@models/http/ozariErrorModel';
-import { CreateUserRequestModel, SignInUserRequestModel } from './models';
+import { CreateUserRequestModel, SignInUserRequestModel } from './auth.models';
 
 export function validateCreateUser(req: Request, res: Response, next: NextFunction): void {
   const { confirmPassword, email, fullName, password, termsAccepted } =

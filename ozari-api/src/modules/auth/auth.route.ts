@@ -3,8 +3,8 @@ import { Router } from 'express';
 import { verifyJwt } from '@middlewares/authMiddleware';
 import { isGrantedRoles } from '@middlewares/roleMiddleware';
 import { RolesEnum } from '@models/enums/rolesEnum';
-import { createUser, getAllUsers, refreshToken, signInUser, signOutUser } from './controller';
-import { validateCreateUser, validateSignIn } from './validator';
+import { createUser, getAllUsers, refreshToken, signInUser, signOutUser } from './auth.controller';
+import { validateCreateUser, validateSignIn } from './auth.validator';
 
 const router = Router();
 

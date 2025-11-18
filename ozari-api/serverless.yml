@@ -84,9 +84,22 @@ custom:
     exclude:
       - aws-sdk
 
+package:
+  patterns:
+    - src/locales/**
+
 functions:
+  health:
+    handler: src/modules/health/health.handler
+    events:
+      - httpApi:
+          method: ANY
+          path: ${param:API_BASE_PATH}/health
+      - httpApi:
+          method: ANY
+          path: ${param:API_BASE_PATH}/health/{proxy+}
   auth:
-    handler: src/modules/auth/handler.handler
+    handler: src/modules/auth/auth.handler
     events:
       - httpApi:
           method: ANY

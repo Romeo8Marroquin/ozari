@@ -62,7 +62,7 @@ const cliFormat = combine(
 
 const jsonFormat = combine(
   addContextFormat(),
-  timestamp({ format: 'DD/MM/YYYY hh:mm:ss.SSS A' }),
+  timestamp({ format: 'DD/MM/YYYY hh:mm:ss.SSS Z' }),
   json(),
 );
 /**
@@ -77,10 +77,10 @@ const jsonFormat = combine(
  */
 export const logger = winston.createLogger({
   level: process.env.LOG_LEVEL ?? 'info',
+  format:
+    process.env.API_ENV === 'prod' || process.env.AWS_LAMBDA_FUNCTION_NAME ? jsonFormat : cliFormat,
   transports: [
-    new winston.transports.Console({
-      format: cliFormat,
-    }),
+    new winston.transports.Console(),
     // new winston.transports.File({
     //   filename: 'logs/external.log',
     //   format: jsonFormat,

@@ -14,7 +14,11 @@ import { TokenEnum } from '@models/enums/tokenEnum';
 import { sendOzariError } from '@models/http/ozariErrorModel';
 import { sendOzariSuccess } from '@models/http/ozariSuccessModel';
 import { applicationConfig } from '@src/applicationConfig';
-import { CreateUserRequestModel, GetAllUsersResponseModel, SignInUserRequestModel } from './models';
+import {
+  CreateUserRequestModel,
+  GetAllUsersResponseModel,
+  SignInUserRequestModel,
+} from './auth.models';
 
 const jwtSecret = process.env.JWT_SECRET;
 if (!jwtSecret) {

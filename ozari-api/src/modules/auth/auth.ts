@@ -1,4 +1,4 @@
 import { createLambdaHandler } from '@helpers/createApp';
-import router from './route';
+import router from './auth.route';
 
 export const handler = createLambdaHandler('/auth', router);

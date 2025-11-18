@@ -8,6 +8,7 @@ import FilesystemBackend from 'i18next-fs-backend/cjs';
 import * as i18nmiddleware from 'i18next-http-middleware';
 import path from 'node:path';
 import serverless from 'serverless-http';
+import fs from 'node:fs';
 
 import { logger } from '@deps/winstonConfig.js';
 import { LoggerStorage } from '@models/common/logModel.js';
@@ -17,14 +18,13 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 export const asyncLocalStorage = new AsyncLocalStorage<LoggerStorage>();
 
-export const i18nReady = (async () => {
-  // NOSONAR
+export const i18nReady = (async () => { // NOSONAR
   await i18next
     .use(FilesystemBackend)
     .use(i18nmiddleware.LanguageDetector)
     .init({
       backend: {
-        loadPath: path.join(__dirname, '..', 'locales', '{{lng}}', '{{ns}}.json'),
+        loadPath: path.join(process.cwd(), 'src', 'locales', '{{lng}}', '{{ns}}.json'),
       },
       detection: {
         lookupHeader: 'accept-language',
@@ -33,6 +33,9 @@ export const i18nReady = (async () => {
       fallbackLng: 'es-GT',
       preload: ['es-GT'],
       supportedLngs: ['es-GT'],
+      ns: ['translation'],
+      defaultNS: 'translation',
+      initImmediate: false,
     });
 })();
 
