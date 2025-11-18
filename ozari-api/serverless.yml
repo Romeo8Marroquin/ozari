@@ -107,3 +107,12 @@ functions:
       - httpApi:
           method: ANY
           path: ${param:API_BASE_PATH}/auth/{proxy+}
+  products:
+    handler: src/modules/products/products.handler
+    events:
+      - httpApi:
+          method: ANY
+          path: ${param:API_BASE_PATH}/products
+      - httpApi:
+          method: ANY
+          path: ${param:API_BASE_PATH}/products/{proxy+}
