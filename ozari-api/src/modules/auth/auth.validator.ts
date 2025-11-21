@@ -44,6 +44,7 @@ export function validateCreateUser(req: Request, res: Response, next: NextFuncti
         password,
       }),
     );
+
     sendOzariError(
       res,
       HttpEnum.BAD_REQUEST,

@@ -18,5 +18,6 @@ export const applicationConfig = {
     expiresIn: '7d',
     issuer: 'ozari',
   },
+  sensitiveKeys: ['password', 'token', 'secret', 'creditCard', 'cvv', 'auth'],
   basePath: '/api',
 };

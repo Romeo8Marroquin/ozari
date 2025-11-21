@@ -12,9 +12,8 @@ stages:
       LOG_FORMAT: JSON
       LOG_LEVEL: INFO
       API_BASE_PATH: /api
-      LAMBDA_SECURITY_GROUP_ID: test
-      SUBNET_A_ID: test
-      SUBNET_B_ID: test
+      THROTTLING_BURST: 200
+      THROTTLING_RATE: 100
   default:
     observability: false
     params:
@@ -22,25 +21,25 @@ stages:
       NODE_VERSION: nodejs22.x
       NODE_TARGET: node22
       LOG_FORMAT: JSON
-      LOG_LEVEL: DEBUG
+      LOG_LEVEL: INFO
       API_BASE_PATH: /api
-      LAMBDA_SECURITY_GROUP_ID: test
-      SUBNET_A_ID: test
-      SUBNET_B_ID: test
+      THROTTLING_BURST: 50
+      THROTTLING_RATE: 20
 
 provider:
   name: aws
-  profile: terraform-profile
+  profile: ${env:PROFILE, 'default'}
   runtime: ${param:NODE_VERSION}
   region: ${param:AWS_REGION}
-  stage: dev
+  stage: ${opt:stage, 'dev'}
   architecture: arm64
+  memorySize: 1024
+  timeout: 15
   logRetentionInDays: 30
   logs:
-    lambda:
-      logFormat: ${param:LOG_FORMAT}
-      applicationLogLevel: ${param:LOG_LEVEL}
-      systemLogLevel: ${param:LOG_LEVEL}
+    httpApi: true
+  httpApi:
+    cors: true
   iam:
     role:
       statements:
@@ -48,23 +47,16 @@ provider:
           Action:
             - kms:Encrypt
             - kms:Decrypt
-          Resource: ${env:AWS_KEY_ARN}
-  # vpc:
-  #   securityGroupIds:
-  #     - ${param:LAMBDA_SECURITY_GROUP_ID}
-  #   subnetIds:
-  #     - ${param:SUBNET_A_ID}
-  #     - ${param:SUBNET_B_ID}
+          Resource: ${ssm:/ozari/${self:provider.stage}/kms_key_arn}
+        - Effect: Allow
+          Action:
+            - ssm:GetParameter
+            - ssm:GetParameters
+          Resource:
+            - 'arn:aws:ssm:${self:provider.region}:*:parameter/ozari/${self:provider.stage}/*'
   environment:
-    AWS_KEY_ARN: ${env:AWS_KEY_ARN}
-    DATABASE_URL: ${env:DATABASE_URL}
-    API_ENV: ${env:API_ENV}
-    API_HOST: ${env:API_HOST}
-    APP_HOST: ${env:APP_HOST}
-    API_PORT: ${env:API_PORT}
-    LOG_LEVEL: ${env:LOG_LEVEL}
-    JWT_SECRET: ${env:JWT_SECRET}
-    JWT_REFRESH_SECRET: ${env:JWT_REFRESH_SECRET}
+    API_ENV: ${env:API_ENV, 'dev'}
+    LOG_LEVEL: ${env:LOG_LEVEL, 'info'}
   tags:
     project: ozari-api
     stage: ${sls:stage}
@@ -72,25 +64,25 @@ provider:
 plugins:
   - serverless-offline
 
-custom:
-  esbuild:
-    bundle: true
-    minify: false
-    target: ${param:NODE_TARGET}
-    platform: node
-    format: cjs
-    sourcemap: true
-    tsconfig: ./tsconfig.json
-    exclude:
-      - aws-sdk
-
 package:
   patterns:
     - src/locales/**
+    - '!src/**/*.test.ts'
+    - '!README.md'
+
+resources:
+  Resources:
+    HttpApiStage:
+      Type: AWS::ApiGatewayV2::Stage
+      Properties:
+        DefaultRouteSettings:
+          ThrottlingBurstLimit: ${param:THROTTLING_BURST}
+          ThrottlingRateLimit: ${param:THROTTLING_RATE}
 
 functions:
   health:
     handler: src/modules/health/health.handler
+    #reservedConcurrency: 2
     events:
       - httpApi:
           method: ANY
@@ -100,6 +92,7 @@ functions:
           path: ${param:API_BASE_PATH}/health/{proxy+}
   auth:
     handler: src/modules/auth/auth.handler
+    #reservedConcurrency: 5
     events:
       - httpApi:
           method: ANY
@@ -109,6 +102,7 @@ functions:
           path: ${param:API_BASE_PATH}/auth/{proxy+}
   products:
     handler: src/modules/products/products.handler
+    #reservedConcurrency: 5
     events:
       - httpApi:
           method: ANY

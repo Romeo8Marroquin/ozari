@@ -17,7 +17,7 @@ router.get('/signout', verifyJwt, signOutUser);
 // endregion
 
 // region Public Routes
-router.post('/', validateCreateUser, createUser);
+router.post('/user', validateCreateUser, createUser);
 router.post('/signin', validateSignIn, signInUser);
 router.get('/refresh', refreshToken);
 // endregion

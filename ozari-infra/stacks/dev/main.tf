@@ -11,26 +11,28 @@ terraform {
   }
 }
 
-variable "profile" {
-  type    = string
-  default = "terraform-profile"
+provider "aws" {
+  region  = var.region
+  profile = var.profile
 }
 
-module "network" {
-  source      = "../../modules/network"
-  region      = var.region
-  profile     = var.profile
-  environment = "dev"
+module "kms" {
+  source      = "../../modules/kms"
+  environment = var.environment
 }
 
 module "db" {
-  source            = "../../modules/db"
-  region            = var.region
-  profile           = var.profile
-  vpc_id            = module.network.vpc_id
-  public_subnet_ids = module.network.public_subnet_ids
-  allowed_ip        = var.allowed_ip
-  db_password       = var.db_password
-  db_name           = var.db_name
-  environment       = "dev"
+  count       = var.deploy_local ? 0 : 1
+  source      = "../../modules/db"
+  db_password = var.db_password
+  environment = var.environment
+}
+
+module "ssm" {
+  count              = var.deploy_local ? 0 : 1
+  source             = "../../modules/ssm"
+  environment        = var.environment
+  app_host           = var.app_host
+  jwt_secret         = var.jwt_secret
+  jwt_refresh_secret = var.jwt_refresh_secret
 }

@@ -1,9 +1,9 @@
 {
   "api": {
     "cors": {
-      "origin": "CORS Origin:",
+      "origin": "CORS Origin: <{{-origin}}>",
       "originUndefined": "El origen no está definido.",
-      "originInvalid": "El origen no es válido.",
+      "originInvalid": "El origen <{{-origin}}> no es válido.",
       "logs": {
         "portError": "El puerto <{{-port}}> no está definido.",
         "originNotDefined": "El origen <{{-origin}}> no está definido.",
@@ -61,7 +61,7 @@
       "logs": {
         "userCreated": "Usuario creado exitosamente con el correo <{{-email}}> y el nombre <{{-fullName}}>.",
         "userAlreadyExists": "El usuario con el correo <{{-email}}> ya existe.",
-        "internalServerError": "Error al crear usuario: {{-error}}."
+        "internalServerError": "Error interno al crear usuario."
       }
     },
     "signInUser": {
@@ -148,6 +148,12 @@
         "unauthorized": "[middleware] Usuario <{{-user}}> no autorizado o inválido.",
         "forbidden": "[middleware] Acceso denegado, el usuario con id <{{-userId}}> no tiene acceso al recurso <{{-method}} {{-url}}> con el rol <{{-role}}>.",
         "internalServerError": "[middleware] Error al validar el token en el middleware de permisos: {{-error}}."
+      }
+    },
+    "errorHandler": {
+      "internalError": "Ha ocurrido un error interno en el servidor.",
+      "logs": {
+        "internalError": "[middleware] Error interno en el servidor: {{-error}}."
       }
     }
   },

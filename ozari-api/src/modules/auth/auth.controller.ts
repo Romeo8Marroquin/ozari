@@ -169,7 +169,7 @@ export const signInUser = async (req: Request, res: Response): Promise<void> => 
     logger.info(i18next.t('user.signInUser.logs.userAuthenticated', { email, userId: user.id }));
     sendOzariSuccess(res, HttpEnum.OK, i18next.t('user.signInUser.userAuthenticated'));
   } catch (error) {
-    logger.error(i18next.t('user.signInUser.logs.internalServerError', { error }));
+    logger.error(i18next.t('user.signInUser.logs.internalServerError'), error);
     sendOzariError(
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
