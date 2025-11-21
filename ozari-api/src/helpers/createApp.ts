@@ -20,7 +20,6 @@ import { AppError } from '@models/common/error';
 export const asyncLocalStorage = new AsyncLocalStorage<LoggerStorage>();
 
 export const i18nReady = (async () => {
-  // NOSONAR
   await i18next
     .use(FilesystemBackend)
     .use(i18nmiddleware.LanguageDetector)
@@ -42,18 +41,8 @@ export const i18nReady = (async () => {
 })();
 
 function configureMiddlewares(app: Express) {
-  const allowedOrigin = process.env.API_HOST;
-  const allowedPort = process.env.API_PORT;
   const frontendDomain = process.env.APP_HOST;
 
-  if (!allowedOrigin) {
-    logger.error(i18next.t('api.cors.logs.originNotDefined', { origin: allowedOrigin }));
-    process.exit(ProcessesEnum.CORS_ORIGIN_ERROR);
-  }
-  if (!allowedPort) {
-    logger.error(i18next.t('api.cors.logs.portError', { port: allowedPort }));
-    process.exit(ProcessesEnum.PORT_ERROR);
-  }
   if (!frontendDomain) {
     logger.error(i18next.t('api.server.logs.appHostError', { host: frontendDomain }));
     process.exit(ProcessesEnum.APP_HOST_ERROR);
@@ -78,8 +67,7 @@ function configureMiddlewares(app: Express) {
   );
 
   const allowedOrigins = new Set([
-    `${allowedOrigin}:${allowedPort}`,
-    `${allowedOrigin}`,
+    `${frontendDomain}`,
     // 'http://localhost:3000'
   ]);
 

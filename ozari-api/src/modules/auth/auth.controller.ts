@@ -19,17 +19,7 @@ import {
   GetAllUsersResponseModel,
   SignInUserRequestModel,
 } from './auth.models';
-
-const jwtSecret = process.env.JWT_SECRET;
-if (!jwtSecret) {
-  logger.error(i18next.t('middlewares.auth.logs.jwtSecretMissing'));
-  process.exit(ProcessesEnum.JWT_SECRET_ERROR);
-}
-const jwtRefreshSecret = process.env.JWT_REFRESH_SECRET;
-if (!jwtRefreshSecret) {
-  logger.error(i18next.t('middlewares.auth.logs.jwtRefreshSecretMissing'));
-  process.exit(ProcessesEnum.JWT_SECRET_ERROR);
-}
+import { getSecret } from '@helpers/ssmLoader';
 
 export const getAllUsers = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -95,6 +85,8 @@ export const signInUser = async (req: Request, res: Response): Promise<void> => 
   const deviceUuid = req.headers['device-uuid'] as string;
 
   try {
+    const jwtSecret = await getSecret('jwt_secret');
+    const jwtRefreshSecret = await getSecret('jwt_refresh_secret');
     const emailSha = encryptSha256Sync(email);
     const user = await prismaClient.user.findUnique({
       where: { emailSha, isActive: true },
@@ -180,6 +172,8 @@ export const signInUser = async (req: Request, res: Response): Promise<void> => 
 
 export const refreshToken = async (req: Request, res: Response): Promise<void> => {
   try {
+    const jwtSecret = await getSecret('jwt_secret');
+    const jwtRefreshSecret = await getSecret('jwt_refresh_secret');
     const refreshToken = req.cookies['refresh-token'] as string | undefined;
     if (!refreshToken) {
       logger.error(i18next.t('user.refreshToken.logs.noRefreshToken', { refreshToken }));

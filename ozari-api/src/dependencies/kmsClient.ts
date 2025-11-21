@@ -1,19 +1,12 @@
 import { DecryptCommand, EncryptCommand, KMSClient } from '@aws-sdk/client-kms';
+import { getSecret } from '@helpers/ssmLoader';
 import crypto from 'node:crypto';
 
 export function encryptSha256Sync(target: string): string {
   return crypto.createHash('sha256').update(target).digest('hex');
 }
 
-const kmsClient = new KMSClient({
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY ?? '',
-    secretAccessKey: process.env.AWS_SECRET_KEY ?? '',
-  },
-  region: process.env.AWS_REGION ?? '',
-});
-
-const keyId = process.env.AWS_KEY_ARN ?? '';
+const kmsClient = new KMSClient();
 
 export async function decryptKmsAsync(target: string): Promise<string>;
 export async function decryptKmsAsync(target: string[]): Promise<string[]>;
@@ -39,17 +32,19 @@ export async function encryptKmsAsync(target: string | string[]): Promise<string
 
 async function decryptSingleKmsAsync(target: string): Promise<string> {
   const ciphertextBlob = Buffer.from(target, 'base64');
+  const KeyId = await getSecret('AWS_KEY_ARN');
   const command = new DecryptCommand({
     CiphertextBlob: ciphertextBlob,
-    KeyId: keyId,
+    KeyId,
   });
   const response = await kmsClient.send(command);
   return response.Plaintext ? Buffer.from(response.Plaintext).toString('utf-8') : '';
 }
 
 async function encryptSingleKmsAsync(target: string): Promise<string> {
+  const KeyId = await getSecret('AWS_KEY_ARN');
   const command = new EncryptCommand({
-    KeyId: keyId,
+    KeyId,
     Plaintext: Buffer.from(target),
   });
 

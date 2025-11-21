@@ -7,19 +7,14 @@ import { logger } from '@deps/winstonConfig';
 import { JwtPayloadModel } from '@models/common/authModel';
 import { CustomRequest } from '@models/common/customRequestModel';
 import { HttpEnum } from '@models/enums/httpEnum';
-import { ProcessesEnum } from '@models/enums/processesEnum';
 import { RolesEnum } from '@models/enums/rolesEnum';
 import { TokenEnum } from '@models/enums/tokenEnum';
 import { sendOzariError } from '@models/http/ozariErrorModel';
-
-const jwtSecret = process.env.JWT_SECRET;
-if (!jwtSecret) {
-  logger.error(i18next.t('middlewares.auth.logs.jwtSecretMissing'));
-  process.exit(ProcessesEnum.JWT_SECRET_ERROR);
-}
+import { getSecret } from '@helpers/ssmLoader';
 
 export const verifyJwt = async (req: CustomRequest, res: Response, next: NextFunction) => {
   try {
+    const jwtSecret = await getSecret('jwt_secret');
     const token = req.header('Authorization')?.split(' ')[1];
     if (!token) {
       logger.error(i18next.t('middlewares.auth.logs.unauthorized', { token }));

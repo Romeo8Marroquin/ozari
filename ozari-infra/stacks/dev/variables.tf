@@ -13,6 +13,9 @@ variable "db_password" {
   type      = string
   sensitive = true
 }
+variable "admin_ip" {
+  type = string
+}
 
 variable "app_host" { type = string }
 variable "jwt_secret" {

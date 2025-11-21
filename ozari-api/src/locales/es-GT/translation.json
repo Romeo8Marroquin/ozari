@@ -12,10 +12,11 @@
     },
     "database": {
       "connected": "Servidor de base de datos conectado exitosamente.",
+      "genericError": "Error interno en el servidor.",
       "logs": {
         "dbDisconnection": "Desconectando la base de datos.",
-
-        "databaseConnectionError": "Error al conectar la base de datos: {{-error}}.",
+        "dbUrlNotDefined": "La URL de la base de datos no está definida.",
+        "databaseConnectionError": "Error al conectar la base de datos.",
         "databaseShutdownError": "Error al cerrar la base de datos: {{-error}}."
       }
     },
@@ -28,6 +29,12 @@
         "hostError": "No se encontró el host <{{-host}}>.",
         "appHostError": "No se encontró el host del frontend <{{-host}}>.",
         "portError": "No se encontró el puerto <{{-port}}>."
+      }
+    },
+    "ssm": {
+      "ssmFetchError": "Error interno en el servidor.",
+      "logs": {
+        "ssmFetchError": "Error al obtener el parámetro SSM <{{-ssmPath}}>."
       }
     }
   },

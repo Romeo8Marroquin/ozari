@@ -54,9 +54,17 @@ provider:
             - ssm:GetParameters
           Resource:
             - 'arn:aws:ssm:${self:provider.region}:*:parameter/ozari/${self:provider.stage}/*'
+  vpc:
+    securityGroupIds:
+      - ${ssm:/ozari/${self:provider.stage}/lambda_sg_id}
+    subnetIds:
+      - ${ssm:/ozari/${self:provider.stage}/lambda_subnet_1}
+      - ${ssm:/ozari/${self:provider.stage}/lambda_subnet_2}
   environment:
     API_ENV: ${env:API_ENV, 'dev'}
     LOG_LEVEL: ${env:LOG_LEVEL, 'info'}
+    APP_HOST: ${ssm:/ozari/${self:provider.stage}/app_host}
+    DATABASE_URL: ${env:DATABASE_URL, ssm:/ozari/${self:provider.stage}/database_url}
   tags:
     project: ozari-api
     stage: ${sls:stage}

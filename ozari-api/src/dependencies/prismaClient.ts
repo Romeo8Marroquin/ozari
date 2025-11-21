@@ -1,16 +1,36 @@
-import { PrismaClient } from '@prisma/client';
-import i18next from 'i18next';
-
-import { ProcessesEnum } from '@models/enums/processesEnum';
+import 'dotenv/config';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { logger } from './winstonConfig';
+import i18next from 'i18next';
+import { PrismaClient } from '@src/generated/prisma/client';
 
-export const prismaClient = new PrismaClient();
+declare global {
+  var prismaInstance: PrismaClient | undefined;
+}
+
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  const error = new Error(i18next.t('api.database.genericError'));
+  logger.error(i18next.t('api.database.logs.dbUrlNotDefined'), error);
+  throw new Error(i18next.t('api.database.genericError'));
+}
+
+const adapter = new PrismaPg({
+  connectionString,
+  ssl: {
+    rejectUnauthorized: false,
+  },
+});
+
+export const prismaClient: PrismaClient =
+  global.prismaInstance ?? (global.prismaInstance = new PrismaClient({ adapter }));
+
 prismaClient
   .$connect()
   .then(() => {
     logger.info(i18next.t('api.database.connected'));
   })
-  .catch((error: unknown) => { // NOSONAR
-    logger.error(i18next.t('api.database.logs.databaseConnectionError', { error }));
-    process.exit(ProcessesEnum.DB_CONNECTION_ERROR);
+  .catch((error) => {
+    logger.error(i18next.t('api.database.logs.databaseConnectionError'), error);
   });

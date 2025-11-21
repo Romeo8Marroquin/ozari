@@ -21,18 +21,27 @@ module "kms" {
   environment = var.environment
 }
 
-module "db" {
-  count       = var.deploy_local ? 0 : 1
-  source      = "../../modules/db"
-  db_password = var.db_password
-  environment = var.environment
-}
-
 module "ssm" {
-  count              = var.deploy_local ? 0 : 1
   source             = "../../modules/ssm"
   environment        = var.environment
   app_host           = var.app_host
   jwt_secret         = var.jwt_secret
   jwt_refresh_secret = var.jwt_refresh_secret
+}
+
+module "network" {
+  count       = var.deploy_local ? 0 : 1
+  source      = "../../modules/network"
+  environment = var.environment
+}
+
+module "db" {
+  count             = var.deploy_local ? 0 : 1
+  source            = "../../modules/db"
+  db_password       = var.db_password
+  environment       = var.environment
+  vpc_id            = module.network[0].vpc_id
+  public_subnet_ids = module.network[0].public_subnet_ids
+  lambda_sg_id      = module.network[0].lambda_sg_id
+  admin_ip          = var.admin_ip
 }
