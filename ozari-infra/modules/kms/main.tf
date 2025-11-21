@@ -12,6 +12,11 @@ resource "aws_kms_key" "this" {
   }
 }
 
+resource "aws_kms_alias" "this" {
+  name          = "alias/ozari-key-${var.environment}"
+  target_key_id = aws_kms_key.this.id
+}
+
 data "aws_caller_identity" "current" {}
 
 resource "aws_kms_key_policy" "this" {
