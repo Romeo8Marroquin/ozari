@@ -125,7 +125,7 @@ function configureMiddlewares(app: Express) {
 
 function configureErrorMiddleware(app: Express) {
   app.use((_, __, next) => {
-    const error: AppError = new Error(i18next.t('api.server.errors.notFound'));
+    const error: AppError = new Error(i18next.t('api.server.endpointNotFound'));
     error.status = 404;
     next(error);
   });
@@ -149,7 +149,7 @@ function configureErrorMiddleware(app: Express) {
         errorContext,
       );
     } else {
-      logger.warn(`Error ${status}: ${err.message}`, errorContext);
+      logger.warn(err.message);
     }
 
     const clientMessage = isInternalError

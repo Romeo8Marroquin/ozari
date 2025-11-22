@@ -9,6 +9,7 @@ export interface CreateUserRequestModel {
 export interface SignInUserRequestModel {
   email: string;
   password: string;
+  deviceUuid: string;
 }
 
 export interface GetAllUsersResponseModel {

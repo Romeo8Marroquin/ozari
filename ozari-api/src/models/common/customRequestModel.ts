@@ -14,4 +14,5 @@ export interface UserJwtPayloadModel {
   tokenType: TokenEnum;
   userId: number;
   userRole: RolesEnum;
+  iat: number;
 }

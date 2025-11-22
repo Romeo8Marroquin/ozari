@@ -17,7 +17,7 @@ export const verifyJwt = async (req: CustomRequest, res: Response, next: NextFun
     const jwtSecret = await getSecret('jwt_secret');
     const token = req.header('Authorization')?.split(' ')[1];
     if (!token) {
-      logger.error(i18next.t('middlewares.auth.logs.unauthorized', { token }));
+      logger.warn(i18next.t('middlewares.auth.logs.unauthorized'));
       sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('middlewares.auth.defaultMessage'));
       return;
     }
@@ -64,6 +64,12 @@ export const verifyJwt = async (req: CustomRequest, res: Response, next: NextFun
       return;
     }
 
+    if (jwtActiveTokens[0]?.expiresAt <= new Date()) {
+      logger.error(i18next.t('middlewares.auth.logs.sessionExpired', { jti: jwtPayload.jti }));
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('middlewares.auth.defaultMessage'));
+      return;
+    }
+
     req.user = jwtPayload;
     logger.info(
       i18next.t('middlewares.auth.logs.successAuth', {
@@ -73,7 +79,17 @@ export const verifyJwt = async (req: CustomRequest, res: Response, next: NextFun
     );
     next();
   } catch (error) {
+    if (error instanceof jwt.TokenExpiredError || error instanceof jwt.JsonWebTokenError) {
+      logger.warn(i18next.t('middlewares.auth.logs.unauthorized'), error);
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('middlewares.auth.defaultMessage'));
+      return;
+    }
+
     logger.error(i18next.t('middlewares.auth.logs.internalServerError', { error }));
-    sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('middlewares.auth.defaultMessage'));
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t('middlewares.auth.internalServerError'),
+    );
   }
 };

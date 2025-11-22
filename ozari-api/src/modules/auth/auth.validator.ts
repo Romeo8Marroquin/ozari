@@ -8,6 +8,11 @@ import { sendOzariError } from '@models/http/ozariErrorModel';
 import { CreateUserRequestModel, SignInUserRequestModel } from './auth.models';
 
 export function validateCreateUser(req: Request, res: Response, next: NextFunction): void {
+  if (!req.body || typeof req.body !== 'object') {
+    logger.warn(i18next.t('common.logs.invalidBody'));
+    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t('common.invalidBody'));
+    return;
+  }
   const { confirmPassword, email, fullName, password, termsAccepted } =
     req.body as CreateUserRequestModel;
 
@@ -20,15 +25,15 @@ export function validateCreateUser(req: Request, res: Response, next: NextFuncti
     );
     return;
   }
-
-  if (typeof email !== 'string' || !emailRegex.test(email)) {
+  const sanitizedEmail = email?.trim().toLowerCase();
+  if (typeof email !== 'string' || !emailRegex.test(sanitizedEmail)) {
     logger.warn(i18next.t('user.createUser.validators.logs.invalidEmail', { email }));
     sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t('user.createUser.validators.invalidEmail'));
     return;
   }
 
   if (typeof password !== 'string' || !passwordRegex.test(password)) {
-    logger.warn(i18next.t('user.createUser.validators.logs.invalidPassword', { password }));
+    logger.warn(i18next.t('user.createUser.validators.logs.invalidPassword'));
     sendOzariError(
       res,
       HttpEnum.BAD_REQUEST,
@@ -37,13 +42,18 @@ export function validateCreateUser(req: Request, res: Response, next: NextFuncti
     return;
   }
 
-  if (password !== confirmPassword) {
-    logger.warn(
-      i18next.t('user.createUser.validators.logs.passwordsDoNotMatch', {
-        confirmPassword,
-        password,
-      }),
+  if (typeof confirmPassword !== 'string') {
+    logger.warn(i18next.t('user.createUser.validators.logs.invalidConfirmPassword'));
+    sendOzariError(
+      res,
+      HttpEnum.BAD_REQUEST,
+      i18next.t('user.createUser.validators.invalidConfirmPassword'),
     );
+    return;
+  }
+
+  if (password !== confirmPassword) {
+    logger.warn(i18next.t('user.createUser.validators.logs.passwordsDoNotMatch'));
 
     sendOzariError(
       res,
@@ -65,7 +75,7 @@ export function validateCreateUser(req: Request, res: Response, next: NextFuncti
 
   const validatedBody: CreateUserRequestModel = {
     confirmPassword,
-    email,
+    email: sanitizedEmail,
     fullName: fullName.trim(),
     password,
     termsAccepted,
@@ -76,6 +86,11 @@ export function validateCreateUser(req: Request, res: Response, next: NextFuncti
 }
 
 export function validateSignIn(req: Request, res: Response, next: NextFunction): void {
+  if (!req.body || typeof req.body !== 'object') {
+    logger.warn(i18next.t('common.logs.invalidBody'));
+    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t('common.invalidBody'));
+    return;
+  }
   const { email, password } = req.body as SignInUserRequestModel;
   const deviceUuid = req.headers['device-uuid'] as string | undefined;
   if (!deviceUuid || !genericUuidRegex.test(deviceUuid)) {
@@ -90,14 +105,24 @@ export function validateSignIn(req: Request, res: Response, next: NextFunction):
     return;
   }
 
-  if (typeof email !== 'string' || !emailRegex.test(email)) {
+  if (typeof email !== 'string') {
     logger.warn(i18next.t('user.signInUser.validators.logs.invalidEmail', { email }));
     sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t('user.signInUser.validators.invalidEmail'));
     return;
   }
 
-  if (typeof password !== 'string' || !passwordRegex.test(password)) {
-    logger.warn(i18next.t('user.signInUser.validators.logs.invalidPassword', { password }));
+  const sanitizedEmail = email.trim().toLowerCase();
+
+  if (!emailRegex.test(sanitizedEmail)) {
+    logger.warn(
+      i18next.t('user.signInUser.validators.logs.invalidEmail', { email: sanitizedEmail }),
+    );
+    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t('user.signInUser.validators.invalidEmail'));
+    return;
+  }
+
+  if (typeof password !== 'string' || password.length < 1) {
+    logger.warn(i18next.t('user.signInUser.validators.logs.invalidPassword'));
     sendOzariError(
       res,
       HttpEnum.BAD_REQUEST,
@@ -107,8 +132,9 @@ export function validateSignIn(req: Request, res: Response, next: NextFunction):
   }
 
   const validatedBody: SignInUserRequestModel = {
-    email,
+    email: sanitizedEmail,
     password,
+    deviceUuid,
   };
   req.body = validatedBody;
 

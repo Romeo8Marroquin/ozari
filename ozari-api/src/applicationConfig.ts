@@ -2,7 +2,7 @@ export const applicationConfig = {
   accessToken: {
     algorithm: 'HS256',
     audience: 'platform-users',
-    expiresIn: '15min',
+    expiresIn: 900, // 15 minutes in seconds
     issuer: 'ozari',
   },
   cookieConfig: {
@@ -15,7 +15,7 @@ export const applicationConfig = {
   refreshToken: {
     algorithm: 'HS256',
     audience: 'platform-users',
-    expiresIn: '7d',
+    expiresIn: 2592000, // 30 days in seconds
     issuer: 'ozari',
   },
   sensitiveKeys: ['password', 'token', 'secret', 'creditCard', 'cvv', 'auth'],

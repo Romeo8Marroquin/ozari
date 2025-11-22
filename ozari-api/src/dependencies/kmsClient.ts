@@ -1,9 +1,19 @@
 import { DecryptCommand, EncryptCommand, KMSClient } from '@aws-sdk/client-kms';
 import { getSecret } from '@helpers/ssmLoader';
+import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 
 export function encryptSha256Sync(target: string): string {
   return crypto.createHash('sha256').update(target).digest('hex');
+}
+
+export function hashPassword(password: string): string {
+  const salt = bcrypt.genSaltSync(12);
+  return bcrypt.hashSync(password, salt);
+}
+
+export function comparePassword(password: string, hash: string): boolean {
+  return bcrypt.compareSync(password, hash);
 }
 
 const kmsClient = new KMSClient();
@@ -32,7 +42,7 @@ export async function encryptKmsAsync(target: string | string[]): Promise<string
 
 async function decryptSingleKmsAsync(target: string): Promise<string> {
   const ciphertextBlob = Buffer.from(target, 'base64');
-  const KeyId = await getSecret('AWS_KEY_ARN');
+  const KeyId = await getSecret('kms_key_arn');
   const command = new DecryptCommand({
     CiphertextBlob: ciphertextBlob,
     KeyId,
@@ -42,7 +52,7 @@ async function decryptSingleKmsAsync(target: string): Promise<string> {
 }
 
 async function encryptSingleKmsAsync(target: string): Promise<string> {
-  const KeyId = await getSecret('AWS_KEY_ARN');
+  const KeyId = await getSecret('kms_key_arn');
   const command = new EncryptCommand({
     KeyId,
     Plaintext: Buffer.from(target),

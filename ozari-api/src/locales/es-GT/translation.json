@@ -21,6 +21,7 @@
       }
     },
     "server": {
+      "endpointNotFound": "El endpoint solicitado no fue encontrado.",
       "logs": {
         "serverRunning": "Servidor backend ejecutándose en <{{-host}}:{{-port}}>.",
         "serverClosed": "Servidor backend cerrado exitosamente.",
@@ -36,6 +37,12 @@
       "logs": {
         "ssmFetchError": "Error al obtener el parámetro SSM <{{-ssmPath}}>."
       }
+    }
+  },
+  "common": {
+    "invalidBody": "El formato de la petición es inválido.",
+    "logs": {
+      "invalidBody": "El cuerpo de la petición no es un objeto válido."
     }
   },
   "health": {
@@ -55,18 +62,20 @@
         "invalidFullName": "El nombre es requerido y debe ser válido",
         "invalidEmail": "El correo electrónico es requerido y debe ser válido.",
         "invalidPassword": "La contraseña debe tener al menos 10 caracteres, incluyendo letras, símbolos y números.",
+        "invalidConfirmPassword": "La confirmación de la contraseña es requerida y debe ser válida.",
         "passwordsDoNotMatch": "Las contraseñas no coinciden.",
         "termsNotAccepted": "Debes aceptar los términos y condiciones.",
         "logs": {
           "invalidFullName": "El nombre <{{-fullName}}> no es válido.",
           "invalidEmail": "El correo electrónico <{{-email}}> no es válido.",
-          "invalidPassword": "La contraseña <{{-password}}> no es válida.",
-          "passwordsDoNotMatch": "Las contraseñas <{{-password}}> y <{{-confirmPassword}}> no coinciden.",
+          "invalidPassword": "La contraseña no es válida.",
+          "invalidConfirmPassword": "La confirmación de la contraseña no es válida.",
+          "passwordsDoNotMatch": "Las contraseñas no coinciden.",
           "termsNotAccepted": "Los términos y condiciones no han sido aceptados."
         }
       },
       "logs": {
-        "userCreated": "Usuario creado exitosamente con el correo <{{-email}}> y el nombre <{{-fullName}}>.",
+        "userCreated": "Usuario creado exitosamente con el correo <{{-email}}> y el nombre.",
         "userAlreadyExists": "El usuario con el correo <{{-email}}> ya existe.",
         "internalServerError": "Error interno al crear usuario."
       }
@@ -83,14 +92,14 @@
         "logs": {
           "deviceUuidMissing": "El UUID del dispositivo <{{-uuid}}> no es válido.",
           "invalidEmail": "El correo electrónico <{{-email}}> no es válido.",
-          "invalidPassword": "La contraseña <{{-password}}> no es válida."
+          "invalidPassword": "La contraseña no es válida."
         }
       },
       "logs": {
-        "userAuthenticated": "Usuario con el correo <{{-email}}> y el id <{{-userId}}> autenticado exitosamente.",
+        "userAuthenticated": "Usuario con id <{{-userId}}> autenticado exitosamente.",
 
         "userNotFound": "El usuario con el correo <{{-email}}> no fue encontrado.",
-        "invalidCredentials": "La contraseña del usuario id <{{-userId}}> y email <{{-email}}> es inválida.",
+        "invalidCredentials": "La contraseña del usuario id <{{-userId}}> es inválida.",
         "invalidPassword": "La contraseña es inválida.",
         "internalServerError": "Error al iniciar sesión: {{-error}}."
       }
@@ -102,9 +111,11 @@
       "logs": {
         "tokenRefreshed": "Sesión del usuario id <{{-userId}}> y rol <{{-userRole}}> actualizada exitosamente.",
 
+        "sessionExpired": "La sesión con jti <{{-jti}}> ha expirado.",
+        "sessionExpiredOrInvalid": "La sesión con es inválida o ha expirado.",
         "invalidTokenType": "Tipo de token inválido, se esperaba <{{-expected}}> pero se recibió <{{-received}}>.",
-        "noRefreshToken": "No se encontró el token de actualización <{{-refreshToken}}> en la petición.",
-        "internalServerError": "Error al refrescar el token: {{-error}}."
+        "noRefreshToken": "No se encontró el token de actualización en la petición.",
+        "internalServerError": "Error al refrescar el token."
       }
     },
     "signOutUser": {
@@ -114,7 +125,7 @@
       "logs": {
         "userSignedOut": "Sesión del usuario id <{{-userId}}> y rol <{{-userRole}}> finalizada exitosamente, all devices <{{-allDevices}}>.",
 
-        "internalServerError": "Error al cerrar sesión: {{-error}}."
+        "internalServerError": "Error al cerrar sesión."
       }
     },
     "getAllUsers": {
@@ -138,13 +149,15 @@
     "auth": {
       "defaultMessage": "Acceso denegado.",
       "logs": {
-        "jwtMismatch": "[middleware] El jti <{{-received}}> del token recibido no coincide con el jti esperado <{{-expected}}> de sesión activa.",
         "successAuth": "[middleware] Usuario con el id <{{-userId}}> y rol <{{-role}}> autenticado exitosamente.",
+
+        "jwtMismatch": "[middleware] El jti <{{-received}}> del token recibido no coincide con el jti esperado <{{-expected}}> de sesión activa.",
         "jwtRegisterError": "[middleware] Se encontraron <{{-count}}> tokens activos en base de datos para el token jti <{{-jti}}>.",
         "jwtSecretMissing": "[middleware] JWT Secret no definido.",
+        "sessionExpired": "[middleware] La sesión con jti <{{-jti}}> ha expirado.",
         "jwtRefreshSecretMissing": "[middleware] JWT Refresh Secret no definido.",
         "invalidTokenType": "[middleware] Tipo de token inválido, se esperaba <{{-expected}}> pero se recibió <{{-received}}>.",
-        "unauthorized": "[middleware] No autorizado, token <{{-token}}> no proporcionado o inválido.",
+        "unauthorized": "[middleware] No autorizado, token no proporcionado o inválido.",
         "internalServerError": "[middleware] Error al validar el token en el middleware de autenticación: {{-error}}."
       }
     },
