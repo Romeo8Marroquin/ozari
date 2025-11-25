@@ -66,10 +66,7 @@ function configureMiddlewares(app: Express) {
     }),
   );
 
-  const allowedOrigins = new Set([
-    `${frontendDomain}`,
-    // 'http://localhost:3000'
-  ]);
+  const allowedOrigins = new Set([`${frontendDomain}`]);
 
   app.use(
     cors({

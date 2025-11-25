@@ -1,5 +1,5 @@
 import logo from '@assets/svgs/logo.svg';
-import React, { useMemo, useRef, type MouseEvent } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { gsap } from 'gsap';
 import { FaUserAlt } from 'react-icons/fa';
 import { useGSAP } from '@gsap/react';
@@ -8,33 +8,31 @@ import { FormProvider, useForm } from 'react-hook-form';
 import { DevTool } from '@hookform/devtools';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
-  loginRequiredPatterns,
-  loginSchema,
-  loginSchemaDefaultValues,
-  type LoginType,
-} from './SchemaLogin';
+  registerRequiredPatterns,
+  registerSchema,
+  registerSchemaDefaultValues,
+  type RegisterType,
+} from './SchemaRegister';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { useTranslation } from 'react-i18next';
 import CustomButton from '@components/CustomButton';
 import useLogin from '../hooks/useLogin';
-import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 
-const LoginPage: React.FC = () => {
+const RegisterPage: React.FC = () => {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
-  const search = useSearch({ from: '/sesion' });
   const navigate = useNavigate();
-  const methods = useForm<LoginType>({
-    resolver: zodResolver(loginSchema),
-    defaultValues: loginSchemaDefaultValues,
+  const methods = useForm<RegisterType>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: registerSchemaDefaultValues,
     mode: 'onTouched',
   });
-  const { reset, handleSubmit, trigger, formState } = methods;
-  const { login, isPending } = useLogin();
+  const { trigger, reset, getValues } = methods;
+  const { login, isPending, error } = useLogin();
 
   useGSAP(
     () => {
-      if (!containerRef.current) return;
       const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
       tl.from('.rotational-asset', {
         rotation: 0,
@@ -46,7 +44,7 @@ const LoginPage: React.FC = () => {
       tl.from(
         '.form-element',
         {
-          x: 15,
+          x: -15,
           opacity: 0,
           stagger: 0.15,
           duration: 0.5,
@@ -57,7 +55,7 @@ const LoginPage: React.FC = () => {
       tl.from(
         '.article-element',
         {
-          x: -15,
+          x: 15,
           opacity: 0,
           stagger: 0.15,
           duration: 0.5,
@@ -68,62 +66,17 @@ const LoginPage: React.FC = () => {
     { scope: containerRef },
   );
 
-  const handleRedirect = () => {
-    if (!containerRef.current) return;
-    const tl = gsap.timeline({ defaults: { ease: 'power3.in' } });
-    tl.to('.form-element', {
-      x: 15,
-      opacity: 0,
-      stagger: 0.15,
-      duration: 0.3,
-    });
-    tl.to(
-      '.article-element',
-      {
-        x: -15,
-        opacity: 0,
-        stagger: 0.15,
-        duration: 0.3,
-      },
-      '<+0.1',
-    );
-    tl.to(
-      '.rotational-asset',
-      {
-        rotation: 0,
-        x: 0,
-        y: 0,
-        duration: 0.75,
-      },
-      '<+0.5',
-    );
-    tl.to(
-      '.principal-card',
-      {
-        y: 20,
-        opacity: 0,
-        transform: 'scale(0.9)',
-        duration: 0.5,
-        onComplete: () => {
-          const destine = search.redirect ?? '/panel/productos';
-          navigate({
-            to: destine,
-          });
-        },
-      },
-      '<',
-    );
-  };
-
-  const onSubmit = async (data: LoginType) => {
+  const onSubmit = async () => {
     if (isPending) return;
-    login(data, {
-      onSuccess: () => {
-        reset();
-        handleRedirect();
-      },
-      onError: () => {},
-    });
+    const isValid = await trigger();
+    if (!isValid) return;
+    try {
+      login(getValues());
+      reset();
+    } catch (err) {
+      console.log('Tanstack error:', error);
+      console.error('Login failed:', err);
+    }
   };
 
   const handleAutocomplete = async (event: React.FormEvent<HTMLInputElement>) => {
@@ -133,27 +86,26 @@ const LoginPage: React.FC = () => {
       nativeEvent.data === undefined &&
       nativeEvent.dataTransfer === undefined &&
       nativeEvent.isComposing === undefined &&
-      !formState.isSubmitting
+      !methods.formState.isSubmitting
     ) {
-      const isValid = await trigger();
+      const isValid = await methods.trigger();
       if (isValid) {
-        handleSubmit(onSubmit)();
+        methods.handleSubmit(onSubmit)();
       }
     }
   };
 
-  const handleRegister = (e: MouseEvent) => {
+  const handleLogin = (e: MouseEvent) => {
     e.preventDefault();
-    if (!containerRef.current) return;
     const tl = gsap.timeline({ defaults: { ease: 'power3.in' } });
-    tl.to('.form-element', {
+    tl.to('.article-element', {
       x: 15,
       opacity: 0,
       stagger: 0.15,
       duration: 0.3,
     });
     tl.to(
-      '.article-element',
+      '.form-element',
       {
         x: -15,
         opacity: 0,
@@ -171,7 +123,7 @@ const LoginPage: React.FC = () => {
         duration: 0.75,
         onComplete: () => {
           navigate({
-            to: '/sesion/registro',
+            to: '/sesion/inicio',
           });
         },
       },
@@ -180,44 +132,26 @@ const LoginPage: React.FC = () => {
   };
 
   const requiredPatternsContextValue = useMemo(
-    () => ({ requiredPatterns: loginRequiredPatterns }),
+    () => ({ requiredPatterns: registerRequiredPatterns }),
     [],
   );
 
   return (
     <div ref={containerRef} className="w-full flex justify-center items-center">
       <section className="principal-card relative p-12 bg-white border-none shadow-xl/15 rounded-xl gap-30 flex items-center justify-center overflow-hidden">
-        <div className="rotational-asset absolute w-[110%] h-[150%] -rotate-15 origin-right -translate-x-1/2 blur-lg bg-gradient-to-b from-cream to-blossom"></div>
-        <div className="flex">
-          <div className="flex flex-col items-center justify-center gap-6 z-10">
-            <h2 className="article-element text-2xl font-bold text-black select-none">
-              {t('modules.sesion.login.welcomeMessage')}
-            </h2>
-            <p className="article-element text-lg text-black select-none text-center max-w-55">
-              {t('modules.sesion.login.subtitle')}
-            </p>
-            <div className="article-element w-24 h-32 overflow-hidden">
-              <img
-                src={logo}
-                alt={t('components.pageLoader.logo')}
-                className="w-full h-full object-cover object-center"
-                aria-label={t('components.pageLoader.logo')}
-              />
-            </div>
-          </div>
-        </div>
+        <div className="rotational-asset absolute w-[110%] h-[150%] rotate-15 origin-left translate-x-1/2 blur-lg bg-gradient-to-b from-cream to-blossom"></div>
         <div className="flex flex-col gap-6 justify-center items-center">
           <h2 className="form-element text-2xl font-bold text-black select-none">
-            {t('modules.sesion.login.title')}
+            {t('modules.sesion.register.title')}
           </h2>
           <RequiredPatternsContext.Provider value={requiredPatternsContextValue}>
             <FormProvider {...methods}>
               <form
-                onSubmit={handleSubmit(onSubmit)}
+                onSubmit={methods.handleSubmit(onSubmit)}
                 className="w-full flex flex-col items-center gap-6"
               >
                 <div className="form-element w-full">
-                  <CustomInputForm<LoginType>
+                  <CustomInputForm<RegisterType>
                     id="email-input"
                     data-testid="email-input"
                     autoComplete="email"
@@ -231,7 +165,7 @@ const LoginPage: React.FC = () => {
                   />
                 </div>
                 <div className="form-element w-full">
-                  <CustomInputForm<LoginType>
+                  <CustomInputForm<RegisterType>
                     id="password"
                     data-testid="password-input"
                     autoComplete="current-password"
@@ -245,18 +179,18 @@ const LoginPage: React.FC = () => {
                 </div>
                 <div className="form-element flex flex-col items-center">
                   <CustomButton
-                    text={t('modules.sesion.login.form.submitButton')}
-                    disabled={!formState.isValid}
-                    loading={formState.isSubmitting}
+                    text={t('modules.sesion.register.form.submitButton')}
+                    disabled={!methods.formState.isValid}
+                    loading={methods.formState.isSubmitting}
                   />
                 </div>
 
                 <p className="form-element text-xs text-gray-500 flex flex-col items-center">
-                  <span>{t('modules.sesion.login.form.noAccount')}</span>
+                  <span>{t('modules.sesion.register.form.haveAccount')}</span>
                   <span>
-                    {t('modules.sesion.login.form.signUpLink')}{' '}
-                    <Link onClick={handleRegister} className="text-magenta hover:underline">
-                      {t('modules.sesion.login.form.here')}
+                    {t('modules.sesion.register.form.loginLink')}{' '}
+                    <Link onClick={handleLogin} className="text-magenta hover:underline">
+                      {t('modules.sesion.register.form.here')}
                     </Link>
                   </span>
                 </p>
@@ -264,10 +198,28 @@ const LoginPage: React.FC = () => {
             </FormProvider>
           </RequiredPatternsContext.Provider>
         </div>
+        <div className="flex">
+          <div className="flex flex-col items-center justify-center gap-6 z-10">
+            <h2 className="article-element text-2xl font-bold text-black select-none">
+              {t('modules.sesion.register.welcomeMessage')}
+            </h2>
+            <p className="article-element text-lg text-black select-none text-center max-w-55">
+              {t('modules.sesion.register.subtitle')}
+            </p>
+            <div className="article-element w-24 h-32 overflow-hidden">
+              <img
+                src={logo}
+                alt={t('components.pageLoader.logo')}
+                className="w-full h-full object-cover object-center"
+                aria-label={t('components.pageLoader.logo')}
+              />
+            </div>
+          </div>
+        </div>
       </section>
       <DevTool control={methods.control} />
     </div>
   );
 };
 
-export default LoginPage;
+export default RegisterPage;

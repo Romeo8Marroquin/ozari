@@ -1,4 +1,8 @@
 {
+  "app": {
+    "localStorageSaveError": "Error al almacenar el item {{key}} en el almacenamiento local.",
+    "localStorageReadError": "Error al leer el item {{key}} del almacenamiento local."
+  },
   "components": {
     "pageLoader": {
       "logo": "Logo Party Rentals"
@@ -30,9 +34,39 @@
           "invalidSymbolPassword": "Un símbolo no válido",
           "minLengthPassword": "La contraseña es muy corta",
           "maxLengthPassword": "La contraseña es muy larga",
+          "invalidPassword": "La contraseña es inválida",
           "submitButton": "Iniciar Sesión",
           "noAccount": "Si no posees una cuenta",
           "signUpLink": "regístrate",
+          "here": "aquí"
+        },
+        "api": {
+          "loginError": "Ha ocurrido un error al iniciar la sesion."
+        }
+      },
+      "register": {
+        "title": "REGISTRO",
+        "welcomeMessage": "Bienvenido",
+        "subtitle": "Crea una cuenta para acceder a los servicios de Party Rentals",
+        "form": {
+          "emailLabel": "Correo electrónico",
+          "emailPlaceholder": "Ingrese su correo",
+          "requiredEmail": "El correo es obligatorio",
+          "invalidEmail": "El correo debe ser válido",
+          "maxLengthEmail": "El correo es muy largo",
+          "passwordLabel": "Contraseña",
+          "passwordPlaceholder": "Ingrese su contraseña",
+          "requiredPassword": "La contraseña es obligatoria",
+          "uppercaseLetterPassword": "Se debe tener una mayúscula",
+          "lowercaseLetterPassword": "Se debe tener una minúscula",
+          "numberPassword": "Se debe tener un número",
+          "safeSymbolPassword": "Se debe tener un símbolo",
+          "invalidSymbolPassword": "Un símbolo no válido",
+          "minLengthPassword": "La contraseña es muy corta",
+          "maxLengthPassword": "La contraseña es muy larga",
+          "submitButton": "Registrarse",
+          "haveAccount": "Si ya posees una cuenta",
+          "loginLink": "inicia sesión",
           "here": "aquí"
         }
       }

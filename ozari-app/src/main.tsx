@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const router = createRouter({
   routeTree,
+  defaultViewTransition: true,
   defaultNotFoundComponent: () => <Navigate to="/" />,
   defaultPendingComponent: () => <PageLoader />,
 });

@@ -166,7 +166,7 @@ export const signInUser = async (req: Request, res: Response): Promise<void> => 
     });
 
     res
-      .header('Authorization', `Bearer ${accessToken}`)
+      .header('authorization', `Bearer ${accessToken}`)
       .cookie('refresh-token', refreshToken, applicationConfig.cookieConfig);
 
     logger.info(i18next.t('user.signInUser.logs.userAuthenticated', { userId: user.id }));
@@ -282,7 +282,7 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
     });
 
     res
-      .header('Authorization', `Bearer ${accessToken}`)
+      .header('authorization', `Bearer ${accessToken}`)
       .cookie('refresh-token', newValidRefreshToken, applicationConfig.cookieConfig);
 
     logger.info(

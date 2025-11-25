@@ -3,7 +3,7 @@ import { Outlet } from '@tanstack/react-router';
 import gsap from 'gsap';
 import { useRef } from 'react';
 
-const SesionLayout: React.FC = () => {
+const PanelLayout: React.FC = () => {
   const container = useRef<HTMLDivElement>(null);
 
   useGSAP(
@@ -37,4 +37,4 @@ const SesionLayout: React.FC = () => {
   );
 };
 
-export default SesionLayout;
+export default PanelLayout;

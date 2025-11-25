@@ -1,7 +1,6 @@
 import {
   LOWER_REGEX,
   NUMBER_REGEX,
-  PASSWORD_REGEX,
   SAFE_SYMBOL_REGEX,
   UNSAFE_SYMBOL_REGEX,
   UPPER_REGEX,
@@ -10,7 +9,7 @@ import getZodRequiredPatterns from '../../../utils/getZodRequiredPatterns';
 import { t } from 'i18next';
 import { z } from 'zod';
 
-export const loginSchema = z.object({
+export const registerSchema = z.object({
   email: z
     .string()
     .nonempty(t('modules.sesion.login.form.requiredEmail'))
@@ -20,7 +19,7 @@ export const loginSchema = z.object({
   password: z
     .string()
     .nonempty(t('modules.sesion.login.form.requiredPassword'))
-    .min(10, t('modules.sesion.login.form.minLengthPassword'))
+    .min(12, t('modules.sesion.login.form.minLengthPassword'))
     .max(128, t('modules.sesion.login.form.maxLengthPassword'))
     .refine((val) => UPPER_REGEX.test(val), t('modules.sesion.login.form.uppercaseLetterPassword'))
     .refine((val) => LOWER_REGEX.test(val), t('modules.sesion.login.form.lowercaseLetterPassword'))
@@ -29,15 +28,14 @@ export const loginSchema = z.object({
     .refine(
       (val) => !UNSAFE_SYMBOL_REGEX.test(val),
       t('modules.sesion.login.form.invalidSymbolPassword'),
-    )
-    .refine((val) => PASSWORD_REGEX.test(val), t('modules.sesion.login.form.invalidPassword')),
+    ),
 });
 
-export type LoginType = z.infer<typeof loginSchema>;
+export type RegisterType = z.infer<typeof registerSchema>;
 
-export const loginSchemaDefaultValues: LoginType = {
+export const registerSchemaDefaultValues: RegisterType = {
   email: '',
   password: '',
 };
 
-export const loginRequiredPatterns = getZodRequiredPatterns(loginSchema);
+export const registerRequiredPatterns = getZodRequiredPatterns(registerSchema);

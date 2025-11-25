@@ -3,13 +3,16 @@ import SesionLayout from '@sesion/SesionLayout';
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { Storage } from '@utils/storage';
 
-export const Route = createFileRoute('/sesion')({
-  beforeLoad: () => {
+export const Route = createFileRoute('/panel')({
+  beforeLoad: ({ location }) => {
     const isLogged = !!Storage.get(StorageKeys.TOKEN);
 
-    if (isLogged) {
+    if (!isLogged) {
       throw redirect({
-        to: '/panel/productos',
+        to: '/sesion/inicio',
+        search: {
+          redirect: location.href,
+        },
       });
     }
   },

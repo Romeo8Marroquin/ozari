@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [tanstackRouter({ target: 'react', autoCodeSplitting: true }), react(), tailwindcss()],
   resolve: {
     alias: {
+      '@utils': path.resolve(__dirname, './src/utils'),
       '@sesion': path.resolve(__dirname, './src/modules/sesion'),
       '@assets': path.resolve(__dirname, './src/assets'),
       '@components': path.resolve(__dirname, './src/components'),
@@ -15,6 +16,15 @@ export default defineConfig({
       '@functions': path.resolve(__dirname, './src/utils/functions'),
       '@contexts': path.resolve(__dirname, './src/contexts'),
       '@api': path.resolve(__dirname, './src/api'),
+    },
+  },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
   test: {
