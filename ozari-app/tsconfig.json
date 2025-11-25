@@ -3,6 +3,7 @@
   "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }],
   "compilerOptions": {
     "paths": {
+      "@hooks/*": ["./src/hooks/*"],
       "@utils/*": ["./src/utils/*"],
       "@sesion/*": ["./src/modules/sesion/*"],
       "@assets/*": ["./src/assets/*"],

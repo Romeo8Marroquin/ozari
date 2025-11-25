@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [tanstackRouter({ target: 'react', autoCodeSplitting: true }), react(), tailwindcss()],
   resolve: {
     alias: {
+      '@hooks': path.resolve(__dirname, './src/hooks'),
       '@utils': path.resolve(__dirname, './src/utils'),
       '@sesion': path.resolve(__dirname, './src/modules/sesion'),
       '@assets': path.resolve(__dirname, './src/assets'),

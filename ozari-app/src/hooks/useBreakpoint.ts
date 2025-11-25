@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useLayoutEffect } from 'react';
 
 const tailwindBreakpoints = {
   sm: 640,
@@ -10,33 +10,34 @@ const tailwindBreakpoints = {
 
 const useBreakpoint = () => {
   const [breakpoint, setBreakpoint] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState<boolean>();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const determineBreakpoint = () => {
       let currentBreakpoint = 'base';
-
-      if (window.matchMedia(`(min-width: ${tailwindBreakpoints['2xl']}px)`).matches) {
+      console.log('Changing breakpoint', currentBreakpoint);
+      if (globalThis.matchMedia(`(min-width: ${tailwindBreakpoints['2xl']}px)`).matches) {
         currentBreakpoint = '2xl';
-      } else if (window.matchMedia(`(min-width: ${tailwindBreakpoints['xl']}px)`).matches) {
+      } else if (globalThis.matchMedia(`(min-width: ${tailwindBreakpoints['xl']}px)`).matches) {
         currentBreakpoint = 'xl';
-      } else if (window.matchMedia(`(min-width: ${tailwindBreakpoints['lg']}px)`).matches) {
+      } else if (globalThis.matchMedia(`(min-width: ${tailwindBreakpoints['lg']}px)`).matches) {
         currentBreakpoint = 'lg';
-      } else if (window.matchMedia(`(min-width: ${tailwindBreakpoints['md']}px)`).matches) {
+      } else if (globalThis.matchMedia(`(min-width: ${tailwindBreakpoints['md']}px)`).matches) {
         currentBreakpoint = 'md';
-      } else if (window.matchMedia(`(min-width: ${tailwindBreakpoints['sm']}px)`).matches) {
+      } else if (globalThis.matchMedia(`(min-width: ${tailwindBreakpoints['sm']}px)`).matches) {
         currentBreakpoint = 'sm';
       }
-
+      setIsMobile(currentBreakpoint === 'base');
       setBreakpoint(currentBreakpoint);
     };
 
     determineBreakpoint();
 
-    window.addEventListener('resize', determineBreakpoint);
-    return () => window.removeEventListener('resize', determineBreakpoint);
+    globalThis.addEventListener('resize', determineBreakpoint);
+    return () => globalThis.removeEventListener('resize', determineBreakpoint);
   }, []);
 
-  return breakpoint;
+  return { breakpoint, isMobile };
 };
 
 export default useBreakpoint;
