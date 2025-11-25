@@ -20,7 +20,7 @@ const SesionLayout: React.FC = () => {
   return (
     <div
       ref={container}
-      className="relative px-6 py-12 sm:px-0 w-full min-h-screen flex items-center justify-center bg-gradient-to-br from-sky to-blossom"
+      className="relative px-6 py-12 sm:px-0 w-full min-h-screen flex items-center bg-customWhite"
     >
       <Outlet />
     </div>

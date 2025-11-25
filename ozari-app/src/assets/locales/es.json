@@ -12,6 +12,8 @@
     "sesion": {
       "login": {
         "title": "INICIAR SESIÓN",
+        "welcomeMessage": "Party Rentals",
+        "subtitle": "Tu solución en alquiler de mobiliario para eventos",
         "form": {
           "emailLabel": "Correo electrónico",
           "emailPlaceholder": "Ingrese su correo",
@@ -28,7 +30,10 @@
           "invalidSymbolPassword": "Un símbolo no válido",
           "minLengthPassword": "La contraseña es muy corta",
           "maxLengthPassword": "La contraseña es muy larga",
-          "submitButton": "Iniciar Sesión"
+          "submitButton": "Iniciar Sesión",
+          "noAccount": "Si no posees una cuenta",
+          "signUpLink": "regístrate",
+          "here": "aquí"
         }
       }
     }

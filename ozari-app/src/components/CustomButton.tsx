@@ -7,7 +7,7 @@ interface CustomButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement
   startIcon?: React.ReactNode;
   endIcon?: React.ReactNode;
   buttonType?: 'outlined';
-  buttonColor?: 'magenta' | 'midnight';
+  buttonColor?: 'magenta' | 'midnight' | 'sky' | 'blossom' | 'cream' | 'yellow' | 'aqua';
   loading?: boolean;
 }
 
@@ -17,12 +17,25 @@ const buttonClasses = {
       'border-3 border-magenta text-magenta hover:shadow-[0_0_10px_0.5px_var(--color-magenta)] focus:shadow-[0_0_15px_0.5px_var(--color-magenta)]',
     midnight:
       'border-3 border-midnight text-midnight hover:shadow-[0_0_10px_0.5px_var(--color-midnight)] focus:shadow-[0_0_15px_0.5px_var(--color-midnight)]',
+    sky: 'border-3 border-sky text-sky hover:shadow-[0_0_10px_0.5px_var(--color-sky)] focus:shadow-[0_0_15px_0.5px_var(--color-sky)]',
+    blossom:
+      'border-3 border-blossom text-blossom hover:shadow-[0_0_10px_0.5px_var(--color-blossom)] focus:shadow-[0_0_15px_0.5px_var(--color-blossom)]',
+    cream:
+      'border-3 border-cream text-cream hover:shadow-[0_0_10px_0.5px_var(--color-cream)] focus:shadow-[0_0_15px_0.5px_var(--color-cream)]',
+    yellow:
+      'border-3 border-yellow text-yellow hover:shadow-[0_0_10px_0.5px_var(--color-yellow)] focus:shadow-[0_0_15px_0.5px_var(--color-yellow)]',
+    aqua: 'border-3 border-aqua text-aqua hover:shadow-[0_0_10px_0.5px_var(--color-aqua)] focus:shadow-[0_0_15px_0.5px_var(--color-aqua)]',
   },
 };
 
 const loaderColors = {
   magenta: 'border-magenta',
   midnight: 'border-midnight',
+  sky: 'border-sky',
+  blossom: 'border-blossom',
+  cream: 'border-cream',
+  yellow: 'border-yellow',
+  aqua: 'border-aqua',
 };
 
 const CustomButton: React.FC<CustomButtonProps> = ({
@@ -77,10 +90,10 @@ const CustomButton: React.FC<CustomButtonProps> = ({
     <button
       className={`
         cursor-pointer py-3 px-4 rounded-md text-lg font-semibold outline-none select-none transition-all duration-200 flex items-center
-        disabled:pointer-events-none disabled:text-gray-400 disabled:bg-gray-300 disabled:border-gray-400
+        disabled:pointer-events-none disabled:text-gray-400 disabled:bg-gray-100 disabled:border-gray-200
         ${buttonClasses[buttonType]?.[buttonColor]} ${className} ${
-          loading ? 'pointer-events-none' : ''
-        }`}
+        loading ? 'pointer-events-none' : ''
+      }`}
       {...props}
     >
       {showingLoading && (

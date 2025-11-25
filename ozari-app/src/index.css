@@ -25,6 +25,7 @@
   --color-magenta: #ff01ed;
   --color-yellow: #ffcc00;
   --color-aqua: #00ffe2;
+  --color-customWhite: #f8f5f8;
 
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 }
