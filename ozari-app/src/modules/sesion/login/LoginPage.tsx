@@ -5,7 +5,6 @@ import { FaUserAlt } from 'react-icons/fa';
 import { useGSAP } from '@gsap/react';
 import CustomInputForm from '@components/CustomInputForm';
 import { FormProvider, useForm } from 'react-hook-form';
-import { DevTool } from '@hookform/devtools';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   loginRequiredPatterns,
@@ -186,10 +185,10 @@ const LoginPage: React.FC = () => {
 
   return (
     <div ref={containerRef} className="w-full flex justify-center items-center">
-      <section className="principal-card relative p-12 bg-white border-none shadow-xl/15 rounded-xl gap-30 flex items-center justify-center overflow-hidden">
-        <div className="rotational-asset absolute w-[110%] h-[150%] -rotate-15 origin-right -translate-x-1/2 blur-lg bg-gradient-to-b from-cream to-blossom"></div>
+      <section className="principal-card relative p-6 sm:p-12 bg-white border-none shadow-xl/15 rounded-xl gap-20 sm:gap-30 flex flex-col sm:flex-row items-center justify-center overflow-hidden">
+        <div className="rotational-asset absolute w-[150%] h-[110%] sm:w-[110%] sm:h-[150%] -rotate-15 origin-bottom sm:origin-right -translate-y-7/12 sm:translate-y-0 sm:-translate-x-1/2 blur-lg bg-gradient-to-l sm:bg-gradient-to-b from-cream to-blossom"></div>
         <div className="flex">
-          <div className="flex flex-col items-center justify-center gap-6 z-10">
+          <div className="flex flex-col items-center justify-center gap-4 sm:gap-6 z-10">
             <h2 className="article-element text-2xl font-bold text-black select-none">
               {t('modules.sesion.login.welcomeMessage')}
             </h2>
@@ -265,7 +264,6 @@ const LoginPage: React.FC = () => {
           </RequiredPatternsContext.Provider>
         </div>
       </section>
-      <DevTool control={methods.control} />
     </div>
   );
 };

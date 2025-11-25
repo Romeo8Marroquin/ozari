@@ -28,7 +28,7 @@ const SesionLayout: React.FC = () => {
   return (
     <section
       ref={container}
-      className="relative px-6 py-12 sm:px-0 w-full min-h-screen flex items-center bg-customWhite"
+      className="relative px-6 py-12 sm:px-0 w-full min-h-screen overflow-auto flex items-center bg-customWhite"
     >
       <div className="transition-container flex items-center w-full h-full">
         <Outlet />
