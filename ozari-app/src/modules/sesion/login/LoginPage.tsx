@@ -199,7 +199,7 @@ const LoginPage: React.FC = () => {
               <img
                 src={logo}
                 alt={t('components.pageLoader.logo')}
-                className="w-full h-full object-cover object-center"
+                className="w-full h-full object-cover object-center select-none"
                 aria-label={t('components.pageLoader.logo')}
               />
             </div>
@@ -224,7 +224,6 @@ const LoginPage: React.FC = () => {
                     placeholder={t('modules.sesion.login.form.emailPlaceholder')}
                     aria-label={t('modules.sesion.login.form.emailLabel')}
                     name="email"
-                    autoFocus
                     icon={<FaUserAlt />}
                     onInput={handleAutocomplete}
                   />

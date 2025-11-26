@@ -2,6 +2,8 @@ import { useGSAP } from '@gsap/react';
 import { Outlet } from '@tanstack/react-router';
 import gsap from 'gsap';
 import { useRef } from 'react';
+import Header from './components/Header';
+import Sidebar from './components/Sidebar';
 
 const PanelLayout: React.FC = () => {
   const container = useRef<HTMLDivElement>(null);
@@ -26,14 +28,18 @@ const PanelLayout: React.FC = () => {
   );
 
   return (
-    <section
+    <div
       ref={container}
-      className="relative px-6 py-12 sm:px-0 w-full min-h-screen flex items-center bg-customWhite"
+      className="relative overflow-hidden w-full min-h-screen flex bg-customWhite"
     >
-      <div className="transition-container flex items-center w-full h-full">
-        <Outlet />
+      <Sidebar />
+      <div className="flex flex-col flex-1 overflow-y-hidden">
+        <Header />
+        <main className="flex flex-col h-full p-6 overflow-y-auto bg-blue-500">
+          <Outlet />
+        </main>
       </div>
-    </section>
+    </div>
   );
 };
 

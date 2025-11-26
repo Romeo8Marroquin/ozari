@@ -1,7 +1,7 @@
 import { StorageKeys } from '@constants/StorageKeys';
-import SesionLayout from '@sesion/SesionLayout';
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { Storage } from '@utils/storage';
+import PanelLayout from '../modules/panel/PanelLayout';
 
 export const Route = createFileRoute('/panel')({
   beforeLoad: ({ location }) => {
@@ -16,5 +16,5 @@ export const Route = createFileRoute('/panel')({
       });
     }
   },
-  component: SesionLayout,
+  component: PanelLayout,
 });

@@ -5,7 +5,6 @@ import { FaUserAlt } from 'react-icons/fa';
 import { useGSAP } from '@gsap/react';
 import CustomInputForm from '@components/CustomInputForm';
 import { FormProvider, useForm } from 'react-hook-form';
-import { DevTool } from '@hookform/devtools';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   registerRequiredPatterns,
@@ -217,7 +216,6 @@ const RegisterPage: React.FC = () => {
           </div>
         </div>
       </section>
-      <DevTool control={methods.control} />
     </div>
   );
 };
