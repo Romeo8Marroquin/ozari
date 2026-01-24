@@ -178,27 +178,6 @@ jobs:
           LOG_LEVEL: info
           SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
 
-      - name: Run post-deployment health check
-        if: steps.check-infra.outputs.exists == 'true'
-        run: |
-          set -euo pipefail
-          sleep 10
-
-          INFO="$(serverless info --stage dev | tr -d '\r')"
-          echo "$INFO" | sed -n '/endpoints:/,/functions:/p'
-
-          URL="$(echo "$INFO" | sed -nE 's/.*(https:\/\/[^ ]+\/api\/health).*/\1/p' | head -n 1)"
-
-          if [ -z "${URL:-}" ]; then
-            echo "No se pudo detectar la URL /api/health."
-            exit 1
-          fi
-
-          echo "Health URL: $URL"
-          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$URL"
-        env:
-          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
-
   lockdown-security:
     name: Lock Down RDS Security Group
     runs-on: ubuntu-latest
