@@ -15,7 +15,6 @@
   "license": "ISC",
   "dependencies": {
     "@aws-lambda-powertools/parameters": "^2.28.1",
-    "@aws-sdk/client-kms": "^3.927.0",
     "@aws-sdk/client-ssm": "^3.936.0",
     "@prisma/adapter-pg": "^7.0.0",
     "@prisma/client": "^7.0.0",
