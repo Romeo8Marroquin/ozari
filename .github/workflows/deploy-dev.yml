@@ -56,13 +56,12 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -backend-config="profile="
 
       - name: Terraform Plan
         run: |
           terraform plan \
             -var="deploy_local=false" \
-            -var="profile=default" \
             -var="environment=dev" \
             -var="db_password=${{ secrets.DB_PASSWORD }}" \
             -var="admin_ip=${{ secrets.ADMIN_IP }}" \

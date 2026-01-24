@@ -168,7 +168,7 @@ GitHub Actions → Deploy SSM Parameters Only → Run workflow
 cd ozari-infra/stacks/dev
 terraform init
 terraform apply -var="deploy_local=true" \
-  -var="profile=default" \
+  -var="profile=terraform-profile" \
   -var="environment=dev" \
   -var="app_host=http://localhost:5173" \
   -var="jwt_secret=YOUR_SECRET" \
