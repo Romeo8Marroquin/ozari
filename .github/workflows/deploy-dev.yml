@@ -183,17 +183,17 @@ jobs:
         run: |
           set -euo pipefail
           sleep 10
-          URL="$(serverless info --stage dev \
-            | awk '/endpoints:/{flag=1;next} /functions:/{flag=0} flag' \
-            | sed -E 's/^- +//' \
-            | grep -Eo 'https://[^ ]+/api/health' \
-            | head -n 1 || true)"
+
+          INFO="$(serverless info --stage dev | tr -d '\r')"
+          echo "$INFO" | sed -n '/endpoints:/,/functions:/p'
+
+          URL="$(echo "$INFO" | sed -nE 's/.*(https:\/\/[^ ]+\/api\/health).*/\1/p' | head -n 1)"
+
           if [ -z "${URL:-}" ]; then
-            echo "No se pudo detectar la URL del endpoint /api/health desde 'serverless info'."
-            echo "Dump de endpoints:"
-            serverless info --stage dev | sed -n '/endpoints:/,/functions:/p'
+            echo "No se pudo detectar la URL /api/health."
             exit 1
           fi
+
           echo "Health URL: $URL"
           curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$URL"
         env:
