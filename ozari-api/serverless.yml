@@ -45,11 +45,6 @@ provider:
       statements:
         - Effect: Allow
           Action:
-            - kms:Encrypt
-            - kms:Decrypt
-          Resource: ${ssm:/ozari/${self:provider.stage}/kms_key_arn}
-        - Effect: Allow
-          Action:
             - ssm:GetParameter
             - ssm:GetParameters
           Resource:

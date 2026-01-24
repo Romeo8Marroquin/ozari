@@ -15,6 +15,7 @@ pnpm-debug.log*
 # Archivos de entorno (variables sensibles)
 .env
 .env.*.local
+.secrets-backup.txt
 
 # Archivos generados por el sistema operativo
 .DS_Store
@@ -33,3 +34,11 @@ coverage/
 
 # DB
 DML.*
+
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform/
+.terraform.lock.hcl
+tfplan
