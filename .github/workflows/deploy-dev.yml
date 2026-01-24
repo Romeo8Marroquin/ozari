@@ -180,13 +180,17 @@ jobs:
 
       - name: Run post-deployment health check
         if: steps.check-infra.outputs.exists == 'true'
+        shell: bash
         run: |
+          set -euo pipefail
           sleep 10
-            BASE_URL=$(serverless info --stage dev | tr -d '\r' | grep -Eo 'https://[^ ]+' | head -n 1 | sed -E 's#(https://[^/]+).*#\1#')
-            echo "Base URL: $BASE_URL"
-            HEALTH_URL="${BASE_URL}/api/health/check"
-            echo "Health URL: $HEALTH_URL"
-            curl -fsS "$HEALTH_URL"
+          INFO="$(serverless info --stage dev)"
+          echo "$INFO"
+          BASE_URL="$(echo "$INFO" | tr -d '\r' | grep -Eo 'https://[^ ]+' | head -n 1 | sed -E 's#(https://[^/]+).*#\1#')"
+          HEALTH_URL="${BASE_URL}/api/health/check"
+          echo "Base URL: $BASE_URL"
+          echo "Health URL: $HEALTH_URL"
+          curl -fsS "$HEALTH_URL"
         env:
           SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
 
