@@ -10,6 +10,7 @@ import {
   CreateProductRequestModel,
   UpdateProductRequestModel,
 } from './products.models';
+import { sendOzariError } from '@models/http/ozariErrorModel';
 
 export const getAllProducts = async (_: Request, res: Response): Promise<void> => {
   try {
@@ -66,7 +67,7 @@ export const getAllProducts = async (_: Request, res: Response): Promise<void> =
     });
   } catch (error) {
     logger.error(i18next.t('products.getAllProducts.logs.errorFetchingProducts', { error }));
-    sendOzariSuccess(
+    sendOzariError(
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
       i18next.t('products.getAllProducts.errorFetchingProducts'),
@@ -148,7 +149,7 @@ export const createProduct = async (req: Request, res: Response): Promise<void> 
     });
   } catch (error) {
     logger.error(i18next.t('products.createProduct.logs.errorCreatingProduct', { error }));
-    sendOzariSuccess(
+    sendOzariError(
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
       i18next.t('products.createProduct.errorCreatingProduct'),
@@ -198,7 +199,7 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
     sendOzariSuccess(res, HttpEnum.OK, i18next.t('products.updateProduct.productUpdated'));
   } catch (error) {
     logger.error(i18next.t('products.updateProduct.logs.genericError', { error }));
-    sendOzariSuccess(
+    sendOzariError(
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
       i18next.t('products.updateProduct.genericError'),
@@ -226,7 +227,7 @@ export const deleteProduct = async (req: Request, res: Response): Promise<void> 
     sendOzariSuccess(res, HttpEnum.OK, i18next.t('products.deleteProduct.productDeleted'));
   } catch (error) {
     logger.error(i18next.t('products.deleteProduct.logs.genericError', { error }));
-    sendOzariSuccess(
+    sendOzariError(
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
       i18next.t('products.deleteProduct.genericError'),
