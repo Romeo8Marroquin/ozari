@@ -17,6 +17,7 @@ jobs:
   deploy-ssm:
     name: Deploy SSM Parameters
     runs-on: ubuntu-latest
+    environment: dev
 
     defaults:
       run:
@@ -49,10 +50,10 @@ jobs:
             -var="environment=dev" \
             -var="db_password=dummy" \
             -var="admin_ip=0.0.0.0/0" \
-            -var="app_host=${{ secrets.DEV_APP_HOST }}" \
-            -var="jwt_secret=${{ secrets.DEV_JWT_SECRET }}" \
-            -var="jwt_refresh_secret=${{ secrets.DEV_JWT_REFRESH_SECRET }}" \
-            -var="encryption_key=${{ secrets.DEV_ENCRYPTION_KEY }}" \
+            -var="app_host=${{ secrets.APP_HOST }}" \
+            -var="jwt_secret=${{ secrets.JWT_SECRET }}" \
+            -var="jwt_refresh_secret=${{ secrets.JWT_REFRESH_SECRET }}" \
+            -var="encryption_key=${{ secrets.ENCRYPTION_KEY }}" \
             -target=module.ssm \
             -out=tfplan
 

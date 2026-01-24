@@ -16,18 +16,18 @@ This project uses **GitHub Actions** for automated deployments with **cost-optim
 
 ### 1. Setup GitHub Secrets
 
-Go to your GitHub repo → Settings → Secrets and variables → Actions → New repository secret
+Go to your GitHub repo → Settings → Secrets and variables → Actions → Environments → dev
 
 Add the following secrets (generate secure random values):
 
 - `AWS_ACCESS_KEY_ID` - Your AWS access key
 - `AWS_SECRET_ACCESS_KEY` - Your AWS secret key
-- `DEV_DB_PASSWORD` - Strong random password for RDS
-- `DEV_ADMIN_IP` - Your IP address in CIDR format (e.g., `203.0.113.45/32`)
-- `DEV_APP_HOST` - Frontend URL (e.g., `http://localhost:5173`)
-- `DEV_JWT_SECRET` - 64-character random hex string
-- `DEV_JWT_REFRESH_SECRET` - 64-character random hex string
-- `DEV_ENCRYPTION_KEY` - 64-character random hex string (32 bytes)
+- `DB_PASSWORD` - Strong random password for RDS
+- `ADMIN_IP` - Your IP address in CIDR format (e.g., `203.0.113.45/32`)
+- `APP_HOST` - Frontend URL (e.g., `http://localhost:5173`)
+- `JWT_SECRET` - 64-character random hex string
+- `JWT_REFRESH_SECRET` - 64-character random hex string
+- `ENCRYPTION_KEY` - 64-character random hex string (32 bytes)
 
 **Note:** DATABASE_URL is automatically created by Terraform and stored in SSM Parameter Store.
 

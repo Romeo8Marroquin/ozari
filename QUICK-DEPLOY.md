@@ -29,12 +29,12 @@ gh auth login
 
 ### 3. Setup GitHub Secrets
 
-Manually set secrets at: GitHub → Settings → Secrets and variables → Actions
+Manually set secrets at: GitHub → Settings → Secrets and variables → Actions → Environments → dev
 
 Required secrets:
 - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
-- `DEV_DB_PASSWORD`, `DEV_ADMIN_IP`, `DEV_APP_HOST`
-- `DEV_JWT_SECRET`, `DEV_JWT_REFRESH_SECRET`, `DEV_ENCRYPTION_KEY`
+- `DB_PASSWORD`, `ADMIN_IP`, `APP_HOST`
+- `JWT_SECRET`, `JWT_REFRESH_SECRET`, `ENCRYPTION_KEY`
 
 (See DEPLOYMENT.md for details)
 
@@ -274,7 +274,7 @@ Filter: Service = "RDS" or "Lambda"
 → Check security group allows your IP:
 ```bash
 curl ifconfig.me  # Get your current IP
-gh secret set DEV_ADMIN_IP --body "YOUR_IP/32"
+gh secret set ADMIN_IP --body "ADMIN_IP/32"
 ```
 
 ### Prisma Migrations Fail

@@ -31,6 +31,7 @@ jobs:
   deploy-infrastructure:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
+    environment: dev
     # Only run if manually triggered with deploy_infrastructure=true
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_infrastructure == 'true'
 
@@ -63,12 +64,12 @@ jobs:
             -var="deploy_local=false" \
             -var="profile=default" \
             -var="environment=dev" \
-            -var="db_password=${{ secrets.DEV_DB_PASSWORD }}" \
-            -var="admin_ip=${{ secrets.DEV_ADMIN_IP }}" \
-            -var="app_host=${{ secrets.DEV_APP_HOST }}" \
-            -var="jwt_secret=${{ secrets.DEV_JWT_SECRET }}" \
-            -var="jwt_refresh_secret=${{ secrets.DEV_JWT_REFRESH_SECRET }}" \
-            -var="encryption_key=${{ secrets.DEV_ENCRYPTION_KEY }}" \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -var="admin_ip=${{ secrets.ADMIN_IP }}" \
+            -var="app_host=${{ secrets.APP_HOST }}" \
+            -var="jwt_secret=${{ secrets.JWT_SECRET }}" \
+            -var="jwt_refresh_secret=${{ secrets.JWT_REFRESH_SECRET }}" \
+            -var="encryption_key=${{ secrets.ENCRYPTION_KEY }}" \
             -out=tfplan
 
       - name: Terraform Apply
@@ -80,6 +81,7 @@ jobs:
   deploy-api:
     name: Deploy API (Serverless)
     runs-on: ubuntu-latest
+    environment: dev
     needs: [deploy-infrastructure]
     # Run if infra deployed successfully, OR if only API deployment requested
     if: |
