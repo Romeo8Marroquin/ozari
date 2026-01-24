@@ -6,6 +6,7 @@ variable "vpc_id" {
 
 variable "admin_ip" {
   type = string
+  description = "IP address of the admin machine"
 }
 
 variable "lambda_sg_id" {
@@ -39,7 +40,7 @@ resource "aws_security_group" "rds_sg" {
   }
 
   ingress {
-    description = "Postgres from admin IP"
+    description = "PostgreSQL from admin IP only"
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
@@ -47,10 +48,11 @@ resource "aws_security_group" "rds_sg" {
   }
 
   egress {
+    description = "No outbound traffic from RDS"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = []
   }
 
   tags = { Name = "ozari-${var.environment}-rds-sg" }
