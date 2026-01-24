@@ -116,10 +116,22 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
+      - name: Get Database URL from SSM
+        id: get-db-url
+        run: |
+          DB_URL=$(aws ssm get-parameter \
+            --name "/ozari/dev/database_url" \
+            --with-decryption \
+            --query 'Parameter.Value' \
+            --output text \
+            --region ${{ env.AWS_REGION }})
+          echo "::add-mask::$DB_URL"
+          echo "database_url=$DB_URL" >> $GITHUB_OUTPUT
+
       - name: Run Prisma Migrations
         run: npx prisma migrate deploy
         env:
-          DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
+          DATABASE_URL: ${{ steps.get-db-url.outputs.database_url }}
 
       - name: Build TypeScript
         run: npm run build
@@ -133,7 +145,7 @@ jobs:
           PROFILE: default
           API_ENV: dev
           LOG_LEVEL: info
-          DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
+          DATABASE_URL: ${{ steps.get-db-url.outputs.database_url }}
 
       - name: Run post-deployment health check
         run: |

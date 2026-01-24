@@ -18,35 +18,18 @@ This project uses **GitHub Actions** for automated deployments with **cost-optim
 
 Go to your GitHub repo → Settings → Secrets and variables → Actions → New repository secret
 
-Add the following secrets:
+Add the following secrets (generate secure random values):
 
-```bash
-# AWS Credentials
-AWS_ACCESS_KEY_ID=<aws-access-key>
-AWS_SECRET_ACCESS_KEY=<aws-secret-key>
+- `AWS_ACCESS_KEY_ID` - Your AWS access key
+- `AWS_SECRET_ACCESS_KEY` - Your AWS secret key
+- `DEV_DB_PASSWORD` - Strong random password for RDS
+- `DEV_ADMIN_IP` - Your IP address in CIDR format (e.g., `203.0.113.45/32`)
+- `DEV_APP_HOST` - Frontend URL (e.g., `http://localhost:5173`)
+- `DEV_JWT_SECRET` - 64-character random hex string
+- `DEV_JWT_REFRESH_SECRET` - 64-character random hex string
+- `DEV_ENCRYPTION_KEY` - 64-character random hex string (32 bytes)
 
-# Dev Environment Secrets
-DEV_DB_PASSWORD=<strong-password>
-DEV_ADMIN_IP=<ip-address>/32
-DEV_APP_HOST=<frontend-url>
-DEV_JWT_SECRET=<secure-string>
-DEV_JWT_REFRESH_SECRET=<secure-string>
-DEV_ENCRYPTION_KEY=<32-byte-hex-key>
-DEV_DATABASE_URL=postgres://user:password@host:5432/database?schema=public
-```
-
-**Generate secrets:**
-
-```bash
-# Generate JWT secrets (64 chars)
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-
-# Generate encryption key (32 bytes = 64 hex chars)
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-
-# Generate strong DB password
-node -e "console.log(require('crypto').randomBytes(24).toString('base64'))"
-```
+**Note:** DATABASE_URL is automatically created by Terraform and stored in SSM Parameter Store.
 
 ### 2. Initial Setup (Free - SSM Only)
 

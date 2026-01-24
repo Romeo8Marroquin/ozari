@@ -27,13 +27,16 @@ winget install GitHub.cli
 gh auth login
 ```
 
-### 3. Setup Secrets (Windows PowerShell)
+### 3. Setup GitHub Secrets
 
-```powershell
-.\scripts\setup-github-secrets.ps1
-```
+Manually set secrets at: GitHub → Settings → Secrets and variables → Actions
 
-Or manually at: GitHub → Settings → Secrets → Actions
+Required secrets:
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+- `DEV_DB_PASSWORD`, `DEV_ADMIN_IP`, `DEV_APP_HOST`
+- `DEV_JWT_SECRET`, `DEV_JWT_REFRESH_SECRET`, `DEV_ENCRYPTION_KEY`
+
+(See DEPLOYMENT.md for details)
 
 ---
 
@@ -176,8 +179,8 @@ terraform destroy \
 
 ```bash
 # One-time setup
-./scripts/setup-github-secrets.ps1
-# GitHub Actions → "Deploy SSM Parameters Only"
+# 1. Setup GitHub secrets manually (see above)
+# 2. GitHub Actions → "Deploy SSM Parameters Only"
 
 # Daily work
 cd ozari-api
@@ -234,23 +237,6 @@ git push origin dev
 
 # Consider Reserved Instance for 48% savings
 Cost: $12.43/month (or $6.43 with RI)
-```
-
----
-
-## Database URL Setup
-
-After deploying infrastructure, get the database endpoint:
-
-```bash
-cd ozari-infra/stacks/dev
-terraform output db_endpoint
-```
-
-Then set the GitHub secret:
-
-```bash
-gh secret set DEV_DATABASE_URL --body "postgresql://ozari_user:PASSWORD@ENDPOINT:5432/ozari_db?schema=public"
 ```
 
 ---
