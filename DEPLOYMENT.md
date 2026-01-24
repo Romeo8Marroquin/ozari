@@ -42,26 +42,27 @@ GitHub Actions → Deploy SSM Parameters Only → Run workflow
 
 **Result:** You can now develop locally with AWS secrets.
 
-### 3. Deploy Full Infrastructure (Costs Money)
+### 3. Deploy Infrastructure (Costs Money) - Manual Only
 
-When you're ready to test with real RDS:
+When you're ready to test with real infrastructure:
 
 ```bash
 GitHub Actions → Deploy Dev Environment → Run workflow
-  ☑ Deploy infrastructure (Network + RDS)
-  ☑ Deploy API (Serverless)
+  ☑ Deploy infrastructure (Network + RDS) - Check this
   Click "Run workflow"
 ```
 
 **Result:**
-- ✅ VPC + Subnets + Security Groups
-- ✅ RDS PostgreSQL database
-- ✅ Lambda functions deployed
+- ✅ VPC + Subnets + Security Groups deployed
+- ✅ RDS PostgreSQL database created
+- ✅ Lambda functions deployed automatically after infrastructure
 - ⚠️ **Costing $12.43/month**
 
-### 4. Auto-Deploy API on Commits
+**Important:** Infrastructure deployment is manual only (never auto-deploys on push).
 
-After infrastructure is up, pushing code to `dev` branch auto-deploys the API:
+### 4. Auto-Deploy API on Code Changes
+
+After infrastructure exists, push code changes to auto-deploy API:
 
 ```bash
 git add .
@@ -69,7 +70,10 @@ git commit -m "Update API"
 git push origin dev
 ```
 
-**Result:** Lambda functions updated automatically (no infrastructure changes).
+**Result:**
+- ✅ Lambda functions updated automatically
+- ✅ No infrastructure changes (network/DB unchanged)
+- ❌ Fails if infrastructure not deployed (must run step 3 first)
 
 ### 5. Destroy Infrastructure (Save Money)
 

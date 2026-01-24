@@ -60,42 +60,37 @@ terraform apply -var="deploy_local=true" ...
 
 ---
 
-### Deploy Full Infrastructure (Database + API)
+### Deploy Infrastructure (Manual Only)
 
-**GitHub Actions:**
+**GitHub Actions (Recommended):**
 ```
 Actions → "Deploy Dev Environment" → Run workflow
   ☑ Deploy infrastructure (Network + RDS)
-  ☑ Deploy API (Serverless)
+  → Infrastructure + API deploy automatically
 ```
 
-**Manual:**
-```bash
-# 1. Deploy infrastructure
-cd ozari-infra/stacks/dev
-terraform init
-terraform apply -var="deploy_local=false" ...
+**Result:**
+- Network, RDS, and API all deployed
+- **Cost: $12.43/month** starts accruing
 
-# 2. Deploy API
+**Manual (Advanced):**
+```bash
+cd ozari-infra/stacks/dev
+terraform apply -var="deploy_local=false" ...
 cd ../../ozari-api
-npm ci
-npx prisma generate
-npx prisma migrate deploy
-npm run build
 serverless deploy --stage dev
 ```
 
-**Cost: $12.43/month**
-
 ---
 
-### Update API Only (No Infrastructure Change)
+### Update API Only (Auto on Push)
 
-**Auto:** Just push to `dev` branch
+**Auto-deploy on code changes:**
 ```bash
-git add .
+git add ozari-api/
 git commit -m "Update API"
 git push origin dev
+→ API auto-deploys (if infrastructure exists)
 ```
 
 **Manual:**
@@ -105,6 +100,7 @@ serverless deploy --stage dev
 ```
 
 **Cost: No change**
+**Note:** Fails if infrastructure not deployed first
 
 ---
 

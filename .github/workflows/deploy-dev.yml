@@ -1,26 +1,21 @@
 name: Deploy Dev Environment
 
 on:
-  # Manual trigger with infrastructure control
+  # Manual trigger for infrastructure deployment
   workflow_dispatch:
     inputs:
       deploy_infrastructure:
         description: "Deploy infrastructure (Network + RDS)"
         required: true
         type: boolean
-        default: false
-      deploy_api:
-        description: "Deploy API (Serverless)"
-        required: true
-        type: boolean
         default: true
 
+  # Auto-deploy API on code changes
   push:
     branches:
       - dev
     paths:
       - "ozari-api/**"
-      - ".github/workflows/deploy-dev.yml"
 
 concurrency:
   group: deploy-dev-${{ github.ref }}
@@ -33,10 +28,10 @@ env:
 
 jobs:
   deploy-infrastructure:
-    name: Deploy Infrastructure
+    name: Deploy Infrastructure (Network + RDS)
     runs-on: ubuntu-latest
     environment: dev
-    # Only run if manually triggered with deploy_infrastructure=true
+    # Only run on manual trigger (no auto-deploy for infrastructure)
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_infrastructure == 'true'
 
     defaults:
@@ -86,12 +81,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: dev
     needs: [deploy-infrastructure]
-    # Run if infra deployed successfully, OR if only API deployment requested
+    # Run after infrastructure job completes (or on push events)
     if: |
       always() &&
       (needs.deploy-infrastructure.result == 'success' ||
-       needs.deploy-infrastructure.result == 'skipped') &&
-      (github.event.inputs.deploy_api == 'true' || github.event_name == 'push')
+       needs.deploy-infrastructure.result == 'skipped')
 
     defaults:
       run:
@@ -118,49 +112,62 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check if database exists
-        id: check-db
+      - name: Check if infrastructure exists
+        id: check-infra
         continue-on-error: true
         run: |
+          # Check if network infrastructure is deployed (required for Lambda VPC)
           if aws ssm get-parameter \
-            --name "/ozari/dev/database_url" \
+            --name "/ozari/dev/lambda_subnet_1" \
             --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            DB_URL=$(aws ssm get-parameter \
+
+            # If infrastructure exists, get database URL
+            if aws ssm get-parameter \
               --name "/ozari/dev/database_url" \
-              --with-decryption \
-              --query 'Parameter.Value' \
-              --output text \
-              --region ${{ env.AWS_REGION }})
-            echo "::add-mask::$DB_URL"
-            echo "database_url=$DB_URL" >> $GITHUB_OUTPUT
+              --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
+              DB_URL=$(aws ssm get-parameter \
+                --name "/ozari/dev/database_url" \
+                --with-decryption \
+                --query 'Parameter.Value' \
+                --output text \
+                --region ${{ env.AWS_REGION }})
+              echo "::add-mask::$DB_URL"
+              echo "database_url=$DB_URL" >> $GITHUB_OUTPUT
+            else
+              # Shouldn't happen, but use dummy URL as fallback
+              echo "database_url=postgresql://dummy:dummy@localhost:5432/dummy?schema=public" >> $GITHUB_OUTPUT
+            fi
           else
             echo "exists=false" >> $GITHUB_OUTPUT
-            # Use dummy URL for Prisma generate (doesn't connect, just generates client)
             echo "database_url=postgresql://dummy:dummy@localhost:5432/dummy?schema=public" >> $GITHUB_OUTPUT
           fi
 
       - name: Generate Prisma Client
+        if: steps.check-infra.outputs.exists == 'true'
         run: npx prisma generate
         env:
-          DATABASE_URL: ${{ steps.check-db.outputs.database_url }}
+          DATABASE_URL: ${{ steps.check-infra.outputs.database_url }}
 
       - name: Run Prisma Migrations
-        if: steps.check-db.outputs.exists == 'true'
+        if: steps.check-infra.outputs.exists == 'true'
         run: npx prisma migrate deploy
         env:
-          DATABASE_URL: ${{ steps.check-db.outputs.database_url }}
+          DATABASE_URL: ${{ steps.check-infra.outputs.database_url }}
 
-      - name: Warn if database not deployed
-        if: steps.check-db.outputs.exists != 'true'
+      - name: Skip deployment if no infrastructure
+        if: steps.check-infra.outputs.exists != 'true'
         run: |
-          echo "::warning::Database not deployed. Lambdas will be deployed but will fail at runtime."
-          echo "::warning::Run 'Deploy Dev Environment' workflow with 'Deploy infrastructure' enabled to create the database."
+          echo "::error::Infrastructure not deployed. Cannot deploy API without VPC/subnets."
+          echo "::error::Run 'Deploy Dev Environment' workflow manually to deploy infrastructure first."
+          exit 1
 
       - name: Install Serverless Framework
+        if: steps.check-infra.outputs.exists == 'true'
         run: npm install -g serverless
 
       - name: Deploy to AWS Lambda
+        if: steps.check-infra.outputs.exists == 'true'
         run: serverless deploy --stage dev --verbose
         env:
           API_ENV: dev
@@ -168,14 +175,14 @@ jobs:
           SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
 
       - name: Run post-deployment health check
-        if: steps.check-db.outputs.exists == 'true'
+        if: steps.check-infra.outputs.exists == 'true'
         run: |
           sleep 10
           ENDPOINT=$(serverless info --stage dev | grep "endpoint:" | awk '{print $2}')
           curl -f "${ENDPOINT}/api/health" || exit 1
 
   notify:
-    name: Notify deployment status
+    name: Deployment Summary
     runs-on: ubuntu-latest
     needs: [deploy-infrastructure, deploy-api]
     if: always()
@@ -190,6 +197,13 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ "${{ needs.deploy-infrastructure.result }}" == "success" ]; then
-            echo "Warning **RDS is running - costing ~\$12/month**" >> $GITHUB_STEP_SUMMARY
-            echo "Run the 'Destroy Dev Infrastructure' workflow when done testing" >> $GITHUB_STEP_SUMMARY
+            echo "Warning **Infrastructure deployed - RDS costing ~\$12/month**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Run 'Destroy Dev Infrastructure' workflow when done testing to save costs." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.deploy-api.result }}" == "failure" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **API deployment failed**" >> $GITHUB_STEP_SUMMARY
+            echo "If infrastructure not deployed, run 'Deploy Dev Environment' workflow manually." >> $GITHUB_STEP_SUMMARY
           fi
