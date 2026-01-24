@@ -163,7 +163,6 @@ jobs:
       - name: Deploy to AWS Lambda
         run: serverless deploy --stage dev --verbose
         env:
-          PROFILE: default
           API_ENV: dev
           LOG_LEVEL: info
 

@@ -72,8 +72,6 @@ jobs:
 
       - name: Remove Serverless deployment
         run: serverless remove --stage dev --verbose
-        env:
-          PROFILE: default
 
   destroy-infrastructure:
     name: Destroy Infrastructure (RDS + Network)
