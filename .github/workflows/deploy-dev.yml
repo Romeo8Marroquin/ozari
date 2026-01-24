@@ -182,9 +182,11 @@ jobs:
         if: steps.check-infra.outputs.exists == 'true'
         run: |
           sleep 10
-          HEALTH_URL=$(serverless info --stage dev | grep -Eo 'https://[^ ]+/api/health' | head -n 1)
-          echo "Health URL: $HEALTH_URL"
-          curl -f "$HEALTH_URL" || exit 1
+            BASE_URL=$(serverless info --stage dev | tr -d '\r' | grep -Eo 'https://[^ ]+' | head -n 1 | sed -E 's#(https://[^/]+).*#\1#')
+            echo "Base URL: $BASE_URL"
+            HEALTH_URL="${BASE_URL}/api/health/check"
+            echo "Health URL: $HEALTH_URL"
+            curl -fsS "$HEALTH_URL"
         env:
           SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
 
