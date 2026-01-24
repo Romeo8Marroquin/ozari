@@ -1,3 +1,5 @@
+org: rems8
+app: ozari
 service: ozari-api
 
 stages:
