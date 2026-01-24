@@ -1,0 +1,73 @@
+name: Deploy SSM Parameters Only (Free)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - dev
+    paths:
+      - "ozari-infra/modules/ssm/**"
+      - ".github/workflows/deploy-ssm-only.yml"
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 1.12.0
+
+jobs:
+  deploy-ssm:
+    name: Deploy SSM Parameters
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ozari-infra/stacks/dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan (SSM only)
+        run: |
+          terraform plan \
+            -var="deploy_local=true" \
+            -var="profile=default" \
+            -var="environment=dev" \
+            -var="db_password=dummy" \
+            -var="admin_ip=0.0.0.0/0" \
+            -var="app_host=${{ secrets.DEV_APP_HOST }}" \
+            -var="jwt_secret=${{ secrets.DEV_JWT_SECRET }}" \
+            -var="jwt_refresh_secret=${{ secrets.DEV_JWT_REFRESH_SECRET }}" \
+            -var="encryption_key=${{ secrets.DEV_ENCRYPTION_KEY }}" \
+            -target=module.ssm \
+            -out=tfplan
+
+      - name: Terraform Apply (SSM only)
+        run: terraform apply -auto-approve tfplan
+
+      - name: Summary
+        run: |
+          echo "## SSM Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "SSM parameters deployed for local development" >> $GITHUB_STEP_SUMMARY
+          echo "**Cost: \$0/month** (SSM Parameter Store is free)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "You can now run the API locally with:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'cd ozari-api' >> $GITHUB_STEP_SUMMARY
+          echo 'npm run dev' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

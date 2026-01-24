@@ -1,0 +1,162 @@
+name: Deploy Dev Environment
+
+on:
+  # Manual trigger with infrastructure control
+  workflow_dispatch:
+    inputs:
+      deploy_infrastructure:
+        description: "Deploy infrastructure (Network + RDS)"
+        required: true
+        type: boolean
+        default: false
+      deploy_api:
+        description: "Deploy API (Serverless)"
+        required: true
+        type: boolean
+        default: true
+
+  push:
+    branches:
+      - dev
+    paths:
+      - "ozari-api/**"
+      - ".github/workflows/deploy-dev.yml"
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 1.12.0
+  NODE_VERSION: 22
+
+jobs:
+  deploy-infrastructure:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    # Only run if manually triggered with deploy_infrastructure=true
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_infrastructure == 'true'
+
+    defaults:
+      run:
+        working-directory: ozari-infra/stacks/dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var="deploy_local=false" \
+            -var="profile=default" \
+            -var="environment=dev" \
+            -var="db_password=${{ secrets.DEV_DB_PASSWORD }}" \
+            -var="admin_ip=${{ secrets.DEV_ADMIN_IP }}" \
+            -var="app_host=${{ secrets.DEV_APP_HOST }}" \
+            -var="jwt_secret=${{ secrets.DEV_JWT_SECRET }}" \
+            -var="jwt_refresh_secret=${{ secrets.DEV_JWT_REFRESH_SECRET }}" \
+            -var="encryption_key=${{ secrets.DEV_ENCRYPTION_KEY }}" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Output RDS endpoint
+        run: terraform output
+
+  deploy-api:
+    name: Deploy API (Serverless)
+    runs-on: ubuntu-latest
+    needs: [deploy-infrastructure]
+    # Run if infra deployed successfully, OR if only API deployment requested
+    if: |
+      always() &&
+      (needs.deploy-infrastructure.result == 'success' ||
+       needs.deploy-infrastructure.result == 'skipped') &&
+      (github.event.inputs.deploy_api == 'true' || github.event_name == 'push')
+
+    defaults:
+      run:
+        working-directory: ozari-api
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: ozari-api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Run Prisma Migrations
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Install Serverless Framework
+        run: npm install -g serverless
+
+      - name: Deploy to AWS Lambda
+        run: serverless deploy --stage dev --verbose
+        env:
+          PROFILE: default
+          API_ENV: dev
+          LOG_LEVEL: info
+          DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
+
+      - name: Run post-deployment health check
+        run: |
+          sleep 10
+          ENDPOINT=$(serverless info --stage dev | grep "endpoint:" | awk '{print $2}')
+          curl -f "${ENDPOINT}/api/health" || exit 1
+
+  notify:
+    name: Notify deployment status
+    runs-on: ubuntu-latest
+    needs: [deploy-infrastructure, deploy-api]
+    if: always()
+
+    steps:
+      - name: Deployment Summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Infrastructure: ${{ needs.deploy-infrastructure.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- API: ${{ needs.deploy-api.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.deploy-infrastructure.result }}" == "success" ]; then
+            echo "Warning **RDS is running - costing ~\$12/month**" >> $GITHUB_STEP_SUMMARY
+            echo "Run the 'Destroy Dev Infrastructure' workflow when done testing" >> $GITHUB_STEP_SUMMARY
+          fi

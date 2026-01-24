@@ -1,0 +1,146 @@
+name: Destroy Dev Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      destroy_api:
+        description: "Remove API (Serverless functions)"
+        required: true
+        type: boolean
+        default: true
+      destroy_infrastructure:
+        description: "Destroy infrastructure (Network + RDS) - SAVES $12/month"
+        required: true
+        type: boolean
+        default: true
+      confirm_destroy:
+        description: 'Type "DESTROY" to confirm'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 1.12.0
+  NODE_VERSION: 22
+
+jobs:
+  validate:
+    name: Validate destruction request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm_destroy }}" != "DESTROY" ]; then
+            echo "❌ Destruction not confirmed. You must type 'DESTROY' exactly."
+            exit 1
+          fi
+          echo "✅ Destruction confirmed"
+
+  remove-api:
+    name: Remove Serverless API
+    runs-on: ubuntu-latest
+    needs: [validate]
+    if: github.event.inputs.destroy_api == 'true'
+
+    defaults:
+      run:
+        working-directory: ozari-api
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Serverless Framework
+        run: npm install -g serverless
+
+      - name: Remove Serverless deployment
+        run: serverless remove --stage dev --verbose
+        env:
+          PROFILE: default
+
+  destroy-infrastructure:
+    name: Destroy Infrastructure (RDS + Network)
+    runs-on: ubuntu-latest
+    needs: [validate, remove-api]
+    if: |
+      always() &&
+      needs.validate.result == 'success' &&
+      (needs.remove-api.result == 'success' || needs.remove-api.result == 'skipped') &&
+      github.event.inputs.destroy_infrastructure == 'true'
+
+    defaults:
+      run:
+        working-directory: ozari-infra/stacks/dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Destroy (Network + RDS only)
+        run: |
+          terraform destroy \
+            -var="deploy_local=false" \
+            -var="profile=default" \
+            -var="environment=dev" \
+            -var="db_password=${{ secrets.DEV_DB_PASSWORD }}" \
+            -var="admin_ip=${{ secrets.DEV_ADMIN_IP }}" \
+            -var="app_host=${{ secrets.DEV_APP_HOST }}" \
+            -var="jwt_secret=${{ secrets.DEV_JWT_SECRET }}" \
+            -var="jwt_refresh_secret=${{ secrets.DEV_JWT_REFRESH_SECRET }}" \
+            -var="encryption_key=${{ secrets.DEV_ENCRYPTION_KEY }}" \
+            -target=module.network[0] \
+            -target=module.db[0] \
+            -auto-approve
+
+      - name: Verify SSM parameters still exist
+        run: |
+          aws ssm get-parameter --name "/ozari/dev/jwt_secret" --region ${{ env.AWS_REGION }} > /dev/null
+          echo "✅ SSM parameters preserved for local development"
+
+  notify:
+    name: Notify destruction status
+    runs-on: ubuntu-latest
+    needs: [remove-api, destroy-infrastructure]
+    if: always()
+
+    steps:
+      - name: Destruction Summary
+        run: |
+          echo "## Destruction Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- API Removed: ${{ needs.remove-api.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Infrastructure Destroyed: ${{ needs.destroy-infrastructure.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.destroy-infrastructure.result }}" == "success" ]; then
+            echo "Success **Infrastructure destroyed - saving ~\$12/month**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "SSM parameters preserved for local development" >> $GITHUB_STEP_SUMMARY
+          fi
