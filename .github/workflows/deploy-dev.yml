@@ -92,7 +92,7 @@ jobs:
       always() &&
       (needs.deploy-infrastructure.result == 'success' ||
        needs.deploy-infrastructure.result == 'skipped') &&
-      (github.event.inputs.deploy_api == 'true' || github.event_name == 'push')
+      (github.event.inputs.deploy_api == 'true' || github.event_name == 'workflow_run')
 
     defaults:
       run:
