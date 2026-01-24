@@ -24,7 +24,6 @@ export async function getSecret(name: string): Promise<string> {
     if (!secret) throw new Error(i18next.t('api.ssm.ssmFetchError'));
     return secret;
   } catch (error) {
-    console.log(error);
     logger.error(i18next.t('api.ssm.logs.ssmFetchError', { ssmPath }), error);
     throw new Error(i18next.t('api.ssm.ssmFetchError'));
   }
