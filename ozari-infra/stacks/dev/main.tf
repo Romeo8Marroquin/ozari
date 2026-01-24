@@ -16,17 +16,13 @@ provider "aws" {
   profile = var.profile
 }
 
-module "kms" {
-  source      = "../../modules/kms"
-  environment = var.environment
-}
-
 module "ssm" {
   source             = "../../modules/ssm"
   environment        = var.environment
   app_host           = var.app_host
   jwt_secret         = var.jwt_secret
   jwt_refresh_secret = var.jwt_refresh_secret
+  encryption_key     = var.encryption_key
 }
 
 module "network" {

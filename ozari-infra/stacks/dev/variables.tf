@@ -26,3 +26,7 @@ variable "jwt_refresh_secret" {
   type      = string
   sensitive = true
 }
+variable "encryption_key" {
+  type      = string
+  sensitive = true
+}
