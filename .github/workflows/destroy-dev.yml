@@ -72,6 +72,9 @@ jobs:
 
       - name: Remove Serverless deployment
         run: serverless remove --stage dev --verbose
+        env:
+          AWS_PROFILE: ""
+          SERVERLESS_ACCESS_KEY: ""
 
   destroy-infrastructure:
     name: Destroy Infrastructure (RDS + Network)

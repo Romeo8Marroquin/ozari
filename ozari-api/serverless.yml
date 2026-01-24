@@ -26,7 +26,6 @@ stages:
 
 provider:
   name: aws
-  profile: ${env:PROFILE, 'default'}
   runtime: ${param:NODE_VERSION}
   region: ${param:AWS_REGION}
   stage: ${opt:stage, 'dev'}

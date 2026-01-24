@@ -160,11 +160,16 @@ jobs:
       - name: Install Serverless Framework
         run: npm install -g serverless
 
+      - name: Clean Serverless cache
+        run: rm -rf .serverless
+
       - name: Deploy to AWS Lambda
         run: serverless deploy --stage dev --verbose
         env:
           API_ENV: dev
           LOG_LEVEL: info
+          AWS_PROFILE: ""
+          SERVERLESS_ACCESS_KEY: ""
 
       - name: Run post-deployment health check
         if: steps.check-db.outputs.exists == 'true'
