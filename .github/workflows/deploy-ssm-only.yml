@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - dev
+    paths:
+      - "ozari-infra/modules/ssm/**"
+      - ".github/workflows/deploy-ssm-only.yml"
 
 concurrency:
   group: deploy-dev-${{ github.ref }}
