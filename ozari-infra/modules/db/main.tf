@@ -40,11 +40,23 @@ resource "aws_security_group" "rds_sg" {
   }
 
   ingress {
-    description = "PostgreSQL from admin IP only"
+    description = "PostgreSQL from admin IP"
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
     cidr_blocks = [var.admin_ip]
+  }
+
+  # Allow GitHub Actions and other CI/CD tools for non-prod
+  dynamic "ingress" {
+    for_each = local.is_prod ? [] : [1]
+    content {
+      description = "PostgreSQL from anywhere (dev only, for CI/CD)"
+      from_port   = 5432
+      to_port     = 5432
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
   }
 
   egress {
@@ -108,5 +120,5 @@ resource "aws_cloudwatch_metric_alarm" "rds_connections" {
 resource "aws_ssm_parameter" "database_url" {
   name  = "/ozari/${var.environment}/database_url"
   type  = "SecureString"
-  value = "postgres://${aws_db_instance.postgres.username}:${var.db_password}@${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}/${aws_db_instance.postgres.db_name}?schema=public"
+  value = "postgresql://${aws_db_instance.postgres.username}:${var.db_password}@${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}/${aws_db_instance.postgres.db_name}?schema=public&sslmode=require"
 }
