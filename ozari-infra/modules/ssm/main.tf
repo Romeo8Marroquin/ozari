@@ -9,6 +9,11 @@ variable "jwt_refresh_secret" {
   sensitive = true
 }
 
+variable "encryption_key" {
+  type      = string
+  sensitive = true
+}
+
 resource "aws_ssm_parameter" "app_host" {
   name  = "/ozari/${var.environment}/app_host"
   type  = "String"
@@ -25,4 +30,10 @@ resource "aws_ssm_parameter" "jwt_refresh_secret" {
   name  = "/ozari/${var.environment}/jwt_refresh_secret"
   type  = "SecureString"
   value = var.jwt_refresh_secret
+}
+
+resource "aws_ssm_parameter" "encryption_key" {
+  name  = "/ozari/${var.environment}/encryption_key"
+  type  = "SecureString"
+  value = var.encryption_key
 }

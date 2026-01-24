@@ -8,7 +8,7 @@ import {
   encryptKmsAsync,
   encryptSha256Sync,
   hashPassword,
-} from '@deps/kmsClient';
+} from '@helpers/encryption';
 import { prismaClient } from '@deps/prismaClient';
 import { logger } from '@deps/winstonConfig';
 import { getSecret } from '@helpers/ssmLoader';

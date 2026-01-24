@@ -5,7 +5,7 @@ variable "vpc_id" {
 }
 
 variable "admin_ip" {
-  type = string
+  type        = string
   description = "IP address of the admin machine"
 }
 
@@ -79,14 +79,30 @@ resource "aws_db_instance" "postgres" {
   username = "postgres"
   password = var.db_password
 
-  publicly_accessible    = true
-  db_subnet_group_name   = aws_db_subnet_group.rds_subnet_group.name
-  vpc_security_group_ids = [aws_security_group.rds_sg.id]
+  publicly_accessible                 = true
+  db_subnet_group_name                = aws_db_subnet_group.rds_subnet_group.name
+  vpc_security_group_ids              = [aws_security_group.rds_sg.id]
+  iam_database_authentication_enabled = true # Use IAM instead of passwords
+  enabled_cloudwatch_logs_exports     = ["postgresql", "upgrade"]
+  deletion_protection                 = true
+  ca_cert_identifier                  = "rds-ca-rsa2048-g1"
 
   skip_final_snapshot = !local.is_prod
   apply_immediately   = !local.is_prod
 
   tags = { Name = "ozari-${var.environment}-postgres" }
+}
+
+resource "aws_cloudwatch_metric_alarm" "rds_connections" {
+  alarm_name          = "rds-connection-spike"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "DatabaseConnections"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 10
+  alarm_description   = "Alert on unusual connection count"
 }
 
 resource "aws_ssm_parameter" "database_url" {
