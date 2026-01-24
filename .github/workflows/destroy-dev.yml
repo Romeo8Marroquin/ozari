@@ -67,11 +67,26 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Install dependencies
+        run: npm ci
+
       - name: Install Serverless Framework
         run: npm install -g serverless
 
       - name: Remove Serverless deployment
-        run: serverless remove --stage dev --verbose
+        run: |
+          set -uo pipefail
+          out="$(serverless remove --stage dev --verbose 2>&1)" || rc=$?
+          rc="${rc:-0}"
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            if echo "$out" | grep -Eqi "(does not exist|not found|No stack|Stack .* does not exist|ValidationError.*does not exist)"; then
+              echo "Serverless stack ya estaba removido. Continuando."
+              exit 0
+            fi
+            echo "❌ Falló serverless remove por una razón real."
+            exit "$rc"
+          fi
         env:
           SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
 
