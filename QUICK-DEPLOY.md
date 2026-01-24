@@ -67,10 +67,13 @@ terraform apply -var="deploy_local=true" ...
 Actions → "Deploy Dev Environment" → Run workflow
   ☑ Deploy infrastructure (Network + RDS)
   → Infrastructure + API deploy automatically
+  → RDS auto-locks down after migrations
 ```
 
 **Result:**
 - Network, RDS, and API all deployed
+- RDS temporarily open for migrations (~2 min)
+- RDS automatically secured after completion
 - **Cost: $12.43/month** starts accruing
 
 **Manual (Advanced):**

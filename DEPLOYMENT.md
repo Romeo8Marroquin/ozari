@@ -54,9 +54,16 @@ GitHub Actions → Deploy Dev Environment → Run workflow
 
 **Result:**
 - ✅ VPC + Subnets + Security Groups deployed
-- ✅ RDS PostgreSQL database created
-- ✅ Lambda functions deployed automatically after infrastructure
+- ✅ RDS PostgreSQL database created (temporarily open for migrations)
+- ✅ Migrations run from GitHub Actions
+- ✅ RDS automatically locked down after migrations complete
+- ✅ Lambda functions deployed
 - ⚠️ **Costing $12.43/month**
+
+**Security Flow:**
+1. RDS deployed with temporary public access (0.0.0.0/0)
+2. Migrations run (~2 minutes)
+3. RDS automatically locked down (Lambda + Admin IP only)
 
 **Important:** Infrastructure deployment is manual only (never auto-deploys on push).
 

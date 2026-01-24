@@ -22,6 +22,12 @@ variable "db_password" {
   sensitive = true
 }
 
+variable "allow_migrations_from_github" {
+  type        = bool
+  default     = false
+  description = "Temporarily allow GitHub Actions to access RDS for migrations"
+}
+
 locals {
   is_prod = lower(var.environment) == "prod"
 }
@@ -47,11 +53,11 @@ resource "aws_security_group" "rds_sg" {
     cidr_blocks = [var.admin_ip]
   }
 
-  # Allow GitHub Actions and other CI/CD tools for non-prod
+  # Temporary access for migrations from GitHub Actions
   dynamic "ingress" {
-    for_each = local.is_prod ? [] : [1]
+    for_each = var.allow_migrations_from_github ? [1] : []
     content {
-      description = "PostgreSQL from anywhere (dev only, for CI/CD)"
+      description = "Temporary: PostgreSQL from GitHub Actions for migrations"
       from_port   = 5432
       to_port     = 5432
       protocol    = "tcp"
