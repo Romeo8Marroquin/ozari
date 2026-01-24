@@ -102,7 +102,6 @@ resource "aws_db_instance" "postgres" {
   vpc_security_group_ids              = [aws_security_group.rds_sg.id]
   iam_database_authentication_enabled = true # Use IAM instead of passwords
   enabled_cloudwatch_logs_exports     = ["postgresql", "upgrade"]
-  deletion_protection                 = true
   ca_cert_identifier                  = "rds-ca-rsa2048-g1"
 
   skip_final_snapshot = !local.is_prod
