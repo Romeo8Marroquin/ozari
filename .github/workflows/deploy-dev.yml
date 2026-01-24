@@ -15,12 +15,17 @@ on:
         type: boolean
         default: true
 
-  push:
+  # Auto-trigger after SSM deployment completes (guarantees SSM deployed first)
+  workflow_run:
+    workflows: ["Deploy SSM Parameters Only (Free)"]
+    types:
+      - completed
     branches:
       - dev
-    paths:
-      - "ozari-api/**"
-      - ".github/workflows/deploy-dev.yml"
+
+concurrency:
+  group: deploy-dev-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   AWS_REGION: us-east-1
@@ -122,57 +127,49 @@ jobs:
             --name "/ozari/dev/database_url" \
             --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
+            DB_URL=$(aws ssm get-parameter \
+              --name "/ozari/dev/database_url" \
+              --with-decryption \
+              --query 'Parameter.Value' \
+              --output text \
+              --region ${{ env.AWS_REGION }})
+            echo "::add-mask::$DB_URL"
+            echo "database_url=$DB_URL" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
+            # Use dummy URL for Prisma generate (doesn't connect, just generates client)
+            echo "database_url=postgresql://dummy:dummy@localhost:5432/dummy?schema=public" >> $GITHUB_OUTPUT
           fi
 
-      - name: Get Database URL from SSM
-        if: steps.check-db.outputs.exists == 'true'
-        id: get-db-url
-        run: |
-          DB_URL=$(aws ssm get-parameter \
-            --name "/ozari/dev/database_url" \
-            --with-decryption \
-            --query 'Parameter.Value' \
-            --output text \
-            --region ${{ env.AWS_REGION }})
-          echo "::add-mask::$DB_URL"
-          echo "database_url=$DB_URL" >> $GITHUB_OUTPUT
-
       - name: Generate Prisma Client
-        if: steps.check-db.outputs.exists == 'true'
         run: npx prisma generate
         env:
-          DATABASE_URL: ${{ steps.get-db-url.outputs.database_url }}
+          DATABASE_URL: ${{ steps.check-db.outputs.database_url }}
 
       - name: Run Prisma Migrations
         if: steps.check-db.outputs.exists == 'true'
         run: npx prisma migrate deploy
         env:
-          DATABASE_URL: ${{ steps.get-db-url.outputs.database_url }}
+          DATABASE_URL: ${{ steps.check-db.outputs.database_url }}
 
       - name: Warn if database not deployed
         if: steps.check-db.outputs.exists != 'true'
         run: |
-          echo "::warning::Database not deployed. Skipping Prisma and Serverless deployment."
-          echo "::warning::Run 'Deploy Dev Environment' workflow with 'Deploy infrastructure' enabled first."
+          echo "::warning::Database not deployed. Lambdas will be deployed but will fail at runtime."
+          echo "::warning::Run 'Deploy Dev Environment' workflow with 'Deploy infrastructure' enabled to create the database."
 
       - name: Build TypeScript
-        if: steps.check-db.outputs.exists == 'true'
         run: npm run build
 
       - name: Install Serverless Framework
-        if: steps.check-db.outputs.exists == 'true'
         run: npm install -g serverless
 
       - name: Deploy to AWS Lambda
-        if: steps.check-db.outputs.exists == 'true'
         run: serverless deploy --stage dev --verbose
         env:
           PROFILE: default
           API_ENV: dev
           LOG_LEVEL: info
-          DATABASE_URL: ${{ steps.get-db-url.outputs.database_url }}
 
       - name: Run post-deployment health check
         if: steps.check-db.outputs.exists == 'true'
