@@ -17,7 +17,6 @@ if (!connectionString) {
   throw new Error(i18next.t('api.database.genericError'));
 }
 const ca = readFileSync('certs/global-bundle.pem', 'utf8');
-console.log(new URL(connectionString).hostname);
 
 const adapter = new PrismaPg({
   connectionString,
