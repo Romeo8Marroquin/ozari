@@ -21,7 +21,7 @@ const adapter = new PrismaPg({
 });
 
 export const prismaClient: PrismaClient =
-  global.prismaInstance ?? (global.prismaInstance = new PrismaClient({ adapter }));
+  globalThis.prismaInstance ?? (globalThis.prismaInstance = new PrismaClient({ adapter }));
 
 prismaClient
   .$connect()
