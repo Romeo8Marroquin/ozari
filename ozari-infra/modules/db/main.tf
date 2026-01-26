@@ -124,5 +124,5 @@ resource "aws_cloudwatch_metric_alarm" "rds_connections" {
 resource "aws_ssm_parameter" "database_url" {
   name  = "/ozari/${var.environment}/database_url"
   type  = "SecureString"
-  value = "postgresql://${aws_db_instance.postgres.username}:${var.db_password}@${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}/${aws_db_instance.postgres.db_name}?schema=public&sslmode=require"
+  value = "postgresql://${aws_db_instance.postgres.username}:${var.db_password}@${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}/${aws_db_instance.postgres.db_name}?schema=public&sslmode=require&uselibpqcompat=true"
 }
