@@ -101,7 +101,6 @@ resource "aws_db_instance" "postgres" {
   db_subnet_group_name            = aws_db_subnet_group.rds_subnet_group.name
   vpc_security_group_ids          = [aws_security_group.rds_sg.id]
   enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]
-  ca_cert_identifier              = "rds-ca-rsa2048-g1"
 
   skip_final_snapshot = !local.is_prod
   apply_immediately   = !local.is_prod
@@ -124,5 +123,5 @@ resource "aws_cloudwatch_metric_alarm" "rds_connections" {
 resource "aws_ssm_parameter" "database_url" {
   name  = "/ozari/${var.environment}/database_url"
   type  = "SecureString"
-  value = "postgresql://${aws_db_instance.postgres.username}:${var.db_password}@${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}/${aws_db_instance.postgres.db_name}?schema=public&sslmode=require&uselibpqcompat=true"
+  value = "postgresql://${aws_db_instance.postgres.username}:${var.db_password}@${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}/${aws_db_instance.postgres.db_name}?schema=public"
 }
