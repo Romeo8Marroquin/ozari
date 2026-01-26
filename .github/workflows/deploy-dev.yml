@@ -10,13 +10,6 @@ on:
         type: boolean
         default: true
 
-  # Auto-deploy API on code changes
-  push:
-    branches:
-      - dev
-    paths:
-      - "ozari-api/**"
-
 concurrency:
   group: deploy-dev-${{ github.ref }}
   cancel-in-progress: false
