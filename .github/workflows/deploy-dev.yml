@@ -1,89 +1,22 @@
-name: Deploy Dev Environment
+name: Database Migrations
 
 on:
-  # Manual trigger for infrastructure deployment
-  workflow_dispatch:
-    inputs:
-      deploy_infrastructure:
-        description: "Deploy infrastructure (Network + RDS)"
-        required: true
-        type: boolean
-        default: true
-
-concurrency:
-  group: deploy-dev-${{ github.ref }}
-  cancel-in-progress: false
+  push:
+    branches:
+      - dev
+    paths:
+      - "ozari-api/prisma/schema.prisma"
+      - "ozari-api/prisma/migrations/**"
+      - "ozari-api/prisma.config.ts"
 
 env:
-  AWS_REGION: us-east-1
-  TF_VERSION: 1.12.0
   NODE_VERSION: 22
 
 jobs:
-  deploy-infrastructure:
-    name: Deploy Infrastructure (Network + RDS)
+  migrate:
+    name: Apply Migrations
     runs-on: ubuntu-latest
     environment: dev
-    # Only run on manual trigger (no auto-deploy for infrastructure)
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_infrastructure == 'true'
-
-    defaults:
-      run:
-        working-directory: ozari-infra/stacks/dev
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Terraform Init
-        run: terraform init -backend-config="profile="
-
-      - name: Terraform Plan (with migrations access)
-        run: |
-          terraform plan \
-            -var="deploy_local=false" \
-            -var="environment=dev" \
-            -var="db_password=${{ secrets.DB_PASSWORD }}" \
-            -var="admin_ip=${{ secrets.ADMIN_IP }}" \
-            -var="app_host=${{ secrets.APP_HOST }}" \
-            -var="jwt_secret=${{ secrets.JWT_SECRET }}" \
-            -var="jwt_refresh_secret=${{ secrets.JWT_REFRESH_SECRET }}" \
-            -var="encryption_key=${{ secrets.ENCRYPTION_KEY }}" \
-            -var="api_key=${{ secrets.API_KEY }}" \
-            -target=module.ssm \
-            -out=tfplan
-
-      - name: Terraform Apply (with migrations access)
-        run: terraform apply -auto-approve tfplan
-
-      - name: Wait for RDS to be ready
-        run: sleep 30
-
-      - name: Output RDS endpoint
-        run: terraform output
-
-  deploy-api:
-    name: Deploy API (Serverless)
-    runs-on: ubuntu-latest
-    environment: dev
-    needs: [deploy-infrastructure]
-    # Run after infrastructure job completes (or on push events)
-    if: |
-      always() &&
-      (needs.deploy-infrastructure.result == 'success' ||
-       needs.deploy-infrastructure.result == 'skipped')
 
     defaults:
       run:
@@ -93,106 +26,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: "npm"
-          cache-dependency-path: ozari-api/package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Check if infrastructure exists
-        id: check-infra
-        continue-on-error: true
-        run: |
-          # If infrastructure exists, get database URL
-          if aws ssm get-parameter \
-            --name "/ozari/dev/database_url" \
-            --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
-            DB_URL=$(aws ssm get-parameter \
-              --name "/ozari/dev/database_url" \
-              --with-decryption \
-              --query 'Parameter.Value' \
-              --output text \
-              --region ${{ env.AWS_REGION }})
-            echo "::add-mask::$DB_URL"
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "database_url=$DB_URL" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "database_url=postgresql://dummy:dummy@localhost:5432/dummy?schema=public" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Generate Prisma Client
-        if: steps.check-infra.outputs.exists == 'true'
-        run: npx prisma generate
+      - name: Apply migrations
+        run: npx prisma migrate dev
         env:
-          DATABASE_URL: ${{ steps.check-infra.outputs.database_url }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-      - name: Run Prisma Migrations
-        if: steps.check-infra.outputs.exists == 'true'
-        run: npx prisma migrate deploy
-        env:
-          DATABASE_URL: ${{ steps.check-infra.outputs.database_url }}
-
-      - name: Skip deployment if no infrastructure
-        if: steps.check-infra.outputs.exists != 'true'
+      - name: Summary
         run: |
-          echo "::error::Infrastructure not deployed. Cannot deploy API without VPC/subnets."
-          echo "::error::Run 'Deploy Dev Environment' workflow manually to deploy infrastructure first."
-          exit 1
-
-      - name: Install Serverless Framework
-        if: steps.check-infra.outputs.exists == 'true'
-        run: npm install -g serverless
-
-      - name: Deploy to AWS Lambda
-        if: steps.check-infra.outputs.exists == 'true'
-        run: serverless deploy --stage dev --verbose
-        env:
-          API_ENV: dev
-          LOG_LEVEL: info
-          SERVERLESS_ACCESS_KEY: ${{ secrets.SERVERLESS_ACCESS_KEY }}
-
-  notify:
-    name: Deployment Summary
-    runs-on: ubuntu-latest
-    needs: [deploy-infrastructure, deploy-api]
-    if: always()
-
-    steps:
-      - name: Deployment Summary
-        run: |
-          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Database Migrations" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- Infrastructure: ${{ needs.deploy-infrastructure.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- API: ${{ needs.deploy-api.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Security Lockdown: ${{ needs.lockdown-security.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ "${{ needs.deploy-infrastructure.result }}" == "success" ]; then
-            echo "⚠️ **Infrastructure deployed - RDS costing ~\$12/month**" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "Run 'Destroy Dev Infrastructure' workflow when done testing to save costs." >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ "${{ needs.lockdown-security.result }}" == "success" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "🔒 **RDS security locked down**" >> $GITHUB_STEP_SUMMARY
-            echo "Access limited to: Lambda functions + Admin IP (${{ secrets.ADMIN_IP }})" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ "${{ needs.deploy-api.result }}" == "failure" ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "❌ **API deployment failed**" >> $GITHUB_STEP_SUMMARY
-            echo "If infrastructure not deployed, run 'Deploy Dev Environment' workflow manually." >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "Migrations applied successfully." >> $GITHUB_STEP_SUMMARY
