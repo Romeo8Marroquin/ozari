@@ -57,6 +57,7 @@ jobs:
             -var="jwt_secret=${{ secrets.JWT_SECRET }}" \
             -var="jwt_refresh_secret=${{ secrets.JWT_REFRESH_SECRET }}" \
             -var="encryption_key=${{ secrets.ENCRYPTION_KEY }}" \
+            -var="api_key=${{ secrets.API_KEY }}" \
             -target=module.ssm \
             -out=tfplan
 
