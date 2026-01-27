@@ -1,30 +1,32 @@
 # Node modules
 node_modules/
 
-# Directorios de salida de TypeScript y builds
+# Output directories and files
 dist/
 build/
 out/
 
-# Archivos de logs
+# Log files
 *.log
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 
-# Archivos de entorno (variables sensibles)
+# Env variables
 .env
 .env.*.local
 .secrets-backup.txt
 
-# Archivos generados por el sistema operativo
+# Auto generated files
 .DS_Store
 Thumbs.db
 
-# Archivos de configuración de editores/IDEs
+# Config files on ide and AI
 .vscode/
 .idea/
 .serverless/
+.claude/
+CLAUDE.md
 
 # Archivos de TypeScript
 *.tsbuildinfo
