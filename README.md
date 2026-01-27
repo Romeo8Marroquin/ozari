@@ -14,7 +14,7 @@ A cloud-ready business implementation platform.
 ## Prerequisites
 
 - Node.js >= 22
-- npm
+- pnpm
 
 ## Local Development
 
@@ -23,15 +23,15 @@ A cloud-ready business implementation platform.
 3. Install dependencies:
    ```bash
    cd ozari-api
-   npm install
+   pnpm install
    ```
 4. Generate Prisma client:
    ```bash
-   npx prisma generate
+   pnpm exec prisma generate
    ```
 5. Run the development server:
    ```bash
-   npm run dev
+   pnpm run dev
    ```
 
 ## Database (Neon)
@@ -51,7 +51,7 @@ This project uses [Neon](https://neon.tech) as the PostgreSQL provider.
 
 ```bash
 cd ozari-api
-npx prisma migrate dev
+pnpm exec prisma migrate dev
 ```
 
 ### Production Migrations

@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Router as RouterType } from 'express';
 
 import { verifyJwt } from '@middlewares/authMiddleware';
 import { isGrantedRoles } from '@middlewares/roleMiddleware';
@@ -10,7 +10,7 @@ import {
   validateUpdateProduct,
 } from './products.validators';
 
-const router = Router();
+const router: RouterType = Router();
 
 // region Role Protected Routes
 router.post(

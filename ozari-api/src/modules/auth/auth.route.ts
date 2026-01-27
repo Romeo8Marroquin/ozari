@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Router as RouterType } from 'express';
 
 import { verifyJwt } from '@middlewares/authMiddleware';
 import { isGrantedRoles } from '@middlewares/roleMiddleware';
@@ -6,7 +6,7 @@ import { RolesEnum } from '@models/enums/rolesEnum';
 import { createUser, getAllUsers, refreshToken, signInUser, signOutUser } from './auth.controller';
 import { validateCreateUser, validateSignIn } from './auth.validator';
 
-const router = Router();
+const router: RouterType = Router();
 
 //region Role Protected Routes
 router.get('/all', verifyJwt, isGrantedRoles([RolesEnum.Admin]), getAllUsers);
