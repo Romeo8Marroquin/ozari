@@ -1,76 +1,97 @@
 # Ozari
 
-A cloud-ready business implementation platform.
+Cloud-ready business implementation platform.
+
+## Architecture
+
+This is a monorepo containing:
+
+- **ozari-api** - Backend API (Express.js + Prisma + PostgreSQL)
+- **ozari-app** - Frontend application (React + Vite + TanStack Router)
+- **ozari-infra** - Infrastructure as code (Terraform for AWS)
 
 ## Tech Stack
 
-| Layer       | Technology                     |
-|-------------|--------------------------------|
-| Frontend    | React + Vite + Tailwind        |
-| Backend     | Express.js + Node.js           |
-| Database    | PostgreSQL (Neon)              |
-| ORM         | Prisma                         |
+| Layer          | Technology                    |
+|----------------|-------------------------------|
+| Frontend       | React + Vite + Tailwind       |
+| Backend        | Express.js + Node.js          |
+| Database       | PostgreSQL (Neon)             |
+| ORM            | Prisma                        |
+| Infrastructure | AWS Lambda + Terraform        |
+| Deployment     | Serverless Framework          |
 
 ## Prerequisites
 
 - Node.js >= 22
-- pnpm
+- pnpm >= 10
+- Terraform >= 1.12.0 (for infrastructure)
 
-## Local Development
+## Quick Start
 
-1. Clone the repository
-2. Copy `.env.example` to `.env` and configure your environment variables
-3. Install dependencies:
-   ```bash
-   cd ozari-api
-   pnpm install
-   ```
-4. Generate Prisma client:
-   ```bash
-   pnpm exec prisma generate
-   ```
-5. Run the development server:
-   ```bash
-   pnpm run dev
-   ```
+### Backend
 
-## Database (Neon)
-
-This project uses [Neon](https://neon.tech) as the PostgreSQL provider.
-
-### Setup
-
-1. Create a project at [console.neon.tech](https://console.neon.tech)
-2. Copy the connection string from the dashboard
-3. Set `DATABASE_URL` in your local `.env`:
-   ```
-   DATABASE_URL="postgresql://user:password@ep-xxx.region.aws.neon.tech/dbname?sslmode=require"
-   ```
-
-### Local Migrations
+See [ozari-api/README.md](./ozari-api/README.md) for detailed backend setup, database configuration, and deployment instructions.
 
 ```bash
 cd ozari-api
-pnpm exec prisma migrate dev
+pnpm install
+pnpm exec prisma generate
+pnpm run dev
 ```
 
-### Production Migrations
+### Frontend
 
-Migrations are automatically applied when changes are pushed to the `dev` branch affecting:
-- `ozari-api/prisma/schema.prisma`
-- `ozari-api/prisma/migrations/**`
-- `ozari-api/prisma.config.ts`
-
-## GitHub Secrets
-
-Configure in repository settings (Settings > Secrets and variables > Actions):
-
-| Secret | Description |
-|--------|-------------|
-| `DATABASE_URL` | Neon PostgreSQL connection string |
-
-### Generating Secure Keys
+See [ozari-app/README.md](./ozari-app/README.md) for frontend-specific development guidelines.
 
 ```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+cd ozari-app
+pnpm install
+pnpm run dev
 ```
+
+### Infrastructure
+
+```bash
+cd ozari-infra/stacks/dev
+terraform init
+terraform plan
+terraform apply
+```
+
+## Development Workflow
+
+1. Clone the repository
+2. Configure environment variables (see respective README files)
+3. Install dependencies in both `ozari-api` and `ozari-app`
+4. Start development servers
+5. Access the application at `http://localhost:5173`
+
+## Repository Structure
+
+```
+ozari/
+├── ozari-api/          # Backend API
+│   ├── src/
+│   ├── prisma/
+│   └── README.md       # Backend documentation
+├── ozari-app/          # Frontend application
+│   ├── src/
+│   └── README.md       # Frontend documentation
+├── ozari-infra/        # Infrastructure
+│   ├── modules/
+│   └── stacks/
+├── .github/
+│   └── workflows/      # CI/CD workflows
+└── README.md           # This file
+```
+
+## Documentation
+
+- [Backend API Documentation](./ozari-api/README.md)
+- [Frontend Application Documentation](./ozari-app/README.md)
+- [Development Guide](./CLAUDE.md)
+
+## License
+
+Proprietary

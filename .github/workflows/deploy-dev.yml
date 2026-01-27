@@ -40,7 +40,7 @@ jobs:
           cache-dependency-path: ozari-api/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Apply migrations
         run: pnpm exec prisma migrate deploy
