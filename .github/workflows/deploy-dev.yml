@@ -8,6 +8,7 @@ on:
       - "ozari-api/prisma/schema.prisma"
       - "ozari-api/prisma/migrations/**"
       - "ozari-api/prisma.config.ts"
+      - ".github/workflows/deploy-dev.yml"
 
 env:
   NODE_VERSION: 22
