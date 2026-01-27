@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import i18next from 'i18next';
 
-import { prismaClient } from '@deps/prismaClient';
+import { getPrismaClient } from '@deps/prismaClient';
 import { logger } from '@deps/winstonConfig';
 import { HttpEnum } from '@models/enums/httpEnum';
 import { sendOzariSuccess } from '@models/http/ozariSuccessModel';
@@ -14,6 +14,7 @@ import { sendOzariError } from '@models/http/ozariErrorModel';
 
 export const getAllProducts = async (_: Request, res: Response): Promise<void> => {
   try {
+    const prismaClient = await getPrismaClient();
     const rawProducts = await prismaClient.product.findMany({
       include: {
         businessType: { select: { name: true } },
@@ -89,6 +90,7 @@ export const createProduct = async (req: Request, res: Response): Promise<void> 
     sellPrice,
   } = req.body as CreateProductRequestModel;
   try {
+    const prismaClient = await getPrismaClient();
     const createdProduct = await prismaClient.product.create({
       data: {
         currencyId: currencyId,
@@ -172,6 +174,7 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
     sellPrice,
   } = req.body as UpdateProductRequestModel;
   try {
+    const prismaClient = await getPrismaClient();
     const createdProduct = await prismaClient.product.update({
       data: {
         currencyId: currencyId,
@@ -211,6 +214,7 @@ export const deleteProduct = async (req: Request, res: Response): Promise<void> 
   const { id } = req.query;
   const parsedId = Number(id);
   try {
+    const prismaClient = await getPrismaClient();
     await prismaClient.product.update({
       data: {
         isActive: false,

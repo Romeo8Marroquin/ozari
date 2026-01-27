@@ -3,7 +3,7 @@ import i18next from 'i18next';
 import serverless from 'serverless-http';
 dotenv.config();
 
-import { prismaClient } from '@deps/prismaClient';
+import { getPrismaClient } from '@deps/prismaClient';
 import { logger } from '@deps/winstonConfig';
 import { i18nReady } from '@helpers/createApp';
 import { ProcessesEnum } from '@models/enums/processesEnum';
@@ -13,6 +13,7 @@ let server: ReturnType<typeof app.listen> | undefined;
 
 const shutdownDatabase = async () => {
   logger.info(i18next.t('api.database.logs.dbDisconnection'));
+  const prismaClient = await getPrismaClient();
   await prismaClient.$disconnect();
   server?.close(() => {
     logger.info(i18next.t('api.server.logs.serverClosed'));

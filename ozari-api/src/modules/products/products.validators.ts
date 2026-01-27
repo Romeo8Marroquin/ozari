@@ -2,7 +2,7 @@
 import { NextFunction, Request, Response } from 'express';
 import i18next from 'i18next';
 
-import { prismaClient } from '@deps/prismaClient';
+import { getPrismaClient } from '@deps/prismaClient';
 import { logger } from '@deps/winstonConfig';
 import { descriptionTextRegex, fullNameRegex, genericHttpsUrlRegex } from '@helpers/regex';
 import { isValidEnumValue } from '@helpers/utils';
@@ -49,7 +49,7 @@ export const validateCreateProduct = async (
       );
       return;
     }
-
+    const prismaClient = await getPrismaClient();
     const validCategories = await prismaClient.productCategory.findFirst({
       where: { id: (categoryId as number | undefined) ?? 0, isActive: true },
     });
@@ -288,7 +288,7 @@ export const validateUpdateProduct = async (
       );
       return;
     }
-
+    const prismaClient = await getPrismaClient();
     const validCategories = await prismaClient.productCategory.findFirst({
       where: { id: (categoryId as number | undefined) ?? 0, isActive: true },
     });
@@ -547,7 +547,7 @@ export const validateDeleteProduct = async (
       );
       return;
     }
-
+    const prismaClient = await getPrismaClient();
     const validProduct = await prismaClient.product.findFirst({
       where: { id: Number(id), isActive: true },
     });

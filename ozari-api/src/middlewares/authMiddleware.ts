@@ -2,7 +2,7 @@ import { NextFunction, Response } from 'express';
 import i18next from 'i18next';
 import jwt from 'jsonwebtoken';
 
-import { prismaClient } from '@deps/prismaClient';
+import { getPrismaClient } from '@deps/prismaClient';
 import { logger } from '@deps/winstonConfig';
 import { JwtPayloadModel } from '@models/common/authModel';
 import { CustomRequest } from '@models/common/customRequestModel';
@@ -33,6 +33,7 @@ export const verifyJwt = async (req: CustomRequest, res: Response, next: NextFun
       return;
     }
 
+    const prismaClient = await getPrismaClient();
     const jwtActiveTokens = await prismaClient.jwtSession.findMany({
       where: {
         deviceUuid: jwtPayload.deviceUuid,

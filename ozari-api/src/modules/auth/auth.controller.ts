@@ -9,7 +9,7 @@ import {
   encryptSha256Sync,
   hashPassword,
 } from '@helpers/encryption';
-import { prismaClient } from '@deps/prismaClient';
+import { getPrismaClient } from '@deps/prismaClient';
 import { logger } from '@deps/winstonConfig';
 import { getSecret } from '@helpers/ssmLoader';
 import { JwtPayloadModel } from '@models/common/authModel';
@@ -28,6 +28,7 @@ import {
 
 export const getAllUsers = async (req: Request, res: Response): Promise<void> => {
   try {
+    const prismaClient = await getPrismaClient();
     const users = await prismaClient.user.findMany({
       where: { isActive: true },
     });
@@ -55,6 +56,7 @@ export const getAllUsers = async (req: Request, res: Response): Promise<void> =>
 
 export const createUser = async (req: Request, res: Response): Promise<void> => {
   try {
+    const prismaClient = await getPrismaClient();
     const { email, fullName, password, termsAccepted } = req.body as CreateUserRequestModel;
     const emailSha = encryptSha256Sync(email);
     const existingUser = await prismaClient.user.findUnique({
@@ -89,6 +91,7 @@ export const signInUser = async (req: Request, res: Response): Promise<void> => 
   const { email, password, deviceUuid } = req.body as SignInUserRequestModel;
 
   try {
+    const prismaClient = await getPrismaClient();
     const jwtSecret = await getSecret('jwt_secret');
     const jwtRefreshSecret = await getSecret('jwt_refresh_secret');
     const emailSha = encryptSha256Sync(email);
@@ -183,6 +186,7 @@ export const signInUser = async (req: Request, res: Response): Promise<void> => 
 
 export const refreshToken = async (req: Request, res: Response): Promise<void> => {
   try {
+    const prismaClient = await getPrismaClient();
     const jwtSecret = await getSecret('jwt_secret');
     const jwtRefreshSecret = await getSecret('jwt_refresh_secret');
     const refreshToken = req.cookies['refresh-token'] as string | undefined;
@@ -309,9 +313,10 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
 };
 
 export const signOutUser = async (req: CustomRequest, res: Response): Promise<void> => {
-  const allDevices = (req.query?.allDevices as string | undefined) === 'true';
-  const { deviceUuid, userId, userRole } = req.user as JwtPayloadModel;
   try {
+    const prismaClient = await getPrismaClient();
+    const allDevices = (req.query?.allDevices as string | undefined) === 'true';
+    const { deviceUuid, userId, userRole } = req.user as JwtPayloadModel;
     if (allDevices) {
       await prismaClient.jwtSession.deleteMany({
         where: { isActive: true, userId },

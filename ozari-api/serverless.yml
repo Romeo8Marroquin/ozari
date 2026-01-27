@@ -58,7 +58,6 @@ provider:
     API_ENV: ${env:API_ENV, 'dev'}
     LOG_LEVEL: ${env:LOG_LEVEL, 'info'}
     APP_HOST: ${ssm:/ozari/${self:provider.stage}/app_host}
-    DATABASE_URL: ${env:DATABASE_URL, ssm:/ozari/${self:provider.stage}/database_url}
   tags:
     project: ozari-api
     stage: ${sls:stage}

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:debug": "tsx watch --inspect-brk src/index.ts",
+    "build": "tsc",
     "offline": "serverless offline",
     "deploy": "serverless deploy",
     "deploy:prod": "serverless deploy --stage prod",
