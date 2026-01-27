@@ -55,47 +55,8 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-resource "aws_security_group" "lambda_sg" {
-  name        = "ozari-${var.environment}-lambda-sg"
-  description = "Security group for Lambda functions"
-  vpc_id      = aws_vpc.this.id
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "ozari-${var.environment}-lambda-sg"
-  }
-}
-
-resource "aws_ssm_parameter" "lambda_sg_id" {
-  name  = "/ozari/${var.environment}/lambda_sg_id"
-  type  = "String"
-  value = aws_security_group.lambda_sg.id
-}
-
-resource "aws_ssm_parameter" "lambda_subnet_1" {
-  name  = "/ozari/${var.environment}/lambda_subnet_1"
-  type  = "String"
-  value = aws_subnet.public[0].id
-}
-
-resource "aws_ssm_parameter" "lambda_subnet_2" {
-  name  = "/ozari/${var.environment}/lambda_subnet_2"
-  type  = "String"
-  value = aws_subnet.public[1].id
-}
-
 output "vpc_id" {
   value = aws_vpc.this.id
-}
-
-output "lambda_sg_id" {
-  value = aws_security_group.lambda_sg.id
 }
 
 output "public_subnet_ids" {

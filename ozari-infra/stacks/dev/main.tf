@@ -32,13 +32,12 @@ module "network" {
 }
 
 module "db" {
-  count                         = var.deploy_local ? 0 : 1
-  source                        = "../../modules/db"
-  db_password                   = var.db_password
-  environment                   = var.environment
-  vpc_id                        = module.network[0].vpc_id
-  public_subnet_ids             = module.network[0].public_subnet_ids
-  lambda_sg_id                  = module.network[0].lambda_sg_id
-  admin_ip                      = var.admin_ip
-  allow_migrations_from_github  = var.allow_migrations_from_github
+  count                        = var.deploy_local ? 0 : 1
+  source                       = "../../modules/db"
+  db_password                  = var.db_password
+  environment                  = var.environment
+  vpc_id                       = module.network[0].vpc_id
+  public_subnet_ids            = module.network[0].public_subnet_ids
+  admin_ip                     = var.admin_ip
+  allow_migrations_from_github = var.allow_migrations_from_github
 }

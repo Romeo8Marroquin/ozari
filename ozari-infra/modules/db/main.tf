@@ -9,10 +9,6 @@ variable "admin_ip" {
   description = "IP address of the admin machine"
 }
 
-variable "lambda_sg_id" {
-  type = string
-}
-
 variable "public_subnet_ids" {
   type = list(string)
 }
@@ -38,11 +34,11 @@ resource "aws_security_group" "rds_sg" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description     = "Postgres from Lambda SG"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [var.lambda_sg_id]
+    description = "Postgres from lambda (security from ssl and user/password)"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
@@ -51,18 +47,6 @@ resource "aws_security_group" "rds_sg" {
     to_port     = 5432
     protocol    = "tcp"
     cidr_blocks = [var.admin_ip]
-  }
-
-  # Temporary access for migrations from GitHub Actions
-  dynamic "ingress" {
-    for_each = var.allow_migrations_from_github ? [1] : []
-    content {
-      description = "Temporary: PostgreSQL from GitHub Actions for migrations"
-      from_port   = 5432
-      to_port     = 5432
-      protocol    = "tcp"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
   }
 
   egress {

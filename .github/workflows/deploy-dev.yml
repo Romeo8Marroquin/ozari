@@ -113,28 +113,19 @@ jobs:
         id: check-infra
         continue-on-error: true
         run: |
-          # Check if network infrastructure is deployed (required for Lambda VPC)
+          # If infrastructure exists, get database URL
           if aws ssm get-parameter \
-            --name "/ozari/dev/lambda_subnet_1" \
+            --name "/ozari/dev/database_url" \
             --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-
-            # If infrastructure exists, get database URL
-            if aws ssm get-parameter \
+            DB_URL=$(aws ssm get-parameter \
               --name "/ozari/dev/database_url" \
-              --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
-              DB_URL=$(aws ssm get-parameter \
-                --name "/ozari/dev/database_url" \
-                --with-decryption \
-                --query 'Parameter.Value' \
-                --output text \
-                --region ${{ env.AWS_REGION }})
-              echo "::add-mask::$DB_URL"
-              echo "database_url=$DB_URL" >> $GITHUB_OUTPUT
-            else
-              # Shouldn't happen, but use dummy URL as fallback
-              echo "database_url=postgresql://dummy:dummy@localhost:5432/dummy?schema=public" >> $GITHUB_OUTPUT
-            fi
+              --with-decryption \
+              --query 'Parameter.Value' \
+              --output text \
+              --region ${{ env.AWS_REGION }})
+            echo "::add-mask::$DB_URL"
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "database_url=$DB_URL" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
             echo "database_url=postgresql://dummy:dummy@localhost:5432/dummy?schema=public" >> $GITHUB_OUTPUT
