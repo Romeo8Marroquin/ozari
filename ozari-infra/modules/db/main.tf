@@ -18,12 +18,6 @@ variable "db_password" {
   sensitive = true
 }
 
-variable "allow_migrations_from_github" {
-  type        = bool
-  default     = false
-  description = "Temporarily allow GitHub Actions to access RDS for migrations"
-}
-
 locals {
   is_prod = lower(var.environment) == "prod"
 }

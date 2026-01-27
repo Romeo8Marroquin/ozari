@@ -33,9 +33,3 @@ variable "encryption_key" {
   type      = string
   sensitive = true
 }
-
-variable "allow_migrations_from_github" {
-  type        = bool
-  default     = false
-  description = "Temporarily allow GitHub Actions to access RDS for migrations"
-}
