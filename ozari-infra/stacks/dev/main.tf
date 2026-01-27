@@ -23,6 +23,7 @@ module "ssm" {
   jwt_secret         = var.jwt_secret
   jwt_refresh_secret = var.jwt_refresh_secret
   encryption_key     = var.encryption_key
+  api_key            = var.api_key
 }
 
 module "network" {

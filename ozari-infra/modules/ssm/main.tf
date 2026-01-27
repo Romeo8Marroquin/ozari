@@ -14,6 +14,11 @@ variable "encryption_key" {
   sensitive = true
 }
 
+variable "api_key" {
+  type      = string
+  sensitive = true
+}
+
 resource "aws_ssm_parameter" "app_host" {
   name  = "/ozari/${var.environment}/app_host"
   type  = "String"
@@ -36,4 +41,10 @@ resource "aws_ssm_parameter" "encryption_key" {
   name  = "/ozari/${var.environment}/encryption_key"
   type  = "SecureString"
   value = var.encryption_key
+}
+
+resource "aws_ssm_parameter" "api_key" {
+  name  = "/ozari/${var.environment}/api_key"
+  type  = "SecureString"
+  value = var.api_key
 }

@@ -16,6 +16,7 @@ import { applicationConfig } from '@src/applicationConfig';
 import { sanitizeSensitiveData } from './utils';
 import { UUID } from 'node:crypto';
 import { AppError } from '@models/common/error';
+import { validateApiKey } from '@middlewares/apiKeyMiddleware';
 
 export const asyncLocalStorage = new AsyncLocalStorage<LoggerStorage>();
 
@@ -90,6 +91,7 @@ function configureMiddlewares(app: Express) {
 
   app.use(cookieParser());
   app.use(express.json({ limit: '10kb' }));
+  app.use(validateApiKey);
 
   app.use((req, _res, next) => {
     const requestUuid = (req.headers['x-request-id'] as UUID) ?? crypto.randomUUID();

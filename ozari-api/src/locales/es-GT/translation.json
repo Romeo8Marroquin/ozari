@@ -140,6 +140,15 @@
     }
   },
   "middlewares": {
+    "apiKey": {
+      "defaultMessage": "Acceso denegado.",
+      "internalServerError": "Ha ocurrido un error interno en el servidor.",
+      "logs": {
+        "missingApiKey": "[middleware] API Key no proporcionada en la petición.",
+        "invalidApiKey": "[middleware] API Key inválida.",
+        "internalServerError": "[middleware] Error al validar API Key: {{-error}}."
+      }
+    },
     "disabled": {
       "defaultMessage": "Esta ruta está deshabilitada temporalmente.",
       "logs": {
