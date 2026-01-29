@@ -8,7 +8,7 @@ export const api = axios.create({
   timeout: 10000,
   headers: { 'Content-Type': 'application/json' },
 });
-
+console.log(import.meta.env.VITE_API_URL);
 // Request interceptors
 api.interceptors.request.use((config) => {
   if (config.deviceUuid) {
