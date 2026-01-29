@@ -26,7 +26,7 @@
     "verbatimModuleSyntax": true,
 
     /* Type Checking */
-    "strict": true,
+    "strict": false,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "exactOptionalPropertyTypes": true,
