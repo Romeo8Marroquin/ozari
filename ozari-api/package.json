@@ -12,7 +12,7 @@
     "dev": "tsx watch --env-file=.env src/index.ts",
     "dev:debug": "tsx watch --inspect --env-file=.env src/index.ts",
     "build": "tsc --project tsconfig.build.json && tsc-alias --project tsconfig.build.json && cpx \"src/locales/**/*\" dist/locales",
-    "start": "node --env-file=.env dist/index.js",
+    "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:dev": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
