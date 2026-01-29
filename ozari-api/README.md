@@ -2,6 +2,8 @@
 
 Modern Express TypeScript API for the Ozari platform.
 
+**Status**: ✅ Deployed on Railway (dev environment)
+
 ## Features
 
 - **Express.js** - Fast, unopinionated web framework
@@ -151,14 +153,22 @@ src/
 All requests require `x-api-key` header:
 
 ```bash
+# Local development
 curl -H "x-api-key: your-api-key" http://localhost:3000/api/health/check
+
+# Production
+curl -H "x-api-key: your-api-key" <your-railway-url>/api/health/check
 ```
 
-Protected endpoints require JWT access token:
+Protected endpoints also require JWT access token:
 
 ```bash
-curl -H "Authorization: Bearer <access-token>" http://localhost:3000/api/products/all
+curl -H "x-api-key: your-api-key" \
+     -H "Authorization: Bearer <access-token>" \
+     http://localhost:3000/api/products/all
 ```
+
+**Note**: The frontend automatically includes the API key from the `VITE_API_KEY` environment variable in all requests.
 
 ## Environment Variables
 
@@ -179,27 +189,43 @@ curl -H "Authorization: Bearer <access-token>" http://localhost:3000/api/product
 
 ### Railway
 
+**Status**: ✅ Deployed and operational
+
 The backend is deployed on Railway with automatic deployments from the `dev` branch.
 
 **Configuration**:
+- **Platform**: Railway
 - **Build Command**: `pnpm run build`
 - **Start Command**: `pnpm start`
 - **Auto-Deploy**: Enabled from `dev` branch
-- **Database**: Neon PostgreSQL (external connection)
+- **Database**: Neon PostgreSQL 17 (direct connection via `@prisma/adapter-pg`)
+- **Node Version**: 22
 
-**Environment Variables** (configure in Railway dashboard):
+**Environment Variables** (configured in Railway dashboard):
 ```bash
 NODE_ENV=production
 API_HOST=0.0.0.0
 PORT=${{PORT}}              # Railway provides this automatically
 API_BASE_PATH=/api
-APP_HOST=<your-frontend-url>
-DATABASE_URL=<neon-postgresql-url>
-JWT_SECRET=<your-jwt-secret>
-JWT_REFRESH_SECRET=<your-refresh-secret>
-ENCRYPTION_KEY=<your-encryption-key>
-API_KEY=<your-api-key>
+APP_HOST=<cloudflare-frontend-url>
+DATABASE_URL=<neon-postgresql-connection-string>
+JWT_SECRET=<generated-secret>
+JWT_REFRESH_SECRET=<generated-secret>
+ENCRYPTION_KEY=<generated-secret>
+API_KEY=<generated-secret>
 LOG_LEVEL=info
+```
+
+**Generate Secrets** (for local development):
+```bash
+# JWT secrets (use different values for each)
+openssl rand -hex 32
+
+# Encryption key (32 bytes)
+openssl rand -hex 32
+
+# API key
+openssl rand -hex 32
 ```
 
 **Setup Steps**:
@@ -212,7 +238,15 @@ LOG_LEVEL=info
 **Database Migrations**:
 - Migrations are applied via GitHub Actions on push to `dev` branch
 - See `.github/workflows/deploy-dev.yml` for configuration
-- Migrations run before Railway deployment completes
+- Workflow triggers on changes to:
+  - `ozari-api/prisma/schema.prisma`
+  - `ozari-api/prisma/migrations/**`
+  - `ozari-api/prisma.config.ts`
+
+**Health Check**:
+```bash
+curl <your-railway-url>/api/health/check
+```
 
 ### Docker (Optional)
 

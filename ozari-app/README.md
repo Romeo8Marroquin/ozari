@@ -2,6 +2,8 @@
 
 Modern React frontend application for the Ozari platform.
 
+**Status**: ✅ Deployed on Cloudflare Pages (dev environment)
+
 ## Features
 
 - **React 19** - Latest React with concurrent features
@@ -41,9 +43,21 @@ cp .env.example .env
 Configure environment variables:
 
 ```bash
-# Backend API URL (leave empty to use Vite proxy)
+# Backend API URL (leave empty to use Vite proxy in development)
 VITE_API_URL=
+
+# API Key for backend authentication (must match backend's API_KEY)
+VITE_API_KEY=
 ```
+
+**Development**: Leave `VITE_API_URL` empty to use Vite's proxy configuration.
+**Production**: Set to your Railway backend URL.
+
+**Security Warning**: Keep `VITE_API_KEY` secure:
+- Never commit `.env` files to version control
+- Use environment variables in deployment platforms
+- Rotate keys if exposed
+- The API key is validated server-side but should remain private
 
 ### 3. Development
 
@@ -152,9 +166,14 @@ API calls are handled using **Axios** and **TanStack Query**.
 ### API Client
 
 Located in `src/api/client.ts`, the client is configured with:
-- Base URL from `VITE_API_URL` or defaults to `/api` (proxied in dev)
-- Request/response interceptors
-- Error handling
+- **Base URL**:
+  - Development: `/api` (proxied by Vite to `http://localhost:3000`)
+  - Production: `${VITE_API_URL}/api` (direct to Railway backend)
+- **Authentication**: Automatically injects JWT token from localStorage
+- **API Key**: Automatically injects `x-api-key` header from `VITE_API_KEY`
+- **Device Tracking**: Sends `device-uuid` header for session management
+- **Public Endpoints**: Skip authentication when `config.public` is true
+- **Request/Response Interceptors**: Error handling and token refresh
 
 ### Using TanStack Query
 
@@ -288,23 +307,53 @@ The following path aliases are configured:
 
 ### Cloudflare Pages
 
-The frontend will be deployed on Cloudflare Pages with automatic deployments from the `dev` branch.
+**Status**: ✅ Deployed and operational
+
+The frontend is deployed on Cloudflare Pages with automatic deployments from the `dev` branch.
 
 **Configuration**:
+- **Platform**: Cloudflare Pages
 - **Build Command**: `pnpm run build`
 - **Build Output Directory**: `dist`
 - **Node Version**: 22
+- **Auto-Deploy**: Enabled from `dev` branch
 
-**Environment Variables**:
+**Environment Variables** (configured in Cloudflare Pages):
 ```bash
 VITE_API_URL=<your-railway-backend-url>
+VITE_API_KEY=<matches-backend-api-key>
+```
+
+**Security Configuration**:
+
+The app includes Content Security Policy (CSP) configured in `index.html`:
+- Whitelists Railway backend in `connect-src` directive
+- Enforces HTTPS for all connections
+- Restricts resource loading to trusted sources
+- Prevents XSS and injection attacks
+
+**Important**: Update the CSP in `index.html` to match your Railway backend URL:
+```html
+<meta
+  http-equiv="Content-Security-Policy"
+  content="
+    ...
+    connect-src 'self' https://your-railway-backend-url;
+    ...
+  "
+/>
 ```
 
 **Setup Steps**:
 1. Connect repository to Cloudflare Pages
-2. Configure build settings
-3. Set environment variables
+2. Configure build settings:
+   - Framework preset: Vite
+   - Build command: `pnpm run build`
+   - Build output: `dist`
+   - Root directory: `ozari-app`
+3. Set environment variables (see above)
 4. Enable auto-deploy from `dev` branch
+
 
 ## Technologies
 
