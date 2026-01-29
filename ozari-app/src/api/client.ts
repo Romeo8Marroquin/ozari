@@ -20,5 +20,8 @@ api.interceptors.request.use((config) => {
   }
   const token = Storage.get<string>(StorageKeys.TOKEN);
   if (token) config.headers.Authorization = `Bearer ${token}`;
+
+  const apiKey = import.meta.env.VITE_API_KEY;
+  if (apiKey) config.headers['x-api-key'] = apiKey;
   return config;
 });
