@@ -2,13 +2,13 @@ import { StorageKeys } from '@constants/StorageKeys';
 import { getOrCreateDeviceUuid } from '@utils/deviceUuid';
 import { Storage } from '@utils/storage';
 import axios from 'axios';
+
 export const api = axios.create({
-  baseURL:
-    import.meta.env.VITE_APP_ENV === 'development' ? '/api' : `${import.meta.env.VITE_API_URL}/api`,
+  baseURL: import.meta.env.DEV ? '/api' : `${import.meta.env.VITE_API_URL}/api`,
   timeout: 10000,
   headers: { 'Content-Type': 'application/json' },
 });
-console.log(import.meta.env.VITE_API_URL);
+
 // Request interceptors
 api.interceptors.request.use((config) => {
   if (config.deviceUuid) {
