@@ -13,6 +13,7 @@
     "dev:debug": "tsx watch --inspect --env-file=.env src/index.ts",
     "build": "tsc --project tsconfig.build.json",
     "start": "node --env-file=.env dist/index.js",
+    "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
