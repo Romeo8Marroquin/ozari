@@ -13,7 +13,7 @@ import { appConfig } from "./config/app.js";
 import type { AppError } from "./models/common/error.js";
 
 import authRouter from "./modules/auth/auth.route.js";
-import productsRouter from "./modules/products/products.route.js";
+// import productsRouter from "./modules/products/products.route.js";
 import healthRouter from "./modules/health/health.route.js";
 
 export function createApp(): Express {
@@ -124,7 +124,7 @@ function configureRoutes(app: Express): void {
   // Module routes
   apiRouter.use("/health", healthRouter);
   apiRouter.use("/auth", authRouter);
-  apiRouter.use("/products", productsRouter);
+  // apiRouter.use("/products", productsRouter);
 
   // Mount API router at base path
   app.use(appConfig.basePath, apiRouter);
