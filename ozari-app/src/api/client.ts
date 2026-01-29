@@ -3,7 +3,8 @@ import { getOrCreateDeviceUuid } from '@utils/deviceUuid';
 import { Storage } from '@utils/storage';
 import axios from 'axios';
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_APP_ENV === 'dev' ? '/api' : `${import.meta.env.VITE_API_URL}/api`,
+  baseURL:
+    import.meta.env.VITE_APP_ENV === 'development' ? '/api' : `${import.meta.env.VITE_API_URL}/api`,
   timeout: 10000,
   headers: { 'Content-Type': 'application/json' },
 });

@@ -1,3 +1,5 @@
+/* eslint-disable */
+
 // @ts-nocheck
 
 // noinspection JSUnusedGlobalSymbols
@@ -6,90 +8,90 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRouteImport } from './routes/__root';
-import { Route as SesionRouteImport } from './routes/sesion';
-import { Route as PanelRouteImport } from './routes/panel';
-import { Route as SplatRouteImport } from './routes/$';
-import { Route as IndexRouteImport } from './routes/index';
-import { Route as SesionRegistroRouteImport } from './routes/sesion/registro';
-import { Route as SesionInicioRouteImport } from './routes/sesion/inicio';
-import { Route as SesionSplatRouteImport } from './routes/sesion/$';
-import { Route as PanelProductosRouteImport } from './routes/panel/productos';
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as SesionRouteImport } from './routes/sesion'
+import { Route as PanelRouteImport } from './routes/panel'
+import { Route as SplatRouteImport } from './routes/$'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as SesionRegistroRouteImport } from './routes/sesion/registro'
+import { Route as SesionInicioRouteImport } from './routes/sesion/inicio'
+import { Route as SesionSplatRouteImport } from './routes/sesion/$'
+import { Route as PanelProductosRouteImport } from './routes/panel/productos'
 
 const SesionRoute = SesionRouteImport.update({
   id: '/sesion',
   path: '/sesion',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const PanelRoute = PanelRouteImport.update({
   id: '/panel',
   path: '/panel',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
   path: '/$',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
-} as any);
+} as any)
 const SesionRegistroRoute = SesionRegistroRouteImport.update({
   id: '/registro',
   path: '/registro',
   getParentRoute: () => SesionRoute,
-} as any);
+} as any)
 const SesionInicioRoute = SesionInicioRouteImport.update({
   id: '/inicio',
   path: '/inicio',
   getParentRoute: () => SesionRoute,
-} as any);
+} as any)
 const SesionSplatRoute = SesionSplatRouteImport.update({
   id: '/$',
   path: '/$',
   getParentRoute: () => SesionRoute,
-} as any);
+} as any)
 const PanelProductosRoute = PanelProductosRouteImport.update({
   id: '/productos',
   path: '/productos',
   getParentRoute: () => PanelRoute,
-} as any);
+} as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute;
-  '/$': typeof SplatRoute;
-  '/panel': typeof PanelRouteWithChildren;
-  '/sesion': typeof SesionRouteWithChildren;
-  '/panel/productos': typeof PanelProductosRoute;
-  '/sesion/$': typeof SesionSplatRoute;
-  '/sesion/inicio': typeof SesionInicioRoute;
-  '/sesion/registro': typeof SesionRegistroRoute;
+  '/': typeof IndexRoute
+  '/$': typeof SplatRoute
+  '/panel': typeof PanelRouteWithChildren
+  '/sesion': typeof SesionRouteWithChildren
+  '/panel/productos': typeof PanelProductosRoute
+  '/sesion/$': typeof SesionSplatRoute
+  '/sesion/inicio': typeof SesionInicioRoute
+  '/sesion/registro': typeof SesionRegistroRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute;
-  '/$': typeof SplatRoute;
-  '/panel': typeof PanelRouteWithChildren;
-  '/sesion': typeof SesionRouteWithChildren;
-  '/panel/productos': typeof PanelProductosRoute;
-  '/sesion/$': typeof SesionSplatRoute;
-  '/sesion/inicio': typeof SesionInicioRoute;
-  '/sesion/registro': typeof SesionRegistroRoute;
+  '/': typeof IndexRoute
+  '/$': typeof SplatRoute
+  '/panel': typeof PanelRouteWithChildren
+  '/sesion': typeof SesionRouteWithChildren
+  '/panel/productos': typeof PanelProductosRoute
+  '/sesion/$': typeof SesionSplatRoute
+  '/sesion/inicio': typeof SesionInicioRoute
+  '/sesion/registro': typeof SesionRegistroRoute
 }
 export interface FileRoutesById {
-  __root__: typeof rootRouteImport;
-  '/': typeof IndexRoute;
-  '/$': typeof SplatRoute;
-  '/panel': typeof PanelRouteWithChildren;
-  '/sesion': typeof SesionRouteWithChildren;
-  '/panel/productos': typeof PanelProductosRoute;
-  '/sesion/$': typeof SesionSplatRoute;
-  '/sesion/inicio': typeof SesionInicioRoute;
-  '/sesion/registro': typeof SesionRegistroRoute;
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/$': typeof SplatRoute
+  '/panel': typeof PanelRouteWithChildren
+  '/sesion': typeof SesionRouteWithChildren
+  '/panel/productos': typeof PanelProductosRoute
+  '/sesion/$': typeof SesionSplatRoute
+  '/sesion/inicio': typeof SesionInicioRoute
+  '/sesion/registro': typeof SesionRegistroRoute
 }
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath;
+  fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/$'
@@ -98,8 +100,8 @@ export interface FileRouteTypes {
     | '/panel/productos'
     | '/sesion/$'
     | '/sesion/inicio'
-    | '/sesion/registro';
-  fileRoutesByTo: FileRoutesByTo;
+    | '/sesion/registro'
+  fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/$'
@@ -108,7 +110,7 @@ export interface FileRouteTypes {
     | '/panel/productos'
     | '/sesion/$'
     | '/sesion/inicio'
-    | '/sesion/registro';
+    | '/sesion/registro'
   id:
     | '__root__'
     | '/'
@@ -118,107 +120,108 @@ export interface FileRouteTypes {
     | '/panel/productos'
     | '/sesion/$'
     | '/sesion/inicio'
-    | '/sesion/registro';
-  fileRoutesById: FileRoutesById;
+    | '/sesion/registro'
+  fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute;
-  SplatRoute: typeof SplatRoute;
-  PanelRoute: typeof PanelRouteWithChildren;
-  SesionRoute: typeof SesionRouteWithChildren;
+  IndexRoute: typeof IndexRoute
+  SplatRoute: typeof SplatRoute
+  PanelRoute: typeof PanelRouteWithChildren
+  SesionRoute: typeof SesionRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
     '/sesion': {
-      id: '/sesion';
-      path: '/sesion';
-      fullPath: '/sesion';
-      preLoaderRoute: typeof SesionRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+      id: '/sesion'
+      path: '/sesion'
+      fullPath: '/sesion'
+      preLoaderRoute: typeof SesionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/panel': {
-      id: '/panel';
-      path: '/panel';
-      fullPath: '/panel';
-      preLoaderRoute: typeof PanelRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+      id: '/panel'
+      path: '/panel'
+      fullPath: '/panel'
+      preLoaderRoute: typeof PanelRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$': {
-      id: '/$';
-      path: '/$';
-      fullPath: '/$';
-      preLoaderRoute: typeof SplatRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+      id: '/$'
+      path: '/$'
+      fullPath: '/$'
+      preLoaderRoute: typeof SplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
-      id: '/';
-      path: '/';
-      fullPath: '/';
-      preLoaderRoute: typeof IndexRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sesion/registro': {
-      id: '/sesion/registro';
-      path: '/registro';
-      fullPath: '/sesion/registro';
-      preLoaderRoute: typeof SesionRegistroRouteImport;
-      parentRoute: typeof SesionRoute;
-    };
+      id: '/sesion/registro'
+      path: '/registro'
+      fullPath: '/sesion/registro'
+      preLoaderRoute: typeof SesionRegistroRouteImport
+      parentRoute: typeof SesionRoute
+    }
     '/sesion/inicio': {
-      id: '/sesion/inicio';
-      path: '/inicio';
-      fullPath: '/sesion/inicio';
-      preLoaderRoute: typeof SesionInicioRouteImport;
-      parentRoute: typeof SesionRoute;
-    };
+      id: '/sesion/inicio'
+      path: '/inicio'
+      fullPath: '/sesion/inicio'
+      preLoaderRoute: typeof SesionInicioRouteImport
+      parentRoute: typeof SesionRoute
+    }
     '/sesion/$': {
-      id: '/sesion/$';
-      path: '/$';
-      fullPath: '/sesion/$';
-      preLoaderRoute: typeof SesionSplatRouteImport;
-      parentRoute: typeof SesionRoute;
-    };
+      id: '/sesion/$'
+      path: '/$'
+      fullPath: '/sesion/$'
+      preLoaderRoute: typeof SesionSplatRouteImport
+      parentRoute: typeof SesionRoute
+    }
     '/panel/productos': {
-      id: '/panel/productos';
-      path: '/productos';
-      fullPath: '/panel/productos';
-      preLoaderRoute: typeof PanelProductosRouteImport;
-      parentRoute: typeof PanelRoute;
-    };
+      id: '/panel/productos'
+      path: '/productos'
+      fullPath: '/panel/productos'
+      preLoaderRoute: typeof PanelProductosRouteImport
+      parentRoute: typeof PanelRoute
+    }
   }
 }
 
 interface PanelRouteChildren {
-  PanelProductosRoute: typeof PanelProductosRoute;
+  PanelProductosRoute: typeof PanelProductosRoute
 }
 
 const PanelRouteChildren: PanelRouteChildren = {
   PanelProductosRoute: PanelProductosRoute,
-};
+}
 
-const PanelRouteWithChildren = PanelRoute._addFileChildren(PanelRouteChildren);
+const PanelRouteWithChildren = PanelRoute._addFileChildren(PanelRouteChildren)
 
 interface SesionRouteChildren {
-  SesionSplatRoute: typeof SesionSplatRoute;
-  SesionInicioRoute: typeof SesionInicioRoute;
-  SesionRegistroRoute: typeof SesionRegistroRoute;
+  SesionSplatRoute: typeof SesionSplatRoute
+  SesionInicioRoute: typeof SesionInicioRoute
+  SesionRegistroRoute: typeof SesionRegistroRoute
 }
 
 const SesionRouteChildren: SesionRouteChildren = {
   SesionSplatRoute: SesionSplatRoute,
   SesionInicioRoute: SesionInicioRoute,
   SesionRegistroRoute: SesionRegistroRoute,
-};
+}
 
-const SesionRouteWithChildren = SesionRoute._addFileChildren(SesionRouteChildren);
+const SesionRouteWithChildren =
+  SesionRoute._addFileChildren(SesionRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SplatRoute: SplatRoute,
   PanelRoute: PanelRouteWithChildren,
   SesionRoute: SesionRouteWithChildren,
-};
+}
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>();
+  ._addFileTypes<FileRouteTypes>()

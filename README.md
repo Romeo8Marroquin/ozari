@@ -8,7 +8,6 @@ This is a monorepo containing:
 
 - **ozari-api** - Backend API (Express.js + Prisma + PostgreSQL)
 - **ozari-app** - Frontend application (React + Vite + TanStack Router)
-- **ozari-infra** - Infrastructure as code (Terraform for AWS)
 
 ## Tech Stack
 
@@ -18,14 +17,12 @@ This is a monorepo containing:
 | Backend        | Express.js + Node.js          |
 | Database       | PostgreSQL (Neon)             |
 | ORM            | Prisma                        |
-| Infrastructure | AWS Lambda + Terraform        |
-| Deployment     | Serverless Framework          |
+| Deployment     | Railway (Backend) + Cloudflare (Frontend) |
 
 ## Prerequisites
 
 - Node.js >= 22
 - pnpm >= 10
-- Terraform >= 1.12.0 (for infrastructure)
 
 ## Quick Start
 
@@ -50,14 +47,6 @@ pnpm install
 pnpm run dev
 ```
 
-### Infrastructure
-
-```bash
-cd ozari-infra/stacks/dev
-terraform init
-terraform plan
-terraform apply
-```
 
 ## Development Workflow
 
@@ -78,9 +67,6 @@ ozari/
 ├── ozari-app/          # Frontend application
 │   ├── src/
 │   └── README.md       # Frontend documentation
-├── ozari-infra/        # Infrastructure
-│   ├── modules/
-│   └── stacks/
 ├── .github/
 │   └── workflows/      # CI/CD workflows
 └── README.md           # This file

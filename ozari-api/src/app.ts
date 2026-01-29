@@ -4,6 +4,8 @@ import helmet from "helmet";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import i18next from "i18next";
+import rateLimit from "express-rate-limit";
+
 import { i18nmiddleware } from "./config/i18n.js";
 import { logger } from "./config/logger.js";
 import { asyncLocalStorage, type RequestContext } from "./config/context.js";
@@ -54,6 +56,14 @@ function configureMiddlewares(app: Express): void {
       },
     }),
   );
+  // Limiter
+  const globalLimiter = rateLimit({
+    windowMs: 60_000, // 1 min
+    limit: 15, // 120 req/min per IP
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+  });
+  app.use(globalLimiter);
 
   const allowedOrigins = new Set([frontendDomain]);
   app.use(

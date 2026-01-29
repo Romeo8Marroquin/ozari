@@ -179,14 +179,42 @@ curl -H "Authorization: Bearer <access-token>" http://localhost:3000/api/product
 
 ### Railway
 
-1. Create new project in Railway
-2. Add PostgreSQL database
-3. Set environment variables
-4. Deploy from GitHub:
-   - Build command: `pnpm run build`
-   - Start command: `pnpm start`
+The backend is deployed on Railway with automatic deployments from the `dev` branch.
 
-### Docker
+**Configuration**:
+- **Build Command**: `pnpm run build`
+- **Start Command**: `pnpm start`
+- **Auto-Deploy**: Enabled from `dev` branch
+- **Database**: Neon PostgreSQL (external connection)
+
+**Environment Variables** (configure in Railway dashboard):
+```bash
+NODE_ENV=production
+API_HOST=0.0.0.0
+PORT=${{PORT}}              # Railway provides this automatically
+API_BASE_PATH=/api
+APP_HOST=<your-frontend-url>
+DATABASE_URL=<neon-postgresql-url>
+JWT_SECRET=<your-jwt-secret>
+JWT_REFRESH_SECRET=<your-refresh-secret>
+ENCRYPTION_KEY=<your-encryption-key>
+API_KEY=<your-api-key>
+LOG_LEVEL=info
+```
+
+**Setup Steps**:
+1. Create new project in Railway
+2. Connect GitHub repository
+3. Configure environment variables above
+4. Enable auto-deploy from `dev` branch
+5. Railway will automatically build and deploy on push
+
+**Database Migrations**:
+- Migrations are applied via GitHub Actions on push to `dev` branch
+- See `.github/workflows/deploy-dev.yml` for configuration
+- Migrations run before Railway deployment completes
+
+### Docker (Optional)
 
 ```dockerfile
 FROM node:22-alpine
@@ -207,8 +235,8 @@ CMD ["pnpm", "start"]
 | `pnpm run build` | Build TypeScript to dist/ |
 | `pnpm start` | Start production server |
 | `pnpm run prisma:generate` | Generate Prisma Client |
-| `pnpm run prisma:migrate` | Run database migrations |
-| `pnpm run prisma:migrate:deploy` | Deploy migrations (production) |
+| `pnpm run prisma:dev` | Run database migrations (development) |
+| `pnpm run prisma:deploy` | Deploy migrations (production) |
 | `pnpm run prisma:studio` | Open Prisma Studio |
 | `pnpm run lint` | Run ESLint |
 | `pnpm run lint:fix` | Fix ESLint errors |
