@@ -15,13 +15,14 @@ api.interceptors.request.use((config) => {
     const deviceUuid = getOrCreateDeviceUuid();
     config.headers['device-uuid'] = deviceUuid;
   }
+  const apiKey = import.meta.env.VITE_API_KEY;
+  if (apiKey) config.headers['x-api-key'] = apiKey;
+
   if (config.public) {
     return config;
   }
   const token = Storage.get<string>(StorageKeys.TOKEN);
   if (token) config.headers.Authorization = `Bearer ${token}`;
 
-  const apiKey = import.meta.env.VITE_API_KEY;
-  if (apiKey) config.headers['x-api-key'] = apiKey;
   return config;
 });
