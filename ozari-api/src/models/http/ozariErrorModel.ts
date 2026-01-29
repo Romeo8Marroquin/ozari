@@ -1,7 +1,7 @@
-import { Response } from 'express';
+import type { Response } from "express";
 
-import { HttpEnum } from '../enums/httpEnum.js';
-import { SubCodeErrorEnum } from '../enums/subCodeErrorEnum.js';
+import { HttpEnum } from "../enums/httpEnum.js";
+import { SubCodeErrorEnum } from "../enums/subCodeErrorEnum.js";
 
 export interface OzariHttpErrorModel {
   message: string;

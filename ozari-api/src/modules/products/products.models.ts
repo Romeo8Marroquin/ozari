@@ -1,4 +1,4 @@
-import { CurrencyModel } from '@models/common/currencyModel';
+import type { CurrencyModel } from "@/models/common/currencyModel.js";
 
 export interface CreateProductDetailRequestModel {
   detail: string;
@@ -9,13 +9,13 @@ export interface CreateProductRequestModel {
   businessTypeId: number;
   categoryId: number;
   currencyId: number;
-  description?: string;
-  imageUrl?: string;
+  description: string | undefined;
+  imageUrl: string | undefined;
   name: string;
   productDetails: CreateProductDetailRequestModel[];
   quantity: number;
-  rentPrice?: number;
-  sellPrice?: number;
+  rentPrice: number | undefined;
+  sellPrice: number | undefined;
 }
 
 export interface UpdateProductDetailRequestModel extends CreateProductDetailRequestModel {
@@ -37,12 +37,12 @@ export interface BaseProductResponseModel {
   businessType: string;
   category: string;
   currency: CurrencyModel;
-  description?: string;
+  description: string | undefined;
   details: BaseProductDetailsResponseModel[];
   id: number;
-  imageUrl?: string;
+  imageUrl: string | undefined;
   name: string;
   quantity: number;
-  rentPrice?: number;
-  sellPrice?: number;
+  rentPrice: number | undefined;
+  sellPrice: number | undefined;
 }

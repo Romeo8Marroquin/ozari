@@ -1,25 +1,29 @@
-import { Request, Response } from 'express';
-import i18next from 'i18next';
-
-import { getPrismaClient } from '@deps/prismaClient';
-import { logger } from '@deps/winstonConfig';
-import { HttpEnum } from '@models/enums/httpEnum';
-import { sendOzariSuccess } from '@models/http/ozariSuccessModel';
+import type { Request, Response } from "express";
+import { i18next } from "@/config/i18n.js";
+import { getPrismaClient } from "@/services/prisma.service.js";
+import { logger } from "@/config/logger.js";
+import { HttpEnum } from "@models/enums/httpEnum.js";
+import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
+import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import {
-  BaseProductResponseModel,
-  CreateProductRequestModel,
-  UpdateProductRequestModel,
-} from './products.models';
-import { sendOzariError } from '@models/http/ozariErrorModel';
+  type BaseProductResponseModel,
+  type CreateProductRequestModel,
+  type UpdateProductRequestModel,
+} from "./products.models.js";
 
-export const getAllProducts = async (_: Request, res: Response): Promise<void> => {
+export const getAllProducts = async (
+  _: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const prismaClient = await getPrismaClient();
     const rawProducts = await prismaClient.product.findMany({
       include: {
         businessType: { select: { name: true } },
         category: { select: { name: true } },
-        currency: { select: { id: true, iso4217Code: true, name: true, symbol: true } },
+        currency: {
+          select: { id: true, iso4217Code: true, name: true, symbol: true },
+        },
         productDetails: {
           select: {
             detail: true,
@@ -37,46 +41,58 @@ export const getAllProducts = async (_: Request, res: Response): Promise<void> =
       },
     });
 
-    const products: BaseProductResponseModel[] = rawProducts.map((product) => ({
-      businessType: product.businessType.name,
-      category: product.category.name,
-      currency: {
-        id: product.currency.id,
-        iso4217Code: product.currency.iso4217Code,
-        name: product.currency.name,
-        symbol: product.currency.symbol,
-      },
-      description: product.description ?? undefined,
-      details: product.productDetails.map((detail) => ({
-        detail: detail.detail,
-        detailType: detail.detailType.name,
-        id: detail.id,
-      })),
-      id: product.id,
-      imageUrl: product.imageUrl ?? undefined,
-      name: product.name,
-      quantity: product.quantity,
-      rentPrice: product.rentPrice ? Number(product.rentPrice) : undefined,
-      sellPrice: product.sellPrice ? Number(product.sellPrice) : undefined,
-    }));
-
     logger.info(
-      i18next.t('products.getAllProducts.logs.productsFetched', { count: rawProducts.length }),
+      i18next.t("products.getAllProducts.logs.productsFetched", {
+        count: rawProducts.length,
+      }),
     );
-    sendOzariSuccess(res, HttpEnum.OK, i18next.t('products.getAllProducts.productsFetched'), {
-      products,
-    });
+    sendOzariSuccess(
+      res,
+      HttpEnum.OK,
+      i18next.t("products.getAllProducts.productsFetched"),
+      {
+        products: rawProducts.map((product) => ({
+          businessType: product.businessType.name,
+          category: product.category.name,
+          currency: {
+            id: product.currency.id,
+            iso4217Code: product.currency.iso4217Code,
+            name: product.currency.name,
+            symbol: product.currency.symbol,
+          },
+          description: product.description ?? undefined,
+          details: product.productDetails.map((detail) => ({
+            detail: detail.detail,
+            detailType: detail.detailType.name,
+            id: detail.id,
+          })),
+          id: product.id,
+          imageUrl: product.imageUrl ?? undefined,
+          name: product.name,
+          quantity: product.quantity,
+          rentPrice: product.rentPrice ? Number(product.rentPrice) : undefined,
+          sellPrice: product.sellPrice ? Number(product.sellPrice) : undefined,
+        })),
+      },
+    );
   } catch (error) {
-    logger.error(i18next.t('products.getAllProducts.logs.errorFetchingProducts', { error }));
+    logger.error(
+      i18next.t("products.getAllProducts.logs.errorFetchingProducts", {
+        error,
+      }),
+    );
     sendOzariError(
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
-      i18next.t('products.getAllProducts.errorFetchingProducts'),
+      i18next.t("products.getAllProducts.errorFetchingProducts"),
     );
   }
 };
 
-export const createProduct = async (req: Request, res: Response): Promise<void> => {
+export const createProduct = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   const {
     businessTypeId,
     categoryId,
@@ -112,7 +128,9 @@ export const createProduct = async (req: Request, res: Response): Promise<void> 
       include: {
         businessType: { select: { name: true } },
         category: { select: { name: true } },
-        currency: { select: { id: true, iso4217Code: true, name: true, symbol: true } },
+        currency: {
+          select: { id: true, iso4217Code: true, name: true, symbol: true },
+        },
         productDetails: {
           select: {
             detail: true,
@@ -142,24 +160,42 @@ export const createProduct = async (req: Request, res: Response): Promise<void> 
       imageUrl: createdProduct.imageUrl ?? undefined,
       name: createdProduct.name,
       quantity: createdProduct.quantity,
-      rentPrice: createdProduct.rentPrice ? Number(createdProduct.rentPrice) : undefined,
-      sellPrice: createdProduct.sellPrice ? Number(createdProduct.sellPrice) : undefined,
+      rentPrice: createdProduct.rentPrice
+        ? Number(createdProduct.rentPrice)
+        : undefined,
+      sellPrice: createdProduct.sellPrice
+        ? Number(createdProduct.sellPrice)
+        : undefined,
     };
-    logger.info(i18next.t('products.createProduct.logs.productCreated', { id: createdProduct.id }));
-    sendOzariSuccess(res, HttpEnum.CREATED, i18next.t('products.createProduct.productCreated'), {
-      product: responseProduct,
-    });
+    logger.info(
+      i18next.t("products.createProduct.logs.productCreated", {
+        id: createdProduct.id,
+      }),
+    );
+    sendOzariSuccess(
+      res,
+      HttpEnum.CREATED,
+      i18next.t("products.createProduct.productCreated"),
+      {
+        product: responseProduct,
+      },
+    );
   } catch (error) {
-    logger.error(i18next.t('products.createProduct.logs.errorCreatingProduct', { error }));
+    logger.error(
+      i18next.t("products.createProduct.logs.errorCreatingProduct", { error }),
+    );
     sendOzariError(
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
-      i18next.t('products.createProduct.errorCreatingProduct'),
+      i18next.t("products.createProduct.errorCreatingProduct"),
     );
   }
 };
 
-export const updateProduct = async (req: Request, res: Response): Promise<void> => {
+export const updateProduct = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   const {
     businessTypeId,
     categoryId,
@@ -198,19 +234,32 @@ export const updateProduct = async (req: Request, res: Response): Promise<void> 
       },
       where: { id },
     });
-    logger.info(i18next.t('products.updateProduct.logs.productUpdated', { id: createdProduct.id }));
-    sendOzariSuccess(res, HttpEnum.OK, i18next.t('products.updateProduct.productUpdated'));
+    logger.info(
+      i18next.t("products.updateProduct.logs.productUpdated", {
+        id: createdProduct.id,
+      }),
+    );
+    sendOzariSuccess(
+      res,
+      HttpEnum.OK,
+      i18next.t("products.updateProduct.productUpdated"),
+    );
   } catch (error) {
-    logger.error(i18next.t('products.updateProduct.logs.genericError', { error }));
+    logger.error(
+      i18next.t("products.updateProduct.logs.genericError", { error }),
+    );
     sendOzariError(
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
-      i18next.t('products.updateProduct.genericError'),
+      i18next.t("products.updateProduct.genericError"),
     );
   }
 };
 
-export const deleteProduct = async (req: Request, res: Response): Promise<void> => {
+export const deleteProduct = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   const { id } = req.query;
   const parsedId = Number(id);
   try {
@@ -227,14 +276,22 @@ export const deleteProduct = async (req: Request, res: Response): Promise<void> 
       },
       where: { id: parsedId },
     });
-    logger.info(i18next.t('products.deleteProduct.logs.productDeleted', { id }));
-    sendOzariSuccess(res, HttpEnum.OK, i18next.t('products.deleteProduct.productDeleted'));
+    logger.info(
+      i18next.t("products.deleteProduct.logs.productDeleted", { id }),
+    );
+    sendOzariSuccess(
+      res,
+      HttpEnum.OK,
+      i18next.t("products.deleteProduct.productDeleted"),
+    );
   } catch (error) {
-    logger.error(i18next.t('products.deleteProduct.logs.genericError', { error }));
+    logger.error(
+      i18next.t("products.deleteProduct.logs.genericError", { error }),
+    );
     sendOzariError(
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
-      i18next.t('products.deleteProduct.genericError'),
+      i18next.t("products.deleteProduct.genericError"),
     );
   }
 };

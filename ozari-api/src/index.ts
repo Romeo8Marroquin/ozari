@@ -1,63 +1,70 @@
-import dotenv from 'dotenv';
-import i18next from 'i18next';
-import serverless from 'serverless-http';
-dotenv.config();
+import { createApp } from "./app.js";
+import { initializeI18n } from "./config/i18n.js";
+import { logger } from "./config/logger.js";
+import { disconnectPrisma } from "./services/prisma.service.js";
 
-import { getPrismaClient } from '@deps/prismaClient';
-import { logger } from '@deps/winstonConfig';
-import { i18nReady } from '@helpers/createApp';
-import { ProcessesEnum } from '@models/enums/processesEnum';
-import app from '@src/app';
+const PORT = parseInt(process.env["PORT"] ?? "3000", 10);
+const HOST = process.env["API_HOST"] ?? "localhost";
 
-let server: ReturnType<typeof app.listen> | undefined;
+async function startServer() {
+  try {
+    // Initialize i18n before starting server
+    logger.info("Initializing i18n...");
+    await initializeI18n();
+    logger.info("i18n initialized successfully");
 
-const shutdownDatabase = async () => {
-  logger.info(i18next.t('api.database.logs.dbDisconnection'));
-  const prismaClient = await getPrismaClient();
-  await prismaClient.$disconnect();
-  server?.close(() => {
-    logger.info(i18next.t('api.server.logs.serverClosed'));
-    process.exit(ProcessesEnum.SUCCESS);
-  });
-};
+    const app = createApp();
 
-if (process.env.API_ENV !== 'prod' && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
-  async function startHttpServer() {
-    const port = process.env.API_PORT;
-    const host = process.env.API_HOST;
-    if (!host) {
-      logger.error(i18next.t('api.server.logs.hostError', { host }));
-      process.exit(ProcessesEnum.HOST_ERROR);
-    }
-    if (!port) {
-      logger.error(i18next.t('api.server.logs.portError', { port }));
-      process.exit(ProcessesEnum.PORT_ERROR);
-    }
-    await i18nReady;
-    server = app.listen(port, () => {
-      logger.info(i18next.t('api.server.logs.serverRunning', { host, port }));
+    const server = app.listen(PORT, HOST, () => {
+      logger.info(`Server started successfully`);
+      logger.info(`Environment: ${process.env["NODE_ENV"] ?? "development"}`);
+      logger.info(`Listening on http://${HOST}:${PORT}`);
+      logger.info(`API base path: ${process.env["BASE_PATH"] ?? "/api"}`);
     });
 
-    process.on('SIGINT', () => {
-      shutdownDatabase().catch((error: unknown) => {
-        logger.error(i18next.t('api.database.logs.databaseShutdownError', { error }));
-        process.exit(ProcessesEnum.DB_DISCONNECTION_ERROR);
+    // Shutdown handling
+    const shutdown = async (signal: string) => {
+      logger.info(`${signal} received. Starting shutdown...`);
+
+      server.close(async () => {
+        logger.info("HTTP server closed");
+
+        try {
+          await disconnectPrisma();
+          logger.info("Shutdown completed");
+          process.exit(0);
+        } catch (error) {
+          logger.error("Error during shutdown", { error });
+          process.exit(1);
+        }
       });
+
+      // Force shutdown after 10 seconds
+      setTimeout(() => {
+        logger.error("Forced shutdown after timeout");
+        process.exit(1);
+      }, 10000);
+    };
+
+    // Listen for termination signals
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", () => shutdown("SIGINT"));
+
+    // Handle uncaught exceptions
+    process.on("uncaughtException", (error) => {
+      logger.error("Uncaught Exception", { error });
+      process.exit(1);
     });
 
-    process.on('SIGTERM', () => {
-      shutdownDatabase().catch((error: unknown) => {
-        logger.error(i18next.t('api.database.logs.databaseShutdownError', { error }));
-        process.exit(ProcessesEnum.DB_DISCONNECTION_ERROR);
-      });
+    // Handle unhandled promise rejections
+    process.on("unhandledRejection", (reason, promise) => {
+      logger.error("Unhandled Rejection", { reason, promise });
+      process.exit(1);
     });
+  } catch (error) {
+    logger.error("Failed to start server", { error });
+    process.exit(1);
   }
-  void startHttpServer(); // NOSONAR
 }
 
-const handler = serverless(app);
-
-export const globalHandler = async (event: Object, context: Object) => {
-  await i18nReady;
-  return handler(event, context);
-};
+startServer();

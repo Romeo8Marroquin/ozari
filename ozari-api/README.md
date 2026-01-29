@@ -1,224 +1,234 @@
 # Ozari API
 
-Backend API for the Ozari platform built with Express.js, Prisma, and PostgreSQL.
+Modern Express TypeScript API for the Ozari platform.
 
-## Tech Stack
+## Features
 
-- Runtime: Node.js 22
-- Framework: Express.js 5
-- Database: PostgreSQL (Neon)
-- ORM: Prisma 7
-- Deployment: AWS Lambda (Serverless Framework)
-- Package Manager: pnpm
+- **Express.js** - Fast, unopinionated web framework
+- **TypeScript** - Type-safe development with strict mode
+- **Prisma** - Modern ORM with PostgreSQL
+- **JWT Authentication** - Secure token-based auth with refresh tokens
+- **Role-Based Access Control** - Admin, Employee, Client roles
+- **AES-256-GCM Encryption** - Encrypted sensitive data (KMS fields)
+- **Winston Logger** - Structured logging with request context
+- **i18n Support** - Spanish (Guatemala) translations
+- **Security** - Helmet, CORS, API key validation
+- **AsyncLocalStorage** - Request context tracking
 
 ## Prerequisites
 
-- Node.js >= 22
-- pnpm >= 10
-- Neon PostgreSQL database
+- **Node.js** >= 22.0.0
+- **pnpm** >= 9.0.0
+- **PostgreSQL** database (Neon or local)
 
-## Local Development
+## Quick Start
 
-### Environment Setup
-
-1. Copy the environment template:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Configure environment variables in `.env`:
-   ```bash
-   # Server Configuration
-   API_ENV=dev
-   API_HOST=localhost
-   API_PORT=3000
-   APP_HOST=http://localhost:5173
-
-   # Database
-   DATABASE_URL="postgresql://user:password@ep-xxx.region.aws.neon.tech/dbname?sslmode=require"
-
-   # Security (generate with: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")
-   JWT_SECRET=your_jwt_secret
-   JWT_REFRESH_SECRET=your_refresh_secret
-   ENCRYPTION_KEY=your_encryption_key
-   API_KEY=your_api_key
-   ```
-
-### Installation
+### 1. Install Dependencies
 
 ```bash
+cd ozari-api
 pnpm install
-pnpm exec prisma generate
 ```
 
-### Development Server
+### 2. Environment Setup
+
+Copy `.env.example` to `.env` and configure:
 
 ```bash
+cp .env.example .env
+```
+
+Generate secrets:
+
+```bash
+# JWT secrets
+openssl rand -hex 32
+
+# Encryption key (32 bytes)
+openssl rand -hex 32
+
+# API key
+openssl rand -hex 32
+```
+
+### 3. Database Setup
+
+```bash
+# Generate Prisma Client
+pnpm run prisma:generate
+
+# Run migrations
+pnpm run prisma:migrate
+
+# (Optional) Open Prisma Studio
+pnpm run prisma:studio
+```
+
+### 4. Development
+
+```bash
+# Start dev server with hot reload
 pnpm run dev
+
+# Start with debugger
+pnpm run dev:debug
+
+# Type checking
+pnpm run type-check
+
+# Linting
+pnpm run lint
+pnpm run lint:fix
 ```
 
-The server will start at `http://localhost:3000`.
-
-### Available Commands
+### 5. Production Build
 
 ```bash
-pnpm run dev              # Start dev server with hot reload
-pnpm run dev:debug        # Start with Node debugger
-pnpm run build            # Compile TypeScript
-pnpm run offline          # Run serverless offline (Lambda emulation)
-pnpm exec eslint .        # Run linter
+# Build TypeScript
+pnpm run build
+
+# Start production server
+pnpm start
 ```
 
-## Database
+## Project Structure
 
-### Neon PostgreSQL Setup
+```
+src/
+├── config/              # Configuration files
+│   ├── app.ts          # App constants
+│   ├── context.ts      # AsyncLocalStorage
+│   ├── i18n.ts         # Internationalization
+│   └── logger.ts       # Winston logger
+├── helpers/            # Utility functions
+│   ├── encryption.ts   # AES-256-GCM, bcrypt, SHA-256
+│   ├── regex.ts        # Validation patterns
+│   └── utils.ts        # General utilities
+├── middlewares/        # Express middlewares
+│   ├── apiKey.middleware.ts    # API key validation
+│   ├── auth.middleware.ts      # JWT verification
+│   └── role.middleware.ts      # Role-based access
+├── models/             # TypeScript models
+│   ├── common/         # Shared models
+│   ├── enums/          # Enumerations
+│   └── http/           # HTTP response models
+├── modules/            # Feature modules
+│   ├── auth/          # Authentication
+│   ├── health/        # Health check
+│   └── products/      # Products CRUD
+├── services/          # Business services
+│   └── prisma.service.ts  # Prisma client singleton
+├── locales/           # i18n translations
+│   └── es-GT/
+│       └── translation.json
+├── app.ts             # Express app setup
+└── index.ts           # Server entry point
+```
 
-1. Create a project at [console.neon.tech](https://console.neon.tech)
-2. Create a database for development
-3. Copy the connection string from the dashboard
-4. Set `DATABASE_URL` in `.env`
+## API Endpoints
 
-### Prisma Commands
+### Health
+
+- `GET /api/health/check` - Health check (public)
+
+### Authentication
+
+- `POST /api/auth/user` - Create user (public)
+- `POST /api/auth/signin` - Sign in (public)
+- `GET /api/auth/refresh` - Refresh token (public)
+- `GET /api/auth/signout` - Sign out (protected)
+- `GET /api/auth/all` - Get all users (admin only)
+
+### Products
+
+- `GET /api/products/all` - Get all products (protected)
+- `POST /api/products/create` - Create product (admin only)
+- `PUT /api/products/update` - Update product (admin only)
+- `DELETE /api/products/delete` - Delete product (admin only)
+
+## Authentication
+
+All requests require `x-api-key` header:
 
 ```bash
-# Generate Prisma Client (required after schema changes)
-pnpm exec prisma generate
-
-# Create a new migration
-pnpm exec prisma migrate dev --name migration_name
-
-# Apply migrations
-pnpm exec prisma migrate deploy
-
-# Open Prisma Studio (database GUI)
-pnpm exec prisma studio
-
-# Reset database (development only)
-pnpm exec prisma migrate reset
+curl -H "x-api-key: your-api-key" http://localhost:3000/api/health/check
 ```
 
-### Schema Management
+Protected endpoints require JWT access token:
 
-The Prisma schema is located at `prisma/schema.prisma`. The generated client outputs to `src/generated/prisma` (configured in schema.prisma).
+```bash
+curl -H "Authorization: Bearer <access-token>" http://localhost:3000/api/products/all
+```
 
-After modifying the schema:
-1. Run `pnpm exec prisma migrate dev` to create and apply migration
-2. Run `pnpm exec prisma generate` to regenerate the client
+## Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `NODE_ENV` | Environment (development/production) | No |
+| `HOST` | Server host | No (default: localhost) |
+| `PORT` | Server port | No (default: 3000) |
+| `APP_HOST` | Frontend URL for CORS | Yes |
+| `DATABASE_URL` | PostgreSQL connection string | Yes |
+| `JWT_SECRET` | JWT signing secret | Yes |
+| `JWT_REFRESH_SECRET` | Refresh token secret | Yes |
+| `ENCRYPTION_KEY` | AES-256 encryption key (hex) | Yes |
+| `API_KEY` | API authentication key | Yes |
+| `LOG_LEVEL` | Winston log level | No (default: info) |
 
 ## Deployment
 
-### GitHub Actions Setup
+### Railway
 
-The repository uses GitHub Actions to automatically apply database migrations when changes are pushed to the `dev` branch.
+1. Create new project in Railway
+2. Add PostgreSQL database
+3. Set environment variables
+4. Deploy from GitHub:
+   - Build command: `pnpm run build`
+   - Start command: `pnpm start`
 
-#### Configure GitHub Environment
+### Docker
 
-1. Go to repository Settings > Environments
-2. Create a new environment named `dev`
-3. Configure environment secrets (see below)
-
-#### Required Secrets
-
-Navigate to Settings > Secrets and variables > Actions > Environment secrets (under `dev` environment):
-
-| Secret | Description | Example |
-|--------|-------------|---------|
-| `DATABASE_URL` | Neon PostgreSQL connection string for dev environment | `postgresql://user:pass@ep-xxx.us-east-1.aws.neon.tech/dbname?sslmode=require` |
-
-#### Automatic Migration Workflow
-
-The workflow triggers on push to `dev` branch when these files change:
-- `ozari-api/prisma/schema.prisma`
-- `ozari-api/prisma/migrations/**`
-- `ozari-api/prisma.config.ts`
-- `.github/workflows/deploy-dev.yml`
-
-Workflow steps:
-1. Checkout code
-2. Setup pnpm with cache
-3. Setup Node.js 22 with dependency caching
-4. Install dependencies with `--frozen-lockfile --prefer-offline`
-5. Apply migrations with `pnpm exec prisma migrate deploy`
-
-### Serverless Deployment
-
-Deploy to AWS Lambda:
-
-```bash
-# Deploy to dev stage
-pnpm run deploy
-
-# Deploy to production
-pnpm run deploy:prod
-
-# Remove deployment
-pnpm remove
+```dockerfile
+FROM node:22-alpine
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN npm install -g pnpm && pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm run build
+CMD ["pnpm", "start"]
 ```
 
-Configuration is managed in `serverless.yml`.
+## Scripts
 
-## Architecture
+| Command | Description |
+|---------|-------------|
+| `pnpm run dev` | Start dev server with hot reload |
+| `pnpm run dev:debug` | Start with Node debugger |
+| `pnpm run build` | Build TypeScript to dist/ |
+| `pnpm start` | Start production server |
+| `pnpm run prisma:generate` | Generate Prisma Client |
+| `pnpm run prisma:migrate` | Run database migrations |
+| `pnpm run prisma:migrate:deploy` | Deploy migrations (production) |
+| `pnpm run prisma:studio` | Open Prisma Studio |
+| `pnpm run lint` | Run ESLint |
+| `pnpm run lint:fix` | Fix ESLint errors |
+| `pnpm run type-check` | Check TypeScript types |
 
-### Module Structure
+## Technologies
 
-Each API module is deployed as a separate Lambda function:
+- **Express** 4.21.2 - Web framework
+- **TypeScript** 5.7.2 - Type safety
+- **Prisma** 6.1.0 - Database ORM
+- **PostgreSQL** - Primary database
+- **JWT** - jsonwebtoken 9.0.2
+- **bcrypt** 5.1.1 - Password hashing
+- **Winston** 3.17.0 - Logging
+- **i18next** 24.2.0 - Internationalization
+- **Helmet** 8.0.0 - Security headers
+- **CORS** 2.8.5 - Cross-origin resource sharing
+- **Zod** 3.24.1 - Runtime validation
+- **tsx** 4.19.2 - TypeScript execution
 
-```
-src/modules/{module}/
-├── {module}.ts           # Lambda handler export
-├── {module}.route.ts     # Express router
-├── {module}.controller.ts # Request handlers
-├── {module}.models.ts    # TypeScript types
-└── {module}.validator.ts # Request validation
-```
+## License
 
-Current modules:
-- `auth` - Authentication and user management
-- `health` - Health check endpoints
-- `products` - Product management
-
-### Shared Infrastructure
-
-- `src/helpers/createApp.ts` - Application factory with middleware configuration
-- `src/dependencies/` - Shared dependencies (Prisma, Winston logger)
-- `src/middlewares/` - Request middleware (auth, API key validation, roles)
-- `src/models/` - Shared TypeScript models
-
-### Environment Detection
-
-- **Local development**: Runs as HTTP server (src/index.ts)
-- **AWS Lambda**: Each module runs independently via serverless-http
-
-## Security
-
-### API Key Authentication
-
-All requests require the `x-api-key` header matching the `API_KEY` environment variable.
-
-### Data Encryption
-
-Sensitive data uses encryption patterns:
-- Fields with `Kms` suffix are encrypted (e.g., `emailKms`, `fullNameKms`)
-- Fields with `Sha` suffix are hashed for indexing (e.g., `emailSha`, `passwordSha`)
-
-### JWT Sessions
-
-JWT tokens are tracked in the `jwt_sessions` table with:
-- `jti` - Token identifier
-- `deviceUuid` - Device tracking
-- `expiresAt` - Expiration timestamp
-- `isActive` - Revocation status
-
-## Internationalization
-
-The API uses i18next with:
-- Default locale: `es-GT`
-- Translations: `src/locales/{locale}/translation.json`
-- Detection: `accept-language` header
-
-## Logging
-
-Winston logger configuration:
-- Format: JSON (production) / pretty (development)
-- Context: Tracked via AsyncLocalStorage per request
-- Sensitive data sanitization enabled
+MIT

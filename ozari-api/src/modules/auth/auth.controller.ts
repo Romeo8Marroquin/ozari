@@ -1,32 +1,32 @@
-import { Request, Response } from 'express';
-import i18next from 'i18next';
-import jwt from 'jsonwebtoken';
-
+import type { Request, Response } from "express";
+import { i18next } from "@/config/i18n.js";
+import jwt from "jsonwebtoken";
 import {
   comparePassword,
   decryptKmsAsync,
   encryptKmsAsync,
   encryptSha256Sync,
   hashPassword,
-} from '@helpers/encryption';
-import { getPrismaClient } from '@deps/prismaClient';
-import { logger } from '@deps/winstonConfig';
-import { getSecret } from '@helpers/ssmLoader';
-import { JwtPayloadModel } from '@models/common/authModel';
-import { CustomRequest, UserJwtPayloadModel } from '@models/common/customRequestModel';
-import { HttpEnum } from '@models/enums/httpEnum';
-import { RolesEnum } from '@models/enums/rolesEnum';
-import { TokenEnum } from '@models/enums/tokenEnum';
-import { sendOzariError } from '@models/http/ozariErrorModel';
-import { sendOzariSuccess } from '@models/http/ozariSuccessModel';
-import { applicationConfig } from '@src/applicationConfig';
+} from "@helpers/encryption.js";
+import { getPrismaClient } from "@/services/prisma.service.js";
+import { logger } from "@/config/logger.js";
+import { type JwtPayloadModel } from "@models/common/authModel.js";
 import {
-  CreateUserRequestModel,
-  GetAllUsersResponseModel,
-  SignInUserRequestModel,
-} from './auth.models';
+  type CustomRequest,
+  type UserJwtPayloadModel,
+} from "@models/common/customRequestModel.js";
+import { HttpEnum } from "@models/enums/httpEnum.js";
+import { RolesEnum } from "@models/enums/rolesEnum.js";
+import { TokenEnum } from "@models/enums/tokenEnum.js";
+import { sendOzariError } from "@models/http/ozariErrorModel.js";
+import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
+import { appConfig } from "@/config/app.js";
+import {
+  type CreateUserRequestModel,
+  type SignInUserRequestModel,
+} from "./auth.models.js";
 
-export const getAllUsers = async (req: Request, res: Response): Promise<void> => {
+export const getAllUsers = async (_: Request, res: Response): Promise<void> => {
   try {
     const prismaClient = await getPrismaClient();
     const users = await prismaClient.user.findMany({
@@ -37,34 +37,56 @@ export const getAllUsers = async (req: Request, res: Response): Promise<void> =>
       decryptKmsAsync(users.map((user) => user.emailKms)),
       decryptKmsAsync(users.map((user) => user.fullNameKms)),
     ]);
-    const response: GetAllUsersResponseModel[] = users.map((user, index) => ({
-      createdAt: user.createdAt,
-      email: emails[index],
-      fullName: fullNames[index],
-      id: user.id,
-      role: RolesEnum[user.roleId],
-      updatedAt: user.updatedAt ?? undefined,
-    }));
 
-    logger.info(i18next.t('user.getAllUsers.logs.usersFetched', { count: users.length }));
-    sendOzariSuccess(res, HttpEnum.OK, i18next.t('user.getAllUsers.usersFetched'), response);
+    logger.info(
+      i18next.t("user.getAllUsers.logs.usersFetched", { count: users.length }),
+    );
+    sendOzariSuccess(
+      res,
+      HttpEnum.OK,
+      i18next.t("user.getAllUsers.usersFetched"),
+      users.map((user, index) => ({
+        createdAt: user.createdAt,
+        email: emails[index],
+        fullName: fullNames[index],
+        id: user.id,
+        role: RolesEnum[user.roleId],
+        updatedAt: user.updatedAt ?? undefined,
+      })),
+    );
   } catch (error) {
-    logger.error(i18next.t('user.getAllUsers.logs.internalServerError', { error }));
-    sendOzariError(res, HttpEnum.INTERNAL_SERVER_ERROR, i18next.t('user.getAllUsers.genericError'));
+    logger.error(
+      i18next.t("user.getAllUsers.logs.internalServerError", { error }),
+    );
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("user.getAllUsers.genericError"),
+    );
   }
 };
 
-export const createUser = async (req: Request, res: Response): Promise<void> => {
+export const createUser = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const prismaClient = await getPrismaClient();
-    const { email, fullName, password, termsAccepted } = req.body as CreateUserRequestModel;
+    const { email, fullName, password, termsAccepted } =
+      req.body as CreateUserRequestModel;
     const emailSha = encryptSha256Sync(email);
     const existingUser = await prismaClient.user.findUnique({
       where: { emailSha },
     });
     if (existingUser) {
-      logger.warn(i18next.t('user.createUser.logs.userAlreadyExists', { email }));
-      sendOzariError(res, HttpEnum.CONFLICT, i18next.t('user.createUser.genericError'));
+      logger.warn(
+        i18next.t("user.createUser.logs.userAlreadyExists", { email }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.CONFLICT,
+        i18next.t("user.createUser.genericError"),
+      );
       return;
     }
     const encryptedName = await encryptKmsAsync(fullName);
@@ -79,43 +101,77 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
         termsAccepted,
       },
     });
-    logger.info(i18next.t('user.createUser.logs.userCreated', { email }));
-    sendOzariSuccess(res, HttpEnum.CREATED, i18next.t('user.createUser.userCreated'));
+    logger.info(i18next.t("user.createUser.logs.userCreated", { email }));
+    sendOzariSuccess(
+      res,
+      HttpEnum.CREATED,
+      i18next.t("user.createUser.userCreated"),
+    );
   } catch (error) {
-    logger.error(i18next.t('user.createUser.logs.internalServerError'), error);
-    sendOzariError(res, HttpEnum.INTERNAL_SERVER_ERROR, i18next.t('user.createUser.genericError'));
+    logger.error(i18next.t("user.createUser.logs.internalServerError"), error);
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("user.createUser.genericError"),
+    );
   }
 };
 
-export const signInUser = async (req: Request, res: Response): Promise<void> => {
+export const signInUser = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   const { email, password, deviceUuid } = req.body as SignInUserRequestModel;
 
   try {
     const prismaClient = await getPrismaClient();
-    const jwtSecret = await getSecret('jwt_secret');
-    const jwtRefreshSecret = await getSecret('jwt_refresh_secret');
+    const jwtSecret = process.env["JWT_SECRET"];
+    const jwtRefreshSecret = process.env["JWT_REFRESH_SECRET"];
+
+    if (!jwtSecret || !jwtRefreshSecret) {
+      logger.error("JWT secrets not configured in environment");
+      sendOzariError(
+        res,
+        HttpEnum.INTERNAL_SERVER_ERROR,
+        i18next.t("user.signInUser.internalServerError"),
+      );
+      return;
+    }
+
     const emailSha = encryptSha256Sync(email);
     const user = await prismaClient.user.findFirst({
       where: { emailSha, isActive: true },
     });
     if (!user) {
-      logger.warn(i18next.t('user.signInUser.logs.userNotFound', { email }));
-      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('user.signInUser.genericError'));
+      logger.warn(i18next.t("user.signInUser.logs.userNotFound", { email }));
+      sendOzariError(
+        res,
+        HttpEnum.UNAUTHORIZED,
+        i18next.t("user.signInUser.genericError"),
+      );
       return;
     }
 
     const passwordValid = comparePassword(password, user.passwordSha);
     if (!passwordValid) {
-      logger.warn(i18next.t('user.signInUser.logs.invalidCredentials', { userId: user.id }));
-      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('user.signInUser.genericError'));
+      logger.warn(
+        i18next.t("user.signInUser.logs.invalidCredentials", {
+          userId: user.id,
+        }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.UNAUTHORIZED,
+        i18next.t("user.signInUser.genericError"),
+      );
       return;
     }
 
     const now = Math.floor(Date.now() / 1000);
     const accessJti = crypto.randomUUID();
     const refreshJti = crypto.randomUUID();
-    const accessExp = now + applicationConfig.accessToken.expiresIn;
-    const refreshExp = now + applicationConfig.refreshToken.expiresIn;
+    const accessExp = now + appConfig.accessToken.expiresIn;
+    const refreshExp = now + appConfig.refreshToken.expiresIn;
 
     const accessToken = jwt.sign(
       {
@@ -127,7 +183,7 @@ export const signInUser = async (req: Request, res: Response): Promise<void> => 
         userRole: user.roleId,
       } as UserJwtPayloadModel,
       jwtSecret,
-      applicationConfig.accessToken as jwt.SignOptions,
+      appConfig.accessToken as jwt.SignOptions,
     );
     const refreshToken = jwt.sign(
       {
@@ -139,7 +195,7 @@ export const signInUser = async (req: Request, res: Response): Promise<void> => 
         userRole: user.roleId,
       } as UserJwtPayloadModel,
       jwtRefreshSecret,
-      applicationConfig.refreshToken as jwt.SignOptions,
+      appConfig.refreshToken as jwt.SignOptions,
     );
 
     await prismaClient.$transaction(async (transaction) => {
@@ -169,41 +225,72 @@ export const signInUser = async (req: Request, res: Response): Promise<void> => 
     });
 
     res
-      .header('authorization', `Bearer ${accessToken}`)
-      .cookie('refresh-token', refreshToken, applicationConfig.cookieConfig);
+      .header("authorization", `Bearer ${accessToken}`)
+      .cookie("refresh-token", refreshToken, appConfig.cookieConfig);
 
-    logger.info(i18next.t('user.signInUser.logs.userAuthenticated', { userId: user.id }));
-    sendOzariSuccess(res, HttpEnum.OK, i18next.t('user.signInUser.userAuthenticated'));
+    logger.info(
+      i18next.t("user.signInUser.logs.userAuthenticated", { userId: user.id }),
+    );
+    sendOzariSuccess(
+      res,
+      HttpEnum.OK,
+      i18next.t("user.signInUser.userAuthenticated"),
+    );
   } catch (error) {
-    logger.error(i18next.t('user.signInUser.logs.internalServerError'), error);
+    logger.error(i18next.t("user.signInUser.logs.internalServerError"), error);
     sendOzariError(
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
-      i18next.t('user.signInUser.internalServerError'),
+      i18next.t("user.signInUser.internalServerError"),
     );
   }
 };
 
-export const refreshToken = async (req: Request, res: Response): Promise<void> => {
+export const refreshToken = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
   try {
     const prismaClient = await getPrismaClient();
-    const jwtSecret = await getSecret('jwt_secret');
-    const jwtRefreshSecret = await getSecret('jwt_refresh_secret');
-    const refreshToken = req.cookies['refresh-token'] as string | undefined;
-    if (!refreshToken) {
-      logger.warn(i18next.t('user.refreshToken.logs.noRefreshToken'));
-      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('user.refreshToken.genericError'));
+    const jwtSecret = process.env["JWT_SECRET"];
+    const jwtRefreshSecret = process.env["JWT_REFRESH_SECRET"];
+
+    if (!jwtSecret || !jwtRefreshSecret) {
+      logger.error("JWT secrets not configured in environment");
+      sendOzariError(
+        res,
+        HttpEnum.INTERNAL_SERVER_ERROR,
+        i18next.t("user.refreshToken.internalServerError"),
+      );
       return;
     }
-    const payload = jwt.verify(refreshToken, jwtRefreshSecret) as UserJwtPayloadModel;
+
+    const refreshToken = req.cookies["refresh-token"] as string | undefined;
+    if (!refreshToken) {
+      logger.warn(i18next.t("user.refreshToken.logs.noRefreshToken"));
+      sendOzariError(
+        res,
+        HttpEnum.UNAUTHORIZED,
+        i18next.t("user.refreshToken.genericError"),
+      );
+      return;
+    }
+    const payload = jwt.verify(
+      refreshToken,
+      jwtRefreshSecret,
+    ) as UserJwtPayloadModel;
     if (payload.tokenType !== TokenEnum.REFRESH_TOKEN) {
       logger.error(
-        i18next.t('user.refreshToken.logs.invalidTokenType', {
+        i18next.t("user.refreshToken.logs.invalidTokenType", {
           expected: TokenEnum[TokenEnum.REFRESH_TOKEN],
           received: TokenEnum[payload.tokenType],
         }),
       );
-      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('user.refreshToken.genericError'));
+      sendOzariError(
+        res,
+        HttpEnum.UNAUTHORIZED,
+        i18next.t("user.refreshToken.genericError"),
+      );
       return;
     }
     const foundSession = await prismaClient.jwtSession.findFirst({
@@ -217,22 +304,34 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
     });
 
     if (!foundSession) {
-      logger.error(i18next.t('user.refreshToken.logs.noRefreshToken'));
-      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('user.refreshToken.genericError'));
+      logger.error(i18next.t("user.refreshToken.logs.noRefreshToken"));
+      sendOzariError(
+        res,
+        HttpEnum.UNAUTHORIZED,
+        i18next.t("user.refreshToken.genericError"),
+      );
       return;
     }
 
     if (foundSession.expiresAt <= new Date()) {
-      logger.warn(i18next.t('user.refreshToken.logs.sessionExpired', { jti: foundSession.jti }));
-      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('user.refreshToken.genericError'));
+      logger.warn(
+        i18next.t("user.refreshToken.logs.sessionExpired", {
+          jti: foundSession.jti,
+        }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.UNAUTHORIZED,
+        i18next.t("user.refreshToken.genericError"),
+      );
       return;
     }
 
     const now = Math.floor(Date.now() / 1000);
     const accessJti = crypto.randomUUID();
     const refreshJti = crypto.randomUUID();
-    const accessExp = now + applicationConfig.accessToken.expiresIn;
-    const refreshExp = now + applicationConfig.refreshToken.expiresIn;
+    const accessExp = now + appConfig.accessToken.expiresIn;
+    const refreshExp = now + appConfig.refreshToken.expiresIn;
 
     const accessToken = jwt.sign(
       {
@@ -244,7 +343,7 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
         iat: now,
       } as UserJwtPayloadModel,
       jwtSecret,
-      applicationConfig.accessToken as jwt.SignOptions,
+      appConfig.accessToken as jwt.SignOptions,
     );
     const newValidRefreshToken = jwt.sign(
       {
@@ -256,12 +355,16 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
         iat: now,
       } as UserJwtPayloadModel,
       jwtRefreshSecret,
-      applicationConfig.refreshToken as jwt.SignOptions,
+      appConfig.refreshToken as jwt.SignOptions,
     );
 
     await prismaClient.$transaction(async (transaction) => {
       await transaction.jwtSession.deleteMany({
-        where: { deviceUuid: foundSession.deviceUuid, isActive: true, userId: payload.userId },
+        where: {
+          deviceUuid: foundSession.deviceUuid,
+          isActive: true,
+          userId: payload.userId,
+        },
       });
       await transaction.jwtSession.createMany({
         data: [
@@ -286,36 +389,56 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
     });
 
     res
-      .header('authorization', `Bearer ${accessToken}`)
-      .cookie('refresh-token', newValidRefreshToken, applicationConfig.cookieConfig);
+      .header("authorization", `Bearer ${accessToken}`)
+      .cookie("refresh-token", newValidRefreshToken, appConfig.cookieConfig);
 
     logger.info(
-      i18next.t('user.refreshToken.logs.tokenRefreshed', {
+      i18next.t("user.refreshToken.logs.tokenRefreshed", {
         userId: payload.userId,
         userRole: payload.userRole,
       }),
     );
-    sendOzariSuccess(res, HttpEnum.OK, i18next.t('user.refreshToken.tokenRefreshed'));
+    sendOzariSuccess(
+      res,
+      HttpEnum.OK,
+      i18next.t("user.refreshToken.tokenRefreshed"),
+    );
   } catch (error) {
-    if (error instanceof jwt.TokenExpiredError || error instanceof jwt.JsonWebTokenError) {
-      logger.warn(i18next.t('user.refreshToken.logs.sessionExpiredOrInvalid'), error);
-      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t('user.refreshToken.genericError'));
+    if (
+      error instanceof jwt.TokenExpiredError ||
+      error instanceof jwt.JsonWebTokenError
+    ) {
+      logger.warn(
+        i18next.t("user.refreshToken.logs.sessionExpiredOrInvalid"),
+        error,
+      );
+      sendOzariError(
+        res,
+        HttpEnum.UNAUTHORIZED,
+        i18next.t("user.refreshToken.genericError"),
+      );
       return;
     }
 
-    logger.error(i18next.t('user.refreshToken.logs.internalServerError', { error }));
+    logger.error(
+      i18next.t("user.refreshToken.logs.internalServerError", { error }),
+    );
     sendOzariError(
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
-      i18next.t('user.refreshToken.internalServerError'),
+      i18next.t("user.refreshToken.internalServerError"),
     );
   }
 };
 
-export const signOutUser = async (req: CustomRequest, res: Response): Promise<void> => {
+export const signOutUser = async (
+  req: CustomRequest,
+  res: Response,
+): Promise<void> => {
   try {
     const prismaClient = await getPrismaClient();
-    const allDevices = (req.query?.allDevices as string | undefined) === 'true';
+    const allDevices =
+      (req.query?.["allDevices"] as string | undefined) === "true";
     const { deviceUuid, userId, userRole } = req.user as JwtPayloadModel;
     if (allDevices) {
       await prismaClient.jwtSession.deleteMany({
@@ -326,11 +449,25 @@ export const signOutUser = async (req: CustomRequest, res: Response): Promise<vo
         where: { deviceUuid, isActive: true, userId },
       });
     }
-    res.clearCookie('refresh-token', applicationConfig.cookieConfig);
-    logger.info(i18next.t('user.signOutUser.logs.userSignedOut', { allDevices, userId, userRole }));
-    sendOzariSuccess(res, HttpEnum.OK, i18next.t('user.signOutUser.userSignedOut'));
+    res.clearCookie("refresh-token", appConfig.cookieConfig);
+    logger.info(
+      i18next.t("user.signOutUser.logs.userSignedOut", {
+        allDevices,
+        userId,
+        userRole,
+      }),
+    );
+    sendOzariSuccess(
+      res,
+      HttpEnum.OK,
+      i18next.t("user.signOutUser.userSignedOut"),
+    );
   } catch (error) {
-    logger.error(i18next.t('user.signOutUser.logs.internalServerError'), error);
-    sendOzariError(res, HttpEnum.INTERNAL_SERVER_ERROR, i18next.t('user.signOutUser.genericError'));
+    logger.error(i18next.t("user.signOutUser.logs.internalServerError"), error);
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("user.signOutUser.genericError"),
+    );
   }
 };

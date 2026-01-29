@@ -1,26 +1,38 @@
-import eslint from '@eslint/js';
-import tseslint from 'typescript-eslint';
-import perfectionist from 'eslint-plugin-perfectionist';
-import sonarjs from 'eslint-plugin-sonarjs';
+import eslint from "@eslint/js";
+import tseslint from "@typescript-eslint/eslint-plugin";
+import tsparser from "@typescript-eslint/parser";
 
-export default tseslint.config(
-  {
-    ignores: ['**/*.js'],
-  },
+export default [
   eslint.configs.recommended,
-  tseslint.configs.strictTypeChecked,
-  tseslint.configs.stylisticTypeChecked,
   {
+    files: ["**/*.ts"],
     languageOptions: {
+      parser: tsparser,
       parserOptions: {
-        projectService: true,
-        tsconfigRootDir: import.meta.dirname,
+        ecmaVersion: 2022,
+        sourceType: "module",
+        project: "./tsconfig.json",
       },
     },
+    plugins: {
+      "@typescript-eslint": tseslint,
+    },
     rules: {
-      strict: ['error', 'global'],
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+        },
+      ],
+      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/explicit-function-return-type": "off",
+      "@typescript-eslint/explicit-module-boundary-types": "off",
+      "@typescript-eslint/no-non-null-assertion": "warn",
+      "no-console": ["warn", { allow: ["warn", "error"] }],
     },
   },
-  perfectionist.configs['recommended-natural'],
-  sonarjs.configs['recommended'],
-);
+  {
+    ignores: ["dist/**", "node_modules/**", "src/generated/**"],
+  },
+];

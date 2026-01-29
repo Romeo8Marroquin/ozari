@@ -1,7 +1,7 @@
-import { Response } from 'express';
+import type { Response } from "express";
 
-import { HttpEnum } from '../enums/httpEnum.js';
-import { SubCodeSuccessEnum } from '../enums/subCodeSuccessEnum.js';
+import { HttpEnum } from "../enums/httpEnum.js";
+import { SubCodeSuccessEnum } from "../enums/subCodeSuccessEnum.js";
 
 export interface OzariHttpSuccessModel<T = unknown> {
   data: T | undefined;
@@ -31,6 +31,11 @@ export function sendOzariSuccess(
   data?: unknown,
   subCode: SubCodeSuccessEnum = SubCodeSuccessEnum.EMPTY,
 ): void {
-  const ozariHttpSuccess = createOzariHttpSuccess(status, message, data, subCode);
+  const ozariHttpSuccess = createOzariHttpSuccess(
+    status,
+    message,
+    data,
+    subCode,
+  );
   res.status(status).json(ozariHttpSuccess);
 }

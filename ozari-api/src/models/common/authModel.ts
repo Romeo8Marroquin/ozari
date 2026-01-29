@@ -1,4 +1,4 @@
-import { UserJwtPayloadModel } from './customRequestModel.js';
+import { type UserJwtPayloadModel } from "./customRequestModel.js";
 
 export interface JwtPayloadModel extends UserJwtPayloadModel {
   aud: string;

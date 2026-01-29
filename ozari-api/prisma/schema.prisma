@@ -1,8 +1,6 @@
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output = "../src/generated/prisma"
-  engineType = "client"
-  moduleFormat = "cjs"
 }
 
 datasource db {
@@ -16,9 +14,9 @@ model UserRole {
   isActive    Boolean   @default(true) @map("is_active")
   updatedAt   DateTime? @updatedAt       @map("updated_at")
   createdAt   DateTime  @default(now())  @map("created_at")
-  
+
   users       User[]
-  
+
   @@map("user_roles")
 }
 
@@ -35,7 +33,7 @@ model User {
   isActive      Boolean   @default(true) @map("is_active")
   updatedAt     DateTime? @updatedAt @map("updated_at")
   createdAt     DateTime  @default(now()) @map("created_at")
-  
+
   role          UserRole  @relation(fields: [roleId], references: [id])
   jwtSessions   JwtSession[]
   blacklists    Blacklist[]
@@ -43,7 +41,7 @@ model User {
   addresses     Address[]
   services      Service[]
   userAuthProviders UserAuthProvider[]
-  
+
   @@map("users")
 }
 
@@ -103,9 +101,9 @@ model BlacklistType {
   isActive    Boolean   @default(true) @map("is_active")
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
-  
+
   blacklists  Blacklist[]
-  
+
   @@map("blacklist_types")
 }
 
@@ -117,10 +115,10 @@ model Blacklist {
   isActive        Boolean       @default(true) @map("is_active")
   updatedAt       DateTime?     @updatedAt @map("updated_at")
   createdAt       DateTime      @default(now()) @map("created_at")
-  
+
   user            User          @relation(fields: [userId], references: [id])
   blacklistType   BlacklistType @relation(fields: [blacklistTypeId], references: [id])
-  
+
   @@map("blacklist")
 }
 
@@ -131,9 +129,9 @@ model UserPhoneType {
   isActive    Boolean   @default(true) @map("is_active")
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
-  
+
   userPhones  UserPhone[]
-  
+
   @@map("user_phone_types")
 }
 
@@ -146,11 +144,11 @@ model UserPhone {
   isActive        Boolean       @default(true) @map("is_active")
   updatedAt       DateTime?     @updatedAt @map("updated_at")
   createdAt       DateTime      @default(now()) @map("created_at")
-  
+
   user            User          @relation(fields: [userId], references: [id])
   phoneType       UserPhoneType @relation(fields: [userPhoneTypeId], references: [id])
   services        Service[]
-  
+
   @@map("user_phones")
 }
 
@@ -163,12 +161,12 @@ model Currency {
   isActive     Boolean   @default(true) @map("is_active")
   updatedAt    DateTime? @updatedAt @map("updated_at")
   createdAt    DateTime  @default(now()) @map("created_at")
-  
+
   products         Product[]
   services         Service[]
   serviceDetails   ServiceDetail[]
   serviceExtras    ServiceExtra[]
-  
+
   @@map("currencies")
 }
 
@@ -179,9 +177,9 @@ model ProductBusinessType {
   isActive    Boolean   @default(true) @map("is_active")
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
-  
+
   products    Product[]
-  
+
   @@map("product_business_type")
 }
 
@@ -192,9 +190,9 @@ model ProductCategory {
   isActive    Boolean   @default(true) @map("is_active")
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
-  
+
   products    Product[]
-  
+
   @@map("product_category")
 }
 
@@ -212,13 +210,13 @@ model Product {
   isActive              Boolean             @default(true) @map("is_active")
   updatedAt             DateTime?           @updatedAt @map("updated_at")
   createdAt             DateTime            @default(now()) @map("created_at")
-  
+
   businessType          ProductBusinessType @relation(fields: [productBusinessTypeId], references: [id])
   category              ProductCategory     @relation(fields: [productCategoryId], references: [id])
   currency              Currency            @relation(fields: [currencyId], references: [id])
   productDetails        ProductDetail[]
   serviceDetails        ServiceDetail[]
-  
+
   @@map("products")
 }
 
@@ -229,9 +227,9 @@ model ProductDetailType {
   isActive    Boolean   @default(true) @map("is_active")
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
-  
+
   productDetails  ProductDetail[]
-  
+
   @@map("product_detail_types")
 }
 
@@ -243,10 +241,10 @@ model ProductDetail {
   isActive            Boolean           @default(true) @map("is_active")
   updatedAt           DateTime?         @updatedAt @map("updated_at")
   createdAt           DateTime          @default(now()) @map("created_at")
-  
+
   product             Product           @relation(fields: [productId], references: [id])
   detailType          ProductDetailType @relation(fields: [productDetailTypeId], references: [id])
-  
+
   @@map("product_details")
 }
 
@@ -257,9 +255,9 @@ model Country {
   isActive    Boolean   @default(true) @map("is_active")
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
-  
+
   departments CountryDepartment[]
-  
+
   @@map("countries")
 }
 
@@ -271,10 +269,10 @@ model CountryDepartment {
   isActive    Boolean   @default(true) @map("is_active")
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
-  
+
   country     Country   @relation(fields: [countryId], references: [id])
   municipalities Municipality[]
-  
+
   @@map("departments")
 }
 
@@ -286,10 +284,10 @@ model Municipality {
   isActive       Boolean           @default(true) @map("is_active")
   updatedAt      DateTime?         @updatedAt @map("updated_at")
   createdAt      DateTime          @default(now()) @map("created_at")
-  
+
   department     CountryDepartment @relation(fields: [departmentId], references: [id])
   zones          Zone[]
-  
+
   @@map("municipalities")
 }
 
@@ -301,10 +299,10 @@ model Zone {
   isActive       Boolean      @default(true) @map("is_active")
   updatedAt      DateTime?    @updatedAt @map("updated_at")
   createdAt      DateTime     @default(now()) @map("created_at")
-  
+
   municipality   Municipality @relation(fields: [municipalityId], references: [id])
   addresses      Address[]
-  
+
   @@map("zones")
 }
 
@@ -320,11 +318,11 @@ model Address {
   isActive            Boolean   @default(true) @map("is_active")
   updatedAt           DateTime? @updatedAt @map("updated_at")
   createdAt           DateTime  @default(now()) @map("created_at")
-  
+
   user                User      @relation(fields: [userId], references: [id])
   zone                Zone      @relation(fields: [zoneId], references: [id])
   services            Service[]
-  
+
   @@map("addresses")
 }
 
@@ -335,9 +333,9 @@ model ServiceStatus {
   isActive    Boolean   @default(true) @map("is_active")
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
-  
+
   services    Service[]
-  
+
   @@map("service_status")
 }
 
@@ -348,9 +346,9 @@ model PaymentStatus {
   isActive    Boolean   @default(true) @map("is_active")
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
-  
+
   services    Service[]
-  
+
   @@map("payment_status")
 }
 
@@ -372,7 +370,7 @@ model Service {
   isActive         Boolean       @default(true) @map("is_active")
   updatedAt        DateTime?     @updatedAt @map("updated_at")
   createdAt        DateTime      @default(now()) @map("created_at")
-  
+
   user             User          @relation(fields: [userId], references: [id])
   address          Address       @relation(fields: [addressId], references: [id])
   userPhone        UserPhone     @relation(fields: [userPhoneId], references: [id])
@@ -381,7 +379,7 @@ model Service {
   paymentStatus    PaymentStatus @relation(fields: [paymentStatusId], references: [id])
   serviceDetails   ServiceDetail[]
   serviceExtras    ServiceExtra[]
-  
+
   @@map("services")
 }
 
@@ -396,11 +394,11 @@ model ServiceDetail {
   isActive     Boolean   @default(true) @map("is_active")
   updatedAt    DateTime? @updatedAt @map("updated_at")
   createdAt    DateTime  @default(now()) @map("created_at")
-  
+
   service      Service   @relation(fields: [serviceId], references: [id])
   product      Product   @relation(fields: [productId], references: [id])
   currency     Currency  @relation(fields: [currencyId], references: [id])
-  
+
   @@map("service_details")
 }
 
@@ -416,9 +414,9 @@ model ServiceExtra {
   isActive     Boolean   @default(true) @map("is_active")
   updatedAt    DateTime? @updatedAt @map("updated_at")
   createdAt    DateTime  @default(now()) @map("created_at")
-  
+
   service      Service   @relation(fields: [serviceId], references: [id])
   currency     Currency? @relation(fields: [currencyId], references: [id])
-  
+
   @@map("service_extras")
 }
