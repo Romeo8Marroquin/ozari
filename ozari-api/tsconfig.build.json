@@ -4,7 +4,7 @@
     "sourceMap": false,
     "declaration": false,
     "declarationMap": false,
-    "removeComments": true
+    "removeComments": true,
   },
   "exclude": [
     "node_modules",
@@ -12,6 +12,6 @@
     "**/*.spec.ts",
     "**/*.test.ts",
     "**/__tests__/**",
-    "**/__mocks__/**"
-  ]
+    "**/__mocks__/**",
+  ],
 }
