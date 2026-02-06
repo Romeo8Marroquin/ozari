@@ -17,7 +17,6 @@ jobs:
   lint-and-test-api:
     name: API - Lint & Test
     runs-on: ubuntu-latest
-    environment: dev
 
     defaults:
       run:
@@ -45,7 +44,7 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm exec prisma generate
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL: ""
 
       - name: Type check
         run: pnpm run type-check
