@@ -24,7 +24,7 @@ describe("Utils", () => {
     it("should redact sensitive fields", () => {
       const data = {
         username: "john",
-        password: "secret123",
+        password: "NOT_A_REAL_PASSWORD123",
         email: "john@example.com",
         token: "abc123",
       };
@@ -44,7 +44,7 @@ describe("Utils", () => {
         user: {
           name: "john",
           credentials: {
-            password: "secret123",
+            password: "NOT_A_REAL_PASSWORD123",
             token: "abc123",
           },
         },

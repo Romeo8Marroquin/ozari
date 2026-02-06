@@ -14,12 +14,10 @@ describe("Regex Patterns", () => {
       expect(descriptionTextRegex.test("This is a valid description.")).toBe(
         true,
       );
-      expect(descriptionTextRegex.test("Product with numbers 123!")).toBe(
+      expect(descriptionTextRegex.test("Product with numbers 123!")).toBe(true);
+      expect(descriptionTextRegex.test("Multi-line text: works (great)")).toBe(
         true,
       );
-      expect(
-        descriptionTextRegex.test("Multi-line text: works (great)"),
-      ).toBe(true);
     });
 
     it("should reject descriptions outside length bounds", () => {
@@ -68,9 +66,9 @@ describe("Regex Patterns", () => {
 
   describe("passwordRegex", () => {
     it("should match valid passwords", () => {
-      expect(passwordRegex.test("SecurePass123!")).toBe(true);
-      expect(passwordRegex.test("MyP@ssw0rd2024")).toBe(true);
-      expect(passwordRegex.test("Abc123!defGHI")).toBe(true);
+      expect(passwordRegex.test("Not_A_Real_Password123!")).toBe(true);
+      expect(passwordRegex.test("Not_A_Real_Password2024")).toBe(true);
+      expect(passwordRegex.test("Not_A_Real_Pwd3!defGHI")).toBe(true);
     });
 
     it("should reject passwords without required character types", () => {
