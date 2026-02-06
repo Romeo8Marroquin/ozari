@@ -6,13 +6,27 @@ export function encryptSha256Sync(target: string): string {
   return crypto.createHash("sha256").update(target).digest("hex");
 }
 
-export function hashPassword(password: string): string {
-  const salt = bcrypt.genSaltSync(12);
-  return bcrypt.hashSync(password, salt);
+/**
+ * Hash password using bcrypt (async to prevent event loop blocking)
+ * @param password - Plain text password
+ * @returns Promise<hashed password>
+ */
+export async function hashPassword(password: string): Promise<string> {
+  const salt = await bcrypt.genSalt(12);
+  return bcrypt.hash(password, salt);
 }
 
-export function comparePassword(password: string, hash: string): boolean {
-  return bcrypt.compareSync(password, hash);
+/**
+ * Compare password with hash using bcrypt (async to prevent event loop blocking)
+ * @param password - Plain text password
+ * @param hash - Hashed password
+ * @returns Promise<true if match, false otherwise>
+ */
+export async function comparePassword(
+  password: string,
+  hash: string,
+): Promise<boolean> {
+  return bcrypt.compare(password, hash);
 }
 
 // AES-256-GCM encryption configuration
@@ -68,6 +82,15 @@ export async function encryptKmsAsync(
 }
 
 async function encryptSingleAsync(plaintext: string): Promise<string> {
+  const MAX_PLAINTEXT_SIZE = 1024 * 1024; // 1MB
+  const plaintextSize = Buffer.byteLength(plaintext, "utf8");
+
+  if (plaintextSize > MAX_PLAINTEXT_SIZE) {
+    throw new Error(
+      `Plaintext size (${plaintextSize} bytes) exceeds maximum allowed size (${MAX_PLAINTEXT_SIZE} bytes)`,
+    );
+  }
+
   const key = getEncryptionKey();
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);

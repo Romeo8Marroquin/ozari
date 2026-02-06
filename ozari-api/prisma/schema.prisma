@@ -11,10 +11,10 @@ model UserRole {
   name        String
   description String?
   isActive    Boolean   @default(true) @map("is_active")
-  updatedAt   DateTime? @updatedAt       @map("updated_at")
-  createdAt   DateTime  @default(now())  @map("created_at")
+  updatedAt   DateTime? @updatedAt @map("updated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
 
-  users       User[]
+  users User[]
 
   @@map("user_roles")
 }
@@ -33,35 +33,35 @@ model User {
   updatedAt     DateTime? @updatedAt @map("updated_at")
   createdAt     DateTime  @default(now()) @map("created_at")
 
-  role          UserRole  @relation(fields: [roleId], references: [id])
-  jwtSessions   JwtSession[]
-  blacklists    Blacklist[]
-  userPhones    UserPhone[]
-  addresses     Address[]
-  services      Service[]
+  role              UserRole           @relation(fields: [roleId], references: [id])
+  jwtSessions       JwtSession[]
+  blacklists        Blacklist[]
+  userPhones        UserPhone[]
+  addresses         Address[]
+  services          Service[]
   userAuthProviders UserAuthProvider[]
 
   @@map("users")
 }
 
 model UserAuthProvider {
-  id                 Int       @id @default(autoincrement())
-  userId             Int       @map("user_id")
-  providerName       String    @map("provider_name")
-  providerSubject    String    @map("provider_subject")
-  emailExternalKms   String?   @map("email_external_kms")
-  emailExternalKmsSha String?  @map("email_external_kms_sha")
-  accessTokenKms     String?   @map("access_token_kms")
-  refreshTokenKms    String?   @map("refresh_token_kms")
-  isActive           Boolean   @default(true) @map("is_active")
-  updatedAt          DateTime? @updatedAt @map("updated_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
+  id                  Int       @id @default(autoincrement())
+  userId              Int       @map("user_id")
+  providerName        String    @map("provider_name")
+  providerSubject     String    @map("provider_subject")
+  emailExternalKms    String?   @map("email_external_kms")
+  emailExternalKmsSha String?   @map("email_external_kms_sha")
+  accessTokenKms      String?   @map("access_token_kms")
+  refreshTokenKms     String?   @map("refresh_token_kms")
+  isActive            Boolean   @default(true) @map("is_active")
+  updatedAt           DateTime? @updatedAt @map("updated_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id])
 
-  @@map("user_auth_providers")
   @@unique([providerName, providerSubject], name: "uq_user_auth_providers_provider_subject")
-  @@unique([userId, providerName],        name: "uq_user_auth_providers_user_provider")
+  @@unique([userId, providerName], name: "uq_user_auth_providers_user_provider")
+  @@map("user_auth_providers")
 }
 
 model TokenType {
@@ -78,18 +78,21 @@ model TokenType {
 }
 
 model JwtSession {
-  id          Int       @id @default(autoincrement())
-  jti         String
-  deviceUuid  String    @map("device_uuid")
-  userId      Int       @map("user_id")
-  tokenTypeId Int       @map("token_type_id")
-  issuedAt    DateTime  @map("issued_at")
-  expiresAt   DateTime  @map("expires_at")
-  isActive    Boolean   @default(true) @map("is_active")
+  id          Int      @id @default(autoincrement())
+  jti         String   @unique
+  deviceUuid  String   @map("device_uuid")
+  userId      Int      @map("user_id")
+  tokenTypeId Int      @map("token_type_id")
+  issuedAt    DateTime @map("issued_at")
+  expiresAt   DateTime @map("expires_at")
+  isActive    Boolean  @default(true) @map("is_active")
 
-  user        User      @relation(fields: [userId], references: [id])
-  tokenType   TokenType @relation(fields: [tokenTypeId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+  tokenType TokenType @relation(fields: [tokenTypeId], references: [id])
 
+  // Indexes for frequent queries in auth middleware
+  @@index([userId, isActive]) // Query by user and active status
+  @@index([deviceUuid, isActive]) // Query by device and active status
   @@map("jwt_sessions")
 }
 
@@ -101,23 +104,24 @@ model BlacklistType {
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  blacklists  Blacklist[]
+  blacklists Blacklist[]
 
   @@map("blacklist_types")
 }
 
 model Blacklist {
-  id              Int           @id @default(autoincrement())
-  userId          Int           @map("user_id")
-  blacklistTypeId Int           @map("blacklist_type_id")
+  id              Int       @id @default(autoincrement())
+  userId          Int       @map("user_id")
+  blacklistTypeId Int       @map("blacklist_type_id")
   reason          String
-  isActive        Boolean       @default(true) @map("is_active")
-  updatedAt       DateTime?     @updatedAt @map("updated_at")
-  createdAt       DateTime      @default(now()) @map("created_at")
+  isActive        Boolean   @default(true) @map("is_active")
+  updatedAt       DateTime? @updatedAt @map("updated_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
 
-  user            User          @relation(fields: [userId], references: [id])
-  blacklistType   BlacklistType @relation(fields: [blacklistTypeId], references: [id])
+  user          User          @relation(fields: [userId], references: [id])
+  blacklistType BlacklistType @relation(fields: [blacklistTypeId], references: [id])
 
+  @@index([userId, isActive])
   @@map("blacklist")
 }
 
@@ -129,42 +133,42 @@ model UserPhoneType {
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  userPhones  UserPhone[]
+  userPhones UserPhone[]
 
   @@map("user_phone_types")
 }
 
 model UserPhone {
-  id              Int           @id @default(autoincrement())
-  userId          Int           @map("user_id")
-  userPhoneTypeId Int           @map("user_phone_type_id")
-  phoneNumberKms  String        @map("phone_number_kms")
-  isPrincipal     Boolean       @map("is_principal")
-  isActive        Boolean       @default(true) @map("is_active")
-  updatedAt       DateTime?     @updatedAt @map("updated_at")
-  createdAt       DateTime      @default(now()) @map("created_at")
+  id              Int       @id @default(autoincrement())
+  userId          Int       @map("user_id")
+  userPhoneTypeId Int       @map("user_phone_type_id")
+  phoneNumberKms  String    @map("phone_number_kms")
+  isPrincipal     Boolean   @map("is_principal")
+  isActive        Boolean   @default(true) @map("is_active")
+  updatedAt       DateTime? @updatedAt @map("updated_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
 
-  user            User          @relation(fields: [userId], references: [id])
-  phoneType       UserPhoneType @relation(fields: [userPhoneTypeId], references: [id])
-  services        Service[]
+  user      User          @relation(fields: [userId], references: [id])
+  phoneType UserPhoneType @relation(fields: [userPhoneTypeId], references: [id])
+  services  Service[]
 
   @@map("user_phones")
 }
 
 model Currency {
-  id           Int       @id @default(autoincrement())
-  name         String
-  description  String?
-  symbol       String
-  iso4217Code  String    @map("iso_4217_code")
-  isActive     Boolean   @default(true) @map("is_active")
-  updatedAt    DateTime? @updatedAt @map("updated_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  symbol      String
+  iso4217Code String    @map("iso_4217_code")
+  isActive    Boolean   @default(true) @map("is_active")
+  updatedAt   DateTime? @updatedAt @map("updated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
 
-  products         Product[]
-  services         Service[]
-  serviceDetails   ServiceDetail[]
-  serviceExtras    ServiceExtra[]
+  products       Product[]
+  services       Service[]
+  serviceDetails ServiceDetail[]
+  serviceExtras  ServiceExtra[]
 
   @@map("currencies")
 }
@@ -177,7 +181,7 @@ model ProductBusinessType {
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  products    Product[]
+  products Product[]
 
   @@map("product_business_type")
 }
@@ -190,31 +194,31 @@ model ProductCategory {
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  products    Product[]
+  products Product[]
 
   @@map("product_category")
 }
 
 model Product {
-  id                    Int                 @id @default(autoincrement())
+  id                    Int       @id @default(autoincrement())
   name                  String
   description           String?
-  imageUrl              String?             @map("image_url")
-  productBusinessTypeId Int                 @map("product_business_type_id")
-  productCategoryId     Int                 @map("product_category_id")
-  rentPrice             Decimal?            @db.Decimal(15,2)
-  sellPrice             Decimal?            @db.Decimal(15,2)
-  currencyId            Int                 @map("currency_id")
+  imageUrl              String?   @map("image_url")
+  productBusinessTypeId Int       @map("product_business_type_id")
+  productCategoryId     Int       @map("product_category_id")
+  rentPrice             Decimal?  @db.Decimal(15, 2)
+  sellPrice             Decimal?  @db.Decimal(15, 2)
+  currencyId            Int       @map("currency_id")
   quantity              Int
-  isActive              Boolean             @default(true) @map("is_active")
-  updatedAt             DateTime?           @updatedAt @map("updated_at")
-  createdAt             DateTime            @default(now()) @map("created_at")
+  isActive              Boolean   @default(true) @map("is_active")
+  updatedAt             DateTime? @updatedAt @map("updated_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
 
-  businessType          ProductBusinessType @relation(fields: [productBusinessTypeId], references: [id])
-  category              ProductCategory     @relation(fields: [productCategoryId], references: [id])
-  currency              Currency            @relation(fields: [currencyId], references: [id])
-  productDetails        ProductDetail[]
-  serviceDetails        ServiceDetail[]
+  businessType   ProductBusinessType @relation(fields: [productBusinessTypeId], references: [id])
+  category       ProductCategory     @relation(fields: [productCategoryId], references: [id])
+  currency       Currency            @relation(fields: [currencyId], references: [id])
+  productDetails ProductDetail[]
+  serviceDetails ServiceDetail[]
 
   @@map("products")
 }
@@ -227,22 +231,22 @@ model ProductDetailType {
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  productDetails  ProductDetail[]
+  productDetails ProductDetail[]
 
   @@map("product_detail_types")
 }
 
 model ProductDetail {
-  id                  Int               @id @default(autoincrement())
-  productId           Int               @map("product_id")
-  productDetailTypeId Int               @map("product_detail_type_id")
+  id                  Int       @id @default(autoincrement())
+  productId           Int       @map("product_id")
+  productDetailTypeId Int       @map("product_detail_type_id")
   detail              String
-  isActive            Boolean           @default(true) @map("is_active")
-  updatedAt           DateTime?         @updatedAt @map("updated_at")
-  createdAt           DateTime          @default(now()) @map("created_at")
+  isActive            Boolean   @default(true) @map("is_active")
+  updatedAt           DateTime? @updatedAt @map("updated_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
 
-  product             Product           @relation(fields: [productId], references: [id])
-  detailType          ProductDetailType @relation(fields: [productDetailTypeId], references: [id])
+  product    Product           @relation(fields: [productId], references: [id])
+  detailType ProductDetailType @relation(fields: [productDetailTypeId], references: [id])
 
   @@map("product_details")
 }
@@ -269,38 +273,38 @@ model CountryDepartment {
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  country     Country   @relation(fields: [countryId], references: [id])
+  country        Country        @relation(fields: [countryId], references: [id])
   municipalities Municipality[]
 
   @@map("departments")
 }
 
 model Municipality {
-  id             Int               @id @default(autoincrement())
-  name           String
-  departmentId   Int               @map("department_id")
-  description    String?
-  isActive       Boolean           @default(true) @map("is_active")
-  updatedAt      DateTime?         @updatedAt @map("updated_at")
-  createdAt      DateTime          @default(now()) @map("created_at")
+  id           Int       @id @default(autoincrement())
+  name         String
+  departmentId Int       @map("department_id")
+  description  String?
+  isActive     Boolean   @default(true) @map("is_active")
+  updatedAt    DateTime? @updatedAt @map("updated_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
 
-  department     CountryDepartment @relation(fields: [departmentId], references: [id])
-  zones          Zone[]
+  department CountryDepartment @relation(fields: [departmentId], references: [id])
+  zones      Zone[]
 
   @@map("municipalities")
 }
 
 model Zone {
-  id             Int          @id @default(autoincrement())
+  id             Int       @id @default(autoincrement())
   name           String
-  municipalityId Int          @map("municipality_id")
+  municipalityId Int       @map("municipality_id")
   description    String?
-  isActive       Boolean      @default(true) @map("is_active")
-  updatedAt      DateTime?    @updatedAt @map("updated_at")
-  createdAt      DateTime     @default(now()) @map("created_at")
+  isActive       Boolean   @default(true) @map("is_active")
+  updatedAt      DateTime? @updatedAt @map("updated_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
-  municipality   Municipality @relation(fields: [municipalityId], references: [id])
-  addresses      Address[]
+  municipality Municipality @relation(fields: [municipalityId], references: [id])
+  addresses    Address[]
 
   @@map("zones")
 }
@@ -312,15 +316,15 @@ model Address {
   addressKms          String    @map("address_kms")
   coordsKms           String?   @map("coords_kms")
   instructionsKms     String?   @map("instructions_kms")
-  domicilePrice       Decimal?  @db.Decimal(15,2) @map("domicile_price")
+  domicilePrice       Decimal?  @map("domicile_price") @db.Decimal(15, 2)
   deliveryTimeMinutes Int?      @map("delivery_time_minutes")
   isActive            Boolean   @default(true) @map("is_active")
   updatedAt           DateTime? @updatedAt @map("updated_at")
   createdAt           DateTime  @default(now()) @map("created_at")
 
-  user                User      @relation(fields: [userId], references: [id])
-  zone                Zone      @relation(fields: [zoneId], references: [id])
-  services            Service[]
+  user     User      @relation(fields: [userId], references: [id])
+  zone     Zone      @relation(fields: [zoneId], references: [id])
+  services Service[]
 
   @@map("addresses")
 }
@@ -333,7 +337,7 @@ model ServiceStatus {
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  services    Service[]
+  services Service[]
 
   @@map("service_status")
 }
@@ -346,38 +350,38 @@ model PaymentStatus {
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  services    Service[]
+  services Service[]
 
   @@map("payment_status")
 }
 
 model Service {
-  id               Int           @id @default(autoincrement())
-  userId           Int           @map("user_id")
-  deliveryNameKms  String        @map("delivery_name_kms")
-  addressId        Int           @map("address_id")
-  userPhoneId      Int           @map("user_phone_id")
+  id               Int       @id @default(autoincrement())
+  userId           Int       @map("user_id")
+  deliveryNameKms  String    @map("delivery_name_kms")
+  addressId        Int       @map("address_id")
+  userPhoneId      Int       @map("user_phone_id")
   description      String?
-  serviceStart     DateTime      @map("service_start")
-  serviceEnd       DateTime      @map("service_end")
-  totalAmount      Decimal       @db.Decimal(15,2) @map("total_amount")
-  currencyId       Int           @map("currency_id")
-  serviceStatusId  Int           @map("service_status_id")
-  paymentStatusId  Int           @map("payment_status_id")
+  serviceStart     DateTime  @map("service_start")
+  serviceEnd       DateTime  @map("service_end")
+  totalAmount      Decimal   @map("total_amount") @db.Decimal(15, 2)
+  currencyId       Int       @map("currency_id")
+  serviceStatusId  Int       @map("service_status_id")
+  paymentStatusId  Int       @map("payment_status_id")
   comment          String?
-  invoiceNumberKms String?       @map("invoice_number_kms")
-  isActive         Boolean       @default(true) @map("is_active")
-  updatedAt        DateTime?     @updatedAt @map("updated_at")
-  createdAt        DateTime      @default(now()) @map("created_at")
+  invoiceNumberKms String?   @map("invoice_number_kms")
+  isActive         Boolean   @default(true) @map("is_active")
+  updatedAt        DateTime? @updatedAt @map("updated_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
 
-  user             User          @relation(fields: [userId], references: [id])
-  address          Address       @relation(fields: [addressId], references: [id])
-  userPhone        UserPhone     @relation(fields: [userPhoneId], references: [id])
-  currency         Currency      @relation(fields: [currencyId], references: [id])
-  serviceStatus    ServiceStatus @relation(fields: [serviceStatusId], references: [id])
-  paymentStatus    PaymentStatus @relation(fields: [paymentStatusId], references: [id])
-  serviceDetails   ServiceDetail[]
-  serviceExtras    ServiceExtra[]
+  user           User            @relation(fields: [userId], references: [id])
+  address        Address         @relation(fields: [addressId], references: [id])
+  userPhone      UserPhone       @relation(fields: [userPhoneId], references: [id])
+  currency       Currency        @relation(fields: [currencyId], references: [id])
+  serviceStatus  ServiceStatus   @relation(fields: [serviceStatusId], references: [id])
+  paymentStatus  PaymentStatus   @relation(fields: [paymentStatusId], references: [id])
+  serviceDetails ServiceDetail[]
+  serviceExtras  ServiceExtra[]
 
   @@map("services")
 }
@@ -387,16 +391,16 @@ model ServiceDetail {
   serviceId    Int       @map("service_id")
   productId    Int       @map("product_id")
   quantity     Int
-  unitaryPrice Decimal   @db.Decimal(15,2) @map("unitary_price")
-  parcialPrice Decimal   @db.Decimal(15,2) @map("parcial_price")
+  unitaryPrice Decimal   @map("unitary_price") @db.Decimal(15, 2)
+  parcialPrice Decimal   @map("parcial_price") @db.Decimal(15, 2)
   currencyId   Int       @map("currency_id")
   isActive     Boolean   @default(true) @map("is_active")
   updatedAt    DateTime? @updatedAt @map("updated_at")
   createdAt    DateTime  @default(now()) @map("created_at")
 
-  service      Service   @relation(fields: [serviceId], references: [id])
-  product      Product   @relation(fields: [productId], references: [id])
-  currency     Currency  @relation(fields: [currencyId], references: [id])
+  service  Service  @relation(fields: [serviceId], references: [id])
+  product  Product  @relation(fields: [productId], references: [id])
+  currency Currency @relation(fields: [currencyId], references: [id])
 
   @@map("service_details")
 }
@@ -407,15 +411,15 @@ model ServiceExtra {
   name         String
   description  String?
   quantity     Int?
-  unitaryPrice Decimal?  @db.Decimal(15,2) @map("unitary_price")
-  parcialPrice Decimal?  @db.Decimal(15,2) @map("parcial_price")
+  unitaryPrice Decimal?  @map("unitary_price") @db.Decimal(15, 2)
+  parcialPrice Decimal?  @map("parcial_price") @db.Decimal(15, 2)
   currencyId   Int?      @map("currency_id")
   isActive     Boolean   @default(true) @map("is_active")
   updatedAt    DateTime? @updatedAt @map("updated_at")
   createdAt    DateTime  @default(now()) @map("created_at")
 
-  service      Service   @relation(fields: [serviceId], references: [id])
-  currency     Currency? @relation(fields: [currencyId], references: [id])
+  service  Service   @relation(fields: [serviceId], references: [id])
+  currency Currency? @relation(fields: [currencyId], references: [id])
 
   @@map("service_extras")
 }

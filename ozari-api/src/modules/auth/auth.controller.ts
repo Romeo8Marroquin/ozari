@@ -10,6 +10,11 @@ import {
 } from "@helpers/encryption.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { logger } from "@/config/logger.js";
+import {
+  AuditAction,
+  logAuthAudit,
+  logUserManagementAudit,
+} from "@/config/auditLogger.js";
 import { type JwtPayloadModel } from "@models/common/authModel.js";
 import {
   type CustomRequest,
@@ -21,6 +26,10 @@ import { TokenEnum } from "@models/enums/tokenEnum.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
 import { appConfig } from "@/config/app.js";
+import {
+  clearLoginAttempts,
+  recordFailedLogin,
+} from "@middlewares/loginRateLimit.middleware.js";
 import {
   type CreateUserRequestModel,
   type SignInUserRequestModel,
@@ -91,17 +100,31 @@ export const createUser = async (
     }
     const encryptedName = await encryptKmsAsync(fullName);
     const encryptedEmail = await encryptKmsAsync(email);
-    await prismaClient.user.create({
+    const hashedPassword = await hashPassword(password);
+    const newUser = await prismaClient.user.create({
       data: {
         emailKms: encryptedEmail,
         emailSha,
         fullNameKms: encryptedName,
-        passwordSha: hashPassword(password),
+        passwordSha: hashedPassword,
         roleId: RolesEnum.Client,
         termsAccepted,
       },
     });
+
     logger.info(i18next.t("user.createUser.logs.userCreated", { email }));
+
+    // Audit log: User created
+    if (process.env["NODE_ENV"] === "production") {
+      logUserManagementAudit({
+        action: AuditAction.USER_CREATED,
+        userId: newUser.id,
+        email,
+        ipAddress: req.ip,
+        success: true,
+      });
+    }
+
     sendOzariSuccess(
       res,
       HttpEnum.CREATED,
@@ -144,6 +167,22 @@ export const signInUser = async (
     });
     if (!user) {
       logger.warn(i18next.t("user.signInUser.logs.userNotFound", { email }));
+      // Record failed login attempt for non-existent user (prevent enumeration timing attacks)
+      recordFailedLogin(email);
+
+      // Audit log: Failed login (user not found)
+      if (process.env["NODE_ENV"] === "production") {
+        logAuthAudit({
+          action: AuditAction.USER_LOGIN_FAILED,
+          email,
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+          deviceUuid,
+          success: false,
+          reason: "User not found",
+        });
+      }
+
       sendOzariError(
         res,
         HttpEnum.UNAUTHORIZED,
@@ -152,13 +191,30 @@ export const signInUser = async (
       return;
     }
 
-    const passwordValid = comparePassword(password, user.passwordSha);
+    const passwordValid = await comparePassword(password, user.passwordSha);
     if (!passwordValid) {
       logger.warn(
         i18next.t("user.signInUser.logs.invalidCredentials", {
           userId: user.id,
         }),
       );
+      // Record failed login attempt for invalid password
+      recordFailedLogin(email);
+
+      // Audit log: Failed login (invalid password)
+      if (process.env["NODE_ENV"] === "production") {
+        logAuthAudit({
+          action: AuditAction.USER_LOGIN_FAILED,
+          userId: user.id,
+          email,
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+          deviceUuid,
+          success: false,
+          reason: "Invalid password",
+        });
+      }
+
       sendOzariError(
         res,
         HttpEnum.UNAUTHORIZED,
@@ -228,9 +284,26 @@ export const signInUser = async (
       .header("authorization", `Bearer ${accessToken}`)
       .cookie("refresh-token", refreshToken, appConfig.cookieConfig);
 
+    // Clear failed login attempts on successful authentication
+    clearLoginAttempts(email);
+
     logger.info(
       i18next.t("user.signInUser.logs.userAuthenticated", { userId: user.id }),
     );
+
+    // Audit log: Successful login
+    if (process.env["NODE_ENV"] === "production") {
+      logAuthAudit({
+        action: AuditAction.USER_LOGIN_SUCCESS,
+        userId: user.id,
+        email,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+        deviceUuid,
+        success: true,
+      });
+    }
+
     sendOzariSuccess(
       res,
       HttpEnum.OK,
@@ -398,6 +471,20 @@ export const refreshToken = async (
         userRole: payload.userRole,
       }),
     );
+
+    // Audit log: Token refreshed
+    if (process.env["NODE_ENV"] === "production") {
+      logAuthAudit({
+        action: AuditAction.TOKEN_REFRESH,
+        userId: payload.userId,
+        email: "", // Email not available in refresh token flow
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+        deviceUuid: foundSession.deviceUuid,
+        success: true,
+      });
+    }
+
     sendOzariSuccess(
       res,
       HttpEnum.OK,
@@ -457,6 +544,22 @@ export const signOutUser = async (
         userRole,
       }),
     );
+
+    // Audit log: User logout
+    if (process.env["NODE_ENV"] === "production") {
+      logAuthAudit({
+        action: allDevices
+          ? AuditAction.USER_LOGOUT_ALL_DEVICES
+          : AuditAction.USER_LOGOUT,
+        userId,
+        email: "", // Email not available in logout flow
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+        deviceUuid,
+        success: true,
+      });
+    }
+
     sendOzariSuccess(
       res,
       HttpEnum.OK,
