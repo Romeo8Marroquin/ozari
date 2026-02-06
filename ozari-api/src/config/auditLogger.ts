@@ -171,11 +171,11 @@ export function logAuthAudit(params: {
   };
 
   // Only add optional fields if they are defined
-  if (params.userId !== undefined) entry.userId = params.userId;
-  if (params.ipAddress !== undefined) entry.ipAddress = params.ipAddress;
-  if (params.userAgent !== undefined) entry.userAgent = params.userAgent;
-  if (params.deviceUuid !== undefined) entry.deviceUuid = params.deviceUuid;
-  if (params.reason !== undefined) entry.errorMessage = params.reason;
+  if (params.userId !== undefined) {entry.userId = params.userId;}
+  if (params.ipAddress !== undefined) {entry.ipAddress = params.ipAddress;}
+  if (params.userAgent !== undefined) {entry.userAgent = params.userAgent;}
+  if (params.deviceUuid !== undefined) {entry.deviceUuid = params.deviceUuid;}
+  if (params.reason !== undefined) {entry.errorMessage = params.reason;}
 
   logAudit(entry);
 }
@@ -201,12 +201,12 @@ export function logUserManagementAudit(params: {
   };
 
   // Only add optional fields if they are defined
-  if (params.targetUserId !== undefined) entry.targetUserId = params.targetUserId;
-  if (params.email !== undefined) entry.email = params.email;
-  if (params.ipAddress !== undefined) entry.ipAddress = params.ipAddress;
-  if (params.oldValue !== undefined) entry.oldValue = params.oldValue;
-  if (params.newValue !== undefined) entry.newValue = params.newValue;
-  if (params.reason !== undefined) entry.errorMessage = params.reason;
+  if (params.targetUserId !== undefined) {entry.targetUserId = params.targetUserId;}
+  if (params.email !== undefined) {entry.email = params.email;}
+  if (params.ipAddress !== undefined) {entry.ipAddress = params.ipAddress;}
+  if (params.oldValue !== undefined) {entry.oldValue = params.oldValue;}
+  if (params.newValue !== undefined) {entry.newValue = params.newValue;}
+  if (params.reason !== undefined) {entry.errorMessage = params.reason;}
 
   logAudit(entry);
 }
@@ -230,12 +230,12 @@ export function logSecurityAudit(params: {
   };
 
   // Only add optional fields if they are defined
-  if (params.userId !== undefined) entry.userId = params.userId;
-  if (params.email !== undefined) entry.email = params.email;
-  if (params.ipAddress !== undefined) entry.ipAddress = params.ipAddress;
-  if (params.resource !== undefined) entry.resource = params.resource;
-  if (params.reason !== undefined) entry.errorMessage = params.reason;
-  if (params.metadata !== undefined) entry.metadata = params.metadata;
+  if (params.userId !== undefined) {entry.userId = params.userId;}
+  if (params.email !== undefined) {entry.email = params.email;}
+  if (params.ipAddress !== undefined) {entry.ipAddress = params.ipAddress;}
+  if (params.resource !== undefined) {entry.resource = params.resource;}
+  if (params.reason !== undefined) {entry.errorMessage = params.reason;}
+  if (params.metadata !== undefined) {entry.metadata = params.metadata;}
 
   logAudit(entry);
 }

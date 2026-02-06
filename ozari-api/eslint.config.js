@@ -64,7 +64,6 @@ export default [
       "@typescript-eslint/prefer-nullish-coalescing": "warn",
       "@typescript-eslint/prefer-optional-chain": "warn",
       "@typescript-eslint/no-implied-eval": "error",
-      "@typescript-eslint/no-throw-literal": "error",
 
       // SonarJS Code Quality Rules
       "sonarjs/no-duplicate-string": ["warn", { threshold: 5 }],
@@ -104,7 +103,7 @@ export default [
       "no-eval": "error",
       "no-implied-eval": "off",
       "no-new-func": "error",
-      "no-throw-literal": "off",
+      "no-throw-literal": "error",
       "prefer-promise-reject-errors": "error",
 
       // Performance Rules
@@ -123,6 +122,15 @@ export default [
     },
   },
 
+  // Enum files allow unused exports
+  {
+    files: ["**/*Enum.ts", "**/*Model.ts"],
+    rules: {
+      "no-unused-vars": "off",
+      "@typescript-eslint/no-unused-vars": "off",
+    },
+  },
+
   // Ignore patterns
   {
     ignores: [
@@ -133,6 +141,7 @@ export default [
       "prisma/migrations/**",
       "coverage/**",
       "*.config.js",
+      "*.config.ts",
       "check-duplicate-jti.sql",
     ],
   },
