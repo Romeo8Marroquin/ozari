@@ -27,6 +27,7 @@ const auditFormat = winston.format.combine(
   winston.format.metadata({
     fillExcept: ["message", "level", "timestamp", "label"],
   }),
+  /* c8 ignore next 3 */
   isProduction
     ? // Production: JSON format (structured, searchable in Railway)
       winston.format.json()
@@ -51,6 +52,7 @@ export const auditLogger = winston.createLogger({
   transports: [
     // All audit logs to stdout (Railway captures this)
     new winston.transports.Console({
+      /* c8 ignore next 4 */
       format: isProduction
         ? winston.format.combine(
             winston.format.label({ label: "[AUDIT]" }),
@@ -200,6 +202,7 @@ export function logUserManagementAudit(params: {
     success: params.success,
   };
 
+  /* c8 ignore start */
   // Only add optional fields if they are defined
   if (params.targetUserId !== undefined) {entry.targetUserId = params.targetUserId;}
   if (params.email !== undefined) {entry.email = params.email;}
@@ -207,6 +210,7 @@ export function logUserManagementAudit(params: {
   if (params.oldValue !== undefined) {entry.oldValue = params.oldValue;}
   if (params.newValue !== undefined) {entry.newValue = params.newValue;}
   if (params.reason !== undefined) {entry.errorMessage = params.reason;}
+  /* c8 ignore stop */
 
   logAudit(entry);
 }

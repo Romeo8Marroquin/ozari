@@ -81,6 +81,13 @@ pnpm run type-check
 # Linting
 pnpm run lint
 pnpm run lint:fix
+
+# Testing
+pnpm test                # Run all tests
+pnpm run test:unit       # Run unit tests only
+pnpm run test:integration # Run integration tests only
+pnpm run test:coverage   # Run with coverage (requires 100%)
+pnpm run test:ci         # CI pipeline (unit + integration)
 ```
 
 ### 5. Production Build

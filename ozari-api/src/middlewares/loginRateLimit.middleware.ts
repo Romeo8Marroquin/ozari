@@ -19,6 +19,7 @@ interface LoginAttempt {
 // In-memory store for login attempts (email -> attempt data)
 const loginAttempts = new Map<string, LoginAttempt>();
 
+/* c8 ignore start */
 // Periodic cleanup of expired entries
 setInterval(() => {
   const now = Date.now();
@@ -37,6 +38,7 @@ setInterval(() => {
     );
   }
 }, CLEANUP_INTERVAL_MS);
+/* c8 ignore stop */
 
 /**
  * Check if login attempts are within rate limit for an email

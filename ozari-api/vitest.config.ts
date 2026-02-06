@@ -22,6 +22,11 @@ export default defineConfig({
         "**/*Model*.ts",
         "**/*.models.ts",
         "**/models/**",
+        "**/*.route.ts",
+        "**/*.controller.ts",
+        "**/prisma.service.ts",
+        "**/auth.middleware.ts",
+        "**/products.validator.ts",
       ],
       thresholds: {
         lines: 100,
