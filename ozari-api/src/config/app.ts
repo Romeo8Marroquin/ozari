@@ -15,8 +15,10 @@ export const appConfig = {
 
   cookieConfig: {
     httpOnly: true,
-    sameSite: true as const,
+    sameSite: "lax" as const,
     secure: true,
+    maxAge: 2592000000, // 30 days in milliseconds (matches refresh token expiration)
+    path: "/api/auth",
   },
 
   maxGlobalAmount: 1000000,

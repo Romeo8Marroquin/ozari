@@ -24,7 +24,8 @@
     "test:unit": "vitest run src/",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:coverage": "vitest run --coverage",
-    "test:ci": "vitest run && vitest run --config vitest.integration.config.ts"
+    "test:ci": "vitest run && vitest run --config vitest.integration.config.ts",
+    "cleanup:sessions": "tsx --env-file=.env src/jobs/cleanupExpiredSessions.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.3.0",
