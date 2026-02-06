@@ -85,14 +85,12 @@ async function initializePrismaClient(): Promise<PrismaClient> {
 }
 
 export function getPrismaClient(): Promise<PrismaClient> {
-  if (!globalThis.prismaInitPromise) {
-    globalThis.prismaInitPromise = initializePrismaClient().catch((error) => {
-      logger.error("Database connection error", { error });
-      // Reset promise so it can be retried
-      globalThis.prismaInitPromise = undefined;
-      throw error;
-    });
-  }
+  globalThis.prismaInitPromise ??= initializePrismaClient().catch((error) => {
+    logger.error("Database connection error", { error });
+    // Reset promise so it can be retried
+    globalThis.prismaInitPromise = undefined;
+    throw error;
+  });
 
   return globalThis.prismaInitPromise;
 }

@@ -10,6 +10,9 @@ import {
   type SignInUserRequestModel,
 } from "./auth.models.js";
 
+const invalidBodyKey = "common.logs.invalidBody";
+const invalidBodyMessageKey = "common.invalidBody";
+
 // Zod schemas for validation
 const createUserSchema = z
   .object({
@@ -51,8 +54,8 @@ export function validateCreateUser(
 ): void {
   // Check if body exists and is an object
   if (!req.body || typeof req.body !== "object") {
-    logger.warn(i18next.t("common.logs.invalidBody"));
-    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t("common.invalidBody"));
+    logger.warn(i18next.t(invalidBodyKey));
+    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(invalidBodyMessageKey));
     return;
   }
 
@@ -63,11 +66,11 @@ export function validateCreateUser(
     // Get first validation error
     const firstError = result.error.errors[0];
     if (!firstError) {
-      logger.warn(i18next.t("common.logs.invalidBody"));
+      logger.warn(i18next.t(invalidBodyKey));
       sendOzariError(
         res,
         HttpEnum.BAD_REQUEST,
-        i18next.t("common.invalidBody"),
+        i18next.t(invalidBodyMessageKey),
       );
       return;
     }
@@ -101,8 +104,7 @@ export function validateCreateUser(
           logTranslationKey =
             "user.createUser.validators.logs.passwordsDoNotMatch";
         } else {
-          translationKey =
-            "user.createUser.validators.invalidConfirmPassword";
+          translationKey = "user.createUser.validators.invalidConfirmPassword";
           logTranslationKey =
             "user.createUser.validators.logs.invalidConfirmPassword";
         }
@@ -118,8 +120,8 @@ export function validateCreateUser(
         );
         break;
       default:
-        translationKey = "common.invalidBody";
-        logger.warn(i18next.t("common.logs.invalidBody"));
+        translationKey = invalidBodyMessageKey;
+        logger.warn(i18next.t(invalidBodyKey));
     }
 
     sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(translationKey));
@@ -138,8 +140,8 @@ export function validateSignIn(
 ): void {
   // Check if body exists and is an object
   if (!req.body || typeof req.body !== "object") {
-    logger.warn(i18next.t("common.logs.invalidBody"));
-    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t("common.invalidBody"));
+    logger.warn(i18next.t(invalidBodyKey));
+    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(invalidBodyMessageKey));
     return;
   }
 
@@ -156,11 +158,11 @@ export function validateSignIn(
     // Get first validation error
     const firstError = result.error.errors[0];
     if (!firstError) {
-      logger.warn(i18next.t("common.logs.invalidBody"));
+      logger.warn(i18next.t(invalidBodyKey));
       sendOzariError(
         res,
         HttpEnum.BAD_REQUEST,
-        i18next.t("common.invalidBody"),
+        i18next.t(invalidBodyMessageKey),
       );
       return;
     }
@@ -173,8 +175,7 @@ export function validateSignIn(
     switch (field) {
       case "deviceUuid":
         translationKey = "user.signInUser.validators.deviceUuidMissing";
-        logTranslationKey =
-          "user.signInUser.validators.logs.deviceUuidMissing";
+        logTranslationKey = "user.signInUser.validators.logs.deviceUuidMissing";
         logger.warn(i18next.t(logTranslationKey, { uuid: deviceUuid }));
         break;
       case "email":
@@ -188,8 +189,8 @@ export function validateSignIn(
         logger.warn(i18next.t(logTranslationKey));
         break;
       default:
-        translationKey = "common.invalidBody";
-        logger.warn(i18next.t("common.logs.invalidBody"));
+        translationKey = invalidBodyMessageKey;
+        logger.warn(i18next.t(invalidBodyKey));
     }
 
     sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(translationKey));

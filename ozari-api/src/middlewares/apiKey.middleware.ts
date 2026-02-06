@@ -9,7 +9,7 @@ import { sendOzariError } from "@models/http/ozariErrorModel.js";
  * Note: No caching - allows API key rotation without server restart
  * Environment variable reads are fast enough for production use
  */
-export const validateApiKey = async (
+export const validateApiKey = (
   req: Request,
   res: Response,
   next: NextFunction,

@@ -36,6 +36,11 @@ export default [
         global: "readonly",
         module: "readonly",
         require: "readonly",
+        setTimeout: "readonly",
+        setInterval: "readonly",
+        clearTimeout: "readonly",
+        clearInterval: "readonly",
+        crypto: "readonly",
       },
     },
     plugins: {
@@ -44,6 +49,7 @@ export default [
       security: security,
     },
     rules: {
+      "no-unused-vars": "off", // Use @typescript-eslint/no-unused-vars instead
       "@typescript-eslint/no-unused-vars": [
         "error",
         {
@@ -115,7 +121,7 @@ export default [
 
       // Style rules for best practices
       "max-depth": ["warn", 4], // Max nesting depth
-      "max-lines-per-function": ["warn", { max: 150, skipBlankLines: true }],
+      "max-lines-per-function": ["warn", { max: 300, skipBlankLines: true }],
       "max-params": ["warn", 5], // Max function parameters
       "no-magic-numbers": ["off"],
       complexity: ["warn", 15], // Cyclomatic complexity

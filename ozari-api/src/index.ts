@@ -23,20 +23,21 @@ async function startServer() {
     });
 
     // Shutdown handling
-    const shutdown = async (signal: string) => {
+    const shutdown = (signal: string) => {
       logger.info(`${signal} received. Starting shutdown...`);
 
-      server.close(async () => {
+      server.close(() => {
         logger.info("HTTP server closed");
 
-        try {
-          await disconnectPrisma();
-          logger.info("Shutdown completed");
-          process.exit(0);
-        } catch (error) {
-          logger.error("Error during shutdown", { error });
-          process.exit(1);
-        }
+        disconnectPrisma()
+          .then(() => {
+            logger.info("Shutdown completed");
+            process.exit(0);
+          })
+          .catch((error) => {
+            logger.error("Error during shutdown", { error });
+            process.exit(1);
+          });
       });
 
       // Force shutdown after 10 seconds
@@ -47,8 +48,12 @@ async function startServer() {
     };
 
     // Listen for termination signals
-    process.on("SIGTERM", () => shutdown("SIGTERM"));
-    process.on("SIGINT", () => shutdown("SIGINT"));
+    process.on("SIGTERM", () => {
+      void shutdown("SIGTERM");
+    });
+    process.on("SIGINT", () => {
+      void shutdown("SIGINT");
+    });
 
     // Handle uncaught exceptions
     process.on("uncaughtException", (error) => {
@@ -67,4 +72,7 @@ async function startServer() {
   }
 }
 
-startServer();
+startServer().catch((error) => {
+  logger.error("Server startup failed", { error });
+  process.exit(1);
+});

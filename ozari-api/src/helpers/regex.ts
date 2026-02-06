@@ -12,4 +12,5 @@ export const genericUuidRegex =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const genericHttpsUrlRegex =
+  // eslint-disable-next-line security/detect-unsafe-regex -- Safe regex: no exponential backtracking, fixed length constraints
   /^https:\/\/(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?::\d+)?(?:\/\S*)?$/;

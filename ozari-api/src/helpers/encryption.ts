@@ -55,33 +55,29 @@ function getEncryptionKey(): Buffer {
   return encryptionKey;
 }
 
-export async function decryptKmsAsync(target: string): Promise<string>;
-export async function decryptKmsAsync(target: string[]): Promise<string[]>;
-export async function decryptKmsAsync(
-  target: string | string[],
-): Promise<string | string[]> {
+/* eslint-disable no-redeclare */
+export function decryptKms(target: string): string;
+export function decryptKms(target: string[]): string[];
+export function decryptKms(target: string | string[]): string | string[] {
   if (typeof target === "string") {
-    return decryptSingleAsync(target);
+    return decryptSingle(target);
   } else {
-    const decryptPromises = target.map(decryptSingleAsync);
-    return Promise.all(decryptPromises);
+    return target.map(decryptSingle);
   }
 }
 
-export async function encryptKmsAsync(target: string): Promise<string>;
-export async function encryptKmsAsync(target: string[]): Promise<string[]>;
-export async function encryptKmsAsync(
-  target: string | string[],
-): Promise<string | string[]> {
+/* eslint-disable no-redeclare */
+export function encryptKms(target: string): string;
+export function encryptKms(target: string[]): string[];
+export function encryptKms(target: string | string[]): string | string[] {
   if (typeof target === "string") {
-    return encryptSingleAsync(target);
+    return encryptSingle(target);
   } else {
-    const encryptPromises = target.map(encryptSingleAsync);
-    return Promise.all(encryptPromises);
+    return target.map(encryptSingle);
   }
 }
 
-async function encryptSingleAsync(plaintext: string): Promise<string> {
+function encryptSingle(plaintext: string): string {
   const MAX_PLAINTEXT_SIZE = 1024 * 1024; // 1MB
   const plaintextSize = Buffer.byteLength(plaintext, "utf8");
 
@@ -104,7 +100,7 @@ async function encryptSingleAsync(plaintext: string): Promise<string> {
   return result.toString("base64");
 }
 
-async function decryptSingleAsync(encryptedData: string): Promise<string> {
+function decryptSingle(encryptedData: string): string {
   const key = getEncryptionKey();
   const data = Buffer.from(encryptedData, "base64");
 
