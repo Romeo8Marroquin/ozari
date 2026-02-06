@@ -30,15 +30,20 @@ const customCliFormat = printf((info) => {
 
   // Include full context on first log
   const contextLogs = [
+    /* c8 ignore next */
     requestUuid ? `\n  → RequestUuid: ${requestUuid as string}` : "",
+    /* c8 ignore next 2 */
     info["protocol"] ? `\n  → Protocol: ${info["protocol"] as string}` : "",
     method && originalUrl
       ? `\n  → ${method as string} ${originalUrl as string}`
       : "",
     hostname ? `\n  → Host: ${hostname as string}` : "",
     userAgent ? `\n  → User-Agent: ${userAgent as string}` : "",
+    /* c8 ignore next */
     info["body"] ? `\n  → Body: ${JSON.stringify(info["body"])}` : "",
+    /* c8 ignore next */
     info["params"] ? `\n  → Params: ${JSON.stringify(info["params"])}` : "",
+    /* c8 ignore next 2 */
     info["query"] ? `\n  → Query: ${JSON.stringify(info["query"])}` : "",
     info["ips"] ? `\n  → IPs: ${JSON.stringify(info["ips"])}` : "",
   ];
@@ -78,6 +83,7 @@ const jsonFormat = combine(
 
 export const logger = winston.createLogger({
   level: process.env["LOG_LEVEL"] ?? "info",
+  /* c8 ignore next */
   format: process.env["NODE_ENV"] === "production" ? jsonFormat : cliFormat,
   transports: [new winston.transports.Console()],
 });

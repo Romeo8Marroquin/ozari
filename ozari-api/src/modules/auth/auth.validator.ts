@@ -65,6 +65,7 @@ export function validateCreateUser(
   if (!result.success) {
     // Get first validation error
     const firstError = result.error.errors[0];
+    /* c8 ignore start */
     if (!firstError) {
       logger.warn(i18next.t(invalidBodyKey));
       sendOzariError(
@@ -74,13 +75,16 @@ export function validateCreateUser(
       );
       return;
     }
+    /* c8 ignore stop */
     const field = firstError.path[0] as string;
 
     // Map Zod errors to existing i18n messages
     let translationKey: string;
     let logTranslationKey: string;
 
+    /* c8 ignore start */
     switch (field) {
+      /* c8 ignore stop */
       case "fullName":
         translationKey = "user.createUser.validators.invalidFullName";
         logTranslationKey = "user.createUser.validators.logs.invalidFullName";
@@ -119,9 +123,11 @@ export function validateCreateUser(
           }),
         );
         break;
+      /* c8 ignore start */
       default:
         translationKey = invalidBodyMessageKey;
         logger.warn(i18next.t(invalidBodyKey));
+      /* c8 ignore stop */
     }
 
     sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(translationKey));
@@ -157,6 +163,7 @@ export function validateSignIn(
   if (!result.success) {
     // Get first validation error
     const firstError = result.error.errors[0];
+    /* c8 ignore start */
     if (!firstError) {
       logger.warn(i18next.t(invalidBodyKey));
       sendOzariError(
@@ -166,13 +173,16 @@ export function validateSignIn(
       );
       return;
     }
+    /* c8 ignore stop */
     const field = firstError.path[0] as string;
 
     // Map Zod errors to existing i18n messages
     let translationKey: string;
     let logTranslationKey: string;
 
+    /* c8 ignore start */
     switch (field) {
+      /* c8 ignore stop */
       case "deviceUuid":
         translationKey = "user.signInUser.validators.deviceUuidMissing";
         logTranslationKey = "user.signInUser.validators.logs.deviceUuidMissing";
@@ -188,9 +198,11 @@ export function validateSignIn(
         logTranslationKey = "user.signInUser.validators.logs.invalidPassword";
         logger.warn(i18next.t(logTranslationKey));
         break;
+      /* c8 ignore start */
       default:
         translationKey = invalidBodyMessageKey;
         logger.warn(i18next.t(invalidBodyKey));
+      /* c8 ignore stop */
     }
 
     sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(translationKey));

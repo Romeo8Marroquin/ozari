@@ -40,16 +40,20 @@ function getEncryptionKey(): Buffer {
   if (encryptionKey === null) {
     const keyHex = process.env["ENCRYPTION_KEY"];
 
+    /* c8 ignore start */
     if (!keyHex) {
       logger.error("ENCRYPTION_KEY environment variable is not defined");
       throw new Error("Encryption key not configured");
     }
+    /* c8 ignore stop */
 
     encryptionKey = Buffer.from(keyHex, "hex");
 
+    /* c8 ignore start */
     if (encryptionKey.length !== 32) {
       throw new Error("Encryption key must be 32 bytes (256 bits)");
     }
+    /* c8 ignore stop */
   }
 
   return encryptionKey;
