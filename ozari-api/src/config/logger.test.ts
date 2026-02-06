@@ -119,4 +119,246 @@ describe("Logger", () => {
   it("should use correct format based on NODE_ENV", () => {
     expect(logger.format).toBeDefined();
   });
+
+  it("should handle firstLog without requestUuid", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      method: "GET",
+      originalUrl: "/api/test",
+      protocol: "https",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test without requestUuid", { firstLog: true });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog without protocol", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+      method: "POST",
+      originalUrl: "/api/auth",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test without protocol", { firstLog: true });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog without method and originalUrl", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+      protocol: "https",
+      hostname: "example.com",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test without method/originalUrl", { firstLog: true });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog without hostname", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+      method: "GET",
+      originalUrl: "/api/test",
+      protocol: "https",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test without hostname", { firstLog: true });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog without userAgent", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+      method: "GET",
+      originalUrl: "/api/test",
+      protocol: "https",
+      hostname: "example.com",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test without userAgent", { firstLog: true });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog without body", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+      method: "GET",
+      originalUrl: "/api/test",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test without body", { firstLog: true });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog without params", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+      method: "GET",
+      originalUrl: "/api/test",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test without params", { firstLog: true });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog without query", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+      method: "GET",
+      originalUrl: "/api/test",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test without query", { firstLog: true });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog without ips", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+      method: "GET",
+      originalUrl: "/api/test",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test without ips", { firstLog: true });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog with completely empty context", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({});
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test with empty context", { firstLog: true });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog with protocol field in info", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test with protocol", {
+      firstLog: true,
+      protocol: "https",
+    });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog with body field in info", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test with body", {
+      firstLog: true,
+      body: { username: "test", password: "secret" },
+    });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog with params field in info", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test with params", {
+      firstLog: true,
+      params: { id: "123" },
+    });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog with query field in info", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test with query", {
+      firstLog: true,
+      query: { search: "test", limit: "10" },
+    });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("should handle firstLog with ips field", async () => {
+    const { asyncLocalStorage } = await import("./context.js");
+
+    (asyncLocalStorage.getStore as ReturnType<typeof vi.fn>).mockReturnValue({
+      requestUuid: "test-uuid",
+      ips: ["192.168.1.1", "10.0.0.1"],
+    });
+
+    const spy = vi.spyOn(logger, "info");
+    logger.info("Test with ips", { firstLog: true });
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });

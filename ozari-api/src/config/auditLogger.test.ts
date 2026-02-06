@@ -210,6 +210,125 @@ describe("Audit Logger", () => {
         }),
       );
     });
+
+    it("should handle missing optional fields", () => {
+      logUserManagementAudit({
+        action: AuditAction.USER_UPDATED,
+        userId: 1,
+        success: true,
+      });
+
+      expect(auditLogger.info).toHaveBeenCalledWith(
+        "USER_UPDATED - SUCCESS",
+        expect.objectContaining({
+          userId: 1,
+        }),
+      );
+    });
+
+    it("should handle missing targetUserId", () => {
+      logUserManagementAudit({
+        action: AuditAction.USER_UPDATED,
+        userId: 1,
+        email: "test@example.com",
+        success: true,
+      });
+
+      expect(auditLogger.info).toHaveBeenCalledWith(
+        "USER_UPDATED - SUCCESS",
+        expect.objectContaining({
+          userId: 1,
+          email: "test@example.com",
+        }),
+      );
+    });
+
+    it("should handle missing email", () => {
+      logUserManagementAudit({
+        action: AuditAction.USER_UPDATED,
+        userId: 1,
+        targetUserId: 2,
+        success: true,
+      });
+
+      expect(auditLogger.info).toHaveBeenCalledWith(
+        "USER_UPDATED - SUCCESS",
+        expect.objectContaining({
+          userId: 1,
+          targetUserId: 2,
+        }),
+      );
+    });
+
+    it("should handle missing ipAddress", () => {
+      logUserManagementAudit({
+        action: AuditAction.USER_UPDATED,
+        userId: 1,
+        email: "test@example.com",
+        success: true,
+      });
+
+      expect(auditLogger.info).toHaveBeenCalledWith(
+        "USER_UPDATED - SUCCESS",
+        expect.objectContaining({
+          userId: 1,
+          email: "test@example.com",
+        }),
+      );
+    });
+
+    it("should handle missing oldValue", () => {
+      logUserManagementAudit({
+        action: AuditAction.USER_ROLE_CHANGED,
+        userId: 1,
+        targetUserId: 2,
+        newValue: "ADMIN",
+        success: true,
+      });
+
+      expect(auditLogger.info).toHaveBeenCalledWith(
+        "USER_ROLE_CHANGED - SUCCESS",
+        expect.objectContaining({
+          userId: 1,
+          targetUserId: 2,
+          newValue: "ADMIN",
+        }),
+      );
+    });
+
+    it("should handle missing newValue", () => {
+      logUserManagementAudit({
+        action: AuditAction.USER_ROLE_CHANGED,
+        userId: 1,
+        targetUserId: 2,
+        oldValue: "CLIENT",
+        success: true,
+      });
+
+      expect(auditLogger.info).toHaveBeenCalledWith(
+        "USER_ROLE_CHANGED - SUCCESS",
+        expect.objectContaining({
+          userId: 1,
+          targetUserId: 2,
+          oldValue: "CLIENT",
+        }),
+      );
+    });
+
+    it("should handle missing reason", () => {
+      logUserManagementAudit({
+        action: AuditAction.USER_UPDATED,
+        userId: 1,
+        success: true,
+      });
+
+      expect(auditLogger.info).toHaveBeenCalledWith(
+        "USER_UPDATED - SUCCESS",
+        expect.objectContaining({
+          userId: 1,
+        }),
+      );
+    });
   });
 
   describe("logSecurityAudit", () => {
