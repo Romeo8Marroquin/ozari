@@ -66,8 +66,8 @@ describe("Regex Patterns", () => {
 
   describe("passwordRegex", () => {
     it("should match valid passwords", () => {
-      expect(passwordRegex.test("Not_A_Real_Password123!")).toBe(true);
-      expect(passwordRegex.test("Not_A_Real_Password2024")).toBe(true);
+      expect(passwordRegex.test("Not_A_Real_Pwd123!")).toBe(true);
+      expect(passwordRegex.test("Not_A_Real_Pwd2024")).toBe(true);
       expect(passwordRegex.test("Not_A_Real_Pwd3!defGHI")).toBe(true);
     });
 
