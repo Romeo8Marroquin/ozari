@@ -41,11 +41,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
-      - name: Type check
-        run: pnpm run type-check
-
       - name: Generate Prisma Client
         run: pnpm prisma generate
+
+      - name: Type check
+        run: pnpm run type-check
 
       - name: Lint
         run: pnpm run lint
