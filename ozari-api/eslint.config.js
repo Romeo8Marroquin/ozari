@@ -145,6 +145,7 @@ export default [
       "src/generated/**",
       ".prisma/**",
       "prisma/migrations/**",
+      "**/*.test.*",
       "coverage/**",
       "*.config.js",
       "*.config.ts",
