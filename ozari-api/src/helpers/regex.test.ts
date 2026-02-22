@@ -8,6 +8,22 @@ import {
   genericHttpsUrlRegex,
 } from "./regex.js";
 
+function buildValidPassword(seed = 123): string {
+  return `Aa1!${"x".repeat(6)}${seed}`;
+}
+function buildNoUpper(seed = 123): string {
+  return `aa1!${"x".repeat(6)}${seed}`;
+}
+function buildNoLower(seed = 123): string {
+  return `AA1!${"X".repeat(6)}${seed}`;
+}
+function buildNoDigit(): string {
+  return `Aa!${"x".repeat(7)}xx`; // no digits
+}
+function buildNoSpecial(seed = 123): string {
+  return `Aa1${"x".repeat(6)}x${seed}`; // letters+digits only, no specials
+}
+
 describe("Regex Patterns", () => {
   describe("descriptionTextRegex", () => {
     it("should match valid descriptions", () => {
@@ -66,16 +82,16 @@ describe("Regex Patterns", () => {
 
   describe("passwordRegex", () => {
     it("should match valid passwords", () => {
-      expect(passwordRegex.test("NtARl_PwdV123!")).toBe(true);
-      expect(passwordRegex.test("NtARl_PwdV2024")).toBe(true);
-      expect(passwordRegex.test("NtARl_PwdV3!defGHI")).toBe(true);
+      expect(passwordRegex.test(buildValidPassword(123))).toBe(true);
+      expect(passwordRegex.test(buildValidPassword(2024))).toBe(true);
+      expect(passwordRegex.test(buildValidPassword(9999))).toBe(true);
     });
 
     it("should reject passwords without required character types", () => {
-      expect(passwordRegex.test("nouppercase123!")).toBe(false);
-      expect(passwordRegex.test("NOLOWERCASE123!")).toBe(false);
-      expect(passwordRegex.test("NoNumbers!")).toBe(false);
-      expect(passwordRegex.test("NoSpecialChar123")).toBe(false);
+      expect(passwordRegex.test(buildNoUpper(123))).toBe(false);
+      expect(passwordRegex.test(buildNoLower(123))).toBe(false);
+      expect(passwordRegex.test(buildNoDigit(123))).toBe(false);
+      expect(passwordRegex.test(buildNoSpecial(123))).toBe(false);
     });
 
     it("should reject passwords outside length bounds", () => {
