@@ -1,4 +1,4 @@
-import bcrypt from "bcrypt";
+import { hash, verify } from "@node-rs/bcrypt";
 import crypto from "node:crypto";
 import { logger } from "@/config/logger.js";
 
@@ -12,8 +12,7 @@ export function encryptSha256Sync(target: string): string {
  * @returns Promise<hashed password>
  */
 export async function hashPassword(password: string): Promise<string> {
-  const salt = await bcrypt.genSalt(12);
-  return bcrypt.hash(password, salt);
+  return hash(password, 12);
 }
 
 /**
@@ -26,7 +25,7 @@ export async function comparePassword(
   password: string,
   hash: string,
 ): Promise<boolean> {
-  return bcrypt.compare(password, hash);
+  return verify(password, hash);
 }
 
 // AES-256-GCM encryption configuration

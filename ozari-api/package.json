@@ -28,9 +28,9 @@
     "cleanup:sessions": "tsx --env-file=.env src/jobs/cleanupExpiredSessions.ts"
   },
   "dependencies": {
+    "@node-rs/bcrypt": "^1.10.7",
     "@prisma/adapter-pg": "^7.3.0",
     "@prisma/client": "^7.3.0",
-    "bcrypt": "^5.1.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "express": "^5.2.1",
@@ -46,7 +46,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
-    "@types/bcrypt": "^5.0.2",
     "@types/cookie-parser": "^1.4.7",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
