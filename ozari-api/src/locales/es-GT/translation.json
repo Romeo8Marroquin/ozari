@@ -115,6 +115,7 @@
         "sessionExpiredOrInvalid": "La sesión con es inválida o ha expirado.",
         "invalidTokenType": "Tipo de token inválido, se esperaba <{{-expected}}> pero se recibió <{{-received}}>.",
         "noRefreshToken": "No se encontró el token de actualización en la petición.",
+        "tokenReuseDetected": "[SEGURIDAD] Reutilización de token detectada para el usuario <{{-userId}}> con jti <{{-jti}}>. Todas las sesiones han sido invalidadas.",
         "internalServerError": "Error al refrescar el token."
       }
     },
@@ -183,6 +184,22 @@
       "internalError": "Ha ocurrido un error interno en el servidor.",
       "logs": {
         "internalError": "[middleware] Error interno en el servidor: {{-error}}."
+      }
+    },
+    "loginRateLimit": {
+      "tooManyAttempts": "Demasiados intentos fallidos de inicio de sesión. Por favor intente de nuevo en {{minutes}} minuto(s).",
+      "logs": {
+        "tooManyAttempts": "[middleware] Demasiados intentos de inicio de sesión para el correo <{{-email}}>. Intentos: {{-attempts}}. Tiempo restante: {{-remainingMinutes}} minuto(s).",
+        "accountLocked": "[middleware] Cuenta bloqueada temporalmente para el correo <{{-email}}>. Intentos: {{-attempts}}. Tiempo restante: {{-remainingMinutes}} minuto(s)."
+      }
+    },
+    "csrf": {
+      "tokenMissing": "Token de protección CSRF requerido.",
+      "tokenInvalid": "Token de protección CSRF inválido.",
+      "logs": {
+        "tokenMissing": "[middleware] Token CSRF faltante. Cookie: {{-hasCookie}}, Header: {{-hasHeader}}.",
+        "tokenMismatch": "[middleware] Token CSRF no coincide para {{-method}} {{-url}}.",
+        "tokenValid": "[middleware] Token CSRF válido para {{-method}} {{-url}}."
       }
     }
   },

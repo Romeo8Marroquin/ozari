@@ -5,7 +5,7 @@ export function isValidEnumValue(enumObj: unknown, value: number): boolean {
 }
 
 export const sanitizeSensitiveData = (data: object): object => {
-  if (!data || typeof data !== "object") return data;
+  if (!data || typeof data !== "object") {return data;}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const copy: Record<string, any> = { ...data };

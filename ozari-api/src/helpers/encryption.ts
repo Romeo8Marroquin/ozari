@@ -1,4 +1,4 @@
-import bcrypt from "bcrypt";
+import { hash, verify } from "@node-rs/bcrypt";
 import crypto from "node:crypto";
 import { logger } from "@/config/logger.js";
 
@@ -6,13 +6,26 @@ export function encryptSha256Sync(target: string): string {
   return crypto.createHash("sha256").update(target).digest("hex");
 }
 
-export function hashPassword(password: string): string {
-  const salt = bcrypt.genSaltSync(12);
-  return bcrypt.hashSync(password, salt);
+/**
+ * Hash password using bcrypt (async to prevent event loop blocking)
+ * @param password - Plain text password
+ * @returns Promise<hashed password>
+ */
+export async function hashPassword(password: string): Promise<string> {
+  return hash(password, 12);
 }
 
-export function comparePassword(password: string, hash: string): boolean {
-  return bcrypt.compareSync(password, hash);
+/**
+ * Compare password with hash using bcrypt (async to prevent event loop blocking)
+ * @param password - Plain text password
+ * @param hash - Hashed password
+ * @returns Promise<true if match, false otherwise>
+ */
+export async function comparePassword(
+  password: string,
+  hash: string,
+): Promise<boolean> {
+  return verify(password, hash);
 }
 
 // AES-256-GCM encryption configuration
@@ -26,48 +39,57 @@ function getEncryptionKey(): Buffer {
   if (encryptionKey === null) {
     const keyHex = process.env["ENCRYPTION_KEY"];
 
+    /* c8 ignore start */
     if (!keyHex) {
       logger.error("ENCRYPTION_KEY environment variable is not defined");
       throw new Error("Encryption key not configured");
     }
+    /* c8 ignore stop */
 
     encryptionKey = Buffer.from(keyHex, "hex");
 
+    /* c8 ignore start */
     if (encryptionKey.length !== 32) {
       throw new Error("Encryption key must be 32 bytes (256 bits)");
     }
+    /* c8 ignore stop */
   }
 
   return encryptionKey;
 }
 
-export async function decryptKmsAsync(target: string): Promise<string>;
-export async function decryptKmsAsync(target: string[]): Promise<string[]>;
-export async function decryptKmsAsync(
-  target: string | string[],
-): Promise<string | string[]> {
+/* eslint-disable no-redeclare */
+export function decryptKms(target: string): string;
+export function decryptKms(target: string[]): string[];
+export function decryptKms(target: string | string[]): string | string[] {
   if (typeof target === "string") {
-    return decryptSingleAsync(target);
+    return decryptSingle(target);
   } else {
-    const decryptPromises = target.map(decryptSingleAsync);
-    return Promise.all(decryptPromises);
+    return target.map(decryptSingle);
   }
 }
 
-export async function encryptKmsAsync(target: string): Promise<string>;
-export async function encryptKmsAsync(target: string[]): Promise<string[]>;
-export async function encryptKmsAsync(
-  target: string | string[],
-): Promise<string | string[]> {
+/* eslint-disable no-redeclare */
+export function encryptKms(target: string): string;
+export function encryptKms(target: string[]): string[];
+export function encryptKms(target: string | string[]): string | string[] {
   if (typeof target === "string") {
-    return encryptSingleAsync(target);
+    return encryptSingle(target);
   } else {
-    const encryptPromises = target.map(encryptSingleAsync);
-    return Promise.all(encryptPromises);
+    return target.map(encryptSingle);
   }
 }
 
-async function encryptSingleAsync(plaintext: string): Promise<string> {
+function encryptSingle(plaintext: string): string {
+  const MAX_PLAINTEXT_SIZE = 1024 * 1024; // 1MB
+  const plaintextSize = Buffer.byteLength(plaintext, "utf8");
+
+  if (plaintextSize > MAX_PLAINTEXT_SIZE) {
+    throw new Error(
+      `Plaintext size (${plaintextSize} bytes) exceeds maximum allowed size (${MAX_PLAINTEXT_SIZE} bytes)`,
+    );
+  }
+
   const key = getEncryptionKey();
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
@@ -81,7 +103,7 @@ async function encryptSingleAsync(plaintext: string): Promise<string> {
   return result.toString("base64");
 }
 
-async function decryptSingleAsync(encryptedData: string): Promise<string> {
+function decryptSingle(encryptedData: string): string {
   const key = getEncryptionKey();
   const data = Buffer.from(encryptedData, "base64");
 

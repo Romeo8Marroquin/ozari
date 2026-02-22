@@ -1,15 +1,22 @@
 import type { Request, Response } from "express";
+import crypto from "node:crypto";
 import { i18next } from "@/config/i18n.js";
 import jwt from "jsonwebtoken";
 import {
   comparePassword,
-  decryptKmsAsync,
-  encryptKmsAsync,
+  decryptKms,
+  encryptKms,
   encryptSha256Sync,
   hashPassword,
 } from "@helpers/encryption.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { logger } from "@/config/logger.js";
+import {
+  AuditAction,
+  logAuthAudit,
+  logSecurityAudit,
+  logUserManagementAudit,
+} from "@/config/auditLogger.js";
 import { type JwtPayloadModel } from "@models/common/authModel.js";
 import {
   type CustomRequest,
@@ -22,6 +29,11 @@ import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
 import { appConfig } from "@/config/app.js";
 import {
+  clearLoginAttempts,
+  recordFailedLogin,
+} from "@middlewares/loginRateLimit.middleware.js";
+import { clearCsrfToken, setCsrfToken } from "@middlewares/csrf.middleware.js";
+import {
   type CreateUserRequestModel,
   type SignInUserRequestModel,
 } from "./auth.models.js";
@@ -33,10 +45,8 @@ export const getAllUsers = async (_: Request, res: Response): Promise<void> => {
       where: { isActive: true },
     });
 
-    const [emails, fullNames] = await Promise.all([
-      decryptKmsAsync(users.map((user) => user.emailKms)),
-      decryptKmsAsync(users.map((user) => user.fullNameKms)),
-    ]);
+    const emails = decryptKms(users.map((user) => user.emailKms));
+    const fullNames = decryptKms(users.map((user) => user.fullNameKms));
 
     logger.info(
       i18next.t("user.getAllUsers.logs.usersFetched", { count: users.length }),
@@ -89,19 +99,33 @@ export const createUser = async (
       );
       return;
     }
-    const encryptedName = await encryptKmsAsync(fullName);
-    const encryptedEmail = await encryptKmsAsync(email);
-    await prismaClient.user.create({
+    const encryptedName = encryptKms(fullName);
+    const encryptedEmail = encryptKms(email);
+    const hashedPassword = await hashPassword(password);
+    const newUser = await prismaClient.user.create({
       data: {
         emailKms: encryptedEmail,
         emailSha,
         fullNameKms: encryptedName,
-        passwordSha: hashPassword(password),
+        passwordSha: hashedPassword,
         roleId: RolesEnum.Client,
         termsAccepted,
       },
     });
+
     logger.info(i18next.t("user.createUser.logs.userCreated", { email }));
+
+    // Audit log: User created
+    if (process.env["NODE_ENV"] === "production") {
+      logUserManagementAudit({
+        action: AuditAction.USER_CREATED,
+        userId: newUser.id,
+        email,
+        ipAddress: req.ip,
+        success: true,
+      });
+    }
+
     sendOzariSuccess(
       res,
       HttpEnum.CREATED,
@@ -144,6 +168,18 @@ export const signInUser = async (
     });
     if (!user) {
       logger.warn(i18next.t("user.signInUser.logs.userNotFound", { email }));
+      recordFailedLogin(email);
+      if (process.env["NODE_ENV"] === "production") {
+        logAuthAudit({
+          action: AuditAction.USER_LOGIN_FAILED,
+          email,
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+          deviceUuid,
+          success: false,
+          reason: "User not found",
+        });
+      }
       sendOzariError(
         res,
         HttpEnum.UNAUTHORIZED,
@@ -152,13 +188,26 @@ export const signInUser = async (
       return;
     }
 
-    const passwordValid = comparePassword(password, user.passwordSha);
+    const passwordValid = await comparePassword(password, user.passwordSha);
     if (!passwordValid) {
       logger.warn(
         i18next.t("user.signInUser.logs.invalidCredentials", {
           userId: user.id,
         }),
       );
+      recordFailedLogin(email);
+      if (process.env["NODE_ENV"] === "production") {
+        logAuthAudit({
+          action: AuditAction.USER_LOGIN_FAILED,
+          userId: user.id,
+          email,
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+          deviceUuid,
+          success: false,
+          reason: "Invalid password",
+        });
+      }
       sendOzariError(
         res,
         HttpEnum.UNAUTHORIZED,
@@ -199,6 +248,15 @@ export const signInUser = async (
     );
 
     await prismaClient.$transaction(async (transaction) => {
+      await transaction.$queryRaw`
+        SELECT id
+        FROM jwt_sessions
+        WHERE device_uuid = ${deviceUuid}
+          AND user_id = ${user.id}
+          AND is_active = true
+        FOR UPDATE
+      `;
+
       await transaction.jwtSession.deleteMany({
         where: { deviceUuid, isActive: true, userId: user.id },
       });
@@ -224,13 +282,28 @@ export const signInUser = async (
       });
     });
 
+    // Set CSRF token for protected routes
+    setCsrfToken(res);
+
     res
       .header("authorization", `Bearer ${accessToken}`)
       .cookie("refresh-token", refreshToken, appConfig.cookieConfig);
+    clearLoginAttempts(email);
 
     logger.info(
       i18next.t("user.signInUser.logs.userAuthenticated", { userId: user.id }),
     );
+    if (process.env["NODE_ENV"] === "production") {
+      logAuthAudit({
+        action: AuditAction.USER_LOGIN_SUCCESS,
+        userId: user.id,
+        email,
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+        deviceUuid,
+        success: true,
+      });
+    }
     sendOzariSuccess(
       res,
       HttpEnum.OK,
@@ -250,6 +323,7 @@ export const refreshToken = async (
   req: Request,
   res: Response,
 ): Promise<void> => {
+  const genericErrorKey = "user.refreshToken.genericError";
   try {
     const prismaClient = await getPrismaClient();
     const jwtSecret = process.env["JWT_SECRET"];
@@ -268,11 +342,7 @@ export const refreshToken = async (
     const refreshToken = req.cookies["refresh-token"] as string | undefined;
     if (!refreshToken) {
       logger.warn(i18next.t("user.refreshToken.logs.noRefreshToken"));
-      sendOzariError(
-        res,
-        HttpEnum.UNAUTHORIZED,
-        i18next.t("user.refreshToken.genericError"),
-      );
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
       return;
     }
     const payload = jwt.verify(
@@ -286,11 +356,7 @@ export const refreshToken = async (
           received: TokenEnum[payload.tokenType],
         }),
       );
-      sendOzariError(
-        res,
-        HttpEnum.UNAUTHORIZED,
-        i18next.t("user.refreshToken.genericError"),
-      );
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
       return;
     }
     const foundSession = await prismaClient.jwtSession.findFirst({
@@ -305,11 +371,7 @@ export const refreshToken = async (
 
     if (!foundSession) {
       logger.error(i18next.t("user.refreshToken.logs.noRefreshToken"));
-      sendOzariError(
-        res,
-        HttpEnum.UNAUTHORIZED,
-        i18next.t("user.refreshToken.genericError"),
-      );
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
       return;
     }
 
@@ -319,11 +381,47 @@ export const refreshToken = async (
           jti: foundSession.jti,
         }),
       );
-      sendOzariError(
-        res,
-        HttpEnum.UNAUTHORIZED,
-        i18next.t("user.refreshToken.genericError"),
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
+      return;
+    }
+
+    // Security: Detect refresh token reuse (potential token theft)
+    const tokenAlreadyRotated = await prismaClient.jwtSession.findFirst({
+      where: {
+        jti: payload.jti,
+        tokenTypeId: TokenEnum.REFRESH_TOKEN,
+        isActive: false,
+      },
+    });
+
+    if (tokenAlreadyRotated) {
+      logger.error(
+        i18next.t("user.refreshToken.logs.tokenReuseDetected", {
+          jti: payload.jti,
+          userId: payload.userId,
+        }),
       );
+
+      // Security incident: invalidate all user sessions
+      await prismaClient.jwtSession.updateMany({
+        where: { userId: payload.userId },
+        data: { isActive: false },
+      });
+
+      if (process.env["NODE_ENV"] === "production") {
+        logSecurityAudit({
+          action: AuditAction.UNAUTHORIZED_ACCESS_ATTEMPT,
+          userId: payload.userId,
+          ipAddress: req.ip,
+          success: false,
+          reason: "Refresh token reuse detected - all sessions invalidated",
+          metadata: {
+            deviceUuid: payload.deviceUuid,
+          },
+        });
+      }
+
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
       return;
     }
 
@@ -359,6 +457,26 @@ export const refreshToken = async (
     );
 
     await prismaClient.$transaction(async (transaction) => {
+      const lockedSession = await transaction.$queryRaw<
+        Array<{ id: number; is_active: boolean }>
+      >`
+        SELECT id, is_active
+        FROM jwt_sessions
+        WHERE jti = ${payload.jti}
+          AND token_type_id = ${TokenEnum.REFRESH_TOKEN}
+          AND user_id = ${payload.userId}
+        FOR UPDATE
+      `;
+
+      // Verify the session is still active after acquiring lock
+      if (!lockedSession || lockedSession.length === 0) {
+        throw new Error("Session not found during transaction");
+      }
+
+      if (!lockedSession[0]?.is_active) {
+        throw new Error("Session already invalidated during transaction");
+      }
+
       await transaction.jwtSession.deleteMany({
         where: {
           deviceUuid: foundSession.deviceUuid,
@@ -388,6 +506,9 @@ export const refreshToken = async (
       });
     });
 
+    // Rotate CSRF token on refresh
+    setCsrfToken(res);
+
     res
       .header("authorization", `Bearer ${accessToken}`)
       .cookie("refresh-token", newValidRefreshToken, appConfig.cookieConfig);
@@ -398,6 +519,20 @@ export const refreshToken = async (
         userRole: payload.userRole,
       }),
     );
+
+    // Audit log: Token refreshed
+    if (process.env["NODE_ENV"] === "production") {
+      logAuthAudit({
+        action: AuditAction.TOKEN_REFRESH,
+        userId: payload.userId,
+        email: "", // Email not available in refresh token flow
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+        deviceUuid: foundSession.deviceUuid,
+        success: true,
+      });
+    }
+
     sendOzariSuccess(
       res,
       HttpEnum.OK,
@@ -412,11 +547,7 @@ export const refreshToken = async (
         i18next.t("user.refreshToken.logs.sessionExpiredOrInvalid"),
         error,
       );
-      sendOzariError(
-        res,
-        HttpEnum.UNAUTHORIZED,
-        i18next.t("user.refreshToken.genericError"),
-      );
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
       return;
     }
 
@@ -450,6 +581,7 @@ export const signOutUser = async (
       });
     }
     res.clearCookie("refresh-token", appConfig.cookieConfig);
+    clearCsrfToken(res);
     logger.info(
       i18next.t("user.signOutUser.logs.userSignedOut", {
         allDevices,
@@ -457,6 +589,22 @@ export const signOutUser = async (
         userRole,
       }),
     );
+
+    // Audit log: User logout
+    if (process.env["NODE_ENV"] === "production") {
+      logAuthAudit({
+        action: allDevices
+          ? AuditAction.USER_LOGOUT_ALL_DEVICES
+          : AuditAction.USER_LOGOUT,
+        userId,
+        email: "", // Email not available in logout flow
+        ipAddress: req.ip,
+        userAgent: req.headers["user-agent"],
+        deviceUuid,
+        success: true,
+      });
+    }
+
     sendOzariSuccess(
       res,
       HttpEnum.OK,

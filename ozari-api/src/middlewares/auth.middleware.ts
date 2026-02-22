@@ -15,6 +15,7 @@ export const verifyJwt = async (
   res: Response,
   next: NextFunction,
 ) => {
+  const defaultMessageKey = "middlewares.auth.defaultMessage";
   try {
     const jwtSecret = process.env["JWT_SECRET"];
 
@@ -31,11 +32,7 @@ export const verifyJwt = async (
     const token = req.header("Authorization")?.split(" ")[1];
     if (!token) {
       logger.warn(i18next.t("middlewares.auth.logs.unauthorized"));
-      sendOzariError(
-        res,
-        HttpEnum.UNAUTHORIZED,
-        i18next.t("middlewares.auth.defaultMessage"),
-      );
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(defaultMessageKey));
       return;
     }
 
@@ -48,11 +45,7 @@ export const verifyJwt = async (
           received: TokenEnum[jwtPayload.tokenType],
         }),
       );
-      sendOzariError(
-        res,
-        HttpEnum.UNAUTHORIZED,
-        i18next.t("middlewares.auth.defaultMessage"),
-      );
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(defaultMessageKey));
       return;
     }
 
@@ -73,11 +66,7 @@ export const verifyJwt = async (
           jti: jwtPayload.jti,
         }),
       );
-      sendOzariError(
-        res,
-        HttpEnum.UNAUTHORIZED,
-        i18next.t("middlewares.auth.defaultMessage"),
-      );
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(defaultMessageKey));
       return;
     }
 
@@ -88,11 +77,7 @@ export const verifyJwt = async (
           received: jwtPayload.jti,
         }),
       );
-      sendOzariError(
-        res,
-        HttpEnum.UNAUTHORIZED,
-        i18next.t("middlewares.auth.defaultMessage"),
-      );
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(defaultMessageKey));
       return;
     }
 
@@ -102,11 +87,7 @@ export const verifyJwt = async (
           jti: jwtPayload.jti,
         }),
       );
-      sendOzariError(
-        res,
-        HttpEnum.UNAUTHORIZED,
-        i18next.t("middlewares.auth.defaultMessage"),
-      );
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(defaultMessageKey));
       return;
     }
 
@@ -124,11 +105,7 @@ export const verifyJwt = async (
       error instanceof jwt.JsonWebTokenError
     ) {
       logger.warn(i18next.t("middlewares.auth.logs.unauthorized"), error);
-      sendOzariError(
-        res,
-        HttpEnum.UNAUTHORIZED,
-        i18next.t("middlewares.auth.defaultMessage"),
-      );
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(defaultMessageKey));
       return;
     }
 
