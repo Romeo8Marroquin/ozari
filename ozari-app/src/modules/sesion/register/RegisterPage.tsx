@@ -185,7 +185,7 @@ const RegisterPage: React.FC = () => {
                   <CustomButton
                     text={t('modules.sesion.register.form.submitButton')}
                     disabled={!methods.formState.isValid}
-                    loading={methods.formState.isSubmitting}
+                    loading={isPending}
                   />
                 </div>
 

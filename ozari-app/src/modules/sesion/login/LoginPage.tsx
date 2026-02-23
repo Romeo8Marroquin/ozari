@@ -250,7 +250,7 @@ const LoginPage: React.FC = () => {
                   <CustomButton
                     text={t('modules.sesion.login.form.submitButton')}
                     disabled={!formState.isValid}
-                    loading={formState.isSubmitting}
+                    loading={isPending}
                   />
                 </div>
 
