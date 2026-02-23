@@ -57,14 +57,20 @@ const CustomButton: React.FC<CustomButtonProps> = ({
       if (loading) {
         setShowingLoading(true);
       } else {
-        tl.to(loadingRef.current, {
-          opacity: 0,
-          width: 0,
-          height: 0,
-          marginRight: 0,
-        }).add(() => {
-          if (!loading) setShowingLoading(false);
-        });
+        // Only animate if the loading element exists
+        if (loadingRef.current) {
+          tl.to(loadingRef.current, {
+            opacity: 0,
+            width: 0,
+            height: 0,
+            marginRight: 0,
+          }).add(() => {
+            if (!loading) setShowingLoading(false);
+          });
+        } else {
+          // If element doesn't exist, just update state immediately
+          setShowingLoading(false);
+        }
       }
     },
     { dependencies: [loading, setShowingLoading] },
@@ -75,7 +81,9 @@ const CustomButton: React.FC<CustomButtonProps> = ({
       const tl = gsap.timeline({
         defaults: { ease: 'power1.inOut', duration: 0.2 },
       });
-      if (!showingLoading) return;
+      // Only animate if showingLoading is true AND the ref exists
+      if (!showingLoading || !loadingRef.current) return;
+
       tl.to(loadingRef.current, {
         opacity: 1,
         width: 20,
