@@ -47,7 +47,7 @@
       "register": {
         "title": "REGISTRO",
         "welcomeMessage": "Bienvenido",
-        "subtitle": "Crea una cuenta para acceder a los servicios de Party Rentals",
+        "subtitle": "Regístrate a los servicios de Party Rentals",
         "form": {
           "emailLabel": "Correo electrónico",
           "emailPlaceholder": "Ingrese su correo",

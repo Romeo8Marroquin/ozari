@@ -34,12 +34,12 @@ const LoginPage: React.FC = () => {
   useGSAP(
     () => {
       if (!containerRef.current) return;
-      const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
+      const tl = gsap.timeline({ defaults: { ease: 'power1.out' } });
       tl.from('.rotational-asset', {
         rotation: 0,
         x: 0,
         y: 0,
-        duration: 0.75,
+        duration: 0.7,
       });
 
       tl.from(
