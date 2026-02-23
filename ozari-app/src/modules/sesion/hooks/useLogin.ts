@@ -4,6 +4,7 @@ import type { LoginResponseInterface } from '@sesion/interfaces/LoginInterfaces'
 import type { LoginType } from '@sesion/login/SchemaLogin';
 import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from '@utils/storage';
+import { setupRefreshTimer } from '@utils/tokenRefresh';
 import i18next from 'i18next';
 import { QueryKeys } from '@constants/QueryKeys';
 
@@ -26,6 +27,9 @@ function useLogin() {
         const token = bearerToken.split(' ')[1];
         Storage.set(StorageKeys.TOKEN, token);
         queryClient.invalidateQueries({ queryKey: [QueryKeys.ME] });
+
+        // Setup proactive token refresh timer
+        setupRefreshTimer(token);
       }
     },
     onError: (e) => {
