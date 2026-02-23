@@ -15,7 +15,6 @@ const useBreakpoint = () => {
   useLayoutEffect(() => {
     const determineBreakpoint = () => {
       let currentBreakpoint = 'base';
-      console.log('Changing breakpoint', currentBreakpoint);
       if (globalThis.matchMedia(`(min-width: ${tailwindBreakpoints['2xl']}px)`).matches) {
         currentBreakpoint = '2xl';
       } else if (globalThis.matchMedia(`(min-width: ${tailwindBreakpoints['xl']}px)`).matches) {
@@ -29,6 +28,7 @@ const useBreakpoint = () => {
       }
       setIsMobile(currentBreakpoint === 'base');
       setBreakpoint(currentBreakpoint);
+      console.log('Changing breakpoint, current:', currentBreakpoint);
     };
 
     determineBreakpoint();

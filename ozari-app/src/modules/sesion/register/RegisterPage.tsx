@@ -17,10 +17,12 @@ import { useTranslation } from 'react-i18next';
 import CustomButton from '@components/CustomButton';
 import useLogin from '../hooks/useLogin';
 import { Link, useNavigate } from '@tanstack/react-router';
+import useRotationalAssetAnimation from '@hooks/useRotationalAssetAnimation';
 
 const RegisterPage: React.FC = () => {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
+  const rotationalAssetRef = useRotationalAssetAnimation('register');
   const navigate = useNavigate();
   const methods = useForm<RegisterType>({
     resolver: zodResolver(registerSchema),
@@ -138,7 +140,10 @@ const RegisterPage: React.FC = () => {
   return (
     <div ref={containerRef} className="w-full flex justify-center items-center">
       <section className="principal-card relative p-6 sm:p-12 bg-white border-none shadow-xl/15 rounded-xl gap-20 md:gap-30 flex flex-col md:flex-row items-center justify-center overflow-hidden">
-        <div className="rotational-asset absolute w-[150%] h-[110%] md:w-[110%] md:h-[150%] rotate-15 origin-bottom md:origin-left -translate-y-7/12 md:translate-y-0 md:translate-x-1/2 blur-lg bg-gradient-to-l md:bg-gradient-to-b from-cream to-blossom"></div>
+        <div
+          ref={rotationalAssetRef}
+          className="rotational-asset absolute w-[150%] h-[110%] md:w-[110%] md:h-[150%] rotate-15 origin-bottom md:origin-left -translate-y-7/12 md:translate-y-0 md:translate-x-1/2 blur-lg bg-gradient-to-l md:bg-gradient-to-b from-cream to-blossom"
+        ></div>
         <div className="flex flex-col gap-6 justify-center items-center order-3 md:order-2">
           <h2 className="form-element text-2xl font-bold text-black select-none">
             {t('modules.sesion.register.title')}
