@@ -255,6 +255,7 @@ API_KEY=<from Secret Manager: ozari-api-key>
 `APP_HOST` is a Cloud Build substitution. Keep the repository value as a placeholder and configure the real Cloudflare URL in the Cloud Build trigger or manual substitution.
 
 Use the frontend origin only, without a trailing slash or route path, so CORS can compare browser origins exactly.
+For Cloud Run, configure this value through Cloud Build substitutions rather than hardcoding environment-specific URLs in the repository.
 
 **Cloud Build Trigger Setup**:
 1. Connect the repository to Cloud Build.

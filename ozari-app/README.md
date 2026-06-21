@@ -51,6 +51,7 @@ VITE_API_URL=
 **Staging/Production**: Set to your Cloud Run backend URL.
 
 Use the API origin only, without the `/api` suffix. The frontend client appends `/api` automatically.
+For Cloudflare Pages, configure this value per environment in the Pages dashboard instead of committing real environment files.
 
 ### 3. Development
 
