@@ -50,6 +50,8 @@ VITE_API_URL=
 **Development**: Leave `VITE_API_URL` empty to use Vite's proxy configuration.
 **Staging/Production**: Set to your Cloud Run backend URL.
 
+Use the API origin only, without the `/api` suffix. The frontend client appends `/api` automatically.
+
 ### 3. Development
 
 ```bash
