@@ -48,7 +48,7 @@ VITE_API_URL=
 ```
 
 **Development**: Leave `VITE_API_URL` empty to use Vite's proxy configuration.
-**Production**: Set to your Railway backend URL.
+**Staging/Production**: Set to your Cloud Run backend URL.
 
 ### 3. Development
 
@@ -159,7 +159,7 @@ API calls are handled using **Axios** and **TanStack Query**.
 Located in `src/api/client.ts`, the client is configured with:
 - **Base URL**:
   - Development: `/api` (proxied by Vite to `http://localhost:3000`)
-  - Production: `${VITE_API_URL}/api` (direct to Railway backend)
+  - Staging/Production: `${VITE_API_URL}/api` (direct to Cloud Run backend)
 - **Authentication**: Automatically injects JWT token from session storage
 - **Device Tracking**: Sends `device-uuid` header for session management
 - **CSRF**: Sends `x-csrf-token` from the CSRF cookie for state-changing requests
@@ -311,24 +311,24 @@ The frontend is deployed on Cloudflare Pages with automatic deployments from the
 
 **Environment Variables** (configured in Cloudflare Pages):
 ```bash
-VITE_API_URL=<your-railway-backend-url>
+VITE_API_URL=<your-cloud-run-backend-url>
 ```
 
 **Security Configuration**:
 
 The app includes Content Security Policy (CSP) configured in `index.html`:
-- Whitelists Railway backend in `connect-src` directive
+- Whitelists Cloud Run backend in `connect-src` directive
 - Enforces HTTPS for all connections
 - Restricts resource loading to trusted sources
 - Prevents XSS and injection attacks
 
-**Important**: Update the CSP in `index.html` to match your Railway backend URL:
+**Important**: Update the CSP in `index.html` to match your Cloud Run backend URL:
 ```html
 <meta
   http-equiv="Content-Security-Policy"
   content="
     ...
-    connect-src 'self' https://your-railway-backend-url;
+    connect-src 'self' https://your-cloud-run-backend-url;
     ...
   "
 />
