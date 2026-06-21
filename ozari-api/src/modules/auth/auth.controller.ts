@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import crypto from "node:crypto";
+import { isDeployedEnvironment } from "@/config/environment.js";
 import { i18next } from "@/config/i18n.js";
 import jwt from "jsonwebtoken";
 import {
@@ -116,7 +117,7 @@ export const createUser = async (
     logger.info(i18next.t("user.createUser.logs.userCreated", { email }));
 
     // Audit log: User created
-    if (process.env["NODE_ENV"] === "production") {
+    if (isDeployedEnvironment) {
       logUserManagementAudit({
         action: AuditAction.USER_CREATED,
         userId: newUser.id,
@@ -169,7 +170,7 @@ export const signInUser = async (
     if (!user) {
       logger.warn(i18next.t("user.signInUser.logs.userNotFound", { email }));
       recordFailedLogin(email);
-      if (process.env["NODE_ENV"] === "production") {
+      if (isDeployedEnvironment) {
         logAuthAudit({
           action: AuditAction.USER_LOGIN_FAILED,
           email,
@@ -196,7 +197,7 @@ export const signInUser = async (
         }),
       );
       recordFailedLogin(email);
-      if (process.env["NODE_ENV"] === "production") {
+      if (isDeployedEnvironment) {
         logAuthAudit({
           action: AuditAction.USER_LOGIN_FAILED,
           userId: user.id,
@@ -293,7 +294,7 @@ export const signInUser = async (
     logger.info(
       i18next.t("user.signInUser.logs.userAuthenticated", { userId: user.id }),
     );
-    if (process.env["NODE_ENV"] === "production") {
+    if (isDeployedEnvironment) {
       logAuthAudit({
         action: AuditAction.USER_LOGIN_SUCCESS,
         userId: user.id,
@@ -408,7 +409,7 @@ export const refreshToken = async (
         data: { isActive: false },
       });
 
-      if (process.env["NODE_ENV"] === "production") {
+      if (isDeployedEnvironment) {
         logSecurityAudit({
           action: AuditAction.UNAUTHORIZED_ACCESS_ATTEMPT,
           userId: payload.userId,
@@ -521,7 +522,7 @@ export const refreshToken = async (
     );
 
     // Audit log: Token refreshed
-    if (process.env["NODE_ENV"] === "production") {
+    if (isDeployedEnvironment) {
       logAuthAudit({
         action: AuditAction.TOKEN_REFRESH,
         userId: payload.userId,
@@ -591,7 +592,7 @@ export const signOutUser = async (
     );
 
     // Audit log: User logout
-    if (process.env["NODE_ENV"] === "production") {
+    if (isDeployedEnvironment) {
       logAuthAudit({
         action: allDevices
           ? AuditAction.USER_LOGOUT_ALL_DEVICES

@@ -1,4 +1,4 @@
-const isProduction = process.env["NODE_ENV"] === "production";
+import { isDeployedEnvironment } from "./environment.js";
 
 export const appConfig = {
   accessToken: {
@@ -17,8 +17,8 @@ export const appConfig = {
 
   cookieConfig: {
     httpOnly: true,
-    sameSite: isProduction ? ("none" as const) : ("lax" as const),
-    secure: isProduction,
+    sameSite: isDeployedEnvironment ? ("none" as const) : ("lax" as const),
+    secure: isDeployedEnvironment,
     maxAge: 2592000000, // 30 days in milliseconds (matches refresh token expiration)
     path: "/api/auth",
   },

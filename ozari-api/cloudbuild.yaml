@@ -1,0 +1,100 @@
+substitutions:
+  _REGION: northamerica-south1
+  _SERVICE_NAME: ozari-api-staging
+  _REPOSITORY: ozari-images
+  _IMAGE_URL: northamerica-south1-docker.pkg.dev/$PROJECT_ID/ozari-images/ozari-api
+  _RUN_SA: ozari-run-sa@$PROJECT_ID.iam.gserviceaccount.com
+  _APP_HOST: https://replace-with-cloudflare-url.example
+  _NODE_ENV: staging
+  _APP_ENV: staging
+  _API_BASE_PATH: /api
+  _LOG_LEVEL: info
+  _MAX_INSTANCES: '3'
+  _DATABASE_URL_SECRET: ozari-api-staging-database-url
+  _DIRECT_DATABASE_URL_SECRET: ozari-api-staging-direct-database-url
+  _JWT_SECRET_SECRET: ozari-api-staging-jwt-secret
+  _JWT_REFRESH_SECRET_SECRET: ozari-api-staging-jwt-refresh-secret
+  _ENCRYPTION_KEY_SECRET: ozari-api-staging-encryption-key
+  _API_KEY_SECRET: ozari-api-staging-api-key
+
+steps:
+  - id: verify-api
+    name: node:22-bookworm-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        apt-get update -y
+        apt-get install -y --no-install-recommends openssl ca-certificates
+        rm -rf /var/lib/apt/lists/*
+        corepack enable
+        pnpm install --frozen-lockfile
+        pnpm build
+        pnpm type-check
+
+  - id: build-docker-image
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --tag
+      - ${_IMAGE_URL}:$COMMIT_SHA
+      - --tag
+      - ${_IMAGE_URL}:latest
+      - .
+
+  - id: push-docker-image
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_IMAGE_URL}
+
+  - id: apply-prisma-migrations
+    name: gcr.io/cloud-builders/docker
+    entrypoint: docker
+    args:
+      - run
+      - --rm
+      - --env
+      - DATABASE_URL=$$DIRECT_DATABASE_URL
+      - ${_IMAGE_URL}:$COMMIT_SHA
+      - pnpm
+      - prisma:migrate:deploy
+    secretEnv:
+      - DIRECT_DATABASE_URL
+
+  - id: deploy-cloud-run
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_NAME}
+      - --image=${_IMAGE_URL}:$COMMIT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --service-account=${_RUN_SA}
+      - --allow-unauthenticated
+      - --port=8080
+      - --min-instances=0
+      - --max-instances=${_MAX_INSTANCES}
+      - --cpu=1
+      - --memory=512Mi
+      - --concurrency=40
+      - --timeout=300
+      - --set-env-vars=NODE_ENV=${_NODE_ENV},APP_ENV=${_APP_ENV},API_BASE_PATH=${_API_BASE_PATH},LOG_LEVEL=${_LOG_LEVEL},APP_HOST=${_APP_HOST}
+      - --set-secrets=DATABASE_URL=${_DATABASE_URL_SECRET}:latest,JWT_SECRET=${_JWT_SECRET_SECRET}:latest,JWT_REFRESH_SECRET=${_JWT_REFRESH_SECRET_SECRET}:latest,ENCRYPTION_KEY=${_ENCRYPTION_KEY_SECRET}:latest,API_KEY=${_API_KEY_SECRET}:latest
+
+images:
+  - ${_IMAGE_URL}:$COMMIT_SHA
+  - ${_IMAGE_URL}:latest
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/${_DIRECT_DATABASE_URL_SECRET}/versions/latest
+      env: DIRECT_DATABASE_URL
+
+options:
+  dynamicSubstitutions: true
+  logging: CLOUD_LOGGING_ONLY

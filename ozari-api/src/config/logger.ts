@@ -1,5 +1,6 @@
 import winston from "winston";
 import { asyncLocalStorage } from "./context.js";
+import { isDeployedEnvironment } from "./environment.js";
 
 const { cli, colorize, combine, json, printf, timestamp } = winston.format;
 
@@ -79,6 +80,6 @@ const jsonFormat = combine(
 export const logger = winston.createLogger({
   level: process.env["LOG_LEVEL"] ?? "info",
   /* c8 ignore next */
-  format: process.env["NODE_ENV"] === "production" ? jsonFormat : cliFormat,
+  format: isDeployedEnvironment ? jsonFormat : cliFormat,
   transports: [new winston.transports.Console()],
 });

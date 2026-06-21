@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { isDeployedEnvironment } from "@/config/environment.js";
 import { i18next } from "@/config/i18n.js";
 import { logger } from "@/config/logger.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
@@ -86,7 +87,7 @@ function isTrustedBrowserRequest(req: Request, origin: string): boolean {
     return false;
   }
 
-  if (process.env["NODE_ENV"] !== "production") {
+  if (!isDeployedEnvironment) {
     return true;
   }
 
