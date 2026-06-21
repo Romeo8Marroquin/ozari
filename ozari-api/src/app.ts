@@ -40,7 +40,7 @@ function configureMiddlewares(app: Express): void {
     process.exit(1);
   }
 
-  // Trust proxy (for Railway/Cloud deployment)
+  // Trust proxy for Cloud Run and other reverse-proxy deployments.
   app.set("trust proxy", 1);
 
   app.use(
