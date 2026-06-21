@@ -2,7 +2,6 @@ import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from '@utils/storage';
 import { getTokenTimeRemaining, isTokenValid } from '@utils/jwt';
 import { api } from '@api/client';
-import { router, queryClient } from '../main';
 import type { OzariSuccessResponse } from '../types/api.types';
 
 let refreshTimer: NodeJS.Timeout | null = null;
@@ -29,7 +28,7 @@ function notifyRefreshSubscribers(token: string): void {
  * Refreshes the access token using the refresh token (stored in HttpOnly cookie)
  * @returns New access token or null if refresh failed
  */
-export async function refreshAccessToken(): Promise<string | null> {
+export async function refreshAccessToken(redirectOnFailure = true): Promise<string | null> {
   // Prevent multiple simultaneous refresh requests
   if (isRefreshing) {
     return new Promise((resolve) => {
@@ -42,14 +41,12 @@ export async function refreshAccessToken(): Promise<string | null> {
   isRefreshing = true;
 
   try {
-    // Use main axios instance with special flag to skip 401 interceptor
     const response = await api.post<OzariSuccessResponse>(
       '/auth/refresh',
       {},
       {
-        _isRefreshRequest: true, // Flag to skip 401 interceptor
-        withCredentials: true, // Important: sends HttpOnly refresh-token cookie
-      } as any
+        _isRefreshRequest: true,
+      }
     );
 
     // Extract new access token from Authorization header
@@ -88,9 +85,6 @@ export async function refreshAccessToken(): Promise<string | null> {
     // Clear refresh timer
     clearRefreshTimer();
 
-    // Clear TanStack Query cache
-    queryClient.clear();
-
     // 🔴 TODO: Add Zustand store resets here when implemented
     // Example: authStore.getState().reset();
     // Example: userStore.getState().clear();
@@ -103,12 +97,9 @@ export async function refreshAccessToken(): Promise<string | null> {
 
     // ============================================================================
 
-    // Navigate to login using TanStack Router (SPA navigation)
-    // Using replace: true to prevent back button returning to protected routes
-    router.navigate({
-      to: '/sesion/inicio',
-      replace: true,
-    });
+    if (redirectOnFailure) {
+      window.location.replace('/sesion/inicio');
+    }
 
     return null;
   } finally {
@@ -155,6 +146,7 @@ export function clearRefreshTimer(): void {
  * Call this on app startup
  */
 export function initializeTokenRefresh(): void {
+  localStorage.removeItem(StorageKeys.TOKEN);
   const token = Storage.get<string>(StorageKeys.TOKEN);
 
   if (token && isTokenValid(token)) {

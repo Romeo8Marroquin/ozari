@@ -1,3 +1,5 @@
+const isProduction = process.env["NODE_ENV"] === "production";
+
 export const appConfig = {
   accessToken: {
     algorithm: "HS256" as const,
@@ -15,8 +17,8 @@ export const appConfig = {
 
   cookieConfig: {
     httpOnly: true,
-    sameSite: "lax" as const,
-    secure: true,
+    sameSite: isProduction ? ("none" as const) : ("lax" as const),
+    secure: isProduction,
     maxAge: 2592000000, // 30 days in milliseconds (matches refresh token expiration)
     path: "/api/auth",
   },

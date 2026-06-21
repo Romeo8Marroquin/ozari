@@ -8,16 +8,29 @@ export const api = axios.create({
   baseURL: import.meta.env.DEV ? '/api' : `${import.meta.env.VITE_API_URL}/api`,
   timeout: 10000,
   headers: { 'Content-Type': 'application/json' },
+  withCredentials: true,
 });
 
-// Request interceptor
+const csrfSafeMethods = new Set(['get', 'head', 'options']);
+
+function getCookie(name: string): string | null {
+  const value = document.cookie
+    .split('; ')
+    .find((cookie) => cookie.startsWith(`${name}=`))
+    ?.split('=')[1];
+
+  return value ? decodeURIComponent(value) : null;
+}
+
 api.interceptors.request.use((config) => {
   if (config.deviceUuid) {
     const deviceUuid = getOrCreateDeviceUuid();
     config.headers['device-uuid'] = deviceUuid;
   }
-  const apiKey = import.meta.env.VITE_API_KEY;
-  if (apiKey) config.headers['x-api-key'] = apiKey;
+
+  const method = config.method?.toLowerCase() ?? 'get';
+  const csrfToken = csrfSafeMethods.has(method) ? null : getCookie('csrf-token');
+  if (csrfToken) config.headers['x-csrf-token'] = csrfToken;
 
   if (config.public) {
     return config;

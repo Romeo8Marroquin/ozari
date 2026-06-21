@@ -230,7 +230,7 @@ export const signInUser = async (
         tokenType: TokenEnum.ACCESS_TOKEN,
         userId: user.id,
         userRole: user.roleId,
-      } as UserJwtPayloadModel,
+      },
       jwtSecret,
       appConfig.accessToken as jwt.SignOptions,
     );
@@ -242,7 +242,7 @@ export const signInUser = async (
         tokenType: TokenEnum.REFRESH_TOKEN,
         userId: user.id,
         userRole: user.roleId,
-      } as UserJwtPayloadModel,
+      },
       jwtRefreshSecret,
       appConfig.refreshToken as jwt.SignOptions,
     );
@@ -439,7 +439,7 @@ export const refreshToken = async (
         userId: payload.userId,
         userRole: payload.userRole,
         iat: now,
-      } as UserJwtPayloadModel,
+      },
       jwtSecret,
       appConfig.accessToken as jwt.SignOptions,
     );
@@ -451,7 +451,7 @@ export const refreshToken = async (
         userId: payload.userId,
         userRole: payload.userRole,
         iat: now,
-      } as UserJwtPayloadModel,
+      },
       jwtRefreshSecret,
       appConfig.refreshToken as jwt.SignOptions,
     );

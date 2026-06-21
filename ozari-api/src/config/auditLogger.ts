@@ -34,7 +34,7 @@ const auditFormat = winston.format.combine(
     : // Development: Human-readable format
       winston.format.printf(({ level, message, timestamp, metadata }) => {
         const meta =
-          metadata && Object.keys(metadata as object).length
+          metadata && Object.keys(metadata).length
             ? `\n${JSON.stringify(metadata, null, 2)}`
             : "";
         return `${timestamp} [AUDIT] ${level.toUpperCase()}: ${message}${meta}`;

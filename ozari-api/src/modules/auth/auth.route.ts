@@ -2,6 +2,7 @@ import { Router, type Router as RouterType } from "express";
 import rateLimit from "express-rate-limit";
 import { verifyJwt } from "@middlewares/auth.middleware.js";
 import { checkLoginRateLimit } from "@middlewares/loginRateLimit.middleware.js";
+import { verifyCsrfToken } from "@middlewares/csrf.middleware.js";
 import { isGrantedRoles } from "@middlewares/role.middleware.js";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
 import {
@@ -28,11 +29,11 @@ const refreshTokenLimiter = rateLimit({
 router.get("/all", verifyJwt, isGrantedRoles([RolesEnum.Admin]), getAllUsers);
 
 // Protected Routes
-router.get("/signout", verifyJwt, signOutUser);
+router.post("/signout", verifyJwt, verifyCsrfToken, signOutUser);
 
 // Public Routes
 router.post("/user", validateCreateUser, createUser);
 router.post("/signin", validateSignIn, checkLoginRateLimit, signInUser);
-router.get("/refresh", refreshTokenLimiter, refreshToken);
+router.post("/refresh", refreshTokenLimiter, verifyCsrfToken, refreshToken);
 
 export default router;

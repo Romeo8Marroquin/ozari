@@ -124,7 +124,7 @@ src/
 ├── modules/            # Feature modules
 │   ├── auth/          # Authentication
 │   ├── health/        # Health check
-│   └── products/      # Products CRUD
+│   └── products/      # Planned products module (not mounted yet)
 ├── services/          # Business services
 │   └── prisma.service.ts  # Prisma client singleton
 ├── locales/           # i18n translations
@@ -144,20 +144,17 @@ src/
 
 - `POST /api/auth/user` - Create user (public)
 - `POST /api/auth/signin` - Sign in (public)
-- `GET /api/auth/refresh` - Refresh token (public)
-- `GET /api/auth/signout` - Sign out (protected)
+- `POST /api/auth/refresh` - Refresh token (public)
+- `POST /api/auth/signout` - Sign out (protected)
 - `GET /api/auth/all` - Get all users (admin only)
 
 ### Products
 
-- `GET /api/products/all` - Get all products (protected)
-- `POST /api/products/create` - Create product (admin only)
-- `PUT /api/products/update` - Update product (admin only)
-- `DELETE /api/products/delete` - Delete product (admin only)
+Product endpoints are planned but not currently mounted.
 
 ## Authentication
 
-All requests require `x-api-key` header:
+Server-to-server requests without a browser `Origin` header require `x-api-key`:
 
 ```bash
 # Local development
@@ -167,22 +164,22 @@ curl -H "x-api-key: your-api-key" http://localhost:3000/api/health/check
 curl -H "x-api-key: your-api-key" <your-railway-url>/api/health/check
 ```
 
-Protected endpoints also require JWT access token:
+Protected endpoints also require a JWT access token. State-changing browser requests include CSRF protection through the `csrf-token` cookie and `x-csrf-token` header.
 
 ```bash
 curl -H "x-api-key: your-api-key" \
      -H "Authorization: Bearer <access-token>" \
-     http://localhost:3000/api/products/all
+     http://localhost:3000/api/auth/all
 ```
 
-**Note**: The frontend automatically includes the API key from the `VITE_API_KEY` environment variable in all requests.
+Browser requests are restricted by CORS and authenticated with JWT/CSRF where required. Do not expose `API_KEY` in frontend environment variables.
 
 ## Environment Variables
 
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `NODE_ENV` | Environment (development/production) | No |
-| `HOST` | Server host | No (default: localhost) |
+| `API_HOST` | Server host | No (default: localhost) |
 | `PORT` | Server port | No (default: 3000) |
 | `APP_HOST` | Frontend URL for CORS | Yes |
 | `DATABASE_URL` | PostgreSQL connection string | Yes |

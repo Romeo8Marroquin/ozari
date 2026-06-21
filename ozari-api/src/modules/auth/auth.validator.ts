@@ -5,10 +5,6 @@ import { logger } from "@/config/logger.js";
 import { emailRegex, fullNameRegex, passwordRegex } from "@helpers/regex.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
-import {
-  type CreateUserRequestModel,
-  type SignInUserRequestModel,
-} from "./auth.models.js";
 
 const invalidBodyKey = "common.logs.invalidBody";
 const invalidBodyMessageKey = "common.invalidBody";
@@ -135,7 +131,7 @@ export function validateCreateUser(
   }
 
   // Set validated and sanitized body
-  req.body = result.data as CreateUserRequestModel;
+  req.body = result.data;
   next();
 }
 
@@ -214,7 +210,7 @@ export function validateSignIn(
   req.body = {
     ...bodyData,
     deviceUuid: validatedDeviceUuid,
-  } as SignInUserRequestModel;
+  };
 
   next();
 }
