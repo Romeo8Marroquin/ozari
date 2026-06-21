@@ -3,7 +3,7 @@
 Cloud-ready business implementation platform.
 
 **Status**: ✅ Deployed and operational on `dev` environment
-- **Backend**: Railway
+- **Backend**: Google Cloud Run via Cloud Build
 - **Frontend**: Cloudflare Pages
 - **Database**: Neon PostgreSQL 17
 
@@ -24,7 +24,7 @@ This is a monorepo containing:
 | Backend        | Express.js + Node.js 22       |
 | Database       | PostgreSQL 17 (Neon)          |
 | ORM            | Prisma                        |
-| Deployment     | Railway (Backend) + Cloudflare Pages (Frontend) |
+| Deployment     | Cloud Run (Backend) + Cloudflare Pages (Frontend) |
 | Security       | SSL/TLS + JWT + API Keys + CSP |
 
 ## Prerequisites
@@ -85,9 +85,9 @@ pnpm run dev
 
 The project is configured for automatic deployments:
 
-- **Backend**: Push to `dev` branch triggers Railway deployment
+- **Backend**: Cloud Build trigger uses `ozari-api/cloudbuild.yaml` to build, migrate, and deploy to Cloud Run
 - **Frontend**: Push to `dev` branch triggers Cloudflare Pages deployment
-- **Database Migrations**: GitHub Actions applies migrations on schema changes
+- **Database Migrations**: Cloud Build runs `prisma migrate deploy` once per backend deployment using the Neon direct URL secret
 
 See individual README files for detailed deployment configuration.
 
@@ -102,8 +102,7 @@ ozari/
 ├── ozari-app/          # Frontend application
 │   ├── src/
 │   └── README.md       # Frontend documentation
-├── .github/
-│   └── workflows/      # CI/CD workflows
+├── CLAUDE.md           # Assistant/project operation notes
 └── README.md           # This file
 ```
 

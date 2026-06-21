@@ -5,7 +5,7 @@
 1. [Overview](#overview)
 2. [Audit Logging](#audit-logging)
 3. [Database Query Logging](#database-query-logging)
-4. [Searching Logs in Railway](#searching-logs-in-railway)
+4. [Searching Logs in Cloud Run](#searching-logs-in-cloud-run)
 5. [Usage Examples](#usage-examples)
 6. [Best Practices](#best-practices)
 
@@ -17,17 +17,17 @@
 
 ✅ **Audit Logging** - Track security-critical events (login, logout, user creation, etc.)
 ✅ **Database Query Logging** - Monitor query performance and detect slow queries
-✅ **Railway-Optimized** - Structured JSON logs for easy searching in Railway dashboard
-✅ **Production-Only Audit** - Audit logs only in production (no noise in development)
+✅ **Cloud Run Optimized** - Structured JSON logs for easy searching in Cloud Logging
+✅ **Deployed-Only Audit** - Audit logs in staging/production, with no noise in local development
 ✅ **Automatic Integration** - Already integrated into auth module
 
 ---
 
 ## 🔒 Audit Logging
 
-### **What is Logged (Production Only)**
+### **What is Logged (Deployed Environments Only)**
 
-All audit logs have the prefix `[AUDIT]` and are logged only when `NODE_ENV=production`.
+All audit logs have the prefix `[AUDIT]` and are logged only for deployed environments (`NODE_ENV=staging` or `NODE_ENV=production`).
 
 **Currently Tracked Events:**
 
@@ -52,7 +52,7 @@ All audit logs have the prefix `[AUDIT]` and are logged only when `NODE_ENV=prod
 
 ### **Audit Log Structure**
 
-**Production (Railway):**
+**Staging/Production (Cloud Run):**
 ```json
 {
   "level": "info",
@@ -88,7 +88,7 @@ All audit logs have the prefix `[AUDIT]` and are logged only when `NODE_ENV=prod
 import { AuditAction, logUserManagementAudit } from '@/config/auditLogger.js';
 
 // After creating user
-if (process.env["NODE_ENV"] === "production") {
+if (isDeployedEnvironment) {
   logUserManagementAudit({
     action: AuditAction.USER_CREATED,
     userId: newUser.id,
@@ -104,7 +104,7 @@ if (process.env["NODE_ENV"] === "production") {
 import { AuditAction, logAuthAudit } from '@/config/auditLogger.js';
 
 // After successful login
-if (process.env["NODE_ENV"] === "production") {
+if (isDeployedEnvironment) {
   logAuthAudit({
     action: AuditAction.USER_LOGIN_SUCCESS,
     userId: user.id,
@@ -198,22 +198,21 @@ const slowQueryThreshold = 500; // ms - queries slower than this are logged
 **To adjust the threshold:**
 1. Edit `src/services/prisma.service.ts`
 2. Change `slowQueryThreshold` value (e.g., 1000 for 1 second)
-3. Redeploy to Railway
+3. Redeploy through Cloud Build to Cloud Run
 
 ---
 
-## 🔍 Searching Logs in Railway
+## 🔍 Searching Logs in Cloud Run
 
-Railway provides a centralized log viewer for all your services. Here's how to find and filter audit logs.
+Cloud Run writes container stdout/stderr to Cloud Logging. Here's how to find and filter audit logs.
 
-### **Access Railway Logs**
+### **Access Cloud Run Logs**
 
-1. Go to [railway.app](https://railway.app)
-2. Select your project
-3. Click on your `ozari-api` service
-4. Click **"Deployments"** tab
-5. Click on the latest deployment
-6. Click **"View Logs"** button
+1. Open Google Cloud Console.
+2. Select project `ozari-500103`.
+3. Go to **Cloud Run**.
+4. Select service `ozari-api-staging`.
+5. Open the **Logs** tab, or use **Logs Explorer** for advanced filters.
 
 ### **Search Examples**
 
@@ -268,12 +267,12 @@ Shows queries that took longer than 500ms
 ```
 Shows failed login attempts from specific IP
 
-### **Railway Log Filtering Tips**
+### **Cloud Logging Filtering Tips**
 
-- **Case-sensitive:** Railway search is case-sensitive
+- **Case-sensitive:** Log text filters are case-sensitive
 - **Partial matches:** Search finds partial text matches
 - **JSON fields:** You can search by any JSON field in structured logs
-- **Time range:** Use Railway's time picker to narrow down results
+- **Time range:** Use Cloud Logging's time picker to narrow down results
 - **Download:** Export logs for external analysis (JSON or CSV)
 
 ---
@@ -285,7 +284,7 @@ Shows failed login attempts from specific IP
 **Problem:** User reports they can't log in
 
 **Steps:**
-1. Search Railway logs: `[AUDIT] USER_LOGIN_FAILED email: "user@example.com"`
+1. Search Cloud Run logs: `[AUDIT] USER_LOGIN_FAILED email: "user@example.com"`
 2. Check if account is locked: `[AUDIT] ACCOUNT_LOCKED email: "user@example.com"`
 3. Review IP addresses and user-agents to identify suspicious activity
 4. Check database logs for connection issues
@@ -349,7 +348,7 @@ Shows failed login attempts from specific IP
 **Problem:** Need to provide audit trail for security review
 
 **Steps:**
-1. Export Railway logs for date range
+1. Export Cloud Logging entries for date range
 2. Filter by audit events: `[AUDIT]`
 3. Generate report showing:
    - User creation events
@@ -357,25 +356,25 @@ Shows failed login attempts from specific IP
    - Failed authentication attempts
    - Account lockouts
 
-**Railway Export:**
-1. Click "Download Logs" in Railway dashboard
+**Cloud Logging Export:**
+1. Open Logs Explorer for the Cloud Run service
 2. Select date range
-3. Choose JSON format
+3. Export or copy JSON entries
 4. Use `jq` or similar to filter and format
 
 ```bash
 # Filter audit logs from exported JSON
-cat railway-logs.json | jq 'select(.message | contains("[AUDIT]"))'
+cat cloud-run-logs.json | jq 'select(.message | contains("[AUDIT]"))'
 ```
 
 ---
 
 ## ✅ Best Practices
 
-### **1. Only Log in Production**
+### **1. Only Log in Deployed Environments**
 ```typescript
 // Always wrap audit logs with environment check
-if (process.env["NODE_ENV"] === "production") {
+if (isDeployedEnvironment) {
   logAuthAudit({...});
 }
 ```
@@ -428,10 +427,10 @@ logAuthAudit({
 
 ### **4. Monitor Slow Queries Regularly**
 
-**Set up alerts in Railway:**
-1. Go to your service settings
-2. Set up notification webhooks
-3. Alert on "Slow database query" warnings
+**Set up alerts in Cloud Monitoring:**
+1. Create a log-based metric for "Slow database query" warnings
+2. Create an alerting policy for that metric
+3. Route notifications to the appropriate channel
 
 **Action items:**
 - Review slow queries weekly
@@ -493,8 +492,8 @@ logAudit({
 ### **Already Implemented:**
 ✅ Audit logging in auth module
 ✅ Database query logging
-✅ Railway-optimized structured logging
-✅ Production-only audit logs
+✅ Cloud Run optimized structured logging
+✅ Deployed-environment audit logs
 
 ### **To Add Audit Logging to New Modules:**
 
@@ -505,7 +504,7 @@ import { AuditAction, logAudit } from '@/config/auditLogger.js';
 
 2. Add audit log at critical points:
 ```typescript
-if (process.env["NODE_ENV"] === "production") {
+if (isDeployedEnvironment) {
   logAudit({
     action: AuditAction.YOUR_ACTION,
     userId: user.id,
@@ -515,9 +514,9 @@ if (process.env["NODE_ENV"] === "production") {
 }
 ```
 
-3. Deploy to Railway
+3. Deploy through Cloud Build to Cloud Run
 
-4. Verify in Railway logs: `[AUDIT] YOUR_ACTION`
+4. Verify in Cloud Run logs: `[AUDIT] YOUR_ACTION`
 
 ---
 
@@ -528,9 +527,9 @@ if (process.env["NODE_ENV"] === "production") {
 - Check `src/services/prisma.service.ts` for query logging configuration
 - See `src/modules/auth/auth.controller.ts` for usage examples
 
-**Railway Logs Not Showing?**
-- Verify `NODE_ENV=production` is set in Railway environment variables
-- Check Railway deployment logs for errors
+**Cloud Run Logs Not Showing?**
+- Verify `NODE_ENV=staging` or `NODE_ENV=production` is set for the Cloud Run service
+- Check Cloud Build and Cloud Run revision logs for errors
 - Ensure service is running (green status)
 
 ---
@@ -542,10 +541,10 @@ if (process.env["NODE_ENV"] === "production") {
 ✅ All authentication events tracked
 ✅ Security events monitored
 ✅ Database performance monitored
-✅ Easy to search in Railway
+✅ Easy to search in Cloud Logging
 ✅ Compliant with security best practices
 
-**Search in Railway:** `[AUDIT]`
+**Search in Cloud Logging:** `[AUDIT]`
 **Monitor slow queries:** `Slow database query detected`
 
 You're all set! 🚀

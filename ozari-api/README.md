@@ -2,7 +2,7 @@
 
 Modern Express TypeScript API for the Ozari platform.
 
-**Status**: ✅ Deployed on Railway (dev environment)
+**Status**: ✅ Deployed on Google Cloud Run (staging environment)
 
 ## Features
 
@@ -60,7 +60,7 @@ openssl rand -hex 32
 pnpm run prisma:generate
 
 # Run migrations
-pnpm run prisma:migrate
+pnpm run prisma:dev
 
 # (Optional) Open Prisma Studio
 pnpm run prisma:studio
@@ -160,8 +160,8 @@ Server-to-server requests without a browser `Origin` header require `x-api-key`:
 # Local development
 curl -H "x-api-key: your-api-key" http://localhost:3000/api/health/check
 
-# Production
-curl -H "x-api-key: your-api-key" <your-railway-url>/api/health/check
+# Staging/production
+curl -H "x-api-key: your-api-key" <your-cloud-run-url>/api/health/check
 ```
 
 Protected endpoints also require a JWT access token. State-changing browser requests include CSRF protection through the `csrf-token` cookie and `x-csrf-token` header.
@@ -178,9 +178,10 @@ Browser requests are restricted by CORS and authenticated with JWT/CSRF where re
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `NODE_ENV` | Environment (development/production) | No |
-| `API_HOST` | Server host | No (default: localhost) |
-| `PORT` | Server port | No (default: 3000) |
+| `NODE_ENV` | Runtime mode (`development`, `staging`, `production`) | No |
+| `APP_ENV` | App environment label (`local`, `staging`, `production`) | No |
+| `API_HOST` | Server host. Local defaults to `localhost`; Cloud Run/deployed defaults to `0.0.0.0` | No |
+| `PORT` | Server port. Local defaults to `3000`; Cloud Run uses `PORT` and defaults to `8080` | No |
 | `APP_HOST` | Frontend URL for CORS | Yes |
 | `DATABASE_URL` | PostgreSQL connection string | Yes |
 | `JWT_SECRET` | JWT signing secret | Yes |
@@ -191,77 +192,90 @@ Browser requests are restricted by CORS and authenticated with JWT/CSRF where re
 
 ## Deployment
 
-### Railway
+### Google Cloud Run
 
-**Status**: ✅ Deployed and operational
+**Status**: ✅ Staging deployment configured through Cloud Build
 
-The backend is deployed on Railway with automatic deployments from the `dev` branch.
+The backend is deployed as a normal container on Google Cloud Run. The Cloud Build trigger uses `ozari-api/cloudbuild.yaml`; because this repository is a monorepo, API build steps use `dir: ozari-api` and Docker builds with `ozari-api` as the context.
 
-**Configuration**:
-- **Platform**: Railway
-- **Build Command**: `pnpm run build`
-- **Start Command**: `pnpm start`
-- **Auto-Deploy**: Enabled from `dev` branch
-- **Database**: Neon PostgreSQL 17 (direct connection via `@prisma/adapter-pg`)
-- **Node Version**: 22
+**Staging Configuration**:
+- **Google Cloud project**: `ozari-500103`
+- **Region**: `northamerica-south1`
+- **Cloud Run service**: `ozari-api-staging`
+- **Artifact Registry repository**: `ozari-images`
+- **Runtime service account**: `ozari-run-sa@ozari-500103.iam.gserviceaccount.com`
+- **Cloud Build config**: `ozari-api/cloudbuild.yaml`
+- **Docker context**: `ozari-api`
+- **Runtime command**: `pnpm start`
+- **Container port**: `8080`
+- **Scaling**: `--min-instances=0`, `--max-instances=3`
 
-**Environment Variables** (configured in Railway dashboard):
+**Pipeline Flow**:
+1. `verify-api`: install dependencies, run `pnpm build`, run `pnpm type-check`.
+2. `build-docker-image`: build the Docker image from the `ozari-api` directory.
+3. `push-docker-image`: push `$COMMIT_SHA` and `latest` tags to Artifact Registry.
+4. `apply-prisma-migrations`: run `pnpm prisma:migrate:deploy` once inside the built image.
+5. `deploy-cloud-run`: deploy the exact built image to Cloud Run.
+
+**Prisma and Neon URLs**:
+- Cloud Run runtime uses the Neon pooled URL as `DATABASE_URL`.
+- The migration step uses the Neon direct URL secret, expanded as `DATABASE_URL` only inside the migration container.
+- `DIRECT_DATABASE_URL` is not passed to the Cloud Run runtime.
+- `prisma migrate deploy` is safe to run every deployment; if there are no pending migrations, it is a no-op.
+- Do not put `prisma migrate deploy` in `start`, because Cloud Run may start multiple instances.
+
+**Required Secret Manager Secrets**:
+
+| Secret | Purpose |
+|--------|---------|
+| `ozari-database-url` | Neon pooled URL for Cloud Run runtime |
+| `ozari-direct-database-url` | Neon direct URL for Prisma migrations |
+| `ozari-jwt-secret` | JWT access token signing secret |
+| `ozari-jwt-refresh-secret` | JWT refresh token signing secret |
+| `ozari-encryption-key` | AES-256 encryption key |
+| `ozari-api-key` | Server-to-server API key |
+
+**Runtime Environment Variables**:
+
+These are set by `cloudbuild.yaml` during `gcloud run deploy`:
+
 ```bash
-NODE_ENV=production
-API_HOST=0.0.0.0
-PORT=${{PORT}}              # Railway provides this automatically
+NODE_ENV=staging
+APP_ENV=staging
 API_BASE_PATH=/api
-APP_HOST=<cloudflare-frontend-url>
-DATABASE_URL=<neon-postgresql-connection-string>
-JWT_SECRET=<generated-secret>
-JWT_REFRESH_SECRET=<generated-secret>
-ENCRYPTION_KEY=<generated-secret>
-API_KEY=<generated-secret>
 LOG_LEVEL=info
+APP_HOST=<cloudflare-frontend-url>
+DATABASE_URL=<from Secret Manager: ozari-database-url>
+JWT_SECRET=<from Secret Manager: ozari-jwt-secret>
+JWT_REFRESH_SECRET=<from Secret Manager: ozari-jwt-refresh-secret>
+ENCRYPTION_KEY=<from Secret Manager: ozari-encryption-key>
+API_KEY=<from Secret Manager: ozari-api-key>
 ```
 
-**Generate Secrets** (for local development):
-```bash
-# JWT secrets (use different values for each)
-openssl rand -hex 32
+`APP_HOST` is a Cloud Build substitution. Keep the repository value as a placeholder and configure the real Cloudflare URL in the Cloud Build trigger or manual substitution.
 
-# Encryption key (32 bytes)
-openssl rand -hex 32
-
-# API key
-openssl rand -hex 32
-```
-
-**Setup Steps**:
-1. Create new project in Railway
-2. Connect GitHub repository
-3. Configure environment variables above
-4. Enable auto-deploy from `dev` branch
-5. Railway will automatically build and deploy on push
-
-**Database Migrations**:
-- Migrations are applied via GitHub Actions on push to `dev` branch
-- See `.github/workflows/deploy-dev.yml` for configuration
-- Workflow triggers on changes to:
-  - `ozari-api/prisma/schema.prisma`
-  - `ozari-api/prisma/migrations/**`
-  - `ozari-api/prisma.config.ts`
+**Cloud Build Trigger Setup**:
+1. Connect the repository to Cloud Build.
+2. Configure the trigger to use `/ozari-api/cloudbuild.yaml`.
+3. Configure substitutions for environment-specific values, especially `_APP_HOST`.
+4. Ensure the Cloud Build service account can read the required Secret Manager secrets, push Artifact Registry images, and deploy Cloud Run.
+5. Ensure the Cloud Run runtime service account can access runtime secrets.
 
 **Health Check**:
 ```bash
-curl <your-railway-url>/api/health/check
+curl <your-cloud-run-url>/api/health/check
 ```
 
-### Docker (Optional)
+### Docker
 
-```dockerfile
-FROM node:22-alpine
-WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-RUN npm install -g pnpm && pnpm install --frozen-lockfile
-COPY . .
-RUN pnpm run build
-CMD ["pnpm", "start"]
+The Dockerfile uses `node:22-bookworm-slim`, not Alpine, to avoid Prisma/OpenSSL compatibility issues. It copies `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` before `pnpm install --frozen-lockfile`; the workspace file is required because pnpm overrides are stored there.
+
+Local Docker test from the monorepo root:
+
+```bash
+docker build -t ozari-api-test ./ozari-api
+docker run --rm --env-file ozari-api/.env -p 8080:8080 ozari-api-test
+curl http://localhost:8080/api/health/check
 ```
 
 ## Scripts
@@ -274,7 +288,8 @@ CMD ["pnpm", "start"]
 | `pnpm start` | Start production server |
 | `pnpm run prisma:generate` | Generate Prisma Client |
 | `pnpm run prisma:dev` | Run database migrations (development) |
-| `pnpm run prisma:deploy` | Deploy migrations (production) |
+| `pnpm run prisma:migrate:deploy` | Deploy migrations in staging/production CI/CD |
+| `pnpm run prisma:deploy` | Alias for `pnpm run prisma:migrate:deploy` |
 | `pnpm run prisma:studio` | Open Prisma Studio |
 | `pnpm run lint` | Run ESLint |
 | `pnpm run lint:fix` | Fix ESLint errors |

@@ -27,6 +27,7 @@ Thumbs.db
 .serverless/
 .claude/
 CLAUDE.md
+!CLAUDE.md
 
 # Archivos de TypeScript
 *.tsbuildinfo
