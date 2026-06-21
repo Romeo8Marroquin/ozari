@@ -54,15 +54,16 @@ steps:
 
   - id: apply-prisma-migrations
     name: gcr.io/cloud-builders/docker
-    entrypoint: docker
+    entrypoint: bash
     args:
-      - run
-      - --rm
-      - --env
-      - DATABASE_URL=$$DIRECT_DATABASE_URL
-      - ${_IMAGE_URL}:$COMMIT_SHA
-      - pnpm
-      - prisma:migrate:deploy
+      - -c
+      - |
+        set -euo pipefail
+
+        docker run --rm \
+          --env DATABASE_URL="$$DIRECT_DATABASE_URL" \
+          "${_IMAGE_URL}:$COMMIT_SHA" \
+          pnpm prisma:migrate:deploy
     secretEnv:
       - DIRECT_DATABASE_URL
 
