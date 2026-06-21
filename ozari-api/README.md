@@ -269,6 +269,8 @@ For Cloud Run, configure this value through Cloud Build substitutions rather tha
 curl <your-cloud-run-url>/api/health/check
 ```
 
+The health endpoint verifies both the HTTP service and database connectivity, so a failure usually means the runtime database secret or Neon connectivity should be checked first.
+
 ### Docker
 
 The Dockerfile uses `node:22-bookworm-slim`, not Alpine, to avoid Prisma/OpenSSL compatibility issues. It copies `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` before `pnpm install --frozen-lockfile`; the workspace file is required because pnpm overrides are stored there.
