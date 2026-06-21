@@ -7,7 +7,7 @@ This repository is a monorepo:
 
 ## Deployment Ownership
 
-- Backend deployments use Google Cloud Build and Cloud Run, not GitHub Actions or Railway.
+- Backend deployments use Google Cloud Build and Cloud Run, not GitHub Actions.
 - Frontend deployments use Cloudflare Pages.
 - Do not add GitHub Actions deploy workflows unless explicitly requested.
 - Do not run `gcloud builds submit`, deploy commands, commits, or pushes unless explicitly requested.

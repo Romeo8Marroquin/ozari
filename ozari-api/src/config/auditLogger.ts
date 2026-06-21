@@ -5,16 +5,16 @@ import { isDeployedEnvironment } from "./environment.js";
  * Audit Logger Configuration
  *
  * Purpose: Track security-critical and compliance-related events
- * Deployment: Railway (logs to stdout, captured by Railway's log aggregator)
+ * Deployment: Cloud Run (logs to stdout, captured by Cloud Logging)
  *
  * Key Features:
- * - [AUDIT] prefix for easy filtering in Railway logs
+ * - [AUDIT] prefix for easy filtering in Cloud Logging
  * - Structured JSON in production for searchability
  * - Human-readable format in development
  * - Separate from application logs (different concern)
  *
- * Railway Log Filtering:
- * - Search for "[AUDIT]" in Railway dashboard
+ * Cloud Logging Filtering:
+ * - Search for "[AUDIT]" in Logs Explorer
  * - Filter by action (e.g., "USER_CREATED", "ROLE_CHANGED")
  * - Filter by userId, email, etc.
  */
@@ -28,7 +28,7 @@ const auditFormat = winston.format.combine(
   }),
   /* c8 ignore next 3 */
   isDeployedEnvironment
-    ? // Production: JSON format (structured, searchable in Railway)
+    ? // Deployed environments: JSON format (structured, searchable in Cloud Logging)
       winston.format.json()
     : // Development: Human-readable format
       winston.format.printf(({ level, message, timestamp, metadata }) => {
@@ -46,10 +46,10 @@ export const auditLogger = winston.createLogger({
   format: auditFormat,
   defaultMeta: {
     service: "ozari-api",
-    type: "audit", // Easy filtering in Railway
+    type: "audit", // Easy filtering in Cloud Logging
   },
   transports: [
-    // All audit logs to stdout (Railway captures this)
+    // All audit logs to stdout; Cloud Run forwards this to Cloud Logging.
     new winston.transports.Console({
       /* c8 ignore next 4 */
       format: isDeployedEnvironment

@@ -7,12 +7,12 @@ import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
 
 /**
- * Health check endpoint for Railway load balancer
+ * Health check endpoint for deployed service probes
  * Tests both application and database connectivity
  */
 export const healthCheck = async (_: Request, res: Response): Promise<void> => {
   try {
-    // Test database connectivity (critical for Railway health checks)
+    // Test database connectivity for health checks.
     const prismaClient = await getPrismaClient();
     await prismaClient.$queryRaw`SELECT 1`;
 

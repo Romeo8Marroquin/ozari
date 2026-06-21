@@ -15,7 +15,7 @@ import { getPrismaClient } from "@/services/prisma.service.js";
  * Usage:
  * - Manual: `pnpm run cleanup:sessions`
  * - Cron: Add to crontab or use node-cron
- * - Cloud: Use Railway Cron Jobs or similar
+ * - Cloud: Use Cloud Scheduler or Cloud Run Jobs
  */
 export async function cleanupExpiredSessions(): Promise<void> {
   try {
