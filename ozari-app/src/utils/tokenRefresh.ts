@@ -4,7 +4,7 @@ import { getTokenTimeRemaining, isTokenValid } from '@utils/jwt';
 import { api } from '@api/client';
 import type { OzariSuccessResponse } from '../types/api.types';
 
-let refreshTimer: NodeJS.Timeout | null = null;
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let isRefreshing = false;
 let refreshSubscribers: Array<(token: string) => void> = [];
 

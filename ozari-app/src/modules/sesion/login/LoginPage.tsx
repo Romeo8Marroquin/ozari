@@ -217,7 +217,9 @@ const LoginPage: React.FC = () => {
           <RequiredPatternsContext.Provider value={requiredPatternsContextValue}>
             <FormProvider {...methods}>
               <form
-                onSubmit={handleSubmit(onSubmit)}
+                onSubmit={(event) => {
+                  void handleSubmit(onSubmit)(event);
+                }}
                 className="w-full flex flex-col items-center gap-6"
               >
                 <div className="form-element w-full">

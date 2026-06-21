@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { gsap } from 'gsap';
 import useBreakpoint from './useBreakpoint';
 
@@ -12,16 +12,16 @@ const useRotationalAssetAnimation = (variant: 'login' | 'register' = 'login') =>
   const { breakpoint } = useBreakpoint();
   const previousBreakpointRef = useRef<string | null>(null);
   const rotationalAssetRef = useRef<HTMLDivElement>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
+  const isInitializedRef = useRef(false);
 
   useLayoutEffect(() => {
     // Early return if no breakpoint or ref yet
     if (!breakpoint || !rotationalAssetRef.current) return;
 
     // Skip initial render - just set the initialized flag
-    if (!isInitialized) {
+    if (!isInitializedRef.current) {
       previousBreakpointRef.current = breakpoint;
-      setIsInitialized(true);
+      isInitializedRef.current = true;
       return;
     }
 
@@ -62,7 +62,7 @@ const useRotationalAssetAnimation = (variant: 'login' | 'register' = 'login') =>
     }
 
     previousBreakpointRef.current = breakpoint;
-  }, [breakpoint, variant, isInitialized]);
+  }, [breakpoint, variant]);
 
   return rotationalAssetRef;
 };

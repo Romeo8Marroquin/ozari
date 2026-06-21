@@ -30,7 +30,7 @@ export const initializeI18n = async () => {
       supportedLngs: ["es-GT"],
       ns: ["translation"],
       defaultNS: "translation",
-      initImmediate: false,
+      initAsync: false,
     });
 };
 

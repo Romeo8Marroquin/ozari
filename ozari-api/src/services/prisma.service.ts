@@ -80,7 +80,7 @@ async function initializePrismaClient(): Promise<PrismaClient> {
     return client;
   } catch (error) {
     logger.error("Failed to initialize Prisma Client", { error });
-    throw new Error("Database connection failed");
+    throw new Error("Database connection failed", { cause: error });
   }
 }
 

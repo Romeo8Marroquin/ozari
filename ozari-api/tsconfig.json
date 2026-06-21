@@ -37,6 +37,7 @@
     "noPropertyAccessFromIndexSignature": true,
 
     /* Completeness */
+    "ignoreDeprecations": "6.0",
     "skipLibCheck": true,
 
     /* Path Mapping */
