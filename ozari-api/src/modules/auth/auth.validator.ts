@@ -60,7 +60,7 @@ export function validateCreateUser(
 
   if (!result.success) {
     // Get first validation error
-    const firstError = result.error.errors[0];
+    const firstError = result.error.issues[0];
     /* c8 ignore start */
     if (!firstError) {
       logger.warn(i18next.t(invalidBodyKey));
@@ -158,7 +158,7 @@ export function validateSignIn(
 
   if (!result.success) {
     // Get first validation error
-    const firstError = result.error.errors[0];
+    const firstError = result.error.issues[0];
     /* c8 ignore start */
     if (!firstError) {
       logger.warn(i18next.t(invalidBodyKey));
