@@ -42,6 +42,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
+      - name: Rebuild native deps (bcrypt)
+        run: pnpm rebuild bcrypt --verbose
+
       - name: Apply migrations
         run: pnpm exec prisma migrate deploy
         env:
