@@ -10,16 +10,17 @@ substitutions:
   _API_BASE_PATH: /api
   _LOG_LEVEL: info
   _MAX_INSTANCES: '3'
-  _DATABASE_URL_SECRET: ozari-api-staging-database-url
-  _DIRECT_DATABASE_URL_SECRET: ozari-api-staging-direct-database-url
-  _JWT_SECRET_SECRET: ozari-api-staging-jwt-secret
-  _JWT_REFRESH_SECRET_SECRET: ozari-api-staging-jwt-refresh-secret
-  _ENCRYPTION_KEY_SECRET: ozari-api-staging-encryption-key
-  _API_KEY_SECRET: ozari-api-staging-api-key
+  _DATABASE_URL_SECRET: ozari-database-url
+  _DIRECT_DATABASE_URL_SECRET: ozari-direct-database-url
+  _JWT_SECRET_SECRET: ozari-jwt-secret
+  _JWT_REFRESH_SECRET_SECRET: ozari-jwt-refresh-secret
+  _ENCRYPTION_KEY_SECRET: ozari-encryption-key
+  _API_KEY_SECRET: ozari-api-key
 
 steps:
   - id: verify-api
     name: node:22-bookworm-slim
+    dir: ozari-api
     entrypoint: bash
     args:
       - -c
@@ -35,6 +36,7 @@ steps:
 
   - id: build-docker-image
     name: gcr.io/cloud-builders/docker
+    dir: ozari-api
     args:
       - build
       - --tag
