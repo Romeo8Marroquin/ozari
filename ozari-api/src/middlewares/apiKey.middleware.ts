@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { isDeployedEnvironment } from "@/config/environment.js";
 import { i18next } from "@/config/i18n.js";
 import { logger } from "@/config/logger.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
@@ -16,6 +17,22 @@ export const validateApiKey = (
 ) => {
   try {
     const apiKey = req.header("x-api-key");
+    const origin = req.header("origin");
+
+    if (origin && isTrustedBrowserRequest(req, origin)) {
+      next();
+      return;
+    }
+
+    if (origin) {
+      logger.warn(`Untrusted browser origin blocked - ${origin}`);
+      sendOzariError(
+        res,
+        HttpEnum.FORBIDDEN,
+        i18next.t("middlewares.apiKey.defaultMessage"),
+      );
+      return;
+    }
 
     if (!apiKey) {
       logger.warn(i18next.t("middlewares.apiKey.logs.missingApiKey"));
@@ -64,6 +81,21 @@ export const validateApiKey = (
     );
   }
 };
+
+function isTrustedBrowserRequest(req: Request, origin: string): boolean {
+  if (origin !== process.env["APP_HOST"]) {
+    return false;
+  }
+
+  if (!isDeployedEnvironment) {
+    return true;
+  }
+
+  const fetchMode = req.header("sec-fetch-mode");
+  const fetchDest = req.header("sec-fetch-dest");
+
+  return fetchMode === "cors" && (!fetchDest || fetchDest === "empty");
+}
 
 /**
  * Constant-time string comparison to prevent timing attacks

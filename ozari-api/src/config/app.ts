@@ -1,3 +1,5 @@
+import { isDeployedEnvironment } from "./environment.js";
+
 export const appConfig = {
   accessToken: {
     algorithm: "HS256" as const,
@@ -15,8 +17,8 @@ export const appConfig = {
 
   cookieConfig: {
     httpOnly: true,
-    sameSite: "lax" as const,
-    secure: true,
+    sameSite: isDeployedEnvironment ? ("none" as const) : ("lax" as const),
+    secure: isDeployedEnvironment,
     maxAge: 2592000000, // 30 days in milliseconds (matches refresh token expiration)
     path: "/api/auth",
   },

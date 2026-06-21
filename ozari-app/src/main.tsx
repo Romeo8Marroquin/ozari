@@ -6,15 +6,19 @@ import { routeTree } from './routeTree.gen';
 import { createRouter, Navigate, RouterProvider } from '@tanstack/react-router';
 import PageLoader from '@components/PageLoader';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { initializeTokenRefresh } from '@utils/tokenRefresh';
 
-const router = createRouter({
+export const router = createRouter({
   routeTree,
   defaultViewTransition: true,
   defaultNotFoundComponent: () => <Navigate to="/" />,
   defaultPendingComponent: () => <PageLoader />,
 });
 
-const queryClient = new QueryClient();
+export const queryClient = new QueryClient();
+
+// Initialize token refresh system (proactive timer + 401 interceptor)
+initializeTokenRefresh();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

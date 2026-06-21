@@ -5,10 +5,6 @@ import { logger } from "@/config/logger.js";
 import { emailRegex, fullNameRegex, passwordRegex } from "@helpers/regex.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
-import {
-  type CreateUserRequestModel,
-  type SignInUserRequestModel,
-} from "./auth.models.js";
 
 const invalidBodyKey = "common.logs.invalidBody";
 const invalidBodyMessageKey = "common.invalidBody";
@@ -64,7 +60,7 @@ export function validateCreateUser(
 
   if (!result.success) {
     // Get first validation error
-    const firstError = result.error.errors[0];
+    const firstError = result.error.issues[0];
     /* c8 ignore start */
     if (!firstError) {
       logger.warn(i18next.t(invalidBodyKey));
@@ -135,7 +131,7 @@ export function validateCreateUser(
   }
 
   // Set validated and sanitized body
-  req.body = result.data as CreateUserRequestModel;
+  req.body = result.data;
   next();
 }
 
@@ -162,7 +158,7 @@ export function validateSignIn(
 
   if (!result.success) {
     // Get first validation error
-    const firstError = result.error.errors[0];
+    const firstError = result.error.issues[0];
     /* c8 ignore start */
     if (!firstError) {
       logger.warn(i18next.t(invalidBodyKey));
@@ -214,7 +210,7 @@ export function validateSignIn(
   req.body = {
     ...bodyData,
     deviceUuid: validatedDeviceUuid,
-  } as SignInUserRequestModel;
+  };
 
   next();
 }

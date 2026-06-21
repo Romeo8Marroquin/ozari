@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { isDeployedEnvironment } from "@/config/environment.js";
 import { i18next } from "@/config/i18n.js";
 import { logger } from "@/config/logger.js";
 import { AuditAction, logSecurityAudit } from "@/config/auditLogger.js";
@@ -133,7 +134,7 @@ export function recordFailedLogin(email: string): void {
       );
 
       // Audit log: Account locked due to too many failed attempts
-      if (process.env["NODE_ENV"] === "production") {
+      if (isDeployedEnvironment) {
         logSecurityAudit({
           action: AuditAction.ACCOUNT_LOCKED,
           email,

@@ -1,7 +1,6 @@
 import {
   ZodOptional,
   ZodDefault,
-  ZodEffects,
   ZodIntersection,
   ZodArray,
   ZodObject,
@@ -22,13 +21,7 @@ function unwrapSchema(schema: ZodTypeAny): {
 
     if (current instanceof ZodOptional || current instanceof ZodDefault) {
       isOptional = true;
-      current = (current as ZodOptional<ZodTypeAny> | ZodDefault<ZodTypeAny>)._def.innerType;
-      again = true;
-      continue;
-    }
-
-    if (current instanceof ZodEffects) {
-      current = current._def.schema;
+      current = (current as ZodOptional<ZodTypeAny> | ZodDefault<ZodTypeAny>).unwrap();
       again = true;
     }
   }
@@ -41,14 +34,14 @@ function getZodRequiredPatterns(schema: ZodTypeAny, prefix = ''): RegExp[] {
 
   if (unwrapped instanceof ZodIntersection) {
     return [
-      ...getZodRequiredPatterns(unwrapped._def.left, prefix),
-      ...getZodRequiredPatterns(unwrapped._def.right, prefix),
+      ...getZodRequiredPatterns(unwrapped.def.left as ZodTypeAny, prefix),
+      ...getZodRequiredPatterns(unwrapped.def.right as ZodTypeAny, prefix),
     ];
   }
 
   if (unwrapped instanceof ZodArray) {
-    const elementType = unwrapped._def.type;
-    const children = getZodRequiredPatterns(elementType, `${prefix}\\.\\d+`);
+    const elementType = unwrapped.element;
+    const children = getZodRequiredPatterns(elementType as ZodTypeAny, `${prefix}\\.\\d+`);
     const patterns: RegExp[] = [];
     if (prefix && !isOptional) {
       patterns.push(new RegExp(`^${prefix}$`));
@@ -57,12 +50,11 @@ function getZodRequiredPatterns(schema: ZodTypeAny, prefix = ''): RegExp[] {
   }
 
   if (unwrapped instanceof ZodObject) {
-    const shapeDef = unwrapped._def.shape;
-    const shape: ZodRawShape = typeof shapeDef === 'function' ? shapeDef() : shapeDef;
+    const shape: ZodRawShape = unwrapped.shape;
 
     return Object.entries(shape).flatMap(([key, childSchema]) => {
       const path = prefix ? `${prefix}\\.${key}` : key;
-      return getZodRequiredPatterns(childSchema, path);
+      return getZodRequiredPatterns(childSchema as ZodTypeAny, path);
     });
   }
 

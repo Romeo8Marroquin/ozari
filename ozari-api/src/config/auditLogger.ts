@@ -1,4 +1,5 @@
 import winston from "winston";
+import { isDeployedEnvironment } from "./environment.js";
 
 /**
  * Audit Logger Configuration
@@ -18,8 +19,6 @@ import winston from "winston";
  * - Filter by userId, email, etc.
  */
 
-const isProduction = process.env["NODE_ENV"] === "production";
-
 // Custom format for audit logs
 const auditFormat = winston.format.combine(
   winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
@@ -28,13 +27,13 @@ const auditFormat = winston.format.combine(
     fillExcept: ["message", "level", "timestamp", "label"],
   }),
   /* c8 ignore next 3 */
-  isProduction
+  isDeployedEnvironment
     ? // Production: JSON format (structured, searchable in Railway)
       winston.format.json()
     : // Development: Human-readable format
       winston.format.printf(({ level, message, timestamp, metadata }) => {
         const meta =
-          metadata && Object.keys(metadata as object).length
+          metadata && Object.keys(metadata).length
             ? `\n${JSON.stringify(metadata, null, 2)}`
             : "";
         return `${timestamp} [AUDIT] ${level.toUpperCase()}: ${message}${meta}`;
@@ -53,7 +52,7 @@ export const auditLogger = winston.createLogger({
     // All audit logs to stdout (Railway captures this)
     new winston.transports.Console({
       /* c8 ignore next 4 */
-      format: isProduction
+      format: isDeployedEnvironment
         ? winston.format.combine(
             winston.format.label({ label: "[AUDIT]" }),
             winston.format.json(),

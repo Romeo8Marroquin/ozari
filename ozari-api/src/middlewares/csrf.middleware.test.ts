@@ -69,7 +69,8 @@ describe("CSRF Middleware", () => {
         token,
         expect.objectContaining({
           httpOnly: false,
-          secure: true,
+          sameSite: "lax",
+          secure: false,
           path: "/api",
         }),
       );

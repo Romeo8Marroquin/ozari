@@ -11,10 +11,14 @@ const useDetectAutofill = () => {
         inputElement?.dispatchEvent(new Event('input', { bubbles: true }));
       }
     }, 200);
+
+    // Return cleanup function to clear interval
+    return () => clearInterval(intervalId);
   }, []);
 
   useLayoutEffect(() => {
-    detectAutofill();
+    const cleanup = detectAutofill();
+    return cleanup; // Clear interval on unmount
   }, [detectAutofill]);
 
   return {

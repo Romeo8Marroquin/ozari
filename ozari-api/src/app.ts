@@ -117,6 +117,7 @@ function configureMiddlewares(app: Express): void {
         callback(corsError);
       },
       credentials: true,
+      exposedHeaders: ["Authorization"],
     }),
   );
 

@@ -41,9 +41,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
-      - name: Rebuild native deps (bcrypt)
-        run: pnpm rebuild bcrypt --verbose
-
       - name: Generate Prisma Client
         run: pnpm exec prisma generate
         env:

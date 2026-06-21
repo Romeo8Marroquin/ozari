@@ -45,19 +45,10 @@ Configure environment variables:
 ```bash
 # Backend API URL (leave empty to use Vite proxy in development)
 VITE_API_URL=
-
-# API Key for backend authentication (must match backend's API_KEY)
-VITE_API_KEY=
 ```
 
 **Development**: Leave `VITE_API_URL` empty to use Vite's proxy configuration.
 **Production**: Set to your Railway backend URL.
-
-**Security Warning**: Keep `VITE_API_KEY` secure:
-- Never commit `.env` files to version control
-- Use environment variables in deployment platforms
-- Rotate keys if exposed
-- The API key is validated server-side but should remain private
 
 ### 3. Development
 
@@ -169,9 +160,9 @@ Located in `src/api/client.ts`, the client is configured with:
 - **Base URL**:
   - Development: `/api` (proxied by Vite to `http://localhost:3000`)
   - Production: `${VITE_API_URL}/api` (direct to Railway backend)
-- **Authentication**: Automatically injects JWT token from localStorage
-- **API Key**: Automatically injects `x-api-key` header from `VITE_API_KEY`
+- **Authentication**: Automatically injects JWT token from session storage
 - **Device Tracking**: Sends `device-uuid` header for session management
+- **CSRF**: Sends `x-csrf-token` from the CSRF cookie for state-changing requests
 - **Public Endpoints**: Skip authentication when `config.public` is true
 - **Request/Response Interceptors**: Error handling and token refresh
 
@@ -179,12 +170,12 @@ Located in `src/api/client.ts`, the client is configured with:
 
 ```tsx
 import { useQuery } from '@tanstack/react-query'
-import { apiClient } from '@api/client'
+import { api } from '@api/client'
 
 function MyComponent() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['users'],
-    queryFn: () => apiClient.get('/users'),
+    queryFn: () => api.get('/users'),
   })
 
   // Component logic
@@ -321,7 +312,6 @@ The frontend is deployed on Cloudflare Pages with automatic deployments from the
 **Environment Variables** (configured in Cloudflare Pages):
 ```bash
 VITE_API_URL=<your-railway-backend-url>
-VITE_API_KEY=<matches-backend-api-key>
 ```
 
 **Security Configuration**:

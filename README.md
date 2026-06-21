@@ -111,7 +111,6 @@ ozari/
 
 - [Backend API Documentation](./ozari-api/README.md)
 - [Frontend Application Documentation](./ozari-app/README.md)
-- [Development Guide](./CLAUDE.md)
 
 ## License
 

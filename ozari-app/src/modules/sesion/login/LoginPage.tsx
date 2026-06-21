@@ -17,10 +17,12 @@ import { useTranslation } from 'react-i18next';
 import CustomButton from '@components/CustomButton';
 import useLogin from '../hooks/useLogin';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import useRotationalAssetAnimation from '@hooks/useRotationalAssetAnimation';
 
 const LoginPage: React.FC = () => {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
+  const rotationalAssetRef = useRotationalAssetAnimation('login');
   const search = useSearch({ from: '/sesion' });
   const navigate = useNavigate();
   const methods = useForm<LoginType>({
@@ -34,12 +36,12 @@ const LoginPage: React.FC = () => {
   useGSAP(
     () => {
       if (!containerRef.current) return;
-      const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
+      const tl = gsap.timeline({ defaults: { ease: 'power1.out' } });
       tl.from('.rotational-asset', {
         rotation: 0,
         x: 0,
         y: 0,
-        duration: 0.75,
+        duration: 0.7,
       });
 
       tl.from(
@@ -186,7 +188,10 @@ const LoginPage: React.FC = () => {
   return (
     <div ref={containerRef} className="w-full flex justify-center items-center">
       <section className="principal-card relative p-6 sm:p-12 bg-white border-none shadow-xl/15 rounded-xl gap-20 md:gap-30 flex flex-col md:flex-row items-center justify-center overflow-hidden">
-        <div className="rotational-asset absolute w-[150%] h-[110%] md:w-[110%] md:h-[150%] -rotate-15 origin-bottom md:origin-right -translate-y-7/12 md:translate-y-0 md:-translate-x-1/2 blur-lg bg-gradient-to-l md:bg-gradient-to-b from-cream to-blossom"></div>
+        <div
+          ref={rotationalAssetRef}
+          className="rotational-asset absolute w-[150%] h-[110%] md:w-[110%] md:h-[150%] -rotate-15 origin-bottom md:origin-right -translate-y-7/12 md:translate-y-0 md:-translate-x-1/2 blur-lg bg-gradient-to-l md:bg-gradient-to-b from-cream to-blossom"
+        ></div>
         <div className="flex">
           <div className="flex flex-col items-center justify-center gap-4 md:gap-6 z-10">
             <h2 className="article-element text-2xl font-bold text-black select-none">
@@ -212,7 +217,9 @@ const LoginPage: React.FC = () => {
           <RequiredPatternsContext.Provider value={requiredPatternsContextValue}>
             <FormProvider {...methods}>
               <form
-                onSubmit={handleSubmit(onSubmit)}
+                onSubmit={(event) => {
+                  void handleSubmit(onSubmit)(event);
+                }}
                 className="w-full flex flex-col items-center gap-6"
               >
                 <div className="form-element w-full">
@@ -245,7 +252,7 @@ const LoginPage: React.FC = () => {
                   <CustomButton
                     text={t('modules.sesion.login.form.submitButton')}
                     disabled={!formState.isValid}
-                    loading={formState.isSubmitting}
+                    loading={isPending}
                   />
                 </div>
 
