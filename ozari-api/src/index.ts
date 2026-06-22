@@ -1,5 +1,6 @@
 import { createApp } from "./app.js";
-import { getAppEnv, isDeployedEnvironment } from "./config/environment.js";
+import { appConfig } from "./config/app.js";
+import { getNodeEnv, isDeployedEnvironment } from "./config/environment.js";
 import { initializeI18n } from "./config/i18n.js";
 import { logger } from "./config/logger.js";
 import { disconnectPrisma } from "./services/prisma.service.js";
@@ -20,9 +21,9 @@ async function startServer() {
 
     const server = app.listen(PORT, HOST, () => {
       logger.info(`Server started successfully`);
-      logger.info(`Environment: ${getAppEnv()}`);
+      logger.info(`Environment: ${getNodeEnv()}`);
       logger.info(`Listening on http://${HOST}:${PORT}`);
-      logger.info(`API base path: ${process.env["BASE_PATH"] ?? "/api"}`);
+      logger.info(`API base path: ${appConfig.basePath}`);
     });
 
     // Shutdown handling

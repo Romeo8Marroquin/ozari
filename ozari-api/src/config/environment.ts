@@ -7,7 +7,6 @@
  * set `NODE_ENV` before invoking the code under test).
  */
 export const getNodeEnv = (): string => process.env["NODE_ENV"] ?? "development";
-export const getAppEnv = (): string => process.env["APP_ENV"] ?? getNodeEnv();
 
 export const isProductionEnvironment = (): boolean =>
   getNodeEnv() === "production";

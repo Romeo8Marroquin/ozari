@@ -54,9 +54,14 @@ Or use the repo helpers from `infrastructure/`:
 
 ## Notes
 
-- Variables are **defaulted** to staging values so `plan` works without a
-  `terraform.tfvars`. The real `terraform.tfvars` is gitignored; use
-  `terraform.tfvars.example` as a template.
+- Variables are **defaulted** to staging values (the **source of truth** for non-secret
+  config) so `plan` works without a `terraform.tfvars`. `terraform.tfvars` is optional,
+  gitignored, and only for local overrides — staging does not require it.
+- Cloud Build trigger **substitutions** and Cloud Run **runtime config** are
+  Terraform-managed; change them here, not in the Console (Console edits are
+  emergency-only and get reverted on the next apply). See the **Configuration
+  ownership** section in `infrastructure/README.md` for the full rules, including the
+  checklist for adding a new runtime env var.
 - Terraform **ignores the Cloud Run container image tag** — Cloud Build owns it.
 - Secret **values** are loaded separately; see `infrastructure/scripts/load-secrets-staging.*`.
 - See `infrastructure/README.md` for the full workflow, cleanup candidates, and the

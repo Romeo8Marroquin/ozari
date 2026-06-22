@@ -32,12 +32,6 @@ variable "service_name" {
   default     = "ozari-api"
 }
 
-variable "api_base_path" {
-  description = "API base path served by the app (API_BASE_PATH env var)."
-  type        = string
-  default     = "/api"
-}
-
 variable "app_host" {
   description = "Allowed frontend origin (APP_HOST env var). No trailing slash."
   type        = string
@@ -46,12 +40,6 @@ variable "app_host" {
 
 variable "node_env" {
   description = "NODE_ENV runtime value."
-  type        = string
-  default     = "staging"
-}
-
-variable "app_env" {
-  description = "APP_ENV runtime value."
   type        = string
   default     = "staging"
 }

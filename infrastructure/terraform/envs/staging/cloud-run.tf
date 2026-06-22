@@ -48,17 +48,14 @@ resource "google_cloud_run_v2_service" "ozari_api" {
       }
 
       # --- Plain env vars ---
+      # NODE_ENV is the single environment switch. APP_ENV and API_BASE_PATH were
+      # removed (June 2026 cleanup): APP_ENV was redundant with NODE_ENV and
+      # API_BASE_PATH was never read by the app (base path is appConfig.basePath).
+      # If you add a new runtime env var, add it here AND to cloudbuild.yaml's
+      # `gcloud run deploy --set-env-vars` so Terraform and Cloud Build stay in sync.
       env {
         name  = "NODE_ENV"
         value = var.node_env
-      }
-      env {
-        name  = "APP_ENV"
-        value = var.app_env
-      }
-      env {
-        name  = "API_BASE_PATH"
-        value = var.api_base_path
       }
       env {
         name  = "LOG_LEVEL"

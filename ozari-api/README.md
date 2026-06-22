@@ -176,19 +176,29 @@ Browser requests are restricted by CORS and authenticated with JWT/CSRF where re
 
 ## Environment Variables
 
+Only values that genuinely vary per environment (or are secret) are env vars. Settings
+that are the same across environments live in code as preferences (e.g. the API base
+path and all TOTP/MFA parameters in `src/config/app.ts` → `appConfig`); change those in
+code and redeploy, not via env vars.
+
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `NODE_ENV` | Runtime mode (`development`, `staging`, `production`) | No |
-| `APP_ENV` | App environment label (`local`, `staging`, `production`) | No |
+| `NODE_ENV` | Single environment switch + runtime mode (`development`, `staging`, `production`) | No (default: `development`) |
 | `API_HOST` | Server host. Local defaults to `localhost`; Cloud Run/deployed defaults to `0.0.0.0` | No |
-| `PORT` | Server port. Local defaults to `3000`; Cloud Run uses `PORT` and defaults to `8080` | No |
-| `APP_HOST` | Frontend URL for CORS | Yes |
+| `PORT` | Server port. Local defaults to `3000`; Cloud Run injects `PORT` (`8080`) | No |
+| `APP_HOST` | Frontend URL for CORS + API-key browser-origin check (no trailing slash) | Yes |
 | `DATABASE_URL` | PostgreSQL connection string | Yes |
+| `DIRECT_DATABASE_URL` | Neon direct URL — CI/CD Prisma migrations only, never Cloud Run runtime | Build only |
 | `JWT_SECRET` | JWT signing secret | Yes |
 | `JWT_REFRESH_SECRET` | Refresh token secret | Yes |
 | `ENCRYPTION_KEY` | AES-256 encryption key (hex) | Yes |
 | `API_KEY` | API authentication key | Yes |
 | `LOG_LEVEL` | Winston log level | No (default: info) |
+
+> **Removed (June 2026 cleanup):** `APP_ENV` (redundant — `NODE_ENV` is the only
+> environment switch; `NODE_ENV=staging` already distinguishes staging) and
+> `API_BASE_PATH` (was never read; the base path is the code preference
+> `appConfig.basePath`).
 
 ## Deployment
 
@@ -201,7 +211,7 @@ The backend is deployed as a normal container on Google Cloud Run. The Cloud Bui
 **Staging Configuration**:
 - **Google Cloud project**: `ozari-500103`
 - **Region**: `northamerica-south1`
-- **Cloud Run service**: `ozari-api-staging`
+- **Cloud Run service**: `ozari-api` (this is the staging service; not renamed)
 - **Artifact Registry repository**: `ozari-images`
 - **Runtime service account**: `ozari-run-sa@ozari-500103.iam.gserviceaccount.com`
 - **Cloud Build config**: `ozari-api/cloudbuild.yaml`
@@ -241,8 +251,6 @@ These are set by `cloudbuild.yaml` during `gcloud run deploy`:
 
 ```bash
 NODE_ENV=staging
-APP_ENV=staging
-API_BASE_PATH=/api
 LOG_LEVEL=info
 APP_HOST=<cloudflare-frontend-url>
 DATABASE_URL=<from Secret Manager: ozari-database-url>

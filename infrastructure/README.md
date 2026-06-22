@@ -97,6 +97,87 @@ Manager **versions** out-of-band, from a local gitignored file
 These scripts contain **no** secret values; they read `KEY=VALUE` lines from the local
 file and `gcloud secrets versions add` each one. The app reads `:latest`.
 
+## Configuration ownership — what Terraform manages and how to change it
+
+> **Manual Google Cloud Console edits are emergency-only.** Terraform is the source of
+> truth for the resources below. If you edit them by hand in the Console, the next
+> `terraform plan` will detect the drift and `terraform apply` will **restore the
+> declared state** (your manual change will be reverted). Only edit in the Console for
+> emergency recovery, then reconcile the change back into this code immediately.
+
+### Cloud Build trigger substitutions are Terraform-managed
+
+The Cloud Build trigger substitutions are now managed by Terraform
+(`cloud-build.tf`), **not** edited by hand in the Cloud Console during normal
+operation. Managed substitutions:
+
+- `_APP_HOST`
+- `_IMAGE_URL`
+- `_NODE_ENV`
+- `_REGION`
+- `_RUN_SA`
+- `_SERVICE_NAME`
+
+**To change a substitution:**
+
+1. Edit `infrastructure/terraform/envs/staging/variables.tf` (the value) and/or
+   `cloud-build.tf` (the mapping).
+2. `terraform plan` and review.
+3. `terraform apply` after review.
+4. Do **not** change it manually in the Console except for emergency recovery (and then
+   fold the change back into Terraform).
+
+### `variables.tf` defaults are the staging source of truth
+
+The defaults in `variables.tf` are the **staging source of truth for all non-secret
+configuration**. `terraform.tfvars` is **optional, gitignored, and only for local
+overrides** — staging does **not** require a `terraform.tfvars`. Use
+`terraform.tfvars.example` as a reference if you choose to create local overrides.
+
+### Cloud Run runtime configuration (env vars)
+
+Cloud Run runtime config is owned by **Terraform** (structural config: scaling,
+concurrency, timeout, env vars, secret bindings, SA, ingress) **and** the **Cloud Build
+deploy command** (`ozari-api/cloudbuild.yaml`, which sets env vars + image on each
+deploy). Because both `terraform apply` and `gcloud run deploy` use `--set-env-vars`
+(full replacement), the two **must stay in sync** or they will fight on each run.
+
+**When you add a new runtime env var, update all that apply:**
+
+| File | When |
+|---|---|
+| `variables.tf` | Always — declare the input (with a staging default). |
+| `terraform.tfvars.example` | If you want it documented as an overridable value. |
+| `cloud-run.tf` | Always — add the `env { }` (plain) or `value_source` (secret) block. |
+| `cloud-build.tf` substitutions | Only if Cloud Build needs to pass the value (managed substitution). |
+| `ozari-api/cloudbuild.yaml` deploy command | If Cloud Build sets it on `gcloud run deploy --set-env-vars` — keep this list identical to the env vars Terraform declares. |
+
+> Settings that do **not** vary per environment are **not** env vars — they live in
+> code as preferences (`ozari-api/src/config/app.ts` → `appConfig`, e.g. the API base
+> path and all TOTP/MFA parameters). Change those in code and redeploy.
+>
+> **June 2026 cleanup:** `APP_ENV` and `API_BASE_PATH` were removed from the runtime
+> env. `APP_ENV` was redundant (`NODE_ENV` is the single environment switch); the API
+> base path is the code preference `appConfig.basePath`, not an env var.
+
+### Secret values are NOT managed by Terraform
+
+Terraform manages only the secret **containers** and the **IAM access** to them. Secret
+**payloads/versions are never** in Terraform or Git — they live in Secret Manager and
+are loaded out-of-band (see `scripts/load-secrets-staging.*`). The app reads `:latest`.
+
+### Cloudflare Pages `VITE_API_URL` is NOT managed by Terraform
+
+The frontend's API URL is still configured **manually in Cloudflare Pages** and is
+**not** managed by this Terraform (Terraform here only owns GCP):
+
+```
+VITE_API_URL=https://ozari-api-694756660984.northamerica-south1.run.app
+```
+
+If the Cloud Run URL changes, update this value in the Cloudflare Pages project
+settings by hand.
+
 ## ⚠️ `terraform destroy` is dangerous
 
 `terraform destroy` against this config can **remove the Cloud Run service, Artifact
