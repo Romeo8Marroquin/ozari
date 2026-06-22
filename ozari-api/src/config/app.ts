@@ -15,10 +15,26 @@ export const appConfig = {
     issuer: "ozari",
   },
 
+  mfaToken: {
+    algorithm: "HS256" as const,
+    audience: "platform-users",
+    expiresIn: 300, // 5 minutes in seconds
+    issuer: "ozari",
+  },
+
+  mfa: {
+    issuerLabel: "Ozari",
+    secretBytes: 20,
+    totpDigits: 6,
+    totpStepSeconds: 30,
+    totpWindow: 1,
+    recoveryCodeCount: 10,
+  },
+
   cookieConfig: {
     httpOnly: true,
-    sameSite: isDeployedEnvironment ? ("none" as const) : ("lax" as const),
-    secure: isDeployedEnvironment,
+    sameSite: isDeployedEnvironment() ? ("none" as const) : ("lax" as const),
+    secure: isDeployedEnvironment(),
     maxAge: 2592000000, // 30 days in milliseconds (matches refresh token expiration)
     path: "/api/auth",
   },

@@ -1,0 +1,30 @@
+# Copy this file to terraform.tfvars and fill in / adjust as needed.
+#   cp terraform.tfvars.example terraform.tfvars
+# terraform.tfvars is gitignored. None of these values are secret (they are all
+# public infra identifiers), but the convention keeps the real file out of Git.
+# Secret *payloads* are never stored here — they live in Secret Manager and are
+# loaded separately (see infrastructure/scripts/load-secrets-staging.*).
+
+project_id     = "ozari-500103"
+project_number = "694756660984"
+region         = "northamerica-south1"
+environment    = "staging"
+
+service_name = "ozari-api"
+app_host     = "https://ozari-c28.pages.dev"
+node_env     = "staging"
+log_level    = "info"
+
+artifact_repository_id = "ozari-images"
+image_name             = "ozari-api"
+
+max_instances   = 3
+min_instances   = 0
+concurrency     = 40
+timeout_seconds = 300
+cpu             = "1"
+memory          = "512Mi"
+
+build_trigger_name         = "ozari-api-dev"
+build_trigger_branch_regex = "^dev$"
+github_repository_resource = "projects/ozari-500103/locations/northamerica-south1/connections/ozari-github/repositories/Romeo8Marroquin-ozari"

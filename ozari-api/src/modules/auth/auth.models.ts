@@ -12,6 +12,20 @@ export interface SignInUserRequestModel {
   deviceUuid: string;
 }
 
+export interface ChangePasswordRequestModel {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
+export interface MfaCodeRequestModel {
+  code: string;
+}
+
+export interface MfaDisableRequestModel {
+  password: string;
+}
+
 export interface GetAllUsersResponseModel {
   createdAt: Date;
   email: string | undefined;

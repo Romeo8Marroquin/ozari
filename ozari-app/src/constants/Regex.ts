@@ -1,5 +1,12 @@
 export const SYMBOLS = '!@#$%^&*_-+=?,:;';
 
+// Canonical validation policy — keep in sync with the backend
+// (ozari-api/src/helpers/regex.ts + validators.ts). Both sides must accept and
+// reject exactly the same values; the backend is the security boundary.
+export const PASSWORD_MIN_LENGTH = 12;
+export const PASSWORD_MAX_LENGTH = 128;
+export const EMAIL_MAX_LENGTH = 254; // RFC 5321 maximum total length
+
 export const UPPER_REGEX = /[A-Z]/;
 export const LOWER_REGEX = /[a-z]/;
 export const NUMBER_REGEX = /\d/;
@@ -7,5 +14,8 @@ export const SAFE_SYMBOL_REGEX = /[!@#$%^&*_\-+=?,:;]/;
 
 export const UNSAFE_SYMBOL_REGEX = /[^A-Za-z0-9!@#$%^&*_\-+=?,:;]/;
 
+// Combined password policy (mirrors the backend `passwordRegex`). The granular
+// regexes above compose to the same accept/reject set; this stays as a single
+// source-of-truth reference for the full rule.
 export const PASSWORD_REGEX =
-  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*_\-+=?,:;])[A-Za-z\d!@#$%^&*_\-+=?,:;]{10,128}$/;
+  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*_\-+=?,:;])[A-Za-z\d!@#$%^&*_\-+=?,:;]{12,128}$/;

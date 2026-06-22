@@ -2,7 +2,11 @@ import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import { i18next } from "@/config/i18n.js";
 import { logger } from "@/config/logger.js";
-import { emailRegex, fullNameRegex, passwordRegex } from "@helpers/regex.js";
+import {
+  emailField,
+  fullNameField,
+  passwordField,
+} from "@helpers/validators.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 
@@ -12,17 +16,9 @@ const invalidBodyMessageKey = "common.invalidBody";
 // Zod schemas for validation
 const createUserSchema = z
   .object({
-    fullName: z
-      .string()
-      .trim()
-      .min(1, "Full name is required")
-      .regex(fullNameRegex, "Full name format is invalid"),
-    email: z
-      .string()
-      .trim()
-      .toLowerCase()
-      .regex(emailRegex, "Email format is invalid"),
-    password: z.string().regex(passwordRegex, "Password format is invalid"),
+    fullName: fullNameField,
+    email: emailField,
+    password: passwordField,
     confirmPassword: z.string().min(1, "Confirm password is required"),
     termsAccepted: z
       .boolean()
@@ -34,13 +30,28 @@ const createUserSchema = z
   });
 
 const signInSchema = z.object({
-  email: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(emailRegex, "Email format is invalid"),
+  email: emailField,
   password: z.string().min(1, "Password is required"),
   deviceUuid: z.string().uuid("Device UUID format is invalid"),
+});
+
+const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Current password is required"),
+    newPassword: passwordField,
+    confirmPassword: z.string().min(1, "Confirm password is required"),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
+
+const mfaCodeSchema = z.object({
+  code: z.string().trim().min(6, "Code is invalid").max(32, "Code is invalid"),
+});
+
+const mfaDisableSchema = z.object({
+  password: z.string().min(1, "Password is required"),
 });
 
 export function validateCreateUser(
@@ -212,5 +223,99 @@ export function validateSignIn(
     deviceUuid: validatedDeviceUuid,
   };
 
+  next();
+}
+
+export function validateChangePassword(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (!req.body || typeof req.body !== "object") {
+    logger.warn(i18next.t(invalidBodyKey));
+    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(invalidBodyMessageKey));
+    return;
+  }
+
+  const result = changePasswordSchema.safeParse(req.body);
+  if (!result.success) {
+    const firstError = result.error.issues[0];
+    const field = firstError?.path[0] as string | undefined;
+
+    let translationKey: string;
+    if (field === "currentPassword") {
+      translationKey = "user.changePassword.validators.invalidCurrentPassword";
+    } else if (field === "newPassword") {
+      translationKey = "user.changePassword.validators.invalidNewPassword";
+    } else if (firstError?.message === "Passwords do not match") {
+      translationKey = "user.changePassword.validators.passwordsDoNotMatch";
+    } else if (field === "confirmPassword") {
+      translationKey = "user.changePassword.validators.invalidConfirmPassword";
+    } else {
+      translationKey = invalidBodyMessageKey;
+    }
+
+    logger.warn(
+      i18next.t("user.changePassword.validators.logs.validationError", {
+        field,
+      }),
+    );
+    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(translationKey));
+    return;
+  }
+
+  req.body = result.data;
+  next();
+}
+
+export function validateMfaCode(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (!req.body || typeof req.body !== "object") {
+    logger.warn(i18next.t(invalidBodyKey));
+    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(invalidBodyMessageKey));
+    return;
+  }
+
+  const result = mfaCodeSchema.safeParse(req.body);
+  if (!result.success) {
+    logger.warn(i18next.t("user.mfa.validators.logs.invalidCode"));
+    sendOzariError(
+      res,
+      HttpEnum.BAD_REQUEST,
+      i18next.t("user.mfa.validators.invalidCode"),
+    );
+    return;
+  }
+
+  req.body = result.data;
+  next();
+}
+
+export function validateMfaDisable(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (!req.body || typeof req.body !== "object") {
+    logger.warn(i18next.t(invalidBodyKey));
+    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(invalidBodyMessageKey));
+    return;
+  }
+
+  const result = mfaDisableSchema.safeParse(req.body);
+  if (!result.success) {
+    logger.warn(i18next.t("user.mfa.validators.logs.invalidPassword"));
+    sendOzariError(
+      res,
+      HttpEnum.BAD_REQUEST,
+      i18next.t("user.mfa.validators.invalidPassword"),
+    );
+    return;
+  }
+
+  req.body = result.data;
   next();
 }

@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Request, Response, NextFunction } from "express";
-import { validateCreateUser, validateSignIn } from "./auth.validator.js";
+import {
+  validateChangePassword,
+  validateCreateUser,
+  validateMfaCode,
+  validateMfaDisable,
+  validateSignIn,
+} from "./auth.validator.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
 
 vi.mock("@/config/logger.js", () => ({
@@ -313,6 +319,138 @@ describe("Auth Validators", () => {
       );
 
       expect(mockNext).toHaveBeenCalled();
+    });
+  });
+
+  describe("validateChangePassword", () => {
+    it("should pass with valid data", () => {
+      mockReq.body = {
+        currentPassword: "OldSecurePass123!",
+        newPassword: "NewSecurePass123!",
+        confirmPassword: "NewSecurePass123!",
+      };
+
+      validateChangePassword(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
+
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockRes.status).not.toHaveBeenCalled();
+    });
+
+    it("should reject a weak new password", () => {
+      mockReq.body = {
+        currentPassword: "OldSecurePass123!",
+        newPassword: "weak",
+        confirmPassword: "weak",
+      };
+
+      validateChangePassword(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
+
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.BAD_REQUEST);
+    });
+
+    it("should reject when confirmation does not match", () => {
+      mockReq.body = {
+        currentPassword: "OldSecurePass123!",
+        newPassword: "NewSecurePass123!",
+        confirmPassword: "DifferentPass123!",
+      };
+
+      validateChangePassword(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
+
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.BAD_REQUEST);
+    });
+
+    it("should reject a missing body", () => {
+      mockReq.body = undefined;
+
+      validateChangePassword(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
+
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.BAD_REQUEST);
+    });
+  });
+
+  describe("validateMfaCode", () => {
+    it("should pass with a 6-digit TOTP code", () => {
+      mockReq.body = { code: "123456" };
+
+      validateMfaCode(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
+
+      expect(mockNext).toHaveBeenCalled();
+    });
+
+    it("should pass with a recovery code", () => {
+      mockReq.body = { code: "ABCD2345EFGH6789" };
+
+      validateMfaCode(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
+
+      expect(mockNext).toHaveBeenCalled();
+    });
+
+    it("should reject a too-short code", () => {
+      mockReq.body = { code: "12" };
+
+      validateMfaCode(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
+
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.BAD_REQUEST);
+    });
+  });
+
+  describe("validateMfaDisable", () => {
+    it("should pass with a password", () => {
+      mockReq.body = { password: "OldSecurePass123!" };
+
+      validateMfaDisable(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
+
+      expect(mockNext).toHaveBeenCalled();
+    });
+
+    it("should reject an empty password", () => {
+      mockReq.body = { password: "" };
+
+      validateMfaDisable(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
+
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.BAD_REQUEST);
     });
   });
 });

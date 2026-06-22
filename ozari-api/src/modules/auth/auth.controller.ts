@@ -18,7 +18,6 @@ import {
   logSecurityAudit,
   logUserManagementAudit,
 } from "@/config/auditLogger.js";
-import { type JwtPayloadModel } from "@models/common/authModel.js";
 import {
   type CustomRequest,
   type UserJwtPayloadModel,
@@ -35,9 +34,11 @@ import {
 } from "@middlewares/loginRateLimit.middleware.js";
 import { clearCsrfToken, setCsrfToken } from "@middlewares/csrf.middleware.js";
 import {
+  type ChangePasswordRequestModel,
   type CreateUserRequestModel,
   type SignInUserRequestModel,
 } from "./auth.models.js";
+import { issueAuthenticatedSession } from "./auth.service.js";
 
 export const getAllUsers = async (_: Request, res: Response): Promise<void> => {
   try {
@@ -117,7 +118,7 @@ export const createUser = async (
     logger.info(i18next.t("user.createUser.logs.userCreated", { email }));
 
     // Audit log: User created
-    if (isDeployedEnvironment) {
+    if (isDeployedEnvironment()) {
       logUserManagementAudit({
         action: AuditAction.USER_CREATED,
         userId: newUser.id,
@@ -170,7 +171,7 @@ export const signInUser = async (
     if (!user) {
       logger.warn(i18next.t("user.signInUser.logs.userNotFound", { email }));
       recordFailedLogin(email);
-      if (isDeployedEnvironment) {
+      if (isDeployedEnvironment()) {
         logAuthAudit({
           action: AuditAction.USER_LOGIN_FAILED,
           email,
@@ -197,7 +198,7 @@ export const signInUser = async (
         }),
       );
       recordFailedLogin(email);
-      if (isDeployedEnvironment) {
+      if (isDeployedEnvironment()) {
         logAuthAudit({
           action: AuditAction.USER_LOGIN_FAILED,
           userId: user.id,
@@ -217,84 +218,41 @@ export const signInUser = async (
       return;
     }
 
-    const now = Math.floor(Date.now() / 1000);
-    const accessJti = crypto.randomUUID();
-    const refreshJti = crypto.randomUUID();
-    const accessExp = now + appConfig.accessToken.expiresIn;
-    const refreshExp = now + appConfig.refreshToken.expiresIn;
+    if (user.mfaEnabledAt) {
+      const mfaToken = jwt.sign(
+        {
+          iat: Math.floor(Date.now() / 1000),
+          deviceUuid,
+          tokenType: TokenEnum.MFA_TOKEN,
+          userId: user.id,
+        },
+        jwtSecret,
+        appConfig.mfaToken as jwt.SignOptions,
+      );
+      clearLoginAttempts(email);
+      logger.info(
+        i18next.t("user.signInUser.logs.mfaRequired", { userId: user.id }),
+      );
+      sendOzariSuccess(
+        res,
+        HttpEnum.OK,
+        i18next.t("user.signInUser.mfaRequired"),
+        { mfaRequired: true, mfaToken },
+      );
+      return;
+    }
 
-    const accessToken = jwt.sign(
-      {
-        jti: accessJti,
-        iat: now,
-        deviceUuid,
-        tokenType: TokenEnum.ACCESS_TOKEN,
-        userId: user.id,
-        userRole: user.roleId,
-      },
-      jwtSecret,
-      appConfig.accessToken as jwt.SignOptions,
-    );
-    const refreshToken = jwt.sign(
-      {
-        jti: refreshJti,
-        iat: now,
-        deviceUuid,
-        tokenType: TokenEnum.REFRESH_TOKEN,
-        userId: user.id,
-        userRole: user.roleId,
-      },
-      jwtRefreshSecret,
-      appConfig.refreshToken as jwt.SignOptions,
-    );
-
-    await prismaClient.$transaction(async (transaction) => {
-      await transaction.$queryRaw`
-        SELECT id
-        FROM jwt_sessions
-        WHERE device_uuid = ${deviceUuid}
-          AND user_id = ${user.id}
-          AND is_active = true
-        FOR UPDATE
-      `;
-
-      await transaction.jwtSession.deleteMany({
-        where: { deviceUuid, isActive: true, userId: user.id },
-      });
-      await transaction.jwtSession.createMany({
-        data: [
-          {
-            deviceUuid,
-            expiresAt: new Date(accessExp * 1000),
-            issuedAt: new Date(now * 1000),
-            jti: accessJti,
-            tokenTypeId: TokenEnum.ACCESS_TOKEN,
-            userId: user.id,
-          },
-          {
-            deviceUuid,
-            expiresAt: new Date(refreshExp * 1000),
-            issuedAt: new Date(now * 1000),
-            jti: refreshJti,
-            tokenTypeId: TokenEnum.REFRESH_TOKEN,
-            userId: user.id,
-          },
-        ],
-      });
+    await issueAuthenticatedSession(prismaClient, res, {
+      userId: user.id,
+      userRole: user.roleId,
+      deviceUuid,
     });
-
-    // Set CSRF token for protected routes
-    setCsrfToken(res);
-
-    res
-      .header("authorization", `Bearer ${accessToken}`)
-      .cookie("refresh-token", refreshToken, appConfig.cookieConfig);
     clearLoginAttempts(email);
 
     logger.info(
       i18next.t("user.signInUser.logs.userAuthenticated", { userId: user.id }),
     );
-    if (isDeployedEnvironment) {
+    if (isDeployedEnvironment()) {
       logAuthAudit({
         action: AuditAction.USER_LOGIN_SUCCESS,
         userId: user.id,
@@ -346,10 +304,11 @@ export const refreshToken = async (
       sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
       return;
     }
-    const payload = jwt.verify(
-      refreshToken,
-      jwtRefreshSecret,
-    ) as UserJwtPayloadModel;
+    const payload = jwt.verify(refreshToken, jwtRefreshSecret, {
+      algorithms: [appConfig.refreshToken.algorithm],
+      audience: appConfig.refreshToken.audience,
+      issuer: appConfig.refreshToken.issuer,
+    }) as UserJwtPayloadModel;
     if (payload.tokenType !== TokenEnum.REFRESH_TOKEN) {
       logger.error(
         i18next.t("user.refreshToken.logs.invalidTokenType", {
@@ -409,7 +368,7 @@ export const refreshToken = async (
         data: { isActive: false },
       });
 
-      if (isDeployedEnvironment) {
+      if (isDeployedEnvironment()) {
         logSecurityAudit({
           action: AuditAction.UNAUTHORIZED_ACCESS_ATTEMPT,
           userId: payload.userId,
@@ -522,7 +481,7 @@ export const refreshToken = async (
     );
 
     // Audit log: Token refreshed
-    if (isDeployedEnvironment) {
+    if (isDeployedEnvironment()) {
       logAuthAudit({
         action: AuditAction.TOKEN_REFRESH,
         userId: payload.userId,
@@ -569,42 +528,63 @@ export const signOutUser = async (
 ): Promise<void> => {
   try {
     const prismaClient = await getPrismaClient();
+    const jwtRefreshSecret = process.env["JWT_REFRESH_SECRET"];
     const allDevices =
       (req.query?.["allDevices"] as string | undefined) === "true";
-    const { deviceUuid, userId, userRole } = req.user as JwtPayloadModel;
-    if (allDevices) {
-      await prismaClient.jwtSession.deleteMany({
-        where: { isActive: true, userId },
-      });
-    } else {
-      await prismaClient.jwtSession.deleteMany({
-        where: { deviceUuid, isActive: true, userId },
-      });
+
+    const refreshToken = req.cookies["refresh-token"] as string | undefined;
+    let identity: UserJwtPayloadModel | null = null;
+
+    // Identity comes from the refresh token (the session anchor), verified with
+    // ignoreExpiration so logout works even when the access token has expired.
+    if (refreshToken && jwtRefreshSecret) {
+      try {
+        const payload = jwt.verify(refreshToken, jwtRefreshSecret, {
+          algorithms: [appConfig.refreshToken.algorithm],
+          audience: appConfig.refreshToken.audience,
+          issuer: appConfig.refreshToken.issuer,
+          ignoreExpiration: true,
+        }) as UserJwtPayloadModel;
+        if (payload.tokenType === TokenEnum.REFRESH_TOKEN) {
+          identity = payload;
+        }
+      } catch {
+        identity = null;
+      }
     }
+
+    if (identity) {
+      const { deviceUuid, userId, userRole } = identity;
+      await prismaClient.jwtSession.deleteMany({
+        where: allDevices
+          ? { isActive: true, userId }
+          : { deviceUuid, isActive: true, userId },
+      });
+      logger.info(
+        i18next.t("user.signOutUser.logs.userSignedOut", {
+          allDevices,
+          userId,
+          userRole,
+        }),
+      );
+      if (isDeployedEnvironment()) {
+        logAuthAudit({
+          action: allDevices
+            ? AuditAction.USER_LOGOUT_ALL_DEVICES
+            : AuditAction.USER_LOGOUT,
+          userId,
+          email: "",
+          ipAddress: req.ip,
+          userAgent: req.headers["user-agent"],
+          deviceUuid,
+          success: true,
+        });
+      }
+    }
+
+    // Logout is idempotent: always clear client credentials and succeed.
     res.clearCookie("refresh-token", appConfig.cookieConfig);
     clearCsrfToken(res);
-    logger.info(
-      i18next.t("user.signOutUser.logs.userSignedOut", {
-        allDevices,
-        userId,
-        userRole,
-      }),
-    );
-
-    // Audit log: User logout
-    if (isDeployedEnvironment) {
-      logAuthAudit({
-        action: allDevices
-          ? AuditAction.USER_LOGOUT_ALL_DEVICES
-          : AuditAction.USER_LOGOUT,
-        userId,
-        email: "", // Email not available in logout flow
-        ipAddress: req.ip,
-        userAgent: req.headers["user-agent"],
-        deviceUuid,
-        success: true,
-      });
-    }
 
     sendOzariSuccess(
       res,
@@ -617,6 +597,139 @@ export const signOutUser = async (
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
       i18next.t("user.signOutUser.genericError"),
+    );
+  }
+};
+
+export const getMe = async (
+  req: CustomRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const prismaClient = await getPrismaClient();
+    const { userId } = req.user as UserJwtPayloadModel;
+
+    const user = await prismaClient.user.findFirst({
+      where: { id: userId, isActive: true },
+    });
+    if (!user) {
+      logger.warn(i18next.t("user.getMe.logs.userNotFound", { userId }));
+      sendOzariError(
+        res,
+        HttpEnum.NOT_FOUND,
+        i18next.t("user.getMe.genericError"),
+      );
+      return;
+    }
+
+    sendOzariSuccess(res, HttpEnum.OK, i18next.t("user.getMe.profileFetched"), {
+      id: user.id,
+      email: decryptKms(user.emailKms),
+      fullName: decryptKms(user.fullNameKms),
+      role: RolesEnum[user.roleId],
+      mfaEnabled: user.mfaEnabledAt !== null,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt ?? undefined,
+    });
+  } catch (error) {
+    logger.error(i18next.t("user.getMe.logs.internalServerError", { error }));
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("user.getMe.genericError"),
+    );
+  }
+};
+
+export const changePassword = async (
+  req: CustomRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const prismaClient = await getPrismaClient();
+    const { userId, deviceUuid } = req.user as UserJwtPayloadModel;
+    const { currentPassword, newPassword } =
+      req.body as ChangePasswordRequestModel;
+
+    const user = await prismaClient.user.findFirst({
+      where: { id: userId, isActive: true },
+    });
+    if (!user) {
+      sendOzariError(
+        res,
+        HttpEnum.NOT_FOUND,
+        i18next.t("user.changePassword.genericError"),
+      );
+      return;
+    }
+
+    const currentValid = await comparePassword(
+      currentPassword,
+      user.passwordSha,
+    );
+    if (!currentValid) {
+      logger.warn(
+        i18next.t("user.changePassword.logs.invalidCurrentPassword", {
+          userId,
+        }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.UNAUTHORIZED,
+        i18next.t("user.changePassword.invalidCurrentPassword"),
+      );
+      return;
+    }
+
+    const reusedPassword = await comparePassword(newPassword, user.passwordSha);
+    if (reusedPassword) {
+      sendOzariError(
+        res,
+        HttpEnum.BAD_REQUEST,
+        i18next.t("user.changePassword.passwordReused"),
+      );
+      return;
+    }
+
+    const passwordSha = await hashPassword(newPassword);
+
+    // Update the password and revoke every session except the current device,
+    // so a stolen session elsewhere cannot survive a password change.
+    await prismaClient.$transaction([
+      prismaClient.user.update({
+        where: { id: userId },
+        data: { passwordSha },
+      }),
+      prismaClient.jwtSession.deleteMany({
+        where: { userId, isActive: true, deviceUuid: { not: deviceUuid } },
+      }),
+    ]);
+
+    logger.info(
+      i18next.t("user.changePassword.logs.passwordChanged", { userId }),
+    );
+    if (isDeployedEnvironment()) {
+      logSecurityAudit({
+        action: AuditAction.PASSWORD_CHANGED,
+        userId,
+        ipAddress: req.ip,
+        success: true,
+      });
+    }
+
+    sendOzariSuccess(
+      res,
+      HttpEnum.OK,
+      i18next.t("user.changePassword.passwordChanged"),
+    );
+  } catch (error) {
+    logger.error(
+      i18next.t("user.changePassword.logs.internalServerError", { error }),
+    );
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("user.changePassword.genericError"),
     );
   }
 };

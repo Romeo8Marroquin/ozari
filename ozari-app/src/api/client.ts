@@ -74,7 +74,9 @@ api.interceptors.response.use(
       }
 
       // Attempt to refresh token
-      console.log('[API] 401 detected, attempting token refresh...');
+      if (import.meta.env.DEV) {
+        console.log('[API] 401 detected, attempting token refresh...');
+      }
       const newToken = await refreshAccessToken();
 
       if (newToken) {
