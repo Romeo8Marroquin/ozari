@@ -30,7 +30,7 @@ const RegisterPage: React.FC = () => {
     mode: 'onTouched',
   });
   const { trigger, reset, getValues } = methods;
-  const { login, isPending, error } = useLogin();
+  const { login, isPending } = useLogin();
 
   useGSAP(
     () => {
@@ -75,8 +75,9 @@ const RegisterPage: React.FC = () => {
       login(getValues());
       reset();
     } catch (err) {
-      console.log('Tanstack error:', error);
-      console.error('Login failed:', err);
+      if (import.meta.env.DEV) {
+        console.error('Login failed:', err);
+      }
     }
   };
 

@@ -134,7 +134,7 @@ export function recordFailedLogin(email: string): void {
       );
 
       // Audit log: Account locked due to too many failed attempts
-      if (isDeployedEnvironment) {
+      if (isDeployedEnvironment()) {
         logSecurityAudit({
           action: AuditAction.ACCOUNT_LOCKED,
           email,

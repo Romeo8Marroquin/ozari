@@ -8,6 +8,7 @@ import i18next from "i18next";
 import rateLimit from "express-rate-limit";
 
 import { i18nmiddleware } from "./config/i18n.js";
+import { getAppHost } from "./config/environment.js";
 import { logger } from "./config/logger.js";
 import { asyncLocalStorage, type RequestContext } from "./config/context.js";
 import { sanitizeSensitiveData } from "./helpers/utils.js";
@@ -33,7 +34,7 @@ export function createApp(): Express {
 }
 
 function configureMiddlewares(app: Express): void {
-  const frontendDomain = process.env["APP_HOST"];
+  const frontendDomain = getAppHost();
 
   if (!frontendDomain) {
     logger.error("APP_HOST environment variable is not defined");

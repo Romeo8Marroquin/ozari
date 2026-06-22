@@ -61,7 +61,7 @@
       "validators": {
         "invalidFullName": "El nombre es requerido y debe ser válido",
         "invalidEmail": "El correo electrónico es requerido y debe ser válido.",
-        "invalidPassword": "La contraseña debe tener al menos 10 caracteres, incluyendo letras, símbolos y números.",
+        "invalidPassword": "La contraseña debe tener al menos 12 caracteres, incluyendo letras, símbolos y números.",
         "invalidConfirmPassword": "La confirmación de la contraseña es requerida y debe ser válida.",
         "passwordsDoNotMatch": "Las contraseñas no coinciden.",
         "termsNotAccepted": "Debes aceptar los términos y condiciones.",
@@ -82,6 +82,7 @@
     },
     "signInUser": {
       "userAuthenticated": "Usuario autenticado exitosamente.",
+      "mfaRequired": "Se requiere verificación en dos pasos.",
 
       "genericError": "Credenciales inválidas",
       "internalServerError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
@@ -97,6 +98,7 @@
       },
       "logs": {
         "userAuthenticated": "Usuario con id <{{-userId}}> autenticado exitosamente.",
+        "mfaRequired": "El usuario con id <{{-userId}}> requiere verificación en dos pasos.",
 
         "userNotFound": "El usuario con el correo <{{-email}}> no fue encontrado.",
         "invalidCredentials": "La contraseña del usuario id <{{-userId}}> es inválida.",
@@ -137,6 +139,91 @@
         "usersFetched": "Usuarios obtenidos exitosamente, total de usuarios <{{-count}}>.",
 
         "internalServerError": "Error al obtener usuarios: {{-error}}."
+      }
+    },
+    "getMe": {
+      "profileFetched": "Perfil obtenido exitosamente.",
+
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "userNotFound": "El usuario con id <{{-userId}}> no fue encontrado.",
+        "internalServerError": "Error al obtener el perfil: {{-error}}."
+      }
+    },
+    "changePassword": {
+      "passwordChanged": "Contraseña actualizada exitosamente.",
+      "invalidCurrentPassword": "La contraseña actual es incorrecta.",
+      "passwordReused": "La nueva contraseña debe ser distinta a la actual.",
+
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidCurrentPassword": "La contraseña actual es requerida.",
+        "invalidNewPassword": "La nueva contraseña debe tener al menos 12 caracteres, incluyendo mayúsculas, minúsculas, símbolos y números.",
+        "invalidConfirmPassword": "La confirmación de la contraseña es requerida y debe ser válida.",
+        "passwordsDoNotMatch": "Las contraseñas no coinciden.",
+        "logs": {
+          "validationError": "La validación de cambio de contraseña falló en el campo <{{-field}}>."
+        }
+      },
+      "logs": {
+        "invalidCurrentPassword": "Contraseña actual inválida para el usuario id <{{-userId}}>.",
+        "passwordChanged": "Contraseña actualizada para el usuario id <{{-userId}}>.",
+        "internalServerError": "Error al cambiar la contraseña: {{-error}}."
+      }
+    },
+    "mfa": {
+      "validators": {
+        "invalidCode": "El código de verificación es requerido y debe ser válido.",
+        "invalidPassword": "La contraseña es requerida.",
+        "logs": {
+          "invalidCode": "El código de verificación MFA no es válido.",
+          "invalidPassword": "La contraseña proporcionada para MFA no es válida."
+        }
+      }
+    },
+    "mfaSetup": {
+      "secretGenerated": "Configuración de doble factor iniciada.",
+      "alreadyEnabled": "La verificación en dos pasos ya está activada.",
+
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "secretGenerated": "Secreto MFA generado para el usuario id <{{-userId}}>.",
+        "internalServerError": "Error al iniciar la configuración MFA: {{-error}}."
+      }
+    },
+    "mfaEnable": {
+      "mfaEnabled": "Verificación en dos pasos activada exitosamente.",
+      "alreadyEnabled": "La verificación en dos pasos ya está activada.",
+      "setupRequired": "Primero debes iniciar la configuración de doble factor.",
+      "invalidCode": "El código de verificación es inválido.",
+
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "invalidCode": "Código MFA inválido al activar para el usuario id <{{-userId}}>.",
+        "mfaEnabled": "Verificación en dos pasos activada para el usuario id <{{-userId}}>.",
+        "internalServerError": "Error al activar MFA: {{-error}}."
+      }
+    },
+    "mfaDisable": {
+      "mfaDisabled": "Verificación en dos pasos desactivada exitosamente.",
+      "notEnabled": "La verificación en dos pasos no está activada.",
+      "invalidPassword": "La contraseña es incorrecta.",
+
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "invalidPassword": "Contraseña inválida al desactivar MFA para el usuario id <{{-userId}}>.",
+        "mfaDisabled": "Verificación en dos pasos desactivada para el usuario id <{{-userId}}>.",
+        "internalServerError": "Error al desactivar MFA: {{-error}}."
+      }
+    },
+    "mfaVerifyLogin": {
+      "userAuthenticated": "Usuario autenticado exitosamente.",
+
+      "genericError": "Código de verificación inválido.",
+      "logs": {
+        "invalidCode": "Código MFA inválido al iniciar sesión para el usuario id <{{-userId}}>.",
+        "userAuthenticated": "Usuario id <{{-userId}}> autenticado exitosamente con MFA.",
+        "internalServerError": "Error al verificar el inicio de sesión con MFA: {{-error}}."
       }
     }
   },
@@ -193,6 +280,13 @@
         "accountLocked": "[middleware] Cuenta bloqueada temporalmente para el correo <{{-email}}>. Intentos: {{-attempts}}. Tiempo restante: {{-remainingMinutes}} minuto(s)."
       }
     },
+    "mfaRateLimit": {
+      "tooManyAttempts": "Demasiados intentos de verificación. Por favor intente de nuevo en {{minutes}} minuto(s).",
+      "logs": {
+        "tooManyAttempts": "[middleware] Demasiados intentos de verificación MFA para el usuario id <{{-userId}}>. Intentos: {{-attempts}}. Tiempo restante: {{-remainingMinutes}} minuto(s).",
+        "accountLocked": "[middleware] Verificación MFA bloqueada temporalmente para el usuario id <{{-userId}}>. Intentos: {{-attempts}}. Tiempo restante: {{-remainingMinutes}} minuto(s)."
+      }
+    },
     "csrf": {
       "tokenMissing": "Token de protección CSRF requerido.",
       "tokenInvalid": "Token de protección CSRF inválido.",
@@ -200,6 +294,15 @@
         "tokenMissing": "[middleware] Token CSRF faltante. Cookie: {{-hasCookie}}, Header: {{-hasHeader}}.",
         "tokenMismatch": "[middleware] Token CSRF no coincide para {{-method}} {{-url}}.",
         "tokenValid": "[middleware] Token CSRF válido para {{-method}} {{-url}}."
+      }
+    },
+    "mfa": {
+      "defaultMessage": "Acceso denegado.",
+      "internalServerError": "Ha ocurrido un error interno en el servidor.",
+      "logs": {
+        "unauthorized": "[middleware] Token MFA no proporcionado o inválido.",
+        "invalidTokenType": "[middleware] Tipo de token inválido para el desafío MFA.",
+        "internalServerError": "[middleware] Error al validar el token MFA: {{-error}}."
       }
     }
   },

@@ -27,6 +27,7 @@ model User {
   roleId        Int       @map("role_id")
   passwordSha   String    @map("password_sha")
   mfaSecretKms  String?   @map("mfa_secret_kms")
+  mfaEnabledAt  DateTime? @map("mfa_enabled_at")
   mfaLastUsedAt DateTime? @map("mfa_last_used_at")
   termsAccepted Boolean   @default(false) @map("terms_accepted")
   isActive      Boolean   @default(true) @map("is_active")
@@ -40,8 +41,22 @@ model User {
   addresses         Address[]
   services          Service[]
   userAuthProviders UserAuthProvider[]
+  mfaRecoveryCodes  MfaRecoveryCode[]
 
   @@map("users")
+}
+
+model MfaRecoveryCode {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  codeSha   String    @unique @map("code_sha")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("mfa_recovery_codes")
 }
 
 model UserAuthProvider {

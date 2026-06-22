@@ -4,6 +4,14 @@ import { TokenEnum } from "../enums/tokenEnum.js";
 
 export interface CustomRequest extends Request {
   user?: UserJwtPayloadModel;
+  mfaToken?: MfaTokenPayloadModel;
+}
+
+export interface MfaTokenPayloadModel {
+  deviceUuid: string;
+  tokenType: TokenEnum;
+  userId: number;
+  iat: number;
 }
 
 export interface UserJwtPayloadModel {

@@ -80,6 +80,6 @@ const jsonFormat = combine(
 export const logger = winston.createLogger({
   level: process.env["LOG_LEVEL"] ?? "info",
   /* c8 ignore next */
-  format: isDeployedEnvironment ? jsonFormat : cliFormat,
+  format: isDeployedEnvironment() ? jsonFormat : cliFormat,
   transports: [new winston.transports.Console()],
 });

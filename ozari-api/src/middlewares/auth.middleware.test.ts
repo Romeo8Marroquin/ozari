@@ -162,7 +162,7 @@ describe("Auth Middleware", () => {
         jti: "test-jti",
       },
       process.env["JWT_SECRET"]!,
-      { expiresIn: "1h" },
+      { expiresIn: "1h", issuer: "ozari", audience: "platform-users" },
     );
 
     (mockReq.header as ReturnType<typeof vi.fn>).mockReturnValue(
@@ -189,7 +189,7 @@ describe("Auth Middleware", () => {
         jti: "test-jti",
       },
       process.env["JWT_SECRET"]!,
-      { expiresIn: "1h" },
+      { expiresIn: "1h", issuer: "ozari", audience: "platform-users" },
     );
 
     (mockReq.header as ReturnType<typeof vi.fn>).mockReturnValue(
@@ -223,7 +223,7 @@ describe("Auth Middleware", () => {
         jti: "test-jti",
       },
       process.env["JWT_SECRET"]!,
-      { expiresIn: "1h" },
+      { expiresIn: "1h", issuer: "ozari", audience: "platform-users" },
     );
 
     (mockReq.header as ReturnType<typeof vi.fn>).mockReturnValue(
@@ -260,7 +260,7 @@ describe("Auth Middleware", () => {
         jti: "test-jti",
       },
       process.env["JWT_SECRET"]!,
-      { expiresIn: "1h" },
+      { expiresIn: "1h", issuer: "ozari", audience: "platform-users" },
     );
 
     (mockReq.header as ReturnType<typeof vi.fn>).mockReturnValue(
@@ -296,7 +296,7 @@ describe("Auth Middleware", () => {
         jti: "test-jti",
       },
       process.env["JWT_SECRET"]!,
-      { expiresIn: "1h" },
+      { expiresIn: "1h", issuer: "ozari", audience: "platform-users" },
     );
 
     (mockReq.header as ReturnType<typeof vi.fn>).mockReturnValue(
@@ -332,7 +332,7 @@ describe("Auth Middleware", () => {
         jti: "test-jti",
       },
       process.env["JWT_SECRET"]!,
-      { expiresIn: "1h" },
+      { expiresIn: "1h", issuer: "ozari", audience: "platform-users" },
     );
 
     (mockReq.header as ReturnType<typeof vi.fn>).mockReturnValue(
@@ -370,7 +370,7 @@ describe("Auth Middleware", () => {
         jti: "test-jti",
       },
       process.env["JWT_SECRET"]!,
-      { expiresIn: "1h" },
+      { expiresIn: "1h", issuer: "ozari", audience: "platform-users" },
     );
 
     (mockReq.header as ReturnType<typeof vi.fn>).mockReturnValue(

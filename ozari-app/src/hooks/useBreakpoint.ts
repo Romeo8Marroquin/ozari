@@ -28,7 +28,6 @@ const useBreakpoint = () => {
       }
       setIsMobile(currentBreakpoint === 'base');
       setBreakpoint(currentBreakpoint);
-      console.log('Changing breakpoint, current:', currentBreakpoint);
     };
 
     determineBreakpoint();

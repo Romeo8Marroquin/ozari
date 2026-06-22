@@ -27,7 +27,7 @@ const auditFormat = winston.format.combine(
     fillExcept: ["message", "level", "timestamp", "label"],
   }),
   /* c8 ignore next 3 */
-  isDeployedEnvironment
+  isDeployedEnvironment()
     ? // Deployed environments: JSON format (structured, searchable in Cloud Logging)
       winston.format.json()
     : // Development: Human-readable format
@@ -52,7 +52,7 @@ export const auditLogger = winston.createLogger({
     // All audit logs to stdout; Cloud Run forwards this to Cloud Logging.
     new winston.transports.Console({
       /* c8 ignore next 4 */
-      format: isDeployedEnvironment
+      format: isDeployedEnvironment()
         ? winston.format.combine(
             winston.format.label({ label: "[AUDIT]" }),
             winston.format.json(),
