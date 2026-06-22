@@ -81,9 +81,9 @@ variable "concurrency" {
 }
 
 variable "timeout_seconds" {
-  description = "Cloud Run request timeout in seconds. Kept at 300 for adoption (see README cleanup notes)."
+  description = "Cloud Run request timeout in seconds. Set to 60 as a backstop above the app's own 30s request/response timeout, shrinking the window a slow request can hold an instance."
   type        = number
-  default     = 300
+  default     = 60
 }
 
 variable "cpu" {

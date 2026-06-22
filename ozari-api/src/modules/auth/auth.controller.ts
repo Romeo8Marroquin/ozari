@@ -40,6 +40,13 @@ import {
 } from "./auth.models.js";
 import { issueAuthenticatedSession } from "./auth.service.js";
 
+// Constant-time guard against account enumeration. On the "user not found" path we
+// still run one bcrypt comparison against this fixed hash so the response time matches
+// the "wrong password" path (which runs bcrypt). Computed once per process, reused.
+let timingEqualizerHash: Promise<string> | undefined;
+const getTimingEqualizerHash = (): Promise<string> =>
+  (timingEqualizerHash ??= hashPassword("account-enumeration-timing-guard"));
+
 export const getAllUsers = async (_: Request, res: Response): Promise<void> => {
   try {
     const prismaClient = await getPrismaClient();
@@ -169,6 +176,9 @@ export const signInUser = async (
       where: { emailSha, isActive: true },
     });
     if (!user) {
+      // Run a throwaway bcrypt compare so this path costs the same as the
+      // invalid-password path below, preventing account enumeration via timing.
+      await comparePassword(password, await getTimingEqualizerHash());
       logger.warn(i18next.t("user.signInUser.logs.userNotFound", { email }));
       recordFailedLogin(email);
       if (isDeployedEnvironment()) {
@@ -319,55 +329,39 @@ export const refreshToken = async (
       sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
       return;
     }
-    const foundSession = await prismaClient.jwtSession.findFirst({
+    // Each device has exactly one active refresh session. Look it up by DEVICE (not
+    // by jti) so we can distinguish the device's current token from a previously
+    // rotated one.
+    const currentRefresh = await prismaClient.jwtSession.findFirst({
       where: {
-        jti: payload.jti,
         deviceUuid: payload.deviceUuid,
-        tokenTypeId: TokenEnum.REFRESH_TOKEN,
         userId: payload.userId,
+        tokenTypeId: TokenEnum.REFRESH_TOKEN,
         isActive: true,
       },
     });
 
-    if (!foundSession) {
-      logger.error(i18next.t("user.refreshToken.logs.noRefreshToken"));
+    // No active session for this device (e.g. already signed out) -> nothing to do.
+    if (!currentRefresh) {
+      logger.warn(i18next.t("user.refreshToken.logs.noRefreshToken"));
       sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
       return;
     }
 
-    if (foundSession.expiresAt <= new Date()) {
-      logger.warn(
-        i18next.t("user.refreshToken.logs.sessionExpired", {
-          jti: foundSession.jti,
-        }),
-      );
-      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
-      return;
-    }
-
-    // Security: Detect refresh token reuse (potential token theft)
-    const tokenAlreadyRotated = await prismaClient.jwtSession.findFirst({
-      where: {
-        jti: payload.jti,
-        tokenTypeId: TokenEnum.REFRESH_TOKEN,
-        isActive: false,
-      },
-    });
-
-    if (tokenAlreadyRotated) {
+    // Reuse detection: the token is validly signed but is NOT the device's current
+    // refresh token -> a previously-rotated token is being replayed (likely theft).
+    // Hard-delete every session for the user (fail secure, leaves no tombstone
+    // garbage so we never depend on a cleanup job running under scale-to-zero).
+    if (currentRefresh.jti !== payload.jti) {
       logger.error(
         i18next.t("user.refreshToken.logs.tokenReuseDetected", {
           jti: payload.jti,
           userId: payload.userId,
         }),
       );
-
-      // Security incident: invalidate all user sessions
-      await prismaClient.jwtSession.updateMany({
+      await prismaClient.jwtSession.deleteMany({
         where: { userId: payload.userId },
-        data: { isActive: false },
       });
-
       if (isDeployedEnvironment()) {
         logSecurityAudit({
           action: AuditAction.UNAUTHORIZED_ACCESS_ATTEMPT,
@@ -375,12 +369,21 @@ export const refreshToken = async (
           ipAddress: req.ip,
           success: false,
           reason: "Refresh token reuse detected - all sessions invalidated",
-          metadata: {
-            deviceUuid: payload.deviceUuid,
-          },
+          metadata: { deviceUuid: payload.deviceUuid },
         });
       }
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
+      return;
+    }
 
+    // Defensive: jwt.verify already enforced the token's exp claim, but the DB row
+    // carries the authoritative session lifetime.
+    if (currentRefresh.expiresAt <= new Date()) {
+      logger.warn(
+        i18next.t("user.refreshToken.logs.sessionExpired", {
+          jti: currentRefresh.jti,
+        }),
+      );
       sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
       return;
     }
@@ -393,7 +396,7 @@ export const refreshToken = async (
 
     const accessToken = jwt.sign(
       {
-        deviceUuid: foundSession.deviceUuid,
+        deviceUuid: payload.deviceUuid,
         jti: accessJti,
         tokenType: TokenEnum.ACCESS_TOKEN,
         userId: payload.userId,
@@ -405,7 +408,7 @@ export const refreshToken = async (
     );
     const newValidRefreshToken = jwt.sign(
       {
-        deviceUuid: foundSession.deviceUuid,
+        deviceUuid: payload.deviceUuid,
         jti: refreshJti,
         tokenType: TokenEnum.REFRESH_TOKEN,
         userId: payload.userId,
@@ -416,30 +419,29 @@ export const refreshToken = async (
       appConfig.refreshToken as jwt.SignOptions,
     );
 
+    // Rotate atomically. Lock the device's active refresh row; if it changed out
+    // from under us (a concurrent refresh of the SAME token won the race), treat it
+    // as a harmless retry (401) rather than theft.
+    let rotatedConcurrently = false;
     await prismaClient.$transaction(async (transaction) => {
-      const lockedSession = await transaction.$queryRaw<
-        Array<{ id: number; is_active: boolean }>
-      >`
-        SELECT id, is_active
+      const lockedSession = await transaction.$queryRaw<Array<{ jti: string }>>`
+        SELECT jti
         FROM jwt_sessions
-        WHERE jti = ${payload.jti}
-          AND token_type_id = ${TokenEnum.REFRESH_TOKEN}
+        WHERE device_uuid = ${payload.deviceUuid}
           AND user_id = ${payload.userId}
+          AND token_type_id = ${TokenEnum.REFRESH_TOKEN}
+          AND is_active = true
         FOR UPDATE
       `;
 
-      // Verify the session is still active after acquiring lock
-      if (!lockedSession || lockedSession.length === 0) {
-        throw new Error("Session not found during transaction");
-      }
-
-      if (!lockedSession[0]?.is_active) {
-        throw new Error("Session already invalidated during transaction");
+      if (lockedSession[0]?.jti !== payload.jti) {
+        rotatedConcurrently = true;
+        return;
       }
 
       await transaction.jwtSession.deleteMany({
         where: {
-          deviceUuid: foundSession.deviceUuid,
+          deviceUuid: payload.deviceUuid,
           isActive: true,
           userId: payload.userId,
         },
@@ -447,7 +449,7 @@ export const refreshToken = async (
       await transaction.jwtSession.createMany({
         data: [
           {
-            deviceUuid: foundSession.deviceUuid,
+            deviceUuid: payload.deviceUuid,
             expiresAt: new Date(accessExp * 1000),
             issuedAt: new Date(now * 1000),
             jti: accessJti,
@@ -455,7 +457,7 @@ export const refreshToken = async (
             userId: payload.userId,
           },
           {
-            deviceUuid: foundSession.deviceUuid,
+            deviceUuid: payload.deviceUuid,
             expiresAt: new Date(refreshExp * 1000),
             issuedAt: new Date(now * 1000),
             jti: refreshJti,
@@ -465,6 +467,14 @@ export const refreshToken = async (
         ],
       });
     });
+
+    if (rotatedConcurrently) {
+      logger.warn(
+        `Concurrent refresh for user ${payload.userId} on device ${payload.deviceUuid}; treating as retry`,
+      );
+      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
+      return;
+    }
 
     // Rotate CSRF token on refresh
     setCsrfToken(res);
@@ -488,7 +498,7 @@ export const refreshToken = async (
         email: "", // Email not available in refresh token flow
         ipAddress: req.ip,
         userAgent: req.headers["user-agent"],
-        deviceUuid: foundSession.deviceUuid,
+        deviceUuid: payload.deviceUuid,
         success: true,
       });
     }

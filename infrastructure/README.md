@@ -194,8 +194,11 @@ These are intentionally left **unmanaged** in this first pass; review and clean 
 - **Default compute service account has `roles/editor`** — over-privileged; scope down.
 - **Cloud Build service agent has `roles/secretmanager.admin`** — scope down to
   `secretAccessor` on specific secrets.
-- **Cloud Run timeout is 300s** — kept for adoption; can be reduced later.
-- **Artifact Registry vulnerability scanning is disabled** — consider enabling.
+- **Cloud Run timeout** — reduced from 300s to **60s** (backstop above the app's own
+  30s request/response timeout). Done.
+- **Artifact Registry vulnerability scanning is disabled** — intentionally left off for
+  cost (~$0.26 per image scanned ≈ several $/month at this deploy cadence). Dependency
+  CVEs are tracked manually via `pnpm audit` instead. Revisit if budget allows.
 
 ## Production (future)
 
