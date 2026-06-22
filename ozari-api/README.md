@@ -303,9 +303,39 @@ curl http://localhost:8080/api/health/check
 | `pnpm run prisma:migrate:deploy` | Deploy migrations in staging/production CI/CD |
 | `pnpm run prisma:deploy` | Alias for `pnpm run prisma:migrate:deploy` |
 | `pnpm run prisma:studio` | Open Prisma Studio |
+| `pnpm run db:seed` | Seed reference data (idempotent; see below) |
+| `pnpm run cleanup:sessions` | Delete expired JWT sessions (see below) |
 | `pnpm run lint` | Run ESLint |
 | `pnpm run lint:fix` | Fix ESLint errors |
 | `pnpm run type-check` | Check TypeScript types |
+
+### Database seeding
+
+`pnpm run db:seed` (`prisma db seed` → `prisma/seed.ts`) loads the **reference data**
+the app depends on: `user_roles` (Client/Admin/Employee), `token_types`
+(Access/Refresh), currencies, geography (Guatemala → department → municipality →
+zones), product categories, statuses, etc. Without it, **register and login fail** on
+foreign-key constraints (`roleId` → `user_roles`, `tokenTypeId` → `token_types`).
+
+- The seed is **idempotent** — it upserts by primary key, so running it against an
+  already-seeded DB updates in place and never duplicates. It also resets the serial
+  sequences so a fresh DB won't collide on the next insert.
+- It is **not** part of `prisma migrate deploy` — deploying never runs it. Run it
+  **once per fresh environment** (e.g. a new prod DB). Staging is already seeded.
+- It contains reference data only — no users, secrets, or PII.
+
+### Session cleanup
+
+Token rotation **hard-deletes** old session rows, so active users never accumulate
+garbage. The only rows that linger are **expired** sessions from abandoned logins
+(someone signs in once and never returns). `pnpm run cleanup:sessions` reaps rows where
+`expiresAt <= now`.
+
+- This is a **standalone script**, not an HTTP route. With Cloud Run at
+  `min-instances=0` it does **not** run automatically (nothing triggers it on request).
+- For the current scale, run it manually/occasionally — the garbage is negligible.
+- When it matters, schedule it with **Cloud Scheduler → a Cloud Run Job** (a Job is
+  separate from the service and bills only for its runtime). Not wired up yet.
 
 ## Technologies
 

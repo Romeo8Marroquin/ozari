@@ -9,9 +9,9 @@
     "moduleResolution": "NodeNext",
     "resolveJsonModule": true,
 
-    /* Emit */
+    /* Emit (rootDir is set in tsconfig.build.json so this config can also
+       type-check/lint ops scripts like prisma/seed.ts that live outside src/) */
     "outDir": "./dist",
-    "rootDir": "./src",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
@@ -53,6 +53,6 @@
       "@types/*": ["./src/types/*"],
     },
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "prisma/seed.ts"],
   "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"],
 }
