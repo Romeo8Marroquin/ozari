@@ -187,8 +187,7 @@ code and redeploy, not via env vars.
 | `API_HOST` | Server host. Local defaults to `localhost`; Cloud Run/deployed defaults to `0.0.0.0` | No |
 | `PORT` | Server port. Local defaults to `3000`; Cloud Run injects `PORT` (`8080`) | No |
 | `APP_HOST` | Frontend URL for CORS + API-key browser-origin check (no trailing slash) | Yes |
-| `DATABASE_URL` | PostgreSQL connection string | Yes |
-| `DIRECT_DATABASE_URL` | Neon direct URL — CI/CD Prisma migrations only, never Cloud Run runtime | Build only |
+| `DATABASE_URL` | PostgreSQL connection string (Neon **pooled** URL at runtime) | Yes |
 | `JWT_SECRET` | JWT signing secret | Yes |
 | `JWT_REFRESH_SECRET` | Refresh token secret | Yes |
 | `ENCRYPTION_KEY` | AES-256 encryption key (hex) | Yes |
