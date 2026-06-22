@@ -38,9 +38,29 @@ coverage/
 DML.*
 
 # Terraform
+**/.terraform/
 *.tfstate
 *.tfstate.*
-*.tfvars
-.terraform/
-.terraform.lock.hcl
+*.tfplan
 tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.auto.tfvars
+secrets.auto.tfvars
+*.secret.tfvars
+# Real tfvars are ignored; commit only the *.example templates
+*.tfvars
+!*.tfvars.example
+# Keep .terraform.lock.hcl committed (do NOT ignore it)
+
+# Terraform-loaded secret material (never commit)
+infrastructure/secrets/*
+!infrastructure/secrets/.gitkeep
+
+# Service account / credential files
+*-credentials.json
+service-account*.json

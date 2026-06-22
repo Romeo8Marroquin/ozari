@@ -1,10 +1,17 @@
+# TODO(terraform-ownership): Once the infrastructure/ Terraform adoption is applied,
+# this pipeline should ideally do build + push + run-migrations + update-image ONLY,
+# and let Terraform (google_cloud_run_v2_service) own the structural Cloud Run
+# configuration (scaling, concurrency, timeout, env vars, secret bindings, SA, ingress).
+# The Terraform cloud-run resource already ignores changes to the container image tag
+# so this build's `gcloud run deploy --image` keeps working without fighting Terraform.
 substitutions:
   _REGION: northamerica-south1
-  _SERVICE_NAME: ozari-api-staging
+  # Staging Cloud Run service is named ozari-api (NOT ozari-api-staging). Do not rename.
+  _SERVICE_NAME: ozari-api
   _REPOSITORY: ozari-images
   _IMAGE_URL: northamerica-south1-docker.pkg.dev/$PROJECT_ID/ozari-images/ozari-api
   _RUN_SA: ozari-run-sa@$PROJECT_ID.iam.gserviceaccount.com
-  _APP_HOST: https://replace-with-cloudflare-url.example
+  _APP_HOST: https://ozari-c28.pages.dev
   _NODE_ENV: staging
   _APP_ENV: staging
   _API_BASE_PATH: /api
