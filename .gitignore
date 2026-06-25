@@ -22,10 +22,12 @@ pnpm-debug.log*
 Thumbs.db
 
 # Config files on ide and AI
+.mcp.json
 .vscode/
 .idea/
 .serverless/
 .claude/
+.playwright-mcp/
 **/CLAUDE.md
 
 # Archivos de TypeScript

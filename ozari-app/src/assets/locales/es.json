@@ -64,10 +64,24 @@
           "invalidSymbolPassword": "Un símbolo no válido",
           "minLengthPassword": "La contraseña es muy corta",
           "maxLengthPassword": "La contraseña es muy larga",
+          "fullNameLabel": "Nombre completo",
+          "fullNamePlaceholder": "Ingrese su nombre completo",
+          "requiredFullName": "El nombre es obligatorio",
+          "invalidFullName": "El nombre no es válido",
+          "confirmPasswordLabel": "Confirmar contraseña",
+          "confirmPasswordPlaceholder": "Confirme su contraseña",
+          "requiredConfirmPassword": "Debe confirmar la contraseña",
+          "passwordsDoNotMatch": "Las contraseñas no coinciden",
+          "terms": "Acepto los términos y condiciones del servicio.",
+          "requiredTerms": "Debe aceptar los términos y condiciones",
           "submitButton": "Registrarse",
           "haveAccount": "Si ya posees una cuenta",
           "loginLink": "inicia sesión",
           "here": "aquí"
+        },
+        "api": {
+          "registerSuccess": "Cuenta creada. Queda pendiente de habilitación por un administrador.",
+          "registerError": "No se pudo crear la cuenta. Verifica tus datos e inténtalo de nuevo."
         }
       }
     }

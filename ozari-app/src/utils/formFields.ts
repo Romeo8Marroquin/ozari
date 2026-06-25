@@ -1,5 +1,6 @@
 import {
   EMAIL_MAX_LENGTH,
+  FULLNAME_REGEX,
   LOWER_REGEX,
   NUMBER_REGEX,
   PASSWORD_MAX_LENGTH,
@@ -41,3 +42,9 @@ export const passwordField = z
   )
   // Final catch-all that exactly mirrors the backend `passwordRegex`.
   .refine((val) => PASSWORD_REGEX.test(val), t('modules.sesion.login.form.invalidPassword'));
+
+export const fullNameField = z
+  .string()
+  .trim()
+  .nonempty(t('modules.sesion.register.form.requiredFullName'))
+  .refine((val) => FULLNAME_REGEX.test(val), t('modules.sesion.register.form.invalidFullName'));
