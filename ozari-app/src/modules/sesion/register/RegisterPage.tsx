@@ -1,8 +1,7 @@
 import logo from '@assets/svgs/logo.svg';
-import React, { useMemo, useRef } from 'react';
-import { gsap } from 'gsap';
+import React, { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { FaUserAlt } from 'react-icons/fa';
-import { useGSAP } from '@gsap/react';
+import { HiOutlineMail } from 'react-icons/hi';
 import CustomInputForm from '@components/CustomInputForm';
 import { FormProvider, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -15,70 +14,39 @@ import {
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { useTranslation } from 'react-i18next';
 import CustomButton from '@components/CustomButton';
-import useLogin from '../hooks/useLogin';
-import { Link, useNavigate } from '@tanstack/react-router';
-import useRotationalAssetAnimation from '@hooks/useRotationalAssetAnimation';
+import useRegister from '../hooks/useRegister';
+import useAuthCard from '../hooks/useAuthCard';
+
+type RegisterStatus = { type: 'success' | 'error'; message: string } | null;
 
 const RegisterPage: React.FC = () => {
   const { t } = useTranslation();
-  const containerRef = useRef<HTMLDivElement>(null);
-  const rotationalAssetRef = useRotationalAssetAnimation('register');
-  const navigate = useNavigate();
+  const { containerRef, leaveTo } = useAuthCard('register');
   const methods = useForm<RegisterType>({
     resolver: zodResolver(registerSchema),
     defaultValues: registerSchemaDefaultValues,
     mode: 'onTouched',
   });
-  const { trigger, reset, getValues } = methods;
-  const { login, isPending } = useLogin();
+  const { reset, handleSubmit, trigger, formState, register } = methods;
+  const { register: registerUser, isPending } = useRegister();
+  const [status, setStatus] = useState<RegisterStatus>(null);
+  const redirectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  useGSAP(
-    () => {
-      const tl = gsap.timeline({ defaults: { ease: 'power1.out' } });
-      tl.from('.rotational-asset', {
-        rotation: 0,
-        x: 0,
-        y: 0,
-        duration: 0.7,
-      });
+  useEffect(() => () => clearTimeout(redirectTimer.current), []);
 
-      tl.from(
-        '.form-element',
-        {
-          x: -15,
-          opacity: 0,
-          stagger: 0.15,
-          duration: 0.5,
-        },
-        '>-0.5',
-      );
-
-      tl.from(
-        '.article-element',
-        {
-          x: 15,
-          opacity: 0,
-          stagger: 0.15,
-          duration: 0.5,
-        },
-        '<+0.1',
-      );
-    },
-    { scope: containerRef },
-  );
-
-  const onSubmit = async () => {
+  const onSubmit = (data: RegisterType) => {
     if (isPending) return;
-    const isValid = await trigger();
-    if (!isValid) return;
-    try {
-      login(getValues());
-      reset();
-    } catch (err) {
-      if (import.meta.env.DEV) {
-        console.error('Login failed:', err);
-      }
-    }
+    setStatus(null);
+    registerUser(data, {
+      onSuccess: () => {
+        reset();
+        setStatus({ type: 'success', message: t('modules.sesion.register.api.registerSuccess') });
+        redirectTimer.current = setTimeout(() => leaveTo('/sesion/inicio'), 1700);
+      },
+      onError: () => {
+        setStatus({ type: 'error', message: t('modules.sesion.register.api.registerError') });
+      },
+    });
   };
 
   const handleAutocomplete = async (event: React.FormEvent<HTMLInputElement>) => {
@@ -88,49 +56,18 @@ const RegisterPage: React.FC = () => {
       nativeEvent.data === undefined &&
       nativeEvent.dataTransfer === undefined &&
       nativeEvent.isComposing === undefined &&
-      !methods.formState.isSubmitting
+      !formState.isSubmitting
     ) {
-      const isValid = await methods.trigger();
+      const isValid = await trigger();
       if (isValid) {
-        methods.handleSubmit(onSubmit)();
+        handleSubmit(onSubmit)();
       }
     }
   };
 
   const handleLogin = (e: MouseEvent) => {
     e.preventDefault();
-    const tl = gsap.timeline({ defaults: { ease: 'power3.in' } });
-    tl.to('.article-element', {
-      x: 15,
-      opacity: 0,
-      stagger: 0.15,
-      duration: 0.3,
-    });
-    tl.to(
-      '.form-element',
-      {
-        x: -15,
-        opacity: 0,
-        stagger: 0.15,
-        duration: 0.3,
-      },
-      '<+0.1',
-    );
-    tl.to(
-      '.rotational-asset',
-      {
-        rotation: 0,
-        x: 0,
-        y: 0,
-        duration: 0.75,
-        onComplete: () => {
-          navigate({
-            to: '/sesion/inicio',
-          });
-        },
-      },
-      '<+0.5',
-    );
+    leaveTo('/sesion/inicio');
   };
 
   const requiredPatternsContextValue = useMemo(
@@ -140,32 +77,45 @@ const RegisterPage: React.FC = () => {
 
   return (
     <div ref={containerRef} className="w-full flex justify-center items-center">
-      <section className="principal-card relative p-6 sm:p-12 bg-white border-none shadow-xl/15 rounded-xl gap-20 md:gap-30 flex flex-col md:flex-row items-center justify-center overflow-hidden">
-        <div
-          ref={rotationalAssetRef}
-          className="rotational-asset absolute w-[150%] h-[110%] md:w-[110%] md:h-[150%] rotate-15 origin-bottom md:origin-left -translate-y-7/12 md:translate-y-0 md:translate-x-1/2 blur-lg bg-gradient-to-l md:bg-gradient-to-b from-cream to-blossom"
-        ></div>
-        <div className="flex flex-col gap-6 justify-center items-center order-3 md:order-2">
-          <h2 className="form-element text-2xl font-bold text-black select-none">
+      <section className="principal-card relative w-[min(960px,94vw)] max-w-full md:min-h-[560px] p-8 sm:p-16 bg-white border-none shadow-2xl rounded-2xl gap-16 md:gap-28 flex flex-col md:flex-row items-center justify-center overflow-hidden">
+        <div className="rotational-asset absolute inset-0 m-auto blur-lg bg-gradient-to-l md:bg-gradient-to-b from-cream to-blossom"></div>
+        <div className="order-2 md:order-1 flex flex-col gap-7 justify-center items-center z-10 w-full max-w-md">
+          <h2 className="form-element text-2xl sm:text-3xl font-bold text-black select-none">
             {t('modules.sesion.register.title')}
           </h2>
           <RequiredPatternsContext.Provider value={requiredPatternsContextValue}>
             <FormProvider {...methods}>
               <form
-                onSubmit={methods.handleSubmit(onSubmit)}
-                className="w-full flex flex-col items-center gap-6"
+                onSubmit={(event) => {
+                  void handleSubmit(onSubmit)(event);
+                }}
+                className="w-full flex flex-col items-center gap-4 md:gap-5"
               >
+                <div className="form-element w-full">
+                  <CustomInputForm<RegisterType>
+                    id="fullName-input"
+                    data-testid="fullName-input"
+                    autoComplete="name"
+                    className="text-lg"
+                    label={t('modules.sesion.register.form.fullNameLabel')}
+                    placeholder={t('modules.sesion.register.form.fullNamePlaceholder')}
+                    aria-label={t('modules.sesion.register.form.fullNameLabel')}
+                    name="fullName"
+                    autoFocus
+                    icon={<FaUserAlt />}
+                  />
+                </div>
                 <div className="form-element w-full">
                   <CustomInputForm<RegisterType>
                     id="email-input"
                     data-testid="email-input"
                     autoComplete="email"
-                    label={t('modules.sesion.login.form.emailLabel')}
-                    placeholder={t('modules.sesion.login.form.emailPlaceholder')}
-                    aria-label={t('modules.sesion.login.form.emailLabel')}
+                    className="text-lg"
+                    label={t('modules.sesion.register.form.emailLabel')}
+                    placeholder={t('modules.sesion.register.form.emailPlaceholder')}
+                    aria-label={t('modules.sesion.register.form.emailLabel')}
                     name="email"
-                    autoFocus
-                    icon={<FaUserAlt />}
+                    icon={<HiOutlineMail />}
                     onInput={handleAutocomplete}
                   />
                 </div>
@@ -173,49 +123,85 @@ const RegisterPage: React.FC = () => {
                   <CustomInputForm<RegisterType>
                     id="password"
                     data-testid="password-input"
-                    autoComplete="current-password"
-                    aria-label={t('modules.sesion.login.form.passwordLabel')}
-                    placeholder={t('modules.sesion.login.form.passwordPlaceholder')}
-                    label={t('modules.sesion.login.form.passwordLabel')}
+                    autoComplete="new-password"
+                    className="text-lg"
+                    aria-label={t('modules.sesion.register.form.passwordLabel')}
+                    placeholder={t('modules.sesion.register.form.passwordPlaceholder')}
+                    label={t('modules.sesion.register.form.passwordLabel')}
                     name="password"
                     type="password"
-                    onInput={handleAutocomplete}
                   />
                 </div>
+                <div className="form-element w-full">
+                  <CustomInputForm<RegisterType>
+                    id="confirmPassword"
+                    data-testid="confirmPassword-input"
+                    autoComplete="new-password"
+                    className="text-lg"
+                    aria-label={t('modules.sesion.register.form.confirmPasswordLabel')}
+                    placeholder={t('modules.sesion.register.form.confirmPasswordPlaceholder')}
+                    label={t('modules.sesion.register.form.confirmPasswordLabel')}
+                    name="confirmPassword"
+                    type="password"
+                  />
+                </div>
+                <label className="form-element w-full flex items-start gap-2 text-xs text-gray-600 select-none">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4 accent-magenta"
+                    {...register('termsAccepted')}
+                  />
+                  <span>{t('modules.sesion.register.form.terms')}</span>
+                </label>
                 <div className="form-element flex flex-col items-center">
                   <CustomButton
                     text={t('modules.sesion.register.form.submitButton')}
-                    disabled={!methods.formState.isValid}
+                    disabled={!formState.isValid}
                     loading={isPending}
                   />
                 </div>
+
+                {status && (
+                  <p
+                    role="alert"
+                    className={`form-element text-xs text-center ${
+                      status.type === 'success' ? 'text-green-600' : 'text-red-600'
+                    }`}
+                  >
+                    {status.message}
+                  </p>
+                )}
 
                 <p className="form-element text-xs text-gray-500 flex flex-col items-center">
                   <span>{t('modules.sesion.register.form.haveAccount')}</span>
                   <span>
                     {t('modules.sesion.register.form.loginLink')}{' '}
-                    <Link onClick={handleLogin} className="text-magenta hover:underline">
+                    <a
+                      href="/sesion/inicio"
+                      onClick={handleLogin}
+                      className="text-magenta hover:underline"
+                    >
                       {t('modules.sesion.register.form.here')}
-                    </Link>
+                    </a>
                   </span>
                 </p>
               </form>
             </FormProvider>
           </RequiredPatternsContext.Provider>
         </div>
-        <div className="flex order-2 md:order-3">
-          <div className="flex flex-col items-center justify-center gap-6 z-10">
-            <h2 className="article-element text-2xl font-bold text-black select-none">
+        <div className="order-1 md:order-2 flex z-10">
+          <div className="flex flex-col items-center justify-center gap-5 md:gap-7">
+            <h2 className="article-element text-2xl sm:text-3xl font-bold text-black select-none">
               {t('modules.sesion.register.welcomeMessage')}
             </h2>
-            <p className="article-element text-lg text-black select-none text-center max-w-55">
+            <p className="article-element text-xl text-black select-none text-center max-w-64">
               {t('modules.sesion.register.subtitle')}
             </p>
-            <div className="article-element w-24 h-32 overflow-hidden">
+            <div className="article-element w-28 h-36 overflow-hidden">
               <img
                 src={logo}
                 alt={t('components.pageLoader.logo')}
-                className="w-full h-full object-cover object-center"
+                className="w-full h-full object-cover object-center select-none"
                 aria-label={t('components.pageLoader.logo')}
               />
             </div>

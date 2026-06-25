@@ -6,6 +6,12 @@ export const SYMBOLS = '!@#$%^&*_-+=?,:;';
 export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_MAX_LENGTH = 128;
 export const EMAIL_MAX_LENGTH = 254; // RFC 5321 maximum total length
+export const FULLNAME_MIN_LENGTH = 5;
+export const FULLNAME_MAX_LENGTH = 255;
+
+// Mirrors the backend `fullNameRegex` (ozari-api/src/helpers/regex.ts): letters
+// incl. accents, digits, spaces, apostrophe and hyphen, 5–255 chars total.
+export const FULLNAME_REGEX = /^(?=.{5,255}$)[A-Za-zÀ-ÖØ-öø-ÿ0-9\s'-]+$/;
 
 export const UPPER_REGEX = /[A-Z]/;
 export const LOWER_REGEX = /[a-z]/;

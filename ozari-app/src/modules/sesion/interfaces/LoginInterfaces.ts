@@ -6,3 +6,10 @@ import type { OzariSuccessResponse } from '../../../types/api.types';
  * Refresh token is returned in HttpOnly cookie
  */
 export type LoginResponseInterface = OzariSuccessResponse<undefined>;
+
+/**
+ * Registration response from backend (POST /auth/user). The new account is
+ * created as a normal client and is pending admin enablement; no session is
+ * issued by this endpoint.
+ */
+export type RegisterResponseInterface = OzariSuccessResponse<{ id: string } | undefined>;

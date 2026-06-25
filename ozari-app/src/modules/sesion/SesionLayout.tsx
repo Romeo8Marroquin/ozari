@@ -28,7 +28,11 @@ const SesionLayout: React.FC = () => {
   return (
     <section
       ref={container}
-      className="relative px-6 py-12 sm:px-0 w-full min-h-screen overflow-auto flex items-center bg-customWhite"
+      style={{
+        background:
+          'radial-gradient(120% 120% at 50% 0%, #faf7fa 0%, #efeaf0 58%, #e7e0e8 100%)',
+      }}
+      className="relative px-6 py-6 sm:px-0 w-full min-h-screen overflow-auto flex items-center"
     >
       <div className="transition-container flex items-center w-full h-full">
         <Outlet />
