@@ -100,6 +100,8 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
   const bodyRef = useRef<HTMLDivElement>(null);
   const messageRef = useRef<HTMLParagraphElement>(null);
   const timerRef = useRef<HTMLDivElement>(null);
+  const focusSvgRef = useRef<SVGSVGElement>(null);
+  const focusPathRef = useRef<SVGPathElement>(null);
 
   const dimsRef = useRef({ W: 0, Wt: 0, Ht: 0, bodyH: 0 });
   const renderRef = useRef<(p: number) => void>(() => {});
@@ -141,16 +143,19 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
       const body = bodyRef.current;
       if (!surface || !tab || !body) return;
 
-      // Measure the toast at its natural full size, then lock the width so the body
-      // can grow/shrink in height without the shape reflowing horizontally.
+      // Measure the toast at its natural full size. Crucially we LOCK the surface width
+      // FIRST — rounded up so a sub-pixel can't shave the text into an extra line — and
+      // only THEN read the body height at that locked width. That way the birth animates
+      // straight to the real final height (single- OR multi-line) with no jump when it
+      // settles; measuring before locking targeted the wrong (pre-wrap) height.
       gsap.set(body, { height: 'auto', opacity: 1 });
       gsap.set(surface, { width: 'auto' });
-      const W = surface.offsetWidth;
+      const W = Math.ceil(surface.getBoundingClientRect().width);
       const Wt = tab.offsetWidth;
       const Ht = tab.offsetHeight;
+      gsap.set(surface, { width: W });
       let bodyH = body.offsetHeight;
       dimsRef.current = { W, Wt, Ht, bodyH };
-      gsap.set(surface, { width: W });
 
       // Render the shape + body at a given reveal progress `p` (0 = pill only). Both
       // the body width and height grow from the pill, so it unfolds from the corner.
@@ -158,8 +163,21 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
         const clamped = Math.max(0, Math.min(1, p));
         const visibleBodyH = bodyH * clamped;
         const bodyW = Wt + (W - Wt) * clamped;
+        const totalH = Ht + visibleBodyH;
+        const clip = buildClipPath(W, Ht, Wt, bodyW, totalH, align);
         body.style.height = `${visibleBodyH}px`;
-        surface.style.clipPath = `path("${buildClipPath(W, Ht, Wt, bodyW, Ht + visibleBodyH, align)}")`;
+        surface.style.clipPath = `path("${clip}")`;
+        // Keep the focus ring on the SAME shape every frame, sized to the surface's own
+        // pixel box (not the root height) so a focused toast's border tracks the
+        // birth/collapse exactly and never decouples — even when the slot-collapse later
+        // animates the root height to 0. It then scales + fades with the root, fully synced.
+        if (focusSvgRef.current && focusPathRef.current) {
+          const svg = focusSvgRef.current;
+          svg.style.width = `${W}px`;
+          svg.style.height = `${totalH}px`;
+          svg.setAttribute('viewBox', `0 0 ${W} ${totalH}`);
+          focusPathRef.current.setAttribute('d', clip);
+        }
         if (messageRef.current) {
           // Fade the text in over the back half of the unfold (the shape leads, text follows).
           messageRef.current.style.opacity = `${Math.max(0, (clamped - 0.5) / 0.5)}`;
@@ -178,7 +196,18 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
         body.style.height = 'auto';
         bodyH = body.offsetHeight;
         dimsRef.current.bodyH = bodyH;
-        surface.style.clipPath = `path("${buildClipPath(W, Ht, Wt, W, Ht + bodyH, align)}")`;
+        const totalH = Ht + bodyH;
+        const finalClip = buildClipPath(W, Ht, Wt, W, totalH, align);
+        surface.style.clipPath = `path("${finalClip}")`;
+        // Keep the focus ring (an SVG stroke of the exact same outline) in sync, so the
+        // whole component shows ONE continuous border when focused — never two boxes.
+        if (focusSvgRef.current && focusPathRef.current) {
+          const svg = focusSvgRef.current;
+          svg.style.width = `${W}px`;
+          svg.style.height = `${totalH}px`;
+          svg.setAttribute('viewBox', `0 0 ${W} ${totalH}`);
+          focusPathRef.current.setAttribute('d', finalClip);
+        }
       };
       // Re-settle ONLY if fonts arrive after the birth (a genuine late-font reflow).
       // `document.fonts.ready` resolves immediately when fonts are already cached, so the
@@ -254,8 +283,11 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
     }
   };
 
-  const glassBg = `color-mix(in srgb, ${color} 10%, rgba(255, 255, 255, 0.74))`;
-  const circleBg = `color-mix(in srgb, ${color} 18%, transparent)`;
+  // Colored glass: a tint of the principal color over a light, translucent base — so the
+  // blurred backdrop shows through (real glass) instead of a washed-white panel. Kept
+  // light enough that dark body text stays legible.
+  const glassBg = `color-mix(in srgb, ${color} 22%, rgba(255, 255, 255, 0.55))`;
+  const circleBg = `color-mix(in srgb, ${color} 22%, transparent)`;
 
   // Width policy: a fixed `width` forces multi-line wrapping; otherwise the toast is
   // fit-content up to `maxWidth` (then it wraps). Both are configurable per call.
@@ -279,40 +311,63 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
       onMouseLeave={resumeTimer}
       onFocus={pauseTimer}
       onBlur={resumeTimer}
-      className="mb-3 w-fit cursor-pointer outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-midnight"
-      style={{ filter: 'drop-shadow(0 14px 30px rgba(0,0,0,0.2))', ...sizeStyle }}
+      // The root is pointer-events-none so the empty corner left of the pill (inside the
+      // bounding box but OUTSIDE the clip-path) doesn't catch hover/click — only the
+      // clipped surface does (see below). The handlers still fire here via event bubbling
+      // from the surface, and keep the a11y role + keyboard interaction on one element.
+      className="group pointer-events-none relative mb-3 w-fit outline-none"
+      style={sizeStyle}
     >
       <div
         ref={surfaceRef}
-        className={`flex flex-col backdrop-blur-md ${align === 'right' ? 'items-end' : 'items-start'}`}
-        style={{ background: glassBg }}
+        // `pointer-events-auto` + `clip-path` make ONLY the visible folder-tab shape the
+        // hit target: hover/click on the transparent corner falls through to the page
+        // behind, and the timer only pauses when the pointer is really over the toast.
+        className={`pointer-events-auto flex cursor-pointer flex-col backdrop-blur-md ${align === 'right' ? 'items-end' : 'items-start'}`}
+        // The shadow lives on THIS element (same one as the backdrop blur), not an
+        // ancestor — a filtered ancestor would flatten the backdrop and disable the glass.
+        style={{ background: glassBg, filter: 'drop-shadow(0 14px 30px rgba(0,0,0,0.18))' }}
       >
-        <div ref={tabRef} className="flex w-fit items-center gap-2 px-3.5 py-2">
+        <div ref={tabRef} className="flex w-fit items-center gap-2 px-4 py-2.5">
           <span
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
+            className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full"
             style={{ background: circleBg }}
           >
-            <Icon size={13} color={color} aria-hidden />
+            <Icon size={14} color={color} aria-hidden />
           </span>
-          <span className="whitespace-nowrap text-sm font-semibold leading-none" style={{ color }}>
+          <span className="whitespace-nowrap text-[15px] font-semibold leading-none" style={{ color }}>
             {title}
           </span>
         </div>
 
-        <div ref={bodyRef} className="relative w-full overflow-hidden px-4 py-3.5">
-          <p ref={messageRef} className="text-sm leading-relaxed text-neutral-600">
+        <div ref={bodyRef} className="relative w-full overflow-hidden px-5 py-4">
+          <p ref={messageRef} className="text-[15px] leading-relaxed text-neutral-600">
             {item.message}
           </p>
           {item.duration > 0 && (
             <div
               ref={timerRef}
               aria-hidden
-              className="absolute bottom-0 left-0 h-1 w-full origin-left scale-x-0 opacity-70"
+              className="absolute inset-x-0 bottom-0 h-1 origin-left scale-x-0 rounded-full opacity-70"
               style={{ background: color }}
             />
           )}
         </div>
       </div>
+
+      {/* Focus ring: an SVG stroke of the EXACT clip-path outline, so a keyboard-focused
+          toast shows one continuous border of its principal color around the whole shape
+          (folder tab included), not a rectangle and not two boxes. Sibling of the surface
+          so it isn't cut by the surface's clip-path; overflow-visible so the outer half of
+          the stroke shows. Updated in `settle()`; revealed only on `:focus-visible`. */}
+      <svg
+        ref={focusSvgRef}
+        aria-hidden
+        preserveAspectRatio="none"
+        className="pointer-events-none absolute left-0 top-0 overflow-visible opacity-0 transition-opacity duration-150 group-focus-visible:opacity-100"
+      >
+        <path ref={focusPathRef} fill="none" stroke={color} strokeWidth={2} />
+      </svg>
     </div>
   );
 };

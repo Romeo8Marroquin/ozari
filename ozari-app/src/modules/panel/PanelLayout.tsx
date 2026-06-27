@@ -4,21 +4,6 @@ import gsap from 'gsap';
 import { useRef } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
-import { notify } from '@components/notifications/notify';
-import type { NotificationVariant } from '@components/notifications/notificationConfig';
-
-// --- DEMO: throwaway control to exercise the notification layer. Safe to delete. ---
-const DEMO_NOTIFICATIONS: { variant: NotificationVariant; title: string; message: string }[] = [
-  { variant: 'success', title: 'Guardado', message: 'Los cambios se guardaron correctamente.' },
-  { variant: 'error', title: 'Algo salió mal', message: 'No pudimos completar la acción. Inténtalo de nuevo.' },
-  { variant: 'warning', title: 'Atención', message: 'Tu sesión está por expirar en unos minutos.' },
-  { variant: 'info', title: 'Novedad', message: 'Hay una nueva función disponible en el panel.' },
-];
-
-const pushRandomNotification = (): void => {
-  const pick = DEMO_NOTIFICATIONS[Math.floor(Math.random() * DEMO_NOTIFICATIONS.length)];
-  notify.push({ ...pick, duration: 4000 + Math.floor(Math.random() * 3000) });
-};
 
 const PanelLayout: React.FC = () => {
   const container = useRef<HTMLDivElement>(null);
@@ -82,14 +67,6 @@ const PanelLayout: React.FC = () => {
       <div className="flex flex-col flex-1 overflow-y-hidden">
         <Header />
         <main className="panel-main flex flex-col h-full p-6 overflow-y-auto bg-blue-500">
-          {/* DEMO: throwaway button to test the notification layer. Safe to delete. */}
-          <button
-            type="button"
-            onClick={pushRandomNotification}
-            className="mb-6 w-fit cursor-pointer rounded-md bg-white px-4 py-2 text-sm font-semibold text-midnight shadow-md transition-all hover:shadow-lg active:scale-95"
-          >
-            Lanzar notificación aleatoria
-          </button>
           <Outlet />
         </main>
       </div>

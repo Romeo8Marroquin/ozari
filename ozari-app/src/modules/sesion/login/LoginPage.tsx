@@ -1,5 +1,5 @@
 import logo from '@assets/svgs/logo.svg';
-import React, { useMemo, useState, type MouseEvent } from 'react';
+import React, { useMemo, type MouseEvent } from 'react';
 import { FaUserAlt } from 'react-icons/fa';
 import CustomInputForm from '@components/CustomInputForm';
 import { FormProvider, useForm } from 'react-hook-form';
@@ -12,12 +12,11 @@ import {
 } from './SchemaLogin';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { useTranslation } from 'react-i18next';
-import CustomButton from '@components/CustomButton';
-import AuthStatusMessage, { type AuthStatus } from '@components/AuthStatusMessage';
+import Button from '@components/Button';
+import { notify } from '@components/notifications/notify';
 import useLogin from '../hooks/useLogin';
 import { useSearch } from '@tanstack/react-router';
 import useAuthCard from '../hooks/useAuthCard';
-import { getAuthErrorMessage } from '../getAuthErrorMessage';
 
 const LoginPage: React.FC = () => {
   const { t } = useTranslation();
@@ -30,17 +29,15 @@ const LoginPage: React.FC = () => {
   });
   const { reset, handleSubmit, trigger, formState } = methods;
   const { login, isPending } = useLogin();
-  const [status, setStatus] = useState<AuthStatus>(null);
 
   const onSubmit = (data: LoginType) => {
     if (isPending) return;
-    setStatus(null);
     login(data, {
       onSuccess: (response) => {
         const payload = response.data?.data;
         if (payload && 'mfaRequired' in payload) {
           // 2FA is enabled on this account; the second step isn't wired up yet.
-          setStatus({ type: 'error', message: t('modules.sesion.login.api.mfaNotSupported') });
+          notify.error(t('modules.sesion.login.api.mfaNotSupported'));
           return;
         }
         // Only proceed once a session actually exists (access token in the header).
@@ -49,21 +46,10 @@ const LoginPage: React.FC = () => {
           redirectAfterSuccess(search.redirect ?? '/panel/productos');
           return;
         }
-        setStatus({ type: 'error', message: t('modules.sesion.login.api.loginError') });
+        notify.error(t('modules.sesion.login.api.loginError'));
       },
-      onError: (error) => {
-        setStatus({
-          type: 'error',
-          message: getAuthErrorMessage(error, {
-            fallback: 'modules.sesion.login.api.loginError',
-            networkError: 'modules.sesion.login.api.networkError',
-            byStatus: {
-              401: 'modules.sesion.login.api.invalidCredentials',
-              429: 'modules.sesion.login.api.tooManyAttempts',
-            },
-          }),
-        });
-      },
+      // Backend/network errors (bad credentials, rate limit, 5xx, offline) are surfaced
+      // as a friendly toast by the axios interceptor — nothing to handle here.
     });
   };
 
@@ -155,28 +141,27 @@ const LoginPage: React.FC = () => {
                     onInput={handleAutocomplete}
                   />
                 </div>
-                <div className="form-element flex flex-col items-center">
-                  <CustomButton
-                    text={t('modules.sesion.login.form.submitButton')}
+                <div className="form-element w-full flex flex-col items-center">
+                  <Button
+                    type="submit"
+                    fullWidth
                     disabled={!formState.isValid}
                     loading={isPending}
-                  />
+                  >
+                    {t('modules.sesion.login.form.submitButton')}
+                  </Button>
                 </div>
-
-                <AuthStatusMessage status={status} />
 
                 <p className="form-element text-xs text-gray-500 flex flex-col items-center">
                   <span>{t('modules.sesion.login.form.noAccount')}</span>
-                  <span>
+                  <button
+                    type="button"
+                    onClick={handleRegister}
+                    className="mt-0.5 cursor-pointer rounded px-1 py-0.5 font-medium text-magenta outline-none transition-colors hover:underline focus-visible:underline focus-visible:ring-2 focus-visible:ring-magenta focus-visible:ring-offset-2"
+                  >
                     {t('modules.sesion.login.form.signUpLink')}{' '}
-                    <a
-                      href="/sesion/registro"
-                      onClick={handleRegister}
-                      className="text-magenta hover:underline"
-                    >
-                      {t('modules.sesion.login.form.here')}
-                    </a>
-                  </span>
+                    {t('modules.sesion.login.form.here')}
+                  </button>
                 </p>
               </form>
             </FormProvider>

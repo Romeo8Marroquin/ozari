@@ -1,5 +1,5 @@
 import logo from '@assets/svgs/logo.svg';
-import React, { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import React, { useEffect, useMemo, useRef, type MouseEvent } from 'react';
 import { FaUserAlt } from 'react-icons/fa';
 import { HiOutlineMail } from 'react-icons/hi';
 import CustomInputForm from '@components/CustomInputForm';
@@ -13,11 +13,10 @@ import {
 } from './SchemaRegister';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { useTranslation } from 'react-i18next';
-import CustomButton from '@components/CustomButton';
-import AuthStatusMessage, { type AuthStatus } from '@components/AuthStatusMessage';
+import Button from '@components/Button';
+import Checkbox from '@components/Checkbox';
 import useRegister from '../hooks/useRegister';
 import useAuthCard from '../hooks/useAuthCard';
-import { getAuthErrorMessage } from '../getAuthErrorMessage';
 import { notify } from '@components/notifications/notify';
 
 const RegisterPage: React.FC = () => {
@@ -30,36 +29,24 @@ const RegisterPage: React.FC = () => {
   });
   const { reset, handleSubmit, trigger, formState, register } = methods;
   const { register: registerUser, isPending } = useRegister();
-  const [status, setStatus] = useState<AuthStatus>(null);
   const redirectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => () => clearTimeout(redirectTimer.current), []);
 
   const onSubmit = (data: RegisterType) => {
     if (isPending) return;
-    setStatus(null);
     registerUser(data, {
       onSuccess: () => {
         reset();
-        setStatus(null);
+        // Success is custom: confirm with a toast (it persists across the route change,
+        // since the host is mounted at the router root) and animate back to login.
         notify.success(t('modules.sesion.register.api.registerSuccessToast'), {
           title: t('modules.sesion.register.api.registerSuccessTitle'),
         });
         redirectTimer.current = setTimeout(() => leaveTo('/sesion/inicio'), 1700);
       },
-      onError: (error) => {
-        setStatus({
-          type: 'error',
-          message: getAuthErrorMessage(error, {
-            fallback: 'modules.sesion.register.api.registerError',
-            networkError: 'modules.sesion.register.api.networkError',
-            byStatus: {
-              409: 'modules.sesion.register.api.emailAlreadyExists',
-              429: 'modules.sesion.register.api.tooManyAttempts',
-            },
-          }),
-        });
-      },
+      // Backend/network errors (email taken, rate limit, 5xx, offline) are surfaced as a
+      // friendly toast by the axios interceptor — nothing to handle here.
     });
   };
 
@@ -159,36 +146,33 @@ const RegisterPage: React.FC = () => {
                     type="password"
                   />
                 </div>
-                <label className="form-element w-full flex items-start gap-2 text-xs text-gray-600 select-none">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 size-4 accent-magenta"
+                <div className="form-element w-full">
+                  <Checkbox
                     {...register('termsAccepted')}
-                  />
-                  <span>{t('modules.sesion.register.form.terms')}</span>
-                </label>
-                <div className="form-element flex flex-col items-center">
-                  <CustomButton
-                    text={t('modules.sesion.register.form.submitButton')}
-                    disabled={!formState.isValid}
-                    loading={isPending}
+                    label={t('modules.sesion.register.form.terms')}
                   />
                 </div>
-
-                <AuthStatusMessage status={status} />
+                <div className="form-element w-full flex flex-col items-center">
+                  <Button
+                    type="submit"
+                    fullWidth
+                    disabled={!formState.isValid}
+                    loading={isPending}
+                  >
+                    {t('modules.sesion.register.form.submitButton')}
+                  </Button>
+                </div>
 
                 <p className="form-element text-xs text-gray-500 flex flex-col items-center">
                   <span>{t('modules.sesion.register.form.haveAccount')}</span>
-                  <span>
+                  <button
+                    type="button"
+                    onClick={handleLogin}
+                    className="mt-0.5 cursor-pointer rounded px-1 py-0.5 font-medium text-magenta outline-none transition-colors hover:underline focus-visible:underline focus-visible:ring-2 focus-visible:ring-magenta focus-visible:ring-offset-2"
+                  >
                     {t('modules.sesion.register.form.loginLink')}{' '}
-                    <a
-                      href="/sesion/inicio"
-                      onClick={handleLogin}
-                      className="text-magenta hover:underline"
-                    >
-                      {t('modules.sesion.register.form.here')}
-                    </a>
-                  </span>
+                    {t('modules.sesion.register.form.here')}
+                  </button>
                 </p>
               </form>
             </FormProvider>

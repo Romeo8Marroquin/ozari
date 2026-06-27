@@ -3,13 +3,23 @@
     "localStorageSaveError": "Error al almacenar el item {{key}} en el almacenamiento local.",
     "localStorageReadError": "Error al leer el item {{key}} del almacenamiento local."
   },
+  "errors": {
+    "network": "No pudimos conectar con el servidor. Revisa tu conexión.",
+    "server": "Tuvimos un problema en el servidor. Inténtalo más tarde.",
+    "tooManyRequests": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+    "unauthorized": "Tu sesión no es válida o ha expirado.",
+    "generic": "Ocurrió un error inesperado. Inténtalo de nuevo."
+  },
   "components": {
     "pageLoader": {
       "logo": "Logo Party Rentals"
     },
     "customInput": {
       "requiredField": "*",
-      "optionalField": "(opcional)"
+      "optionalField": "(opcional)",
+      "showPassword": "Mostrar contraseña",
+      "hidePassword": "Ocultar contraseña",
+      "requiredFieldLabel": "obligatorio"
     },
     "notifications": {
       "success": "Listo",

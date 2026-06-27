@@ -84,6 +84,7 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
     const passwordIcon = isPasswordVisible ? <HiEyeSlash /> : <HiEye />;
     const iconToShow = type === 'password' ? passwordIcon : icon;
     const isFilled = isFilledOnChange || Boolean(props.value);
+    const isInteractive = type === 'password' || enablePointerEvents || Boolean(onIconClick);
 
     return (
       <div className="relative flex items-center justify-center w-full" ref={containerRef}>
@@ -92,6 +93,7 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
           {...props}
           disabled={disabled}
           aria-invalid={error || undefined}
+          aria-required={isRequired || undefined}
           onChange={localChange}
           type={isPasswordVisible ? 'text' : type}
           className={twMerge(
@@ -112,7 +114,12 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
         >
           <span>{label}</span>
           {!optionalLabel && isRequired && (
-            <span className="ml-[0.1rem]">{t('components.customInput.requiredField')}</span>
+            <>
+              <span aria-hidden className="ml-[0.1rem]">
+                {t('components.customInput.requiredField')}
+              </span>
+              <span className="sr-only"> ({t('components.customInput.requiredFieldLabel')})</span>
+            </>
           )}
           {optionalLabel && !isRequired && (
             <span className="ml-[0.1rem]">{t('components.customInput.optionalField')}</span>
@@ -121,19 +128,31 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
         <button
           className={`absolute text-xl left-2 size-5 transition-colors duration-300 peer-disabled:text-gray-disabled peer-disabled:pointer-events-none
             ${error ? 'text-red-600' : peerFocusTextClass[focusColor]}
-            ${
-              enablePointerEvents || type === 'password' ? 'cursor-pointer ' : 'pointer-events-none'
-            }`}
+            ${isInteractive ? 'cursor-pointer ' : 'pointer-events-none'}`}
           onMouseDown={localOnIconClick}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
               localOnIconClick(e);
             }
           }}
-          tabIndex={type === 'password' ? 0 : -1}
+          tabIndex={isInteractive ? 0 : -1}
           type="button"
+          // Password toggle is a real control → labelled + state announced; a purely
+          // decorative leading icon is hidden from assistive tech.
+          aria-hidden={!isInteractive || undefined}
+          aria-label={
+            type === 'password'
+              ? t(
+                  isPasswordVisible
+                    ? 'components.customInput.hidePassword'
+                    : 'components.customInput.showPassword',
+                )
+              : undefined
+          }
+          aria-pressed={type === 'password' ? isPasswordVisible : undefined}
         >
-          <div ref={iconButtonRef} className="size-full">
+          <div ref={iconButtonRef} aria-hidden className="size-full">
             {iconToShow}
           </div>
         </button>

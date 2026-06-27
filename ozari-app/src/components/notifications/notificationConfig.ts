@@ -31,4 +31,4 @@ export const DEFAULT_DURATION = 5000;
  * Default cap on toast width (px). Below it the toast is fit-content; at it the
  * message wraps to multiple lines. Overridable per notification via `maxWidth`/`width`.
  */
-export const DEFAULT_MAX_WIDTH = 400;
+export const DEFAULT_MAX_WIDTH = 440;

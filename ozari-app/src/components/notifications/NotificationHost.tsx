@@ -12,8 +12,9 @@ const DESKTOP_QUERY = '(min-width: 640px)';
  * must be coordinated against it (z-index + pointer-events) to avoid layout fights.
  *
  * - Position: top-right on >=640px, top-center on mobile.
- * - The container is `pointer-events-none` so it never blocks the page; each toast
- *   re-enables `pointer-events` for its own click-to-dismiss.
+ * - The whole stack is `pointer-events-none` (container AND per-toast wrappers) so it
+ *   never blocks the page; each toast re-enables `pointer-events` ONLY on its clipped
+ *   glass surface, so the transparent corner beside the pill stays click-through.
  */
 const NotificationHost: React.FC = () => {
   const notifications = useNotificationStore((state) => state.notifications);
@@ -37,9 +38,9 @@ const NotificationHost: React.FC = () => {
         isDesktop ? 'justify-end' : 'justify-center'
       }`}
     >
-      <div className={`flex w-full max-w-[360px] flex-col ${isDesktop ? 'items-end' : 'items-center'}`}>
+      <div className={`flex w-full max-w-[440px] flex-col ${isDesktop ? 'items-end' : 'items-center'}`}>
         {notifications.map((item) => (
-          <div key={item.id} className="pointer-events-auto">
+          <div key={item.id} className="pointer-events-none">
             <NotificationToast item={item} align={align} />
           </div>
         ))}
