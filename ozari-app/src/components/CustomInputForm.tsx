@@ -37,6 +37,8 @@ const CustomInputForm = function <T extends FieldValues>({
           field.ref(element);
           if (typeof ref === 'object' && ref !== null) ref.current = element;
         };
+        const messageId = `${String(name)}-message`;
+        const describedBy = error || instructions ? messageId : undefined;
         return (
           <div className="w-full flex flex-col">
             <CustomInput
@@ -46,8 +48,10 @@ const CustomInputForm = function <T extends FieldValues>({
               error={Boolean(error)}
               ref={combinedRef}
               isRequired={isRequired}
+              aria-describedby={describedBy}
             />
             <AnimatedMessage
+              id={messageId}
               errorMessage={error?.message}
               focusColor={focusColor}
               instructions={instructions}

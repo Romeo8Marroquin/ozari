@@ -10,6 +10,12 @@
     "customInput": {
       "requiredField": "*",
       "optionalField": "(opcional)"
+    },
+    "notifications": {
+      "success": "Listo",
+      "error": "Error",
+      "warning": "Atención",
+      "info": "Información"
     }
   },
   "modules": {
@@ -41,7 +47,11 @@
           "here": "aquí"
         },
         "api": {
-          "loginError": "Ha ocurrido un error al iniciar la sesion."
+          "loginError": "Ha ocurrido un error al iniciar la sesión.",
+          "invalidCredentials": "Correo o contraseña incorrectos.",
+          "tooManyAttempts": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+          "networkError": "No pudimos conectar con el servidor. Revisa tu conexión.",
+          "mfaNotSupported": "Tu cuenta requiere verificación en dos pasos, que aún no está disponible aquí."
         }
       },
       "register": {
@@ -81,7 +91,12 @@
         },
         "api": {
           "registerSuccess": "Cuenta creada. Queda pendiente de habilitación por un administrador.",
-          "registerError": "No se pudo crear la cuenta. Verifica tus datos e inténtalo de nuevo."
+          "registerSuccessTitle": "Cuenta creada",
+          "registerSuccessToast": "Queda pendiente de habilitación por un administrador.",
+          "registerError": "No se pudo crear la cuenta. Verifica tus datos e inténtalo de nuevo.",
+          "emailAlreadyExists": "Este correo ya está registrado.",
+          "tooManyAttempts": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+          "networkError": "No pudimos conectar con el servidor. Revisa tu conexión."
         }
       }
     }

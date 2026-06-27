@@ -14,10 +14,11 @@ import {
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { useTranslation } from 'react-i18next';
 import CustomButton from '@components/CustomButton';
+import AuthStatusMessage, { type AuthStatus } from '@components/AuthStatusMessage';
 import useRegister from '../hooks/useRegister';
 import useAuthCard from '../hooks/useAuthCard';
-
-type RegisterStatus = { type: 'success' | 'error'; message: string } | null;
+import { getAuthErrorMessage } from '../getAuthErrorMessage';
+import { notify } from '@components/notifications/notify';
 
 const RegisterPage: React.FC = () => {
   const { t } = useTranslation();
@@ -29,7 +30,7 @@ const RegisterPage: React.FC = () => {
   });
   const { reset, handleSubmit, trigger, formState, register } = methods;
   const { register: registerUser, isPending } = useRegister();
-  const [status, setStatus] = useState<RegisterStatus>(null);
+  const [status, setStatus] = useState<AuthStatus>(null);
   const redirectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => () => clearTimeout(redirectTimer.current), []);
@@ -40,11 +41,24 @@ const RegisterPage: React.FC = () => {
     registerUser(data, {
       onSuccess: () => {
         reset();
-        setStatus({ type: 'success', message: t('modules.sesion.register.api.registerSuccess') });
+        setStatus(null);
+        notify.success(t('modules.sesion.register.api.registerSuccessToast'), {
+          title: t('modules.sesion.register.api.registerSuccessTitle'),
+        });
         redirectTimer.current = setTimeout(() => leaveTo('/sesion/inicio'), 1700);
       },
-      onError: () => {
-        setStatus({ type: 'error', message: t('modules.sesion.register.api.registerError') });
+      onError: (error) => {
+        setStatus({
+          type: 'error',
+          message: getAuthErrorMessage(error, {
+            fallback: 'modules.sesion.register.api.registerError',
+            networkError: 'modules.sesion.register.api.networkError',
+            byStatus: {
+              409: 'modules.sesion.register.api.emailAlreadyExists',
+              429: 'modules.sesion.register.api.tooManyAttempts',
+            },
+          }),
+        });
       },
     });
   };
@@ -161,16 +175,7 @@ const RegisterPage: React.FC = () => {
                   />
                 </div>
 
-                {status && (
-                  <p
-                    role="alert"
-                    className={`form-element text-xs text-center ${
-                      status.type === 'success' ? 'text-green-600' : 'text-red-600'
-                    }`}
-                  >
-                    {status.message}
-                  </p>
-                )}
+                <AuthStatusMessage status={status} />
 
                 <p className="form-element text-xs text-gray-500 flex flex-col items-center">
                   <span>{t('modules.sesion.register.form.haveAccount')}</span>

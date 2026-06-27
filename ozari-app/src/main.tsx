@@ -11,7 +11,7 @@ import { initializeTokenRefresh } from '@utils/tokenRefresh';
 export const router = createRouter({
   routeTree,
   defaultViewTransition: true,
-  defaultNotFoundComponent: () => <Navigate to="/" />,
+  defaultNotFoundComponent: () => <Navigate to="/sesion/inicio" replace />,
   defaultPendingComponent: () => <PageLoader />,
 });
 

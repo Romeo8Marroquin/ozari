@@ -91,6 +91,7 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
           ref={ref}
           {...props}
           disabled={disabled}
+          aria-invalid={error || undefined}
           onChange={localChange}
           type={isPasswordVisible ? 'text' : type}
           className={twMerge(

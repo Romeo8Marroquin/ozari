@@ -1,5 +1,5 @@
 import logo from '@assets/svgs/logo.svg';
-import React, { useMemo, type MouseEvent } from 'react';
+import React, { useMemo, useState, type MouseEvent } from 'react';
 import { FaUserAlt } from 'react-icons/fa';
 import CustomInputForm from '@components/CustomInputForm';
 import { FormProvider, useForm } from 'react-hook-form';
@@ -13,9 +13,11 @@ import {
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { useTranslation } from 'react-i18next';
 import CustomButton from '@components/CustomButton';
+import AuthStatusMessage, { type AuthStatus } from '@components/AuthStatusMessage';
 import useLogin from '../hooks/useLogin';
 import { useSearch } from '@tanstack/react-router';
 import useAuthCard from '../hooks/useAuthCard';
+import { getAuthErrorMessage } from '../getAuthErrorMessage';
 
 const LoginPage: React.FC = () => {
   const { t } = useTranslation();
@@ -28,15 +30,40 @@ const LoginPage: React.FC = () => {
   });
   const { reset, handleSubmit, trigger, formState } = methods;
   const { login, isPending } = useLogin();
+  const [status, setStatus] = useState<AuthStatus>(null);
 
   const onSubmit = (data: LoginType) => {
     if (isPending) return;
+    setStatus(null);
     login(data, {
-      onSuccess: () => {
-        reset();
-        redirectAfterSuccess(search.redirect ?? '/panel/productos');
+      onSuccess: (response) => {
+        const payload = response.data?.data;
+        if (payload && 'mfaRequired' in payload) {
+          // 2FA is enabled on this account; the second step isn't wired up yet.
+          setStatus({ type: 'error', message: t('modules.sesion.login.api.mfaNotSupported') });
+          return;
+        }
+        // Only proceed once a session actually exists (access token in the header).
+        if (response.headers['authorization']) {
+          reset();
+          redirectAfterSuccess(search.redirect ?? '/panel/productos');
+          return;
+        }
+        setStatus({ type: 'error', message: t('modules.sesion.login.api.loginError') });
       },
-      onError: () => {},
+      onError: (error) => {
+        setStatus({
+          type: 'error',
+          message: getAuthErrorMessage(error, {
+            fallback: 'modules.sesion.login.api.loginError',
+            networkError: 'modules.sesion.login.api.networkError',
+            byStatus: {
+              401: 'modules.sesion.login.api.invalidCredentials',
+              429: 'modules.sesion.login.api.tooManyAttempts',
+            },
+          }),
+        });
+      },
     });
   };
 
@@ -135,6 +162,8 @@ const LoginPage: React.FC = () => {
                     loading={isPending}
                   />
                 </div>
+
+                <AuthStatusMessage status={status} />
 
                 <p className="form-element text-xs text-gray-500 flex flex-col items-center">
                   <span>{t('modules.sesion.login.form.noAccount')}</span>
