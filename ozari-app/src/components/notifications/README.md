@@ -31,6 +31,8 @@ notify.success(message, { title });           // default variant
 notify.error(message);
 notify.warning(message, { duration: 0 });      // 0 = sticky until dismissed
 notify.info(message, { color: '#7d5076' });    // override the principal color
+notify.info(message, { maxWidth: 520 });       // raise the wrap cap (default 400px)
+notify.info(message, { width: 320 });          // fixed width (forces multi-line)
 const id = notify.push({ message, variant: 'success' });
 notify.dismiss(id);
 ```
@@ -49,19 +51,35 @@ text into `notify`.
   not two stacked boxes. The tab anchors to the screen edge (right on desktop top-right,
   left on mobile top-center). The shadow is a `drop-shadow` filter on the wrapper so it
   follows the clipped shape (a `box-shadow` would be clipped away).
-- **Lifecycle (owned by `NotificationToast`).** The pill enters (fade + slide + scale),
-  then the body is **born out of it** — its height grows while the same `clip-path` is
-  rebuilt each frame from the current height and the text fades in. A
-  hover/focus-pausable timer bar drives auto-dismiss. The exit reverses it: the body
-  collapses back into the pill, the pill lingers a beat, then it leaves while siblings
-  glide up.
+- **Lifecycle (owned by `NotificationToast`).** The pill enters (fade + slide + scale)
+  and the body is **born out of it in the same gesture** — the unfold starts the instant
+  the pill begins arriving (heavy overlap, no dead beat between the two), growing in width
+  and height from the pill's corner while the `clip-path` is rebuilt each frame and the
+  text fades in late. A hover/focus-pausable timer bar drives auto-dismiss. The exit
+  reverses it continuously: the body collapses back into the pill and the pill leaves on
+  its tail while siblings glide up.
+- **Sizing.** Height is always **fit-content** (the body settles back to `height: auto`
+  after the birth, so it never clips — even if a web font loads late and reflows the
+  text). Width is **fit-content up to `maxWidth`** (default `400px`), then the message
+  wraps to multiple lines. Per call you can raise/lower `maxWidth` or pass a fixed
+  `width` (which forces wrapping). All capped at `100vw − 2rem` so it never overflows the
+  viewport.
 - **Dismiss.** Auto after `duration`; click/tap anywhere on the toast; or
   `Enter`/`Space`/`Escape` when focused.
-- **Accessibility.** `role="status"` + `aria-live="polite"` for success/info,
-  `role="alert"` + `aria-live="assertive"` for error/warning; focusable; honors
-  `prefers-reduced-motion`.
-- **Responsive.** Top-right ≥640px, top-center below; width capped at
-  `min(360px, 100vw − 2rem)`.
+- **Accessibility.**
+  - **Screen readers:** each toast is a live region — `role="status"` + `aria-live="polite"`
+    for success/info, `role="alert"` + `aria-live="assertive"` for error/warning — plus
+    `aria-atomic="true"` and an `aria-label` of `"<title>. <message>"`, so the whole toast
+    is announced as one unit the moment it mounts (assertive for errors, politely queued
+    otherwise). The icon and timer bar are `aria-hidden`.
+  - **Keyboard:** the toast is a focus stop (`tabIndex=0`); `Enter`/`Space`/`Escape`
+    dismiss it; focus shows a visible `focus-visible` outline (we only suppress the
+    outline for mouse users). Toasts never steal focus on appear (WCAG 2.4.3).
+  - **Timing (WCAG 2.2.1 / 2.2.2):** the auto-dismiss timer **pauses on hover and on
+    focus**, so keyboard and pointer users get unlimited time to read; `duration: 0`
+    makes a toast sticky.
+  - **Motion:** honors `prefers-reduced-motion` (no birth/slide — just a quick fade).
+- **Responsive.** Top-right ≥640px, top-center below.
 
 ## Implementation notes
 

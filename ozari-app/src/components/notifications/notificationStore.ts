@@ -12,6 +12,17 @@ export interface NotificationInput {
   color?: string;
   /** ms before auto-dismiss. `0` keeps it until dismissed. Defaults to {@link DEFAULT_DURATION}. */
   duration?: number;
+  /**
+   * Cap on how wide the toast may grow. Below it the toast is fit-content; at it the
+   * message wraps to multiple lines. Number = px, string = any CSS length.
+   * Defaults to {@link DEFAULT_MAX_WIDTH}. Ignored when `width` is set.
+   */
+  maxWidth?: number | string;
+  /**
+   * Force a fixed width instead of fit-content (the message wraps within it).
+   * Number = px, string = any CSS length. Overrides `maxWidth`.
+   */
+  width?: number | string;
 }
 
 /** A live notification held in the store. */

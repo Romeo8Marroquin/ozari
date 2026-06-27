@@ -2,7 +2,7 @@ import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import React, { useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { VARIANT_STYLES } from './notificationConfig';
+import { DEFAULT_MAX_WIDTH, VARIANT_STYLES } from './notificationConfig';
 import { useNotificationStore, type NotificationItem } from './notificationStore';
 
 interface NotificationToastProps {
@@ -122,14 +122,15 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
     gsap
       .timeline({ onComplete })
       // Body collapses back into the pill while its text fades out.
-      .to(messageRef.current, { opacity: 0, duration: 0.14, ease: 'power1.in' })
+      .to(messageRef.current, { opacity: 0, duration: 0.12, ease: 'power1.in' })
       .to(
         proxy,
-        { p: 0, duration: 0.32, ease: 'power2.in', onUpdate: () => renderRef.current(proxy.p) },
+        { p: 0, duration: 0.26, ease: 'power2.in', onUpdate: () => renderRef.current(proxy.p) },
         '-=0.05',
       )
-      // The pill lingers a beat, then leaves; the slot collapses so siblings glide up.
-      .to(rootRef.current, { opacity: 0, y: -8, scale: 0.95, duration: 0.22, ease: 'power2.in' }, '+=0.12')
+      // The pill leaves on the tail of the collapse (continuous, no dead beat); the slot
+      // collapses so siblings glide up.
+      .to(rootRef.current, { opacity: 0, y: -8, scale: 0.95, duration: 0.2, ease: 'power2.in' }, '-=0.07')
       .to(rootRef.current, { height: 0, marginBottom: 0, duration: 0.2, ease: 'power2.inOut' }, '<');
   }, [dismiss, item.id]);
 
@@ -147,7 +148,7 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
       const W = surface.offsetWidth;
       const Wt = tab.offsetWidth;
       const Ht = tab.offsetHeight;
-      const bodyH = body.offsetHeight;
+      let bodyH = body.offsetHeight;
       dimsRef.current = { W, Wt, Ht, bodyH };
       gsap.set(surface, { width: W });
 
@@ -160,26 +161,65 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
         body.style.height = `${visibleBodyH}px`;
         surface.style.clipPath = `path("${buildClipPath(W, Ht, Wt, bodyW, Ht + visibleBodyH, align)}")`;
         if (messageRef.current) {
-          // Fade the text in late, once the shape is mostly unfolded.
-          messageRef.current.style.opacity = `${Math.max(0, (clamped - 0.6) / 0.4)}`;
+          // Fade the text in over the back half of the unfold (the shape leads, text follows).
+          messageRef.current.style.opacity = `${Math.max(0, (clamped - 0.5) / 0.5)}`;
         }
       };
       renderRef.current = render;
 
+      // Once the birth finishes, hand the body back to fit-content height so it can
+      // never clip its text (sub-pixel rounding or a late web-font reflow), and rebuild
+      // the clip-path from the REAL rendered height so the glass shape still matches.
+      // Only ever called AFTER the birth — never during it, or it would snap the body to
+      // full size and kill the animation.
+      let entered = false;
+      const settle = (): void => {
+        if (exitingRef.current) return;
+        body.style.height = 'auto';
+        bodyH = body.offsetHeight;
+        dimsRef.current.bodyH = bodyH;
+        surface.style.clipPath = `path("${buildClipPath(W, Ht, Wt, W, Ht + bodyH, align)}")`;
+      };
+      // Re-settle ONLY if fonts arrive after the birth (a genuine late-font reflow).
+      // `document.fonts.ready` resolves immediately when fonts are already cached, so the
+      // `entered` guard keeps it from collapsing the birth mid-animation.
+      if (typeof document !== 'undefined' && 'fonts' in document) {
+        void document.fonts.ready
+          .then(() => {
+            if (entered) settle();
+          })
+          .catch(() => {});
+      }
+
       const reduce = prefersReducedMotion();
       if (reduce) {
         render(1);
+        entered = true;
+        settle();
         gsap.from(rootRef.current, { opacity: 0, duration: 0.2 });
       } else {
         render(0);
         const proxy = { p: 0 };
         gsap
           .timeline()
-          .from(rootRef.current, { opacity: 0, y: -14, scale: 0.92, duration: 0.32, ease: 'power3.out' })
+          // 1) The pill snaps in fast and DECELERATES (power3.out) — you clearly see it.
+          .from(rootRef.current, { opacity: 0, y: -12, scale: 0.94, duration: 0.18, ease: 'power3.out' })
+          // 2) The body grows out of it. It starts a hair before the pill fully settles,
+          //    so the motion slows but never STOPS, then re-accelerates into the birth —
+          //    two distinct phases, one continuous gesture. Whole thing ≈ 400ms.
           .to(
             proxy,
-            { p: 1, duration: 0.5, ease: 'power3.out', onUpdate: () => render(proxy.p) },
-            '-=0.1',
+            {
+              p: 1,
+              duration: 0.24,
+              ease: 'power2.out',
+              onUpdate: () => render(proxy.p),
+              onComplete: () => {
+                entered = true;
+                settle();
+              },
+            },
+            '<0.15',
           );
       }
 
@@ -193,7 +233,7 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
             transformOrigin: 'left center',
             duration: item.duration / 1000,
             ease: 'none',
-            delay: reduce ? 0 : 0.7,
+            delay: reduce ? 0 : 0.5,
             onComplete: playExit,
           },
         );
@@ -217,11 +257,20 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
   const glassBg = `color-mix(in srgb, ${color} 10%, rgba(255, 255, 255, 0.74))`;
   const circleBg = `color-mix(in srgb, ${color} 18%, transparent)`;
 
+  // Width policy: a fixed `width` forces multi-line wrapping; otherwise the toast is
+  // fit-content up to `maxWidth` (then it wraps). Both are configurable per call.
+  const toCss = (v: number | string): string => (typeof v === 'number' ? `${v}px` : v);
+  const sizeStyle: React.CSSProperties =
+    item.width != null
+      ? { width: toCss(item.width) }
+      : { maxWidth: `min(${toCss(item.maxWidth ?? DEFAULT_MAX_WIDTH)}, calc(100vw - 2rem))` };
+
   return (
     <div
       ref={rootRef}
       role={isAssertive ? 'alert' : 'status'}
       aria-live={isAssertive ? 'assertive' : 'polite'}
+      aria-atomic="true"
       aria-label={`${title}. ${item.message}`}
       tabIndex={0}
       onClick={playExit}
@@ -230,35 +279,35 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
       onMouseLeave={resumeTimer}
       onFocus={pauseTimer}
       onBlur={resumeTimer}
-      className="mb-3 w-fit max-w-[min(360px,calc(100vw-2rem))] cursor-pointer outline-none"
-      style={{ filter: 'drop-shadow(0 12px 28px rgba(0,0,0,0.18))' }}
+      className="mb-3 w-fit cursor-pointer outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-midnight"
+      style={{ filter: 'drop-shadow(0 14px 30px rgba(0,0,0,0.2))', ...sizeStyle }}
     >
       <div
         ref={surfaceRef}
         className={`flex flex-col backdrop-blur-md ${align === 'right' ? 'items-end' : 'items-start'}`}
         style={{ background: glassBg }}
       >
-        <div ref={tabRef} className="flex w-fit items-center gap-1.5 px-3 py-1.5">
+        <div ref={tabRef} className="flex w-fit items-center gap-2 px-3.5 py-2">
           <span
-            className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
             style={{ background: circleBg }}
           >
-            <Icon size={11} color={color} aria-hidden />
+            <Icon size={13} color={color} aria-hidden />
           </span>
-          <span className="whitespace-nowrap text-xs font-semibold leading-none" style={{ color }}>
+          <span className="whitespace-nowrap text-sm font-semibold leading-none" style={{ color }}>
             {title}
           </span>
         </div>
 
-        <div ref={bodyRef} className="relative w-full overflow-hidden px-4 py-3">
-          <p ref={messageRef} className="text-xs leading-relaxed text-neutral-600">
+        <div ref={bodyRef} className="relative w-full overflow-hidden px-4 py-3.5">
+          <p ref={messageRef} className="text-sm leading-relaxed text-neutral-600">
             {item.message}
           </p>
           {item.duration > 0 && (
             <div
               ref={timerRef}
               aria-hidden
-              className="absolute bottom-0 left-0 h-[3px] w-full origin-left scale-x-0 opacity-70"
+              className="absolute bottom-0 left-0 h-1 w-full origin-left scale-x-0 opacity-70"
               style={{ background: color }}
             />
           )}
