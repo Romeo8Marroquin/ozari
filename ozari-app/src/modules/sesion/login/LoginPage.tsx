@@ -19,7 +19,6 @@ import { useSearch } from '@tanstack/react-router';
 import useAuthCard from '../hooks/useAuthCard';
 import useDesktopAutoFocus from '@hooks/useDesktopAutoFocus';
 import { hasUserGestured } from '@hooks/useUserGesture';
-import { dlog } from '@utils/debug';
 
 const LoginPage: React.FC = () => {
   const { t } = useTranslation();
@@ -60,22 +59,11 @@ const LoginPage: React.FC = () => {
   // dead end on a real device.
   const syncDomValues = () => {
     const form = formRef.current;
-    if (!form) {
-      dlog('syncDomValues: NO formRef');
-      return;
-    }
+    if (!form) return;
     (['email', 'password'] as const).forEach((field) => {
       const el = form.elements.namedItem(field);
       if (el instanceof HTMLInputElement) setValue(field, el.value, { shouldValidate: false });
     });
-    const email = form.elements.namedItem('email');
-    const pwd = form.elements.namedItem('password');
-    dlog(
-      'syncDomValues: emailLen=',
-      email instanceof HTMLInputElement ? email.value.length : 'n/a',
-      'pwdLen=',
-      pwd instanceof HTMLInputElement ? pwd.value.length : 'n/a',
-    );
   };
 
   // The form's submit path: sync the DOM, then let RHF validate. If invalid, RHF flips
@@ -83,17 +71,8 @@ const LoginPage: React.FC = () => {
   // runs. The button is intentionally NOT disabled by validity — a stale `isValid` (mobile
   // autofill not yet synced) must never swallow the tap.
   const submitForm = () => {
-    dlog('submitForm: enter (isPending=', isPending, 'lock=', submitLockRef.current, ')');
     syncDomValues();
-    void handleSubmit(
-      (data) => {
-        dlog('handleSubmit: VALID → onSubmit');
-        onSubmit(data);
-      },
-      (errors) => {
-        dlog('handleSubmit: INVALID', Object.keys(errors).join(','));
-      },
-    )();
+    void handleSubmit(onSubmit)();
   };
 
   // Submit on POINTERDOWN, not just the click. On a real phone, tapping the button while the
@@ -105,32 +84,18 @@ const LoginPage: React.FC = () => {
   // `submitForm`/`onSubmit` are idempotent via the in-flight lock, so the trailing click (when it
   // isn't cancelled) won't double-submit.
   const handleSubmitPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-    dlog(
-      'button pointerdown: type=',
-      event.pointerType,
-      'button=',
-      event.button,
-      'isPrimary=',
-      event.isPrimary,
-    );
     if (!event.isPrimary) return; // ignore secondary touches / non-primary pointers
     submitForm();
   };
 
   const onSubmit = (data: LoginType) => {
-    if (isPending || submitLockRef.current) {
-      dlog('onSubmit: blocked by lock/pending');
-      return;
-    }
+    if (isPending || submitLockRef.current) return;
     submitLockRef.current = true;
-    dlog('onSubmit: calling login()');
     login(data, {
       onSettled: () => {
         submitLockRef.current = false;
-        dlog('login: settled');
       },
       onSuccess: (response) => {
-        dlog('login: onSuccess status=', response.status);
         const payload = response.data?.data;
         if (payload && 'mfaRequired' in payload) {
           // 2FA is enabled on this account; the second step isn't wired up yet.
@@ -221,7 +186,6 @@ const LoginPage: React.FC = () => {
               <form
                 ref={formRef}
                 onSubmit={(event) => {
-                  dlog('form: onSubmit (native)');
                   event.preventDefault();
                   submitForm();
                 }}
@@ -269,8 +233,6 @@ const LoginPage: React.FC = () => {
                     fullWidth
                     loading={isPending}
                     onPointerDown={handleSubmitPointerDown}
-                    onClick={() => dlog('button: onClick')}
-                    onTouchStart={() => dlog('button: onTouchStart')}
                   >
                     {t('modules.sesion.login.form.submitButton')}
                   </Button>
