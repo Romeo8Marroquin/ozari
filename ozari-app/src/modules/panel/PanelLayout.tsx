@@ -4,74 +4,48 @@ import gsap from 'gsap';
 import { useRef } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
+import { PanelChromeProvider } from './hooks/usePanelChrome';
 
-const PanelLayout: React.FC = () => {
+const PanelShell: React.FC = () => {
   const container = useRef<HTMLDivElement>(null);
 
+  // One-time entrance, in the same smooth/harmonious spirit as the auth pages: the chrome
+  // settles in from its edges, then the nav items and content stagger in. Runs once when the
+  // panel mounts (the layout persists across child-route changes). On mobile `.panel-sidebar`
+  // doesn't exist (the drawer is hidden), so those targets are simply skipped.
   useGSAP(
     () => {
-      if (!container.current) return;
-
-      // Create a smooth fade-in sequence that complements the login fade-out
-      const tl = gsap.timeline({ defaults: { ease: 'power2.out' } });
-
-      // Start with container fade-in
-      tl.from(container.current, {
-        opacity: 0,
-        duration: 0.4,
-      });
-
-      // Sidebar slides in from left
-      tl.from(
-        '.panel-sidebar',
-        {
-          x: -50,
-          opacity: 0,
-          duration: 0.5,
-        },
-        '-=0.2', // Start slightly before container finishes
-      );
-
-      // Header slides in from top
-      tl.from(
-        '.panel-header',
-        {
-          y: -30,
-          opacity: 0,
-          duration: 0.5,
-        },
-        '<+0.1', // Start slightly after sidebar
-      );
-
-      // Main content fades in with subtle scale
-      tl.from(
-        '.panel-main',
-        {
-          y: 20,
-          opacity: 0,
-          scale: 0.98,
-          duration: 0.6,
-        },
-        '<+0.1', // Start slightly after header
-      );
+      const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
+      tl.from(container.current, { opacity: 0, duration: 0.35 })
+        .from('.panel-sidebar', { x: -24, opacity: 0, duration: 0.5 }, 0.05)
+        .from('.panel-header', { y: -20, opacity: 0, duration: 0.45 }, 0.12)
+        .from('.panel-main', { y: 16, opacity: 0, duration: 0.5 }, 0.18)
+        .from(
+          '.panel-nav-item',
+          { x: -12, opacity: 0, duration: 0.35, stagger: 0.05, clearProps: 'transform' },
+          0.22,
+        );
     },
     { scope: container },
   );
 
   return (
-    <div
-      ref={container}
-      className="relative overflow-hidden w-full min-h-screen flex bg-customWhite"
-    >
+    <div ref={container} className="flex h-dvh w-full overflow-hidden bg-customWhite">
       <Sidebar />
-      <div className="flex flex-col flex-1 overflow-y-hidden">
+      <div className="flex min-w-0 flex-1 flex-col">
         <Header />
-        <main className="panel-main flex flex-col h-full p-6 overflow-y-auto bg-blue-500">
+        <main className="panel-main flex-1 overflow-y-auto bg-gradient-to-b from-[#f8f5f8] to-[#f0ecf1] p-4 md:p-6 lg:p-8">
           <Outlet />
         </main>
       </div>
     </div>
   );
 };
+
+const PanelLayout: React.FC = () => (
+  <PanelChromeProvider>
+    <PanelShell />
+  </PanelChromeProvider>
+);
 
 export default PanelLayout;

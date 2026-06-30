@@ -3,13 +3,29 @@
     "localStorageSaveError": "Error al almacenar el item {{key}} en el almacenamiento local.",
     "localStorageReadError": "Error al leer el item {{key}} del almacenamiento local."
   },
+  "errors": {
+    "network": "No pudimos conectar con el servidor. Revisa tu conexión.",
+    "server": "Tuvimos un problema en el servidor. Inténtalo más tarde.",
+    "tooManyRequests": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+    "unauthorized": "Tu sesión no es válida o ha expirado.",
+    "generic": "Ocurrió un error inesperado. Inténtalo de nuevo."
+  },
   "components": {
     "pageLoader": {
       "logo": "Logo Party Rentals"
     },
     "customInput": {
       "requiredField": "*",
-      "optionalField": "(opcional)"
+      "optionalField": "(opcional)",
+      "showPassword": "Mostrar contraseña",
+      "hidePassword": "Ocultar contraseña",
+      "requiredFieldLabel": "obligatorio"
+    },
+    "notifications": {
+      "success": "Listo",
+      "error": "Error",
+      "warning": "Atención",
+      "info": "Información"
     }
   },
   "modules": {
@@ -41,7 +57,11 @@
           "here": "aquí"
         },
         "api": {
-          "loginError": "Ha ocurrido un error al iniciar la sesion."
+          "loginError": "Ha ocurrido un error al iniciar la sesión.",
+          "invalidCredentials": "Correo o contraseña incorrectos.",
+          "tooManyAttempts": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+          "networkError": "No pudimos conectar con el servidor. Revisa tu conexión.",
+          "mfaNotSupported": "Tu cuenta requiere verificación en dos pasos, que aún no está disponible aquí."
         }
       },
       "register": {
@@ -81,8 +101,41 @@
         },
         "api": {
           "registerSuccess": "Cuenta creada. Queda pendiente de habilitación por un administrador.",
-          "registerError": "No se pudo crear la cuenta. Verifica tus datos e inténtalo de nuevo."
+          "registerSuccessTitle": "Cuenta creada",
+          "registerSuccessToast": "Queda pendiente de habilitación por un administrador.",
+          "registerError": "No se pudo crear la cuenta. Verifica tus datos e inténtalo de nuevo.",
+          "emailAlreadyExists": "Este correo ya está registrado.",
+          "tooManyAttempts": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+          "networkError": "No pudimos conectar con el servidor. Revisa tu conexión."
         }
+      }
+    },
+    "panel": {
+      "brand": "Party Rentals",
+      "nav": {
+        "dashboard": "Inicio",
+        "products": "Productos",
+        "orders": "Pedidos",
+        "customers": "Clientes",
+        "settings": "Ajustes"
+      },
+      "actions": {
+        "openMenu": "Abrir menú",
+        "closeMenu": "Cerrar menú",
+        "collapse": "Colapsar menú",
+        "expand": "Expandir menú",
+        "userMenu": "Menú de usuario",
+        "notifications": "Notificaciones",
+        "navigation": "Navegación principal"
+      },
+      "user": {
+        "name": "Usuario",
+        "role": "Administrador"
+      },
+      "placeholder": {
+        "badge": "En construcción",
+        "title": "{{section}} en camino",
+        "description": "Esta sección estará disponible muy pronto. Estamos diseñando la mejor experiencia para ti."
       }
     }
   }

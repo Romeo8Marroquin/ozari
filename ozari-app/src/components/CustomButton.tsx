@@ -102,6 +102,7 @@ const CustomButton: React.FC<CustomButtonProps> = ({
         ${buttonClasses[buttonType]?.[buttonColor]} ${className} ${
         loading ? 'pointer-events-none' : ''
       }`}
+      aria-busy={loading || undefined}
       {...props}
     >
       {showingLoading && (

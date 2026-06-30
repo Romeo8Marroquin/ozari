@@ -23,6 +23,7 @@ import { z } from 'zod';
  */
 export const emailField = z
   .string()
+  .trim()
   .nonempty(t('modules.sesion.login.form.requiredEmail'))
   .email(t('modules.sesion.login.form.invalidEmail'))
   .max(EMAIL_MAX_LENGTH, t('modules.sesion.login.form.maxLengthEmail'));

@@ -45,6 +45,30 @@ input[type='password']::-ms-clear {
   display: none;
 }
 
+/* There is no real "autofill happened" event. Browsers DO toggle `:-webkit-autofill` /
+   `:autofill` when they autofill a field, so we attach an empty (no-op) animation to it and
+   listen for `animationstart` in JS as a reliable autofill signal. No visual effect. */
+@keyframes onAutofill {
+  from {
+  }
+  to {
+  }
+}
+input:-webkit-autofill,
+input:autofill {
+  animation-name: onAutofill;
+  animation-duration: 0.01s;
+}
+
+/* Float the floating-label whenever the field is autofilled — including masked values the
+   browser hides from JS — so the label never overlaps the autofilled text. The values match
+   the `-translate-y-6 scale-75` utilities the label uses on focus/fill. */
+.peer:-webkit-autofill ~ label,
+.peer:autofill ~ label {
+  translate: 0 -1.5rem;
+  scale: 0.75;
+}
+
 body {
   margin: 0;
   padding: 0;

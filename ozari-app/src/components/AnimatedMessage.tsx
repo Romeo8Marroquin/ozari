@@ -6,6 +6,7 @@ interface AnimatedMessageProps {
   errorMessage?: string;
   instructions?: string;
   focusColor?: string;
+  id?: string;
 }
 
 const textClass: Record<string, string> = {
@@ -16,6 +17,7 @@ const AnimatedMessage: React.FC<AnimatedMessageProps> = ({
   errorMessage,
   instructions,
   focusColor = 'midnight',
+  id,
 }) => {
   const containerRef = useRef<HTMLParagraphElement>(null);
   const [showed, setShowed] = useState<string | undefined>(undefined);
@@ -35,6 +37,7 @@ const AnimatedMessage: React.FC<AnimatedMessageProps> = ({
   return (
     <p
       ref={containerRef}
+      id={id}
       role="alert"
       className={`ml-1.5 mt-[3px] text-xs ${errorMessage ? 'text-red-600' : textClass[focusColor]}`}
     >

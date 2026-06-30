@@ -1,5 +1,8 @@
-import { createFileRoute, Navigate } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
+// Any unmatched /sesion/* path → login.
 export const Route = createFileRoute('/sesion/$')({
-  component: () => <Navigate to="/sesion/inicio" />,
+  beforeLoad: () => {
+    throw redirect({ to: '/sesion/inicio', replace: true });
+  },
 });
