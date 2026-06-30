@@ -14,6 +14,17 @@ interface CustomInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   isRequired?: boolean;
   optionalLabel?: boolean;
   onIconClick?: () => void;
+  /**
+   * Whether the interactive icon button (e.g. an action button) participates in the tab
+   * order. Defaults to `true` — keep it for real actions (a search button must be
+   * keyboard-operable). Set `false` for a pure pointer/touch convenience like the
+   * password show/hide toggle, which only changes how an existing value is displayed:
+   * it stays clickable + labelled, but no longer interrupts the email→password→submit
+   * keyboard flow. (`-1` keeps it out of Tab, not out of the accessibility tree.)
+   */
+  iconTabbable?: boolean;
+  /** Called when this input is autofilled by the browser / a password manager. */
+  onAutofill?: () => void;
 }
 
 const bgClass: Record<string, string> = {
@@ -43,6 +54,8 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
       isRequired = false,
       optionalLabel = false,
       onIconClick,
+      iconTabbable = true,
+      onAutofill,
       onChange,
       ...props
     }: CustomInputProps,
@@ -52,7 +65,7 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
     const [isFilledOnChange, setIsFilledOnChange] = useState(Boolean(props.value));
     const [isPasswordVisible, setIsPasswordVisible] = useState(false);
     const iconButtonRef = useRef<HTMLDivElement>(null);
-    const { containerRef } = useDetectAutofill();
+    const { containerRef } = useDetectAutofill(onAutofill);
 
     const localOnIconClick = useCallback(
       (e: React.MouseEvent<HTMLButtonElement> | React.KeyboardEvent<HTMLButtonElement>) => {
@@ -91,6 +104,7 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
         <input
           ref={ref}
           {...props}
+          id={id}
           disabled={disabled}
           aria-invalid={error || undefined}
           aria-required={isRequired || undefined}
@@ -136,7 +150,7 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
               localOnIconClick(e);
             }
           }}
-          tabIndex={isInteractive ? 0 : -1}
+          tabIndex={isInteractive && iconTabbable ? 0 : -1}
           type="button"
           // Password toggle is a real control → labelled + state announced; a purely
           // decorative leading icon is hidden from assistive tech.

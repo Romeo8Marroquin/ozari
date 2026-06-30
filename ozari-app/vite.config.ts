@@ -25,6 +25,16 @@ export default defineConfig({
         target: 'http://localhost:3000',
         changeOrigin: true,
         secure: false,
+        // When testing from a phone over the LAN (`pnpm dev --host`), the browser's Origin is
+        // `http://<lan-ip>:5173`, which the API's CORS + API-key origin checks (both keyed to
+        // APP_HOST) would reject. `changeOrigin` only rewrites Host, so rewrite the forwarded
+        // Origin to the API's expected dev host — LAN dev traffic is then treated exactly like
+        // localhost. Dev-proxy only; never ships (prod uses VITE_API_URL + real CORS).
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('origin', 'http://localhost:5173');
+          });
+        },
       },
     },
   },

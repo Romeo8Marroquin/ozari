@@ -1,5 +1,5 @@
 import logo from '@assets/svgs/logo.svg';
-import React, { useEffect, useMemo, useRef, type MouseEvent } from 'react';
+import React, { useMemo, useRef, type MouseEvent } from 'react';
 import { FaUserAlt } from 'react-icons/fa';
 import { HiOutlineMail } from 'react-icons/hi';
 import CustomInputForm from '@components/CustomInputForm';
@@ -17,6 +17,7 @@ import Button from '@components/Button';
 import Checkbox from '@components/Checkbox';
 import useRegister from '../hooks/useRegister';
 import useAuthCard from '../hooks/useAuthCard';
+import useDesktopAutoFocus from '@hooks/useDesktopAutoFocus';
 import { notify } from '@components/notifications/notify';
 
 const RegisterPage: React.FC = () => {
@@ -27,44 +28,38 @@ const RegisterPage: React.FC = () => {
     defaultValues: registerSchemaDefaultValues,
     mode: 'onTouched',
   });
-  const { reset, handleSubmit, trigger, formState, register } = methods;
+  const { reset, handleSubmit, formState, register } = methods;
   const { register: registerUser, isPending } = useRegister();
-  const redirectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  useEffect(() => () => clearTimeout(redirectTimer.current), []);
+  const autoFocusFirst = useDesktopAutoFocus();
+  // Synchronous in-flight lock: blocks a second submit fired in the same frame, before
+  // React re-renders with `isPending` (and disables the button). Released on settle.
+  const submitLockRef = useRef(false);
 
   const onSubmit = (data: RegisterType) => {
-    if (isPending) return;
+    if (isPending || submitLockRef.current) return;
+    submitLockRef.current = true;
     registerUser(data, {
+      onSettled: () => {
+        submitLockRef.current = false;
+      },
       onSuccess: () => {
         reset();
-        // Success is custom: confirm with a toast (it persists across the route change,
-        // since the host is mounted at the router root) and animate back to login.
+        // Success is custom: fire the toast (it persists across the route change, since the
+        // host is mounted at the router root) and immediately animate back to login — same
+        // as clicking the login link, with the toast still visible through the transition.
         notify.success(t('modules.sesion.register.api.registerSuccessToast'), {
           title: t('modules.sesion.register.api.registerSuccessTitle'),
         });
-        redirectTimer.current = setTimeout(() => leaveTo('/sesion/inicio'), 1700);
+        leaveTo('/sesion/inicio');
       },
       // Backend/network errors (email taken, rate limit, 5xx, offline) are surfaced as a
       // friendly toast by the axios interceptor — nothing to handle here.
     });
   };
 
-  const handleAutocomplete = async (event: React.FormEvent<HTMLInputElement>) => {
-    const nativeEvent = event.nativeEvent as InputEvent;
-    if (
-      nativeEvent.inputType === undefined &&
-      nativeEvent.data === undefined &&
-      nativeEvent.dataTransfer === undefined &&
-      nativeEvent.isComposing === undefined &&
-      !formState.isSubmitting
-    ) {
-      const isValid = await trigger();
-      if (isValid) {
-        handleSubmit(onSubmit)();
-      }
-    }
-  };
+  // Register intentionally does NOT auto-submit on autofill (auto-creating an account is
+  // inappropriate). Autofilled values still sync into the form (so the button enables) via
+  // the autofill detection inside CustomInput.
 
   const handleLogin = (e: MouseEvent) => {
     e.preventDefault();
@@ -97,12 +92,15 @@ const RegisterPage: React.FC = () => {
                     id="fullName-input"
                     data-testid="fullName-input"
                     autoComplete="name"
+                    autoCapitalize="words"
+                    autoCorrect="off"
+                    spellCheck={false}
                     className="text-lg"
                     label={t('modules.sesion.register.form.fullNameLabel')}
                     placeholder={t('modules.sesion.register.form.fullNamePlaceholder')}
                     aria-label={t('modules.sesion.register.form.fullNameLabel')}
                     name="fullName"
-                    autoFocus
+                    autoFocus={autoFocusFirst}
                     icon={<FaUserAlt />}
                   />
                 </div>
@@ -110,14 +108,18 @@ const RegisterPage: React.FC = () => {
                   <CustomInputForm<RegisterType>
                     id="email-input"
                     data-testid="email-input"
+                    type="email"
+                    inputMode="email"
                     autoComplete="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     className="text-lg"
                     label={t('modules.sesion.register.form.emailLabel')}
                     placeholder={t('modules.sesion.register.form.emailPlaceholder')}
                     aria-label={t('modules.sesion.register.form.emailLabel')}
                     name="email"
                     icon={<HiOutlineMail />}
-                    onInput={handleAutocomplete}
                   />
                 </div>
                 <div className="form-element w-full">
@@ -131,6 +133,8 @@ const RegisterPage: React.FC = () => {
                     label={t('modules.sesion.register.form.passwordLabel')}
                     name="password"
                     type="password"
+                    iconTabbable={false}
+                    deps={['confirmPassword']}
                   />
                 </div>
                 <div className="form-element w-full">
@@ -144,6 +148,7 @@ const RegisterPage: React.FC = () => {
                     label={t('modules.sesion.register.form.confirmPasswordLabel')}
                     name="confirmPassword"
                     type="password"
+                    iconTabbable={false}
                   />
                 </div>
                 <div className="form-element w-full">
