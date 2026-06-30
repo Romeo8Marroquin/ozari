@@ -109,6 +109,34 @@
           "networkError": "No pudimos conectar con el servidor. Revisa tu conexión."
         }
       }
+    },
+    "panel": {
+      "brand": "Party Rentals",
+      "nav": {
+        "dashboard": "Inicio",
+        "products": "Productos",
+        "orders": "Pedidos",
+        "customers": "Clientes",
+        "settings": "Ajustes"
+      },
+      "actions": {
+        "openMenu": "Abrir menú",
+        "closeMenu": "Cerrar menú",
+        "collapse": "Colapsar menú",
+        "expand": "Expandir menú",
+        "userMenu": "Menú de usuario",
+        "notifications": "Notificaciones",
+        "navigation": "Navegación principal"
+      },
+      "user": {
+        "name": "Usuario",
+        "role": "Administrador"
+      },
+      "placeholder": {
+        "badge": "En construcción",
+        "title": "{{section}} en camino",
+        "description": "Esta sección estará disponible muy pronto. Estamos diseñando la mejor experiencia para ti."
+      }
     }
   }
 }
