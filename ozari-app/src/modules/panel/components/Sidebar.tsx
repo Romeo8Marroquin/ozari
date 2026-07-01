@@ -28,9 +28,11 @@ interface NavItemProps {
   collapsed: boolean;
   active: boolean;
   onNavigate?: () => void;
+  /** Opt this link out of the router's view transition (see the drawer note in SidebarContent). */
+  disableViewTransition?: boolean;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ item, collapsed, active, onNavigate }) => {
+const NavItem: React.FC<NavItemProps> = ({ item, collapsed, active, onNavigate, disableViewTransition }) => {
   const { t } = useTranslation();
   const label = t(`modules.panel.nav.${item.labelKey}`);
   const Icon = item.icon;
@@ -39,6 +41,7 @@ const NavItem: React.FC<NavItemProps> = ({ item, collapsed, active, onNavigate }
     <Link
       to={item.to}
       onClick={onNavigate}
+      viewTransition={disableViewTransition ? false : undefined}
       // Collapsed: the visible label is clipped away, so name the link explicitly + a hover
       // tooltip. Expanded: the visible text is the accessible name, so neither is needed.
       title={collapsed ? label : undefined}
@@ -92,6 +95,7 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
         <Link
           to="/panel/inicio"
           onClick={onNavigate}
+          viewTransition={variant === 'drawer' ? false : undefined}
           aria-label={t('modules.panel.brand')}
           title={collapsed ? t('modules.panel.brand') : undefined}
           className={`group flex items-center gap-3 rounded-xl ${FOCUS_RING}`}
@@ -136,6 +140,10 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
             collapsed={collapsed}
             active={pathname.startsWith(item.to)}
             onNavigate={onNavigate}
+            // In the mobile drawer, navigating closes the drawer with its own slide-out; a router
+            // view transition would ALSO snapshot the still-open drawer and cross-fade it in place
+            // (a "ghost" duplicate). Opting these links out leaves just the clean slide.
+            disableViewTransition={variant === 'drawer'}
           />
         ))}
       </nav>
