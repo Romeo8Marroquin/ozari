@@ -23,7 +23,7 @@ import {
   clearLoginAttempts,
   recordFailedLogin,
 } from "@middlewares/loginRateLimit.middleware.js";
-import { clearCsrfToken, setCsrfToken } from "@middlewares/csrf.middleware.js";
+import { setCsrfToken } from "@middlewares/csrf.middleware.js";
 import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
@@ -64,7 +64,6 @@ vi.mock("@middlewares/loginRateLimit.middleware.js", () => ({
 
 vi.mock("@middlewares/csrf.middleware.js", () => ({
   setCsrfToken: vi.fn(),
-  clearCsrfToken: vi.fn(),
 }));
 
 vi.mock("@models/http/ozariSuccessModel.js", () => ({
@@ -456,7 +455,6 @@ describe("signOutUser", () => {
       "refresh-token",
       expect.anything(),
     );
-    expect(clearCsrfToken).toHaveBeenCalledWith(res);
     expect(sendOzariSuccess).toHaveBeenCalled();
   });
 

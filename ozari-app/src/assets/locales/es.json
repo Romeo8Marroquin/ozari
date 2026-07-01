@@ -11,6 +11,9 @@
     "generic": "Ocurrió un error inesperado. Inténtalo de nuevo."
   },
   "components": {
+    "modal": {
+      "close": "Cerrar"
+    },
     "pageLoader": {
       "logo": "Logo Party Rentals"
     },
@@ -125,17 +128,34 @@
         "collapse": "Colapsar menú",
         "expand": "Expandir menú",
         "userMenu": "Menú de usuario",
+        "userMenuFor": "Menú de usuario: {{name}}",
         "notifications": "Notificaciones",
         "navigation": "Navegación principal"
       },
       "user": {
-        "name": "Usuario",
-        "role": "Administrador"
+        "fallbackName": "Usuario",
+        "roles": {
+          "Client": "Cliente",
+          "Admin": "Administrador",
+          "Employee": "Empleado",
+          "unknown": "Cuenta"
+        },
+        "menu": {
+          "profile": "Mi perfil",
+          "security": "Seguridad",
+          "signOut": "Cerrar sesión"
+        }
       },
       "placeholder": {
         "badge": "En construcción",
         "title": "{{section}} en camino",
         "description": "Esta sección estará disponible muy pronto. Estamos diseñando la mejor experiencia para ti."
+      },
+      "logout": {
+        "title": "Cerrar sesión",
+        "message": "¿Seguro que deseas cerrar sesión? Tendrás que iniciar sesión de nuevo para volver a entrar.",
+        "confirm": "Cerrar sesión",
+        "cancel": "Cancelar"
       }
     }
   }

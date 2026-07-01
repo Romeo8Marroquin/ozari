@@ -26,6 +26,12 @@ function useLogin() {
       if (bearerToken) {
         const token = bearerToken.split(' ')[1];
         Storage.set(StorageKeys.TOKEN, token);
+
+        // Store the CSRF token issued alongside the session (response header). Needed for
+        // every later state-changing call (refresh, signout, change-password, MFA).
+        const csrfToken = response.headers['x-csrf-token'];
+        if (csrfToken) Storage.set(StorageKeys.CSRF, csrfToken);
+
         queryClient.invalidateQueries({ queryKey: [QueryKeys.ME] });
 
         // Setup proactive token refresh timer

@@ -32,7 +32,7 @@ import {
   clearLoginAttempts,
   recordFailedLogin,
 } from "@middlewares/loginRateLimit.middleware.js";
-import { clearCsrfToken, setCsrfToken } from "@middlewares/csrf.middleware.js";
+import { setCsrfToken } from "@middlewares/csrf.middleware.js";
 import {
   type ChangePasswordRequestModel,
   type CreateUserRequestModel,
@@ -592,9 +592,9 @@ export const signOutUser = async (
       }
     }
 
-    // Logout is idempotent: always clear client credentials and succeed.
+    // Logout is idempotent: always clear client credentials and succeed. The CSRF token
+    // is stateless (no cookie) — the client drops its stored copy on signout.
     res.clearCookie("refresh-token", appConfig.cookieConfig);
-    clearCsrfToken(res);
 
     sendOzariSuccess(
       res,
