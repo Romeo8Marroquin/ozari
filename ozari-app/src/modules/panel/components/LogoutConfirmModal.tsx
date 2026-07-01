@@ -21,10 +21,12 @@ const DANGER = '#dc2626';
  * full-screen block). Errors surface as a toast (via the axios interceptor) and leave the modal
  * open for a retry.
  *
- * On success the exit is choreographed for a smooth hand-off to the login page: the modal dismisses,
- * then (with just a slight overlap) the whole panel plays its coordinated exit — the mirror of its
- * entrance — before we navigate, where the login plays its own mount-in animation. The query cache
- * is cleared only after navigating, so the cached profile stays visible (no placeholder flash).
+ * On success we simply close the modal and leave: closing dismisses the confirmation, and the panel
+ * plays its own coordinated exit (the page's exit + the chrome peeling away) and only navigates when
+ * that's done — so the whole layout animates out and hides, then login plays its own mount-in. It's
+ * the same "exit, then navigate" hand-off a tab change uses, just scoped to the whole chrome. The
+ * query cache is cleared AFTER navigating, so the header keeps showing the user during the exit (no
+ * placeholder flash). `runPanelExit` resolves immediately under reduced motion, so it just leaves.
  */
 const LogoutConfirmModal: React.FC<LogoutConfirmModalProps> = ({ open, onClose }) => {
   const { t } = useTranslation();
@@ -33,22 +35,12 @@ const LogoutConfirmModal: React.FC<LogoutConfirmModalProps> = ({ open, onClose }
   const runPanelExit = usePanelExit();
 
   const handleLoggedOut = () => {
-    const goToLogin = () => {
+    onClose(); // close the confirmation…
+    // …then leave: the panel animates itself out, and navigation happens once it's finished.
+    void runPanelExit().then(() => {
       navigate({ to: '/sesion/inicio' });
       queryClient.clear();
-    };
-
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      goToLogin();
-      return;
-    }
-
-    onClose(); // dismiss the modal first…
-    // …then, almost immediately (a heavy overlap so the whole sign-out stays quick), play the
-    // panel's exit and hand off to login.
-    window.setTimeout(() => {
-      void runPanelExit().then(goToLogin);
-    }, 50);
+    });
   };
 
   const { logout, isPending } = useLogout(handleLoggedOut);

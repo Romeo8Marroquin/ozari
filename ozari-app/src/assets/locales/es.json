@@ -134,6 +134,7 @@
       },
       "user": {
         "fallbackName": "Usuario",
+        "loadError": "No pudimos cargar tu información.",
         "roles": {
           "Client": "Cliente",
           "Admin": "Administrador",
@@ -163,7 +164,11 @@
           "title": "Cuenta",
           "description": "Tu información de perfil en Party Rentals.",
           "role": "Rol",
-          "memberSince": "Miembro desde"
+          "memberSince": "Miembro desde",
+          "error": {
+            "message": "No pudimos cargar tu información.",
+            "retry": "Reintentar"
+          }
         },
         "security": {
           "title": "Seguridad",

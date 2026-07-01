@@ -6,6 +6,7 @@ import {
   HiOutlineArrowRightOnRectangle,
   HiOutlineChevronDown,
   HiOutlineShieldCheck,
+  HiOutlineUser,
   HiOutlineUserCircle,
 } from 'react-icons/hi2';
 import { StorageKeys } from '@constants/StorageKeys';
@@ -23,6 +24,17 @@ const FOCUS_RING =
 // Backend RolesEnum (Client=1, Admin=2, Employee=3). The access token carries the role id, so we
 // can label the pill instantly from the token while `/auth/me` (the name) is still in flight.
 const ROLE_BY_ID: Record<number, MeData['role']> = { 1: 'Client', 2: 'Admin', 3: 'Employee' };
+
+// The on-brand avatar shown when the profile couldn't load: a neutral user glyph (never fabricated
+// initials) on the same gradient, so it reads as an intentional "unknown user", not a broken tile.
+const NeutralAvatar: React.FC<{ sizeClass: string; iconClass: string }> = ({ sizeClass, iconClass }) => (
+  <span
+    aria-hidden
+    className={`grid shrink-0 place-items-center rounded-full bg-gradient-to-br from-cream to-blossom text-charcoal/55 shadow-sm ${sizeClass}`}
+  >
+    <HiOutlineUser className={iconClass} />
+  </span>
+);
 
 interface MenuAction {
   key: string;
@@ -53,7 +65,7 @@ interface MenuAction {
 const UserMenu: React.FC = () => {
   const { t } = useTranslation();
   const panelNavigate = usePanelNavigate();
-  const { data: me, isLoading } = useMe();
+  const { data: me, isLoading, isError } = useMe();
 
   const [open, setOpen] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
@@ -68,6 +80,11 @@ const UserMenu: React.FC = () => {
   // name — "Usuario" would read as real data. The role is the exception: it's known instantly
   // from the token, but we still skeleton it here so the whole identity block resolves at once.
   const loading = isLoading && !me;
+  // A COLD failure (no cached profile): show an honest degraded identity — a neutral avatar + the
+  // real role from the token — never the fabricated "Usuario". Recovery is passive (the shared
+  // `useMe` query auto-retries / refetches on focus) or via the settings page's manual retry, so
+  // the chrome stays uncluttered (no retry button wedged into the menu).
+  const hasError = isError && !me;
 
   const fallbackName = t('modules.panel.user.fallbackName');
   const fullName = me?.fullName ?? '';
@@ -205,7 +222,7 @@ const UserMenu: React.FC = () => {
         aria-controls={menuId}
         aria-busy={loading}
         aria-label={
-          loading
+          loading || hasError
             ? t('modules.panel.actions.userMenu')
             : t('modules.panel.actions.userMenuFor', { name: displayName })
         }
@@ -217,6 +234,14 @@ const UserMenu: React.FC = () => {
             <span className="hidden flex-col items-start gap-1.5 sm:flex">
               <span aria-hidden className={`h-3.5 w-24 ${skeletonBar}`} />
               <span aria-hidden className={`h-2.5 w-16 ${skeletonBar}`} />
+            </span>
+          </>
+        ) : hasError ? (
+          <>
+            <NeutralAvatar sizeClass="size-10" iconClass="size-5" />
+            {/* Only the real role (from the token) — no fabricated name. */}
+            <span className="hidden flex-col items-start leading-tight sm:flex">
+              <span className="text-[15px] font-medium text-charcoal/70">{roleLabel}</span>
             </span>
           </>
         ) : (
@@ -268,6 +293,16 @@ const UserMenu: React.FC = () => {
                     <span aria-hidden className={`h-3.5 w-28 ${skeletonBar}`} />
                     <span aria-hidden className={`h-3 w-36 ${skeletonBar}`} />
                     <span aria-hidden className={`h-2.5 w-16 ${skeletonBar}`} />
+                  </span>
+                </>
+              ) : hasError ? (
+                <>
+                  <NeutralAvatar sizeClass="size-[3.25rem]" iconClass="size-6" />
+                  {/* Honest about what didn't load; still shows the real role. Recovery is passive
+                      (shared query) or via the settings page — no retry control wedged in the menu. */}
+                  <span className="flex min-w-0 flex-col leading-tight">
+                    <span className="text-[13px] text-charcoal/60">{t('modules.panel.user.loadError')}</span>
+                    <span className="mt-1 truncate text-xs font-medium text-magenta">{roleLabel}</span>
                   </span>
                 </>
               ) : (

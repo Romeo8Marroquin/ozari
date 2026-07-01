@@ -33,6 +33,31 @@ const defaultContentOut = (element: HTMLElement): Promise<void> => {
   });
 };
 
+// The header section title rides the SAME two-phase flow as the content body, so it never just
+// "swaps": it slides out to the left as we leave (accelerating, `power2.in`, in step with the
+// content exit), then the new title slides in from the right as we enter (decelerating, `power3.out`,
+// in step with the content entrance). Targeted by class (like the mount timeline) so `PanelLayout`
+// can drive the header without a ref into it.
+const HEADER_TITLE = '.panel-header-title';
+
+const headerTitleOut = (): Promise<void> => {
+  const element = document.querySelector(HEADER_TITLE);
+  if (!element || prefersReducedMotion()) return Promise.resolve();
+  return new Promise((resolve) => {
+    gsap.to(element, { autoAlpha: 0, x: -14, duration: 0.18, ease: 'power2.in', overwrite: 'auto', onComplete: resolve });
+  });
+};
+
+const headerTitleIn = (): void => {
+  const element = document.querySelector(HEADER_TITLE);
+  if (!element) return;
+  if (prefersReducedMotion()) {
+    gsap.set(element, { autoAlpha: 1, x: 0 });
+    return;
+  }
+  gsap.fromTo(element, { autoAlpha: 0, x: 14 }, { autoAlpha: 1, x: 0, duration: 0.42, ease: 'power3.out', overwrite: 'auto' });
+};
+
 const PanelShell: React.FC = () => {
   const container = useRef<HTMLDivElement>(null);
   // The content body (wraps the <Outlet>) — the element the DEFAULT transition animates.
@@ -47,6 +72,10 @@ const PanelShell: React.FC = () => {
   const registerExit = useCallback((exit: PanelExitAnimation | null) => {
     customExit.current = exit;
   }, []);
+
+  // The header title animates IN on navigation but not on the first mount — the chrome mount timeline
+  // already reveals the whole header (title included) then.
+  const firstTitleIn = useRef(true);
 
   // CHROME-only entrance on mount: the sidebar and header settle in from their edges and the nav
   // items stagger in. The content BODY is intentionally NOT animated here — `contentIn` (below) owns
@@ -106,19 +135,26 @@ const PanelShell: React.FC = () => {
         go();
         return;
       }
-      void runContentExit().then(go);
+      // Leaving: the content body and the header title exit together, THEN we navigate — so the
+      // header is in lock-step with the content instead of popping after the swap.
+      void Promise.all([runContentExit(), headerTitleOut()]).then(go);
     },
     [navigate, pathname, runContentExit],
   );
 
-  // The DEFAULT entrance, run every time a panel route commits (including the first) — UNLESS the
-  // page registered a custom transition, in which case it owns its own entrance (run on its mount)
-  // and we stay out of the way. The child's registration effect runs before this parent effect, so
-  // `customExit.current` is already set for the incoming page here.
+  // Entering, run every time a panel route commits: the incoming header title slides in (in step
+  // with the content entrance), and the default body-in runs UNLESS the page owns its own entrance
+  // (custom transition). The child's registration effect runs before this parent effect, so
+  // `customExit.current` is already set for the incoming page here. The header title-in is skipped on
+  // the very first mount (the chrome mount timeline reveals it then).
   useLayoutEffect(() => {
     if (!screen.current || !pathname.startsWith('/panel')) return;
-    if (customExit.current) return;
-    defaultContentIn(screen.current);
+    if (!customExit.current) defaultContentIn(screen.current);
+    if (firstTitleIn.current) {
+      firstTitleIn.current = false;
+      return;
+    }
+    headerTitleIn();
   }, [pathname]);
 
   return (

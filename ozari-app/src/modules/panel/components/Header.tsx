@@ -33,7 +33,7 @@ const Header: React.FC = () => {
             <HiOutlineBars3 aria-hidden className="size-6" />
           </button>
         )}
-        <h1 className="truncate text-lg font-semibold text-charcoal">{title}</h1>
+        <h1 className="panel-header-title truncate text-lg font-semibold text-charcoal">{title}</h1>
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-2">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineChevronLeft, HiOutlineXMark } from 'react-icons/hi2';
@@ -33,6 +33,9 @@ interface NavItemProps {
   item: PanelNavItem;
   collapsed: boolean;
   active: boolean;
+  /** This item is the one being LEFT during a tab change — its tint fades out now (in step with the
+   *  content exit), while the destination's fades in at the swap. Keeps the tint in the flow. */
+  leaving?: boolean;
   onNavigate?: () => void;
   /** Glide the active pill to this item now (before the route commits), for a simultaneous start. */
   onActivate?: (target: HTMLElement) => void;
@@ -44,6 +47,7 @@ const NavItem: React.FC<NavItemProps> = ({
   item,
   collapsed,
   active,
+  leaving,
   onNavigate,
   onActivate,
   disableViewTransition,
@@ -77,20 +81,31 @@ const NavItem: React.FC<NavItemProps> = ({
       aria-label={collapsed ? label : undefined}
       aria-current={active ? 'page' : undefined}
       // The active PILL is a single shared element that glides between items (see SidebarContent);
-      // this marks the target it measures. The soft active background stays per-item, below.
+      // this marks the target it measures.
       data-active={active ? 'true' : undefined}
       className={`panel-nav-item group relative flex h-11 items-center rounded-xl px-3.5 transition-colors ${FOCUS_RING} ${
-        active ? 'bg-magenta/[0.08]' : 'hover:bg-charcoal/[0.04]'
+        active ? '' : 'hover:bg-charcoal/[0.04]'
       }`}
     >
+      {/* The soft active tint is its OWN layer so it can cross-fade on its own (opacity) timing —
+          gently in on the new item, out on the old — instead of popping. It's decoupled from the
+          link's `transition-colors` so hover/text stay snappy while this settles softly. Marking the
+          departing item `leaving` drops it here (at click) so it fades out with the content exit,
+          while the destination lights up at the route swap with the content entrance. */}
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute inset-0 rounded-xl bg-magenta/[0.08] transition-opacity duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
+          active && !leaving ? 'opacity-100' : 'opacity-0'
+        }`}
+      />
       <Icon
         aria-hidden
-        className={`size-5 shrink-0 transition-colors ${
+        className={`relative size-5 shrink-0 transition-colors ${
           active ? 'text-magenta' : 'text-charcoal/55 group-hover:text-charcoal/80'
         }`}
       />
       <span
-        className={`${labelTransition} text-sm font-medium ${
+        className={`${labelTransition} relative text-sm font-medium ${
           active ? 'text-charcoal' : 'text-charcoal/70 group-hover:text-charcoal/90'
         } ${collapsed ? 'ml-0 max-w-0 opacity-0' : 'ml-3 max-w-[160px] opacity-100'}`}
       >
@@ -121,6 +136,17 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
   const pillRef = useRef<HTMLSpanElement>(null);
   const firstRun = useRef(true);
   const pillVisible = useRef(false);
+  // The tab being LEFT during a click-driven change (set on click), so its tint fades out with the
+  // content exit; the destination lights up at the swap. Reset the moment the route commits — the
+  // React "adjust state when a value changes during render" pattern (not an effect), so returning to
+  // that tab later (even via browser back) correctly lights it up again.
+  const [leavingKey, setLeavingKey] = useState<string | null>(null);
+  const [lastPath, setLastPath] = useState(pathname);
+  if (pathname !== lastPath) {
+    setLastPath(pathname);
+    setLeavingKey(null);
+  }
+  const currentActiveKey = () => PANEL_NAV.find((navItem) => pathname.startsWith(navItem.to))?.to ?? null;
 
   // Position the single active pill over the active item, measuring its LAYOUT position (offset*,
   // so it's scroll-, transform-, and viewport-proof — correct on any size and after a rotation).
@@ -185,7 +211,10 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
             if (!isPlainClick(event)) return;
             event.preventDefault();
             onNavigate?.();
-            if (pathname !== HOME) panelNavigate(HOME);
+            if (pathname !== HOME) {
+              setLeavingKey(currentActiveKey());
+              panelNavigate(HOME);
+            }
           }}
           // Same reason as the nav items: no view transition, so the active pill glides for real.
           viewTransition={false}
@@ -245,8 +274,13 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
             item={item}
             collapsed={collapsed}
             active={pathname.startsWith(item.to)}
+            leaving={item.to === leavingKey}
             onNavigate={onNavigate}
-            onActivate={(target) => positionPill(true, target)}
+            onActivate={(target) => {
+              positionPill(true, target);
+              // Mark the tab we're leaving so its tint fades out now (with the content exit).
+              setLeavingKey(currentActiveKey());
+            }}
             // Opt every nav link out of the router's view transition. Two reasons: (1) in the mobile
             // drawer it would snapshot the still-open drawer and cross-fade a "ghost" duplicate; and
             // (2) on any variant it would cross-fade old/new page snapshots OVER the live DOM, hiding
