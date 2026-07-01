@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { Link, useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineChevronLeft, HiOutlineXMark } from 'react-icons/hi2';
@@ -47,16 +47,13 @@ const NavItem: React.FC<NavItemProps> = ({ item, collapsed, active, onNavigate, 
       title={collapsed ? label : undefined}
       aria-label={collapsed ? label : undefined}
       aria-current={active ? 'page' : undefined}
+      // The active PILL is a single shared element that glides between items (see SidebarContent);
+      // this marks the target it measures. The soft active background stays per-item, below.
+      data-active={active ? 'true' : undefined}
       className={`panel-nav-item group relative flex h-11 items-center rounded-xl px-3.5 transition-colors ${FOCUS_RING} ${
         active ? 'bg-magenta/[0.08]' : 'hover:bg-charcoal/[0.04]'
       }`}
     >
-      <span
-        aria-hidden
-        className={`absolute left-1 top-1/2 h-5 w-1 -translate-y-1/2 rounded-full bg-magenta transition-all duration-300 motion-reduce:transition-none ${
-          active ? 'scale-y-100 opacity-100' : 'scale-y-0 opacity-0'
-        }`}
-      />
       <Icon
         aria-hidden
         className={`size-5 shrink-0 transition-colors ${
@@ -81,9 +78,65 @@ interface SidebarContentProps {
   onNavigate?: () => void;
 }
 
+// Active pill geometry: h-5 (20px) tall, inset 4px from the item's left edge (the old `left-1`).
+const PILL_HEIGHT = 20;
+const PILL_INSET = 4;
+
 const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onClose, onNavigate }) => {
   const { t } = useTranslation();
   const pathname = useLocation({ select: (location) => location.pathname });
+
+  const navRef = useRef<HTMLElement>(null);
+  const pillRef = useRef<HTMLSpanElement>(null);
+  const firstRun = useRef(true);
+  const pillVisible = useRef(false);
+
+  // Position the single active pill over the active item, measuring its LAYOUT position (offset*,
+  // so it's scroll-, transform-, and viewport-proof — correct on any size and after a rotation).
+  // `animate` glides (the bounce); otherwise it snaps in place (first paint, re-appearing from a
+  // no-active route, and on resize/rotate). Same code serves the expanded rail, collapsed rail, and
+  // drawer, since all three are one vertical list.
+  const positionPill = useCallback((animate: boolean) => {
+    const nav = navRef.current;
+    const pill = pillRef.current;
+    if (!pill) return;
+
+    const active = nav?.querySelector<HTMLElement>('[data-active="true"]');
+    if (!nav || !active) {
+      pill.style.opacity = '0';
+      pillVisible.current = false;
+      return;
+    }
+
+    const x = active.offsetLeft + PILL_INSET;
+    const y = active.offsetTop + active.offsetHeight / 2 - PILL_HEIGHT / 2;
+    const transform = `translate(${x}px, ${y}px)`;
+
+    if (animate) {
+      pill.style.transform = transform; // glide (translate animates with the bounce)
+      pill.style.opacity = '1';
+    } else {
+      pill.style.transition = 'none';
+      pill.style.transform = transform;
+      void pill.offsetHeight; // flush the snap before restoring the class transition
+      pill.style.transition = '';
+      pill.style.opacity = '1';
+    }
+    pillVisible.current = true;
+  }, []);
+
+  // Glide only for a genuine tab→tab change (already visible); snap otherwise.
+  useLayoutEffect(() => {
+    positionPill(!firstRun.current && pillVisible.current);
+    firstRun.current = false;
+  }, [pathname, collapsed, positionPill]);
+
+  // Re-anchor (no animation) on resize / orientation change, so it stays perfectly placed.
+  useEffect(() => {
+    const onResize = () => positionPill(false);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [positionPill]);
 
   return (
     <div className="flex h-full flex-col">
@@ -95,7 +148,8 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
         <Link
           to="/panel/inicio"
           onClick={onNavigate}
-          viewTransition={variant === 'drawer' ? false : undefined}
+          // Same reason as the nav items: no view transition, so the active pill glides for real.
+          viewTransition={false}
           aria-label={t('modules.panel.brand')}
           title={collapsed ? t('modules.panel.brand') : undefined}
           className={`group flex items-center gap-3 rounded-xl ${FOCUS_RING}`}
@@ -125,14 +179,27 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
           starts at the header's baseline. The brand area above stays borderless and reads as one
           continuous chrome with the header. */}
       <nav
+        ref={navRef}
         aria-label={t('modules.panel.actions.navigation')}
-        // `overscroll-contain` stops a scroll that reaches the nav's end from chaining to the page
-        // behind it (matters most for the mobile drawer); `panel-scroll` gives a consistent thin
-        // scrollbar across browsers instead of each OS's native bar.
-        className={`panel-scroll flex flex-1 flex-col gap-1 overflow-y-auto overscroll-contain px-3 py-3 ${
+        // `relative` is the positioning context for the shared active pill (below). `overscroll-contain`
+        // stops a scroll that reaches the nav's end from chaining to the page behind it (matters most
+        // for the mobile drawer); `panel-scroll` gives a consistent thin scrollbar across browsers.
+        className={`panel-scroll relative flex flex-1 flex-col gap-1 overflow-y-auto overscroll-contain px-3 py-3 ${
           variant === 'inline' ? 'border-r border-charcoal/[0.07]' : ''
         }`}
       >
+        {/* The single active indicator. Positioned imperatively (see the layout effect above); it
+            sits on top of the items' soft background. The bounce lives only here — a small overshoot
+            ease so the pill "arrives" with a little life. Kept modest so even the first→last jump
+            doesn't over-swing. Reduced-motion snaps. */}
+        <span
+          ref={pillRef}
+          aria-hidden
+          style={{ willChange: 'transform' }}
+          // ease-in-out shape (smooth slow start → quicker middle → smooth settle) with a small
+          // `>1` end control for a gentle overshoot — a little bounce, less than before. 250ms.
+          className="pointer-events-none absolute left-0 top-0 z-10 h-5 w-1 rounded-full bg-magenta opacity-0 transition-[transform,opacity] duration-[250ms] ease-[cubic-bezier(0.42,0,0.5,1.17)] motion-reduce:transition-none"
+        />
         {PANEL_NAV.map((item) => (
           <NavItem
             key={item.to}
@@ -140,10 +207,12 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
             collapsed={collapsed}
             active={pathname.startsWith(item.to)}
             onNavigate={onNavigate}
-            // In the mobile drawer, navigating closes the drawer with its own slide-out; a router
-            // view transition would ALSO snapshot the still-open drawer and cross-fade it in place
-            // (a "ghost" duplicate). Opting these links out leaves just the clean slide.
-            disableViewTransition={variant === 'drawer'}
+            // Opt every nav link out of the router's view transition. Two reasons: (1) in the mobile
+            // drawer it would snapshot the still-open drawer and cross-fade a "ghost" duplicate; and
+            // (2) on any variant it would cross-fade old/new page snapshots OVER the live DOM, hiding
+            // the active pill's real translation (you'd see a fade between positions, not a glide).
+            // Without it, the pill's own CSS transform transition animates cleanly.
+            disableViewTransition
           />
         ))}
       </nav>
