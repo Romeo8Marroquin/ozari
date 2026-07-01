@@ -57,23 +57,20 @@ export const api = axios.create({
 
 const csrfSafeMethods = new Set(['get', 'head', 'options']);
 
-function getCookie(name: string): string | null {
-  const value = document.cookie
-    .split('; ')
-    .find((cookie) => cookie.startsWith(`${name}=`))
-    ?.split('=')[1];
-
-  return value ? decodeURIComponent(value) : null;
-}
-
 api.interceptors.request.use((config) => {
   if (config.deviceUuid) {
     const deviceUuid = getOrCreateDeviceUuid();
     config.headers['device-uuid'] = deviceUuid;
   }
 
+  // CSRF: echo the token the API handed us (login/refresh response header) back in the
+  // request header on state-changing calls. It's read from storage — not a cookie —
+  // because the FE and API are on different domains in deployed envs, where a cookie set
+  // by the API can't be read by the FE's JS. See csrf.middleware.ts on the backend.
   const method = config.method?.toLowerCase() ?? 'get';
-  const csrfToken = csrfSafeMethods.has(method) ? null : getCookie('csrf-token');
+  const csrfToken = csrfSafeMethods.has(method)
+    ? null
+    : Storage.get<string>(StorageKeys.CSRF);
   if (csrfToken) config.headers['x-csrf-token'] = csrfToken;
 
   if (config.public) {

@@ -9,6 +9,22 @@ let isRefreshing = false;
 let refreshSubscribers: Array<(token: string) => void> = [];
 
 /**
+ * Tears down all client-side auth state. Called both when a refresh fails and on an explicit
+ * sign-out, so "you are no longer logged in" is cleaned up in exactly one place.
+ *
+ * NOTE: intentionally does NOT redirect or clear the React Query cache — those are the caller's
+ * concern (a refresh failure uses a hard `location.replace`; sign-out navigates via the router
+ * and clears the query cache). Keep global-store resets here as they come online.
+ */
+export function clearAuthState(): void {
+  Storage.remove(StorageKeys.TOKEN);
+  Storage.remove(StorageKeys.CSRF);
+  clearRefreshTimer();
+
+  // 🔴 TODO: reset Zustand stores here when implemented (authStore/userStore .reset()).
+}
+
+/**
  * Subscribe to token refresh completion
  * Used by failed requests to retry after refresh
  */
@@ -63,6 +79,10 @@ export async function refreshAccessToken(redirectOnFailure = true): Promise<stri
     // Store new token
     Storage.set(StorageKeys.TOKEN, newToken);
 
+    // The refresh response rotates the CSRF token too — keep our stored copy current.
+    const csrfToken = response.headers['x-csrf-token'];
+    if (csrfToken) Storage.set(StorageKeys.CSRF, csrfToken);
+
     // Notify all waiting requests
     notifyRefreshSubscribers(newToken);
 
@@ -73,29 +93,8 @@ export async function refreshAccessToken(redirectOnFailure = true): Promise<stri
   } catch (error) {
     console.error('Failed to refresh token:', error);
 
-    // ============================================================================
-    // 🚨 STATE CLEANUP ON AUTH FAILURE - ADD YOUR STATE MANAGEMENT HERE 🚨
-    // ============================================================================
-    // When refresh fails, we need to clear ALL application state before redirecting
-    // This ensures no stale data remains after logout
-
-    // Clear stored token
-    Storage.remove(StorageKeys.TOKEN);
-
-    // Clear refresh timer
-    clearRefreshTimer();
-
-    // 🔴 TODO: Add Zustand store resets here when implemented
-    // Example: authStore.getState().reset();
-    // Example: userStore.getState().clear();
-
-    // 🔴 TODO: Add any other global state resets here
-    // - Context API resets
-    // - Custom state managers
-    // - LocalStorage cleanup (except essentials)
-    // - SessionStorage cleanup
-
-    // ============================================================================
+    // Clear ALL client-side auth state before redirecting so no stale data survives.
+    clearAuthState();
 
     if (redirectOnFailure) {
       window.location.replace('/sesion/inicio');

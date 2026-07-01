@@ -3,10 +3,13 @@ import type { Request, Response, NextFunction } from "express";
 import {
   generateCsrfToken,
   setCsrfToken,
-  clearCsrfToken,
   verifyCsrfToken,
 } from "./csrf.middleware.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
+
+// The CSRF token is HMAC-signed with a key derived from JWT_SECRET; it must be set for
+// generate/verify to work.
+process.env["JWT_SECRET"] = "test-jwt-secret-for-csrf-0123456789-abcdef";
 
 vi.mock("@/config/logger.js", () => ({
   logger: {
@@ -31,12 +34,10 @@ describe("CSRF Middleware", () => {
     mockReq = {
       method: "POST",
       originalUrl: "/api/test",
-      cookies: {},
       headers: {},
     };
     mockRes = {
-      cookie: vi.fn().mockReturnThis(),
-      clearCookie: vi.fn().mockReturnThis(),
+      header: vi.fn().mockReturnThis(),
       status: vi.fn().mockReturnThis(),
       json: vi.fn().mockReturnThis(),
     };
@@ -45,92 +46,62 @@ describe("CSRF Middleware", () => {
   });
 
   describe("generateCsrfToken", () => {
-    it("should generate a valid token", () => {
+    it("should generate a signed token in <nonce>.<hmac> form", () => {
       const token = generateCsrfToken();
-      expect(token).toBeDefined();
       expect(typeof token).toBe("string");
-      expect(token.length).toBe(64); // 32 bytes = 64 hex characters
+      const [nonce, signature, extra] = token.split(".");
+      expect(extra).toBeUndefined();
+      expect(nonce).toHaveLength(64); // 32-byte nonce as hex
+      expect(signature).toHaveLength(64); // HMAC-SHA256 as hex
     });
 
     it("should generate unique tokens", () => {
-      const token1 = generateCsrfToken();
-      const token2 = generateCsrfToken();
-      expect(token1).not.toBe(token2);
+      expect(generateCsrfToken()).not.toBe(generateCsrfToken());
     });
   });
 
   describe("setCsrfToken", () => {
-    it("should set CSRF token cookie", () => {
+    it("should issue the token in the x-csrf-token response header", () => {
       const token = setCsrfToken(mockRes as Response);
 
       expect(token).toBeDefined();
-      expect(mockRes.cookie).toHaveBeenCalledWith(
-        "csrf-token",
-        token,
-        expect.objectContaining({
-          httpOnly: false,
-          sameSite: "lax",
-          secure: false,
-          path: "/api",
-        }),
-      );
+      expect(mockRes.header).toHaveBeenCalledWith("x-csrf-token", token);
     });
 
-    it("should return the generated token", () => {
+    it("should return a token that subsequently verifies", () => {
       const token = setCsrfToken(mockRes as Response);
-      expect(token.length).toBe(64);
-    });
-  });
+      mockReq.method = "POST";
+      mockReq.headers = { "x-csrf-token": token };
 
-  describe("clearCsrfToken", () => {
-    it("should clear CSRF token cookie", () => {
-      clearCsrfToken(mockRes as Response);
+      verifyCsrfToken(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
 
-      expect(mockRes.clearCookie).toHaveBeenCalledWith("csrf-token", {
-        path: "/api",
-      });
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockRes.status).not.toHaveBeenCalled();
     });
   });
 
   describe("verifyCsrfToken", () => {
-    it("should allow safe methods without CSRF token", () => {
-      mockReq.method = "GET";
+    it.each(["GET", "HEAD", "OPTIONS"])(
+      "should allow safe method %s without a token",
+      (method) => {
+        mockReq.method = method;
 
-      verifyCsrfToken(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
+        verifyCsrfToken(
+          mockReq as Request,
+          mockRes as Response,
+          mockNext as NextFunction,
+        );
 
-      expect(mockNext).toHaveBeenCalled();
-      expect(mockRes.status).not.toHaveBeenCalled();
-    });
+        expect(mockNext).toHaveBeenCalled();
+        expect(mockRes.status).not.toHaveBeenCalled();
+      },
+    );
 
-    it("should allow HEAD method without CSRF token", () => {
-      mockReq.method = "HEAD";
-
-      verifyCsrfToken(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
-
-      expect(mockNext).toHaveBeenCalled();
-    });
-
-    it("should allow OPTIONS method without CSRF token", () => {
-      mockReq.method = "OPTIONS";
-
-      verifyCsrfToken(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
-
-      expect(mockNext).toHaveBeenCalled();
-    });
-
-    it("should reject POST without CSRF token", () => {
+    it("should reject POST without a token", () => {
       mockReq.method = "POST";
 
       verifyCsrfToken(
@@ -143,9 +114,9 @@ describe("CSRF Middleware", () => {
       expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.FORBIDDEN);
     });
 
-    it("should reject POST with only cookie token", () => {
+    it("should reject a token with no signature separator", () => {
       mockReq.method = "POST";
-      mockReq.cookies = { "csrf-token": "test-token" };
+      mockReq.headers = { "x-csrf-token": "no-separator-here" };
 
       verifyCsrfToken(
         mockReq as Request,
@@ -157,9 +128,10 @@ describe("CSRF Middleware", () => {
       expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.FORBIDDEN);
     });
 
-    it("should reject POST with only header token", () => {
+    it("should reject a token with a tampered signature", () => {
+      const [nonce] = generateCsrfToken().split(".");
       mockReq.method = "POST";
-      mockReq.headers = { "x-csrf-token": "test-token" };
+      mockReq.headers = { "x-csrf-token": `${nonce}.${"0".repeat(64)}` };
 
       verifyCsrfToken(
         mockReq as Request,
@@ -171,10 +143,13 @@ describe("CSRF Middleware", () => {
       expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.FORBIDDEN);
     });
 
-    it("should reject POST with mismatched tokens", () => {
+    it("should reject a token whose nonce was swapped (signature no longer matches)", () => {
+      const tokenA = generateCsrfToken();
+      const tokenB = generateCsrfToken();
+      const nonceA = tokenA.split(".")[0];
+      const sigB = tokenB.split(".")[1];
       mockReq.method = "POST";
-      mockReq.cookies = { "csrf-token": "token1" };
-      mockReq.headers = { "x-csrf-token": "token2" };
+      mockReq.headers = { "x-csrf-token": `${nonceA}.${sigB}` };
 
       verifyCsrfToken(
         mockReq as Request,
@@ -186,80 +161,22 @@ describe("CSRF Middleware", () => {
       expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.FORBIDDEN);
     });
 
-    it("should accept POST with matching tokens", () => {
-      const token = "valid-csrf-token-hex-string";
-      mockReq.method = "POST";
-      mockReq.cookies = { "csrf-token": token };
-      mockReq.headers = { "x-csrf-token": token };
+    it.each(["POST", "PUT", "DELETE", "PATCH"])(
+      "should accept %s with a valid signed token",
+      (method) => {
+        const token = generateCsrfToken();
+        mockReq.method = method;
+        mockReq.headers = { "x-csrf-token": token };
 
-      verifyCsrfToken(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
+        verifyCsrfToken(
+          mockReq as Request,
+          mockRes as Response,
+          mockNext as NextFunction,
+        );
 
-      expect(mockNext).toHaveBeenCalled();
-      expect(mockRes.status).not.toHaveBeenCalled();
-    });
-
-    it("should accept PUT with matching tokens", () => {
-      const token = "valid-csrf-token";
-      mockReq.method = "PUT";
-      mockReq.cookies = { "csrf-token": token };
-      mockReq.headers = { "x-csrf-token": token };
-
-      verifyCsrfToken(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
-
-      expect(mockNext).toHaveBeenCalled();
-    });
-
-    it("should accept DELETE with matching tokens", () => {
-      const token = "valid-csrf-token";
-      mockReq.method = "DELETE";
-      mockReq.cookies = { "csrf-token": token };
-      mockReq.headers = { "x-csrf-token": token };
-
-      verifyCsrfToken(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
-
-      expect(mockNext).toHaveBeenCalled();
-    });
-
-    it("should accept PATCH with matching tokens", () => {
-      const token = "valid-csrf-token";
-      mockReq.method = "PATCH";
-      mockReq.cookies = { "csrf-token": token };
-      mockReq.headers = { "x-csrf-token": token };
-
-      verifyCsrfToken(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
-
-      expect(mockNext).toHaveBeenCalled();
-    });
-
-    it("should reject tokens with different lengths", () => {
-      mockReq.method = "POST";
-      mockReq.cookies = { "csrf-token": "short" };
-      mockReq.headers = { "x-csrf-token": "much-longer-token" };
-
-      verifyCsrfToken(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
-
-      expect(mockNext).not.toHaveBeenCalled();
-      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.FORBIDDEN);
-    });
+        expect(mockNext).toHaveBeenCalled();
+        expect(mockRes.status).not.toHaveBeenCalled();
+      },
+    );
   });
 });

@@ -34,7 +34,7 @@ const NotificationHost: React.FC = () => {
 
   return createPortal(
     <div
-      className={`pointer-events-none fixed inset-x-0 top-0 z-[1000] flex p-4 sm:p-6 ${
+      className={`pointer-events-none fixed inset-x-0 top-0 z-[var(--z-notification)] flex p-4 sm:p-6 ${
         isDesktop ? 'justify-end' : 'justify-center'
       }`}
     >

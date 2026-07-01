@@ -28,6 +28,58 @@
   --color-customWhite: #f8f5f8;
 
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  /* A soft, decelerating settle (ease-out-quint-ish) for reveals — popovers/menus feel like
+     they ease into place rather than stop abruptly. Use as `ease-[var(--ease-settle)]`. */
+  --ease-settle: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Corner-radius language — the single standard for the whole app. Three surface tiers plus
+     `rounded-full` for pills/avatars. New UI should reach for these semantic names
+     (`rounded-card`, `rounded-control`, `rounded-chip`) instead of raw `rounded-2xl/xl/lg`, so
+     the roundness reads by intent and can be retuned in one place.
+       card    (16px) — cards, menus, dialogs, large surfaces (matches the auth cards)
+       control (12px) — buttons, inputs, list/menu items, icon buttons
+       chip     (8px) — small chips, tags, dense affordances */
+  --radius-card: 1rem;
+  --radius-control: 0.75rem;
+  --radius-chip: 0.5rem;
+
+  /* Panel chrome dimensions — the single source of truth for the dashboard frame. These feed
+     the `--spacing-*` namespace, so they're usable as `w-sidebar`, `w-sidebar-collapsed`,
+     `w-sidebar-drawer`, `h-header`, and inside `calc()` arbitrary values. Retune here, in one
+     place, instead of hunting magic numbers across Sidebar/Header.
+     NOTE: the collapsed rail is 72px on purpose — the nav icons are centered on it by a fixed
+     36px offset (see Sidebar.tsx). Keep them in sync if you change it. */
+  --spacing-sidebar: 16rem; /* 256px — expanded inline sidebar */
+  --spacing-sidebar-collapsed: 4.5rem; /* 72px — icons-only rail */
+  --spacing-sidebar-drawer: 270px; /* mobile overlay drawer (a touch wider for touch targets) */
+  --spacing-header: 4rem; /* 64px — top bar height; the sidebar brand block matches it */
+  --spacing-panel-content: 1536px; /* max readable content width on ultrawide displays */
+}
+
+/* ── Stacking order (the single source of truth for z-index across the app) ──────────────
+   Read top-to-bottom = back-to-front. Two bands:
+
+   1) STRUCTURE — the panel chrome in normal flow. Order: content (base) < header < sidebar.
+   2) FLOATING — anything that pops out of flow, ranked by which chrome it belongs to. A body
+      float sits above the structural chrome; a header float (the user menu) sits above body
+      floats; a sidebar float (the mobile drawer) sits above header floats. So opening the
+      header menu and then the hamburger correctly paints the drawer OVER the menu.
+   3) APP OVERLAYS — modals, then notifications on the very top.
+
+   Floating elements should be PORTALED to <body> so they escape their origin's stacking
+   context; only then does this scale actually decide who wins. Gaps left between values on
+   purpose so intermediate layers can slot in later without a renumber. Keep this the one
+   place these numbers live — reference them as `z-[var(--z-*)]`, never a bare `z-40`. */
+:root {
+  --z-header: 20;
+  --z-sidebar: 30;
+
+  --z-float-body: 100;
+  --z-float-header: 200;
+  --z-float-sidebar: 300;
+
+  --z-modal: 1000;
+  --z-notification: 2000;
 }
 
 input[type='password'] {
@@ -73,4 +125,28 @@ body {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+/* Cross-browser thin, on-brand scrollbar for the panel nav (and any panel scroll area). Firefox
+   uses the standard `scrollbar-width`/`scrollbar-color` properties; WebKit & Blink (Safari, Chrome,
+   Edge) use the `::-webkit-scrollbar` pseudo-elements. Declaring both means the sidebar scroll looks
+   the same everywhere instead of falling back to each OS's chunky native bar. The thumb is a low-
+   opacity charcoal so it reads as a hint, not a hard edge. */
+.panel-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(38, 38, 38, 0.22) transparent;
+}
+.panel-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.panel-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.panel-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(38, 38, 38, 0.22);
+  border-radius: 9999px;
+}
+.panel-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(38, 38, 38, 0.38);
 }

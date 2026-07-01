@@ -118,7 +118,9 @@ function configureMiddlewares(app: Express): void {
         callback(corsError);
       },
       credentials: true,
-      exposedHeaders: ["Authorization"],
+      // `Authorization` carries the access token; `x-csrf-token` carries the CSRF token.
+      // Both must be exposed so the browser FE can read them from cross-origin responses.
+      exposedHeaders: ["Authorization", "x-csrf-token"],
     }),
   );
 

@@ -1,5 +1,5 @@
 import logo from '@assets/svgs/logo.svg';
-import React, { useEffect, useMemo, useRef, type MouseEvent } from 'react';
+import React, { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { FaUserAlt } from 'react-icons/fa';
 import CustomInputForm from '@components/CustomInputForm';
 import { FormProvider, useForm } from 'react-hook-form';
@@ -31,6 +31,14 @@ const LoginPage: React.FC = () => {
   });
   const { reset, handleSubmit, trigger, getValues, setValue } = methods;
   const { login, isPending } = useLogin();
+  // Latched once a real session exists and we begin animating to the panel. The form is
+  // cleared at that point (so it's invalid), which on register disables the button via
+  // `formState.isValid`. Login can't gate the button by validity (mobile/iOS autofill
+  // leaves `isValid` stale-false and would swallow the tap — see `submitForm`), so this
+  // flag stands in for "form cleared, redirecting" and disables the button explicitly.
+  // It's a DISABLE, not a loader: the spinner reflects only the in-flight backend call.
+  // Never reset — the component unmounts on the redirect.
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const autoFocusFirst = useDesktopAutoFocus();
   const formRef = useRef<HTMLFormElement>(null);
   // Synchronous in-flight lock: blocks a second submit fired in the same frame, before
@@ -104,6 +112,7 @@ const LoginPage: React.FC = () => {
         }
         // Only proceed once a session actually exists (access token in the header).
         if (response.headers['authorization']) {
+          setIsRedirecting(true);
           reset();
           redirectAfterSuccess(search.redirect ?? '/panel/productos');
           return;
@@ -232,6 +241,7 @@ const LoginPage: React.FC = () => {
                     type="submit"
                     fullWidth
                     loading={isPending}
+                    disabled={isRedirecting}
                     onPointerDown={handleSubmitPointerDown}
                   >
                     {t('modules.sesion.login.form.submitButton')}
