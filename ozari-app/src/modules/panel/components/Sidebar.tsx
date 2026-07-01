@@ -2,9 +2,15 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { Link, useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineChevronLeft, HiOutlineXMark } from 'react-icons/hi2';
-import { PANEL_NAV, type PanelNavItem } from '../navConfig';
+import { PANEL_NAV, type PanelNavItem, type PanelPath } from '../navConfig';
 import { usePanelChrome } from '../hooks/usePanelChrome';
+import { usePanelNavigate } from '../PanelNavContext';
 import BrandMark from './BrandMark';
+
+// A plain primary click (no modifier keys, main button) is the one we intercept for the body
+// transition; a modified/middle click (open-in-new-tab, etc.) is left to the browser + <Link>.
+const isPlainClick = (event: React.MouseEvent): boolean =>
+  event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 
 // Shared motion for the chrome (collapse rail + drawer): a slower, symmetric ease-in-out so it
 // glides in and out instead of snapping at the start. Reused everywhere so the whole panel moves
@@ -28,19 +34,42 @@ interface NavItemProps {
   collapsed: boolean;
   active: boolean;
   onNavigate?: () => void;
+  /** Glide the active pill to this item now (before the route commits), for a simultaneous start. */
+  onActivate?: (target: HTMLElement) => void;
   /** Opt this link out of the router's view transition (see the drawer note in SidebarContent). */
   disableViewTransition?: boolean;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ item, collapsed, active, onNavigate, disableViewTransition }) => {
+const NavItem: React.FC<NavItemProps> = ({
+  item,
+  collapsed,
+  active,
+  onNavigate,
+  onActivate,
+  disableViewTransition,
+}) => {
   const { t } = useTranslation();
+  const panelNavigate = usePanelNavigate();
   const label = t(`modules.panel.nav.${item.labelKey}`);
   const Icon = item.icon;
+
+  // Drive navigation through the panel's body transition instead of <Link>'s instant swap. The
+  // active tab is a no-op (still closes the mobile drawer); modified clicks fall through to <Link>.
+  // On a real move, glide the pill immediately so it travels with the body fade — not after it.
+  const onClick = (event: React.MouseEvent<HTMLElement>) => {
+    if (!isPlainClick(event)) return;
+    event.preventDefault();
+    onNavigate?.();
+    if (!active) {
+      onActivate?.(event.currentTarget);
+      panelNavigate(item.to);
+    }
+  };
 
   return (
     <Link
       to={item.to}
-      onClick={onNavigate}
+      onClick={onClick}
       viewTransition={disableViewTransition ? false : undefined}
       // Collapsed: the visible label is clipped away, so name the link explicitly + a hover
       // tooltip. Expanded: the visible text is the accessible name, so neither is needed.
@@ -84,7 +113,9 @@ const PILL_INSET = 4;
 
 const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onClose, onNavigate }) => {
   const { t } = useTranslation();
+  const panelNavigate = usePanelNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
+  const HOME: PanelPath = '/panel/inicio';
 
   const navRef = useRef<HTMLElement>(null);
   const pillRef = useRef<HTMLSpanElement>(null);
@@ -95,13 +126,16 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
   // so it's scroll-, transform-, and viewport-proof — correct on any size and after a rotation).
   // `animate` glides (the bounce); otherwise it snaps in place (first paint, re-appearing from a
   // no-active route, and on resize/rotate). Same code serves the expanded rail, collapsed rail, and
-  // drawer, since all three are one vertical list.
-  const positionPill = useCallback((animate: boolean) => {
+  // drawer, since all three are one vertical list. An explicit `target` lets a click glide the pill
+  // to the just-clicked item immediately — before the route (and thus `data-active`) has changed —
+  // so the pill and the body transition start together; the route commit then re-runs to the same
+  // spot (a no-op glide).
+  const positionPill = useCallback((animate: boolean, target?: HTMLElement) => {
     const nav = navRef.current;
     const pill = pillRef.current;
     if (!pill) return;
 
-    const active = nav?.querySelector<HTMLElement>('[data-active="true"]');
+    const active = target ?? nav?.querySelector<HTMLElement>('[data-active="true"]');
     if (!nav || !active) {
       pill.style.opacity = '0';
       pillVisible.current = false;
@@ -146,8 +180,13 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
           (just clipped to 0 width) so the link keeps its name in the icon-only rail too. */}
       <div className="flex h-[var(--spacing-header)] shrink-0 items-center px-3.5">
         <Link
-          to="/panel/inicio"
-          onClick={onNavigate}
+          to={HOME}
+          onClick={(event) => {
+            if (!isPlainClick(event)) return;
+            event.preventDefault();
+            onNavigate?.();
+            if (pathname !== HOME) panelNavigate(HOME);
+          }}
           // Same reason as the nav items: no view transition, so the active pill glides for real.
           viewTransition={false}
           aria-label={t('modules.panel.brand')}
@@ -207,6 +246,7 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
             collapsed={collapsed}
             active={pathname.startsWith(item.to)}
             onNavigate={onNavigate}
+            onActivate={(target) => positionPill(true, target)}
             // Opt every nav link out of the router's view transition. Two reasons: (1) in the mobile
             // drawer it would snapshot the still-open drawer and cross-fade a "ghost" duplicate; and
             // (2) on any variant it would cross-fade old/new page snapshots OVER the live DOM, hiding

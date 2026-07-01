@@ -11,6 +11,10 @@ import { initializeTokenRefresh } from '@utils/tokenRefresh';
 export const router = createRouter({
   routeTree,
   defaultViewTransition: true,
+  // Preload a route's chunk on hover/focus so the target is ready by the time it's clicked. This
+  // keeps the panel's body transition seamless — the code-split screen is already loaded, so the
+  // route commits instantly at the hidden midpoint of the fade instead of stalling on a chunk fetch.
+  defaultPreload: 'intent',
   defaultNotFoundComponent: () => <Navigate to="/sesion/inicio" replace />,
   defaultPendingComponent: () => <PageLoader />,
 });

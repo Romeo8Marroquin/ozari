@@ -153,9 +153,34 @@
       },
       "logout": {
         "title": "Cerrar sesión",
-        "message": "¿Seguro que deseas cerrar sesión? Tendrás que iniciar sesión de nuevo para volver a entrar.",
+        "message": "¿Seguro que deseas cerrar sesión?",
         "confirm": "Cerrar sesión",
         "cancel": "Cancelar"
+      },
+      "settings": {
+        "lead": "Administra tu información y la seguridad de tu cuenta.",
+        "account": {
+          "title": "Cuenta",
+          "description": "Tu información de perfil en Party Rentals.",
+          "role": "Rol",
+          "memberSince": "Miembro desde"
+        },
+        "security": {
+          "title": "Seguridad",
+          "description": "Protege el acceso a tu cuenta y cómo inicias sesión.",
+          "password": {
+            "label": "Contraseña",
+            "description": "Cambia la contraseña con la que accedes a tu cuenta.",
+            "action": "Cambiar"
+          },
+          "mfa": {
+            "label": "Verificación en dos pasos",
+            "description": "Añade una capa extra de seguridad al iniciar sesión.",
+            "toggleOn": "Activar verificación en dos pasos",
+            "toggleOff": "Desactivar verificación en dos pasos"
+          }
+        },
+        "soon": "Próximamente"
       }
     }
   }

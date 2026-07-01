@@ -4,6 +4,7 @@ import { HiOutlineSquares2X2 } from 'react-icons/hi2';
 /**
  * Temporary empty-state for panel sections that don't have real content yet. Keeps the chrome
  * feeling complete and on-brand while the features are built. Swap for the real screen later.
+ * Entrance/exit is owned by the panel's body transition (`.panel-screen` in PanelLayout).
  */
 const PanelPlaceholder: React.FC<{ section: string }> = ({ section }) => {
   const { t } = useTranslation();

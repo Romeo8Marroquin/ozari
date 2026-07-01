@@ -13,6 +13,7 @@ import { Storage } from '@utils/storage';
 import { decodeToken } from '@utils/jwt';
 import { getFirstName, getInitials } from '@utils/nameFormat';
 import { useMe, type MeData } from '../hooks/useMe';
+import { usePanelNavigate } from '../PanelNavContext';
 import LogoutConfirmModal from './LogoutConfirmModal';
 
 // The on-brand keyboard focus indicator, matching the rest of the panel chrome (header, sidebar).
@@ -46,11 +47,12 @@ interface MenuAction {
  * click-outside dismissal, and focus returned to the trigger on close. When closed it's
  * `inert`, so it's out of the tab order and the a11y tree entirely.
  *
- * The item actions are intentional placeholders for now — the routes they lead to don't exist
- * yet — but everything around them (design, motion, a11y) is production-ready.
+ * "Seguridad" navigates to the settings page; "Mi perfil" is still an intentional placeholder
+ * (its route doesn't exist yet) — but everything around them (design, motion, a11y) is production-ready.
  */
 const UserMenu: React.FC = () => {
   const { t } = useTranslation();
+  const panelNavigate = usePanelNavigate();
   const { data: me, isLoading } = useMe();
 
   const [open, setOpen] = useState(false);
@@ -141,8 +143,7 @@ const UserMenu: React.FC = () => {
       key: 'security',
       icon: HiOutlineShieldCheck,
       label: t('modules.panel.user.menu.security'),
-      // TODO(panel): navigate to password / MFA settings once they exist.
-      onSelect: () => {},
+      onSelect: () => panelNavigate('/panel/ajustes'),
     },
     {
       key: 'signOut',
