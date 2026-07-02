@@ -5,6 +5,7 @@ import type { LoginType } from '@sesion/login/SchemaLogin';
 import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from '@utils/storage';
 import { setupRefreshTimer } from '@utils/tokenRefresh';
+import { resetForcedLogout } from '@utils/sessionLifecycle';
 import i18next from 'i18next';
 import { QueryKeys } from '@constants/QueryKeys';
 
@@ -16,6 +17,9 @@ function useLogin() {
       const config = {
         public: true,
         deviceUuid: true,
+        // This form renders its own submit errors inline (see LoginPage `onError`), so opt out of
+        // the global toast — the page decides inline vs toast per status.
+        skipErrorNotification: true,
       };
       const response = await api.post<LoginResponseInterface>('/auth/signin', body, config);
       return response;
@@ -33,6 +37,9 @@ function useLogin() {
         if (csrfToken) Storage.set(StorageKeys.CSRF, csrfToken);
 
         queryClient.invalidateQueries({ queryKey: [QueryKeys.ME] });
+
+        // A fresh session re-arms the forced-logout guard, so a later death can tear down again.
+        resetForcedLogout();
 
         // Setup proactive token refresh timer
         setupRefreshTimer(token);

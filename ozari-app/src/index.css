@@ -80,6 +80,9 @@
 
   --z-modal: 1000;
   --z-notification: 2000;
+  /* The app-outage overlay is the ONE thing that outranks notifications: when the backend is down
+     nothing else may be interacted with, so it sits on top of everything, including toasts. */
+  --z-app-overlay: 3000;
 }
 
 input[type='password'] {

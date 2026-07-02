@@ -25,7 +25,7 @@ export const Route = createFileRoute('/sesion')({
     if (!isLogged && !silentRefreshProbed) {
       silentRefreshProbed = true;
       if (token) Storage.remove(StorageKeys.TOKEN);
-      const refreshedToken = await refreshAccessToken(false);
+      const refreshedToken = await refreshAccessToken({ silent: true });
       isLogged = isTokenValid(refreshedToken);
     } else if (token && !isLogged) {
       // Stale token, and we've already probed this tab — just drop it.

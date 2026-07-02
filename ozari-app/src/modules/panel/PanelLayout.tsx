@@ -4,6 +4,7 @@ import gsap from 'gsap';
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
+import ForcedLogoutListener from './ForcedLogoutListener';
 import type { PanelPath } from './navConfig';
 import { PanelChromeProvider } from './hooks/usePanelChrome';
 import { PanelExitContext } from './PanelExitContext';
@@ -162,6 +163,7 @@ const PanelShell: React.FC = () => {
       <PanelNavContext.Provider value={navigateBody}>
         <PanelPageTransitionContext.Provider value={registerExit}>
           <div ref={container} className="panel-root flex h-dvh w-full overflow-hidden bg-customWhite">
+            <ForcedLogoutListener />
             <Sidebar />
             <div className="flex min-w-0 flex-1 flex-col">
               <Header />

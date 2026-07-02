@@ -1,4 +1,4 @@
-import logo from '@assets/svgs/logo.svg';
+import LogoMark from '@components/LogoMark';
 import React, { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { FaUserAlt } from 'react-icons/fa';
 import CustomInputForm from '@components/CustomInputForm';
@@ -13,7 +13,9 @@ import {
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { useTranslation } from 'react-i18next';
 import Button from '@components/Button';
+import FormError from '@components/FormError';
 import { notify } from '@components/notifications/notify';
+import { toFormError } from '@utils/apiError';
 import useLogin from '../hooks/useLogin';
 import { useSearch } from '@tanstack/react-router';
 import useAuthCard from '../hooks/useAuthCard';
@@ -39,6 +41,8 @@ const LoginPage: React.FC = () => {
   // It's a DISABLE, not a loader: the spinner reflects only the in-flight backend call.
   // Never reset — the component unmounts on the redirect.
   const [isRedirecting, setIsRedirecting] = useState(false);
+  // Server-side submit error (bad credentials etc.), rendered inline above the button — NOT a toast.
+  const [formError, setFormError] = useState<string | undefined>(undefined);
   const autoFocusFirst = useDesktopAutoFocus();
   const formRef = useRef<HTMLFormElement>(null);
   // Synchronous in-flight lock: blocks a second submit fired in the same frame, before
@@ -99,6 +103,7 @@ const LoginPage: React.FC = () => {
   const onSubmit = (data: LoginType) => {
     if (isPending || submitLockRef.current) return;
     submitLockRef.current = true;
+    setFormError(undefined); // clear any prior error as we retry
     login(data, {
       onSettled: () => {
         submitLockRef.current = false;
@@ -119,8 +124,13 @@ const LoginPage: React.FC = () => {
         }
         notify.error(t('modules.sesion.login.api.loginError'));
       },
-      // Backend/network errors (bad credentials, rate limit, 5xx, offline) are surfaced
-      // as a friendly toast by the axios interceptor — nothing to handle here.
+      // Route the failure: a validation/credential error (400/401) renders INLINE above the button;
+      // the global concerns (429/5xx/offline) still surface as a toast.
+      onError: (error) => {
+        const { inline, toast } = toFormError(error, t('modules.sesion.login.api.invalidCredentials'));
+        if (inline) setFormError(inline);
+        if (toast) notify.error(toast);
+      },
     });
   };
 
@@ -176,13 +186,8 @@ const LoginPage: React.FC = () => {
             <p className="article-element text-xl text-black select-none text-center max-w-64">
               {t('modules.sesion.login.subtitle')}
             </p>
-            <div className="article-element w-28 h-36 overflow-hidden">
-              <img
-                src={logo}
-                alt={t('components.pageLoader.logo')}
-                className="w-full h-full object-cover object-center select-none"
-                aria-label={t('components.pageLoader.logo')}
-              />
+            <div className="article-element w-28" role="img" aria-label={t('components.pageLoader.logo')}>
+              <LogoMark className="w-full select-none text-charcoal" />
             </div>
           </div>
         </div>
@@ -237,6 +242,7 @@ const LoginPage: React.FC = () => {
                   />
                 </div>
                 <div className="form-element w-full flex flex-col items-center">
+                  <FormError message={formError} id="login-form-error" />
                   <Button
                     type="submit"
                     fullWidth

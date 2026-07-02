@@ -6,6 +6,8 @@ import { routeTree } from './routeTree.gen';
 import axios from 'axios';
 import { createRouter, Navigate, RouterProvider } from '@tanstack/react-router';
 import PageLoader from '@components/PageLoader';
+import ErrorBoundary from '@components/ErrorBoundary';
+import ErrorScreen, { type ErrorScreenVariant } from '@components/ErrorScreen';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { initializeTokenRefresh } from '@utils/tokenRefresh';
 
@@ -18,6 +20,11 @@ export const router = createRouter({
   defaultPreload: 'intent',
   defaultNotFoundComponent: () => <Navigate to="/sesion/inicio" replace />,
   defaultPendingComponent: () => <PageLoader />,
+  // A route's loader/render threw (e.g. its critical data 500'd). Render the on-brand error surface
+  // INLINE (`fill="container"`, so any surrounding chrome stays), with `reset` re-running the route.
+  defaultErrorComponent: ({ reset }) => (
+    <ErrorScreen variant="crash" fill="container" onAction={reset} />
+  ),
 });
 
 export const queryClient = new QueryClient({
@@ -43,10 +50,44 @@ export const queryClient = new QueryClient({
 // Initialize token refresh system (proactive timer + 401 interceptor)
 initializeTokenRefresh();
 
+// DEV: trigger the LIVE outage overlay (with its real auto-retry controls) from the console via
+// `__ozariOutage()`. It then polls /health/check and recovers on the first healthy response.
+if (import.meta.env.DEV) {
+  void import('./stores/outageStore').then(({ reportOutage }) => {
+    (window as Window & { __ozariOutage?: () => void }).__ozariOutage = reportOutage;
+  });
+}
+
+/**
+ * DEV-only preview of the error screens, decided here — ABOVE the router — so the app's route
+ * redirects can't strip it. Load `/#preview-crash` or `/#preview-maintenance` (a full reload) to see
+ * them; the action clears the hash and reloads back into the app. Compiled out of production.
+ */
+function devErrorPreview(): ErrorScreenVariant | null {
+  if (!import.meta.env.DEV) return null;
+  if (window.location.hash === '#preview-crash') return 'crash';
+  if (window.location.hash === '#preview-maintenance') return 'maintenance';
+  return null;
+}
+
+const previewVariant = devErrorPreview();
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    {previewVariant ? (
+      <ErrorScreen
+        variant={previewVariant}
+        onAction={() => {
+          window.location.hash = '';
+          window.location.reload();
+        }}
+      />
+    ) : (
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </ErrorBoundary>
+    )}
   </StrictMode>,
 );

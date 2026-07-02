@@ -15,7 +15,7 @@ export const Route = createFileRoute('/panel')({
         Storage.remove(StorageKeys.TOKEN);
       }
 
-      const refreshedToken = await refreshAccessToken(false);
+      const refreshedToken = await refreshAccessToken({ silent: true });
       isLogged = isTokenValid(refreshedToken);
     }
 

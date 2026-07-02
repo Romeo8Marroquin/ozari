@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineXMark } from 'react-icons/hi2';
+import { registerModal } from './modalRegistry';
 
 type ModalSize = 'sm' | 'md' | 'lg';
 
@@ -93,6 +94,13 @@ const Modal: React.FC<ModalProps> = ({
   useEffect(() => {
     handlers.current = { onClose, dismissible, locked };
   });
+
+  // While open, register with the modal registry so a forced logout (or any global sweep) can close
+  // this modal from the outside — reading the latest `onClose` lazily so it stays current.
+  useEffect(() => {
+    if (!open) return;
+    return registerModal(() => handlers.current.onClose());
+  }, [open]);
 
   // Play the enter transition a frame after mount; unmount a beat after close (the timeout also
   // covers reduced-motion, where no transitionend would ever fire).

@@ -5,10 +5,38 @@
   },
   "errors": {
     "network": "No pudimos conectar con el servidor. Revisa tu conexión.",
+    "offline": "Parece que estás sin conexión a internet.",
     "server": "Tuvimos un problema en el servidor. Inténtalo más tarde.",
     "tooManyRequests": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+    "tooManyRequestsWait": "Demasiados intentos. Inténtalo de nuevo en {{seconds}} s.",
+    "maintenance": "Estamos en mantenimiento. Vuelve en unos minutos.",
     "unauthorized": "Tu sesión no es válida o ha expirado.",
+    "sessionExpired": "Tu sesión expiró. Inicia sesión de nuevo.",
     "generic": "Ocurrió un error inesperado. Inténtalo de nuevo."
+  },
+  "errorScreen": {
+    "overlayLabel": "Estado del servicio",
+    "crash": {
+      "title": "Algo salió mal",
+      "message": "Ocurrió un error inesperado de nuestro lado. Puedes intentar recargar la página.",
+      "action": "Recargar"
+    },
+    "maintenance": {
+      "title": "Volvemos pronto",
+      "message": "No pudimos conectar con el servicio. Estamos trabajando para restablecerlo.",
+      "action": "Reintentar",
+      "retryIn": "Reintentar en {{seconds}} s",
+      "autoRetrying": "Reintentando automáticamente…",
+      "autoStopped": "No pudimos reconectar. Inténtalo manualmente.",
+      "retryFailed": "El servicio sigue sin responder. Inténtalo de nuevo en un momento."
+    },
+    "offline": {
+      "title": "Sin conexión",
+      "message": "Parece que perdiste la conexión a internet. Te reconectaremos automáticamente.",
+      "action": "Reintentar",
+      "autoWaiting": "Esperando la conexión…",
+      "retryFailed": "Sigues sin conexión. Revisa tu internet e inténtalo de nuevo."
+    }
   },
   "components": {
     "modal": {
