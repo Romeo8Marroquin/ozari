@@ -41,9 +41,28 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    setupFiles: './src/setup.test.ts',
+    setupFiles: './src/test/setup.ts',
     coverage: {
       provider: 'v8',
+      reporter: ['text', 'text-summary', 'html'],
+      // `all` so untested source files show up as 0% (honest coverage), not silently omitted.
+      all: true,
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        // Tests + test infra
+        'src/**/*.test.{ts,tsx}',
+        'src/test/**',
+        // Type-only / generated / config — no runtime logic to cover
+        'src/**/*.d.ts',
+        'src/types/**',
+        'src/constants/**',
+        'src/routeTree.gen.ts',
+        // App bootstrap + framework wiring (exercised e2e, not unit): entry, i18n init, route defs
+        'src/main.tsx',
+        'src/i18n.ts',
+        'src/routes/**',
+        'src/assets/**',
+      ],
     },
   },
 });
