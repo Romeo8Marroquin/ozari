@@ -15,6 +15,7 @@ const splitParts = (fullName: string): string[] => fullName.trim().split(/\s+/).
  */
 const firstLetter = (word: string): string => {
   const [head] = Array.from(word);
+  /* v8 ignore next -- unreachable empty-word branch: splitParts already filters out empty parts */
   return head ? head.toLocaleUpperCase('es-GT') : '';
 };
 

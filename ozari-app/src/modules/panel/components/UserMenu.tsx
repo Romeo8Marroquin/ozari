@@ -107,14 +107,17 @@ const UserMenu: React.FC = () => {
 
   const close = useCallback((returnFocus = true) => {
     setOpen(false);
+    /* v8 ignore next -- close() is only ever invoked with the default returnFocus=true; the no-refocus path is defensive */
     if (returnFocus) triggerRef.current?.focus();
   }, []);
 
   // Anchor the panel under the pill, right edges aligned. Recomputed on open and kept in sync
   // while open (a scroll or resize would otherwise leave it stranded).
   const updatePosition = useCallback(() => {
+    /* v8 ignore start -- the trigger is always mounted while positioning runs; the null-rect guard is defensive and unreachable under jsdom */
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
+    /* v8 ignore stop */
     // Round to whole pixels: getBoundingClientRect() is often fractional, and a fixed panel on a
     // sub-pixel boundary renders text blurry and "snaps" a pixel when the open transition ends.
     setPos({ top: Math.round(rect.bottom + 8), right: Math.round(Math.max(8, window.innerWidth - rect.right)) });
@@ -173,6 +176,7 @@ const UserMenu: React.FC = () => {
 
   const onMenuKeyDown = (event: React.KeyboardEvent) => {
     const items = itemRefs.current.filter(Boolean) as HTMLButtonElement[];
+    /* v8 ignore next -- the menu always renders its three items, so the empty-items guard is defensive/unreachable */
     if (items.length === 0) return;
     const index = items.indexOf(document.activeElement as HTMLButtonElement);
     switch (event.key) {

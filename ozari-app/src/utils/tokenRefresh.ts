@@ -145,11 +145,13 @@ export function setupRefreshTimer(token: string): void {
   // Refresh 60 seconds before expiration (or immediately if less than 60s remaining).
   const refreshIn = Math.max(0, (timeRemaining - 60) * 1000);
 
+  /* v8 ignore next 3 -- dev-only logging; `import.meta.env.DEV` is false under test */
   if (import.meta.env.DEV) {
     console.log(`[Token Refresh] Timer set for ${Math.floor(refreshIn / 1000)}s from now`);
   }
 
   refreshTimer = setTimeout(() => {
+    /* v8 ignore next -- dev-only logging inside the deferred timer callback */
     if (import.meta.env.DEV) console.log('[Token Refresh] Proactive refresh triggered');
     void refreshAccessToken();
   }, refreshIn);

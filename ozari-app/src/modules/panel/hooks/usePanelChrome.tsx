@@ -19,6 +19,7 @@ interface PanelChrome {
 const PanelChromeContext = createContext<PanelChrome | null>(null);
 
 const readMode = (): PanelMode => {
+  /* v8 ignore next -- SSR guard; window is always defined under jsdom and in the browser */
   if (typeof window === 'undefined') return 'desktop';
   if (window.matchMedia('(min-width: 1024px)').matches) return 'desktop';
   if (window.matchMedia('(min-width: 768px)').matches) return 'tablet';

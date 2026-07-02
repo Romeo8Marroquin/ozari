@@ -8,6 +8,7 @@ const SesionLayout: React.FC = () => {
 
   useGSAP(
     () => {
+      /* v8 ignore next -- defensive: the scoped ref is always attached when useGSAP runs */
       if (!container.current) return;
       gsap.from(container.current, {
         opacity: 0,

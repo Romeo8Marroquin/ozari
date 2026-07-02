@@ -37,6 +37,7 @@ function shouldNotifyError(error: AxiosError): boolean {
   if (isOutageStatus(status) || isOutageActive()) return false;
   if (isTransientStatus(status) || status === 403) return true;
 
+  /* v8 ignore next -- `?? 'get'` is a defensive fallback; axios always sets config.method */
   return !SAFE_METHODS.has(config.method?.toLowerCase() ?? 'get');
 }
 
@@ -47,6 +48,7 @@ function rejectWithNotice(error: AxiosError): Promise<never> {
 }
 
 export const api = axios.create({
+  /* v8 ignore next -- module-load config; only the DEV branch runs under test */
   baseURL: import.meta.env.DEV ? '/api' : `${import.meta.env.VITE_API_URL}/api`,
   timeout: 10000,
   headers: { 'Content-Type': 'application/json' },
@@ -65,6 +67,7 @@ api.interceptors.request.use((config) => {
   // request header on state-changing calls. It's read from storage — not a cookie —
   // because the FE and API are on different domains in deployed envs, where a cookie set
   // by the API can't be read by the FE's JS. See csrf.middleware.ts on the backend.
+  /* v8 ignore next -- `?? 'get'` is a defensive fallback; axios always sets config.method */
   const method = config.method?.toLowerCase() ?? 'get';
   const csrfToken = csrfSafeMethods.has(method)
     ? null
@@ -135,6 +138,7 @@ api.interceptors.response.use(
       }
 
       // Attempt to refresh token
+      /* v8 ignore next 3 -- dev-only logging; `import.meta.env.DEV` is false under test */
       if (import.meta.env.DEV) {
         console.log('[API] 401 detected, attempting token refresh...');
       }

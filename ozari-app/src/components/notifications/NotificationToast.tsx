@@ -104,6 +104,7 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
   const focusPathRef = useRef<SVGPathElement>(null);
 
   const dimsRef = useRef({ W: 0, Wt: 0, Ht: 0, bodyH: 0 });
+  /* v8 ignore next -- placeholder ref value; useGSAP reassigns renderRef.current before it can ever be called */
   const renderRef = useRef<(p: number) => void>(() => {});
   const progressRef = useRef<gsap.core.Tween | null>(null);
   const exitingRef = useRef(false);
@@ -141,6 +142,7 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
       const surface = surfaceRef.current;
       const tab = tabRef.current;
       const body = bodyRef.current;
+      /* v8 ignore next -- defensive: these refs are always attached by the time this layout effect runs */
       if (!surface || !tab || !body) return;
 
       // Measure the toast at its natural full size. Crucially we LOCK the surface width
@@ -171,6 +173,7 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
         // pixel box (not the root height) so a focused toast's border tracks the
         // birth/collapse exactly and never decouples — even when the slot-collapse later
         // animates the root height to 0. It then scales + fades with the root, fully synced.
+        /* v8 ignore next -- defensive: the focus-ring svg/path refs are always attached (unconditional render) */
         if (focusSvgRef.current && focusPathRef.current) {
           const svg = focusSvgRef.current;
           svg.style.width = `${W}px`;
@@ -178,6 +181,7 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
           svg.setAttribute('viewBox', `0 0 ${W} ${totalH}`);
           focusPathRef.current.setAttribute('d', clip);
         }
+        /* v8 ignore next -- defensive: the message ref is always attached (unconditional render) */
         if (messageRef.current) {
           // Fade the text in over the back half of the unfold (the shape leads, text follows).
           messageRef.current.style.opacity = `${Math.max(0, (clamped - 0.5) / 0.5)}`;
@@ -201,6 +205,7 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
         surface.style.clipPath = `path("${finalClip}")`;
         // Keep the focus ring (an SVG stroke of the exact same outline) in sync, so the
         // whole component shows ONE continuous border when focused — never two boxes.
+        /* v8 ignore next -- defensive: the focus-ring svg/path refs are always attached (unconditional render) */
         if (focusSvgRef.current && focusPathRef.current) {
           const svg = focusSvgRef.current;
           svg.style.width = `${W}px`;

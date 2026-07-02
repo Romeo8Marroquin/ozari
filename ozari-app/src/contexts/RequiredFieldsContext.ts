@@ -8,10 +8,6 @@ export const RequiredPatternsContext = createContext<RequiredPatternsContext>({
   requiredPatterns: [],
 });
 
-const useRequiredPatterns = () => {
-  const ctx = useContext(RequiredPatternsContext);
-  if (!ctx) return [];
-  return ctx.requiredPatterns;
-};
+const useRequiredPatterns = () => useContext(RequiredPatternsContext).requiredPatterns;
 
 export default useRequiredPatterns;

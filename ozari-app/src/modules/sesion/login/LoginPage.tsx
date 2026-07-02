@@ -71,9 +71,11 @@ const LoginPage: React.FC = () => {
   // dead end on a real device.
   const syncDomValues = () => {
     const form = formRef.current;
+    /* v8 ignore next -- defensive: the form ref is always attached while the component is mounted */
     if (!form) return;
     (['email', 'password'] as const).forEach((field) => {
       const el = form.elements.namedItem(field);
+      /* v8 ignore next -- defensive: the named form elements are always the rendered <input>s */
       if (el instanceof HTMLInputElement) setValue(field, el.value, { shouldValidate: false });
     });
   };

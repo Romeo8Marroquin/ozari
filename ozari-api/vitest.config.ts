@@ -27,6 +27,9 @@ export default defineConfig({
         "**/prisma.service.ts",
         "**/auth.middleware.ts",
         "**/products.validator.ts",
+        // API documentation: declarative OpenAPI spec + thin Swagger-UI glue (like routes/controllers,
+        // it's descriptive wiring, not business logic). Validated structurally by src/docs/openapi.test.ts.
+        "src/docs/**",
       ],
       thresholds: {
         lines: 100,

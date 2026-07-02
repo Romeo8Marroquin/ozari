@@ -251,9 +251,11 @@ export function validateChangePassword(
       translationKey = "user.changePassword.validators.passwordsDoNotMatch";
     } else if (field === "confirmPassword") {
       translationKey = "user.changePassword.validators.invalidConfirmPassword";
+      /* c8 ignore start -- unreachable: the schema only errors on the three known fields */
     } else {
       translationKey = invalidBodyMessageKey;
     }
+    /* c8 ignore stop */
 
     logger.warn(
       i18next.t("user.changePassword.validators.logs.validationError", {

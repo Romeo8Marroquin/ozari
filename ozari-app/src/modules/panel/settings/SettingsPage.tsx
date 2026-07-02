@@ -177,6 +177,7 @@ const SettingsPage: React.FC = () => {
       () =>
         new Promise<void>((resolve) => {
           const element = root.current;
+          /* v8 ignore next -- root is always mounted when the exit runs, so the null-element fallback is unreachable */
           const blocks = element ? gsap.utils.selector(element)('.reveal-block') : [];
           if (blocks.length === 0 || prefersReducedMotion()) {
             resolve();

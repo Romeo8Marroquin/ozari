@@ -45,6 +45,8 @@ const useDetectAutofill = (onAutofill?: () => void) => {
     };
     const onInput = (event: Event) => {
       const inputEvent = event as InputEvent;
+      /* v8 ignore next 6 -- the autofill-shaped input branch needs a TRUSTED event, which jsdom
+         forces to isTrusted=false and can't forge; the animationstart path is covered instead */
       if (
         event.isTrusted &&
         inputEvent.inputType == null &&

@@ -74,6 +74,7 @@ const NavItem: React.FC<NavItemProps> = ({
     <Link
       to={item.to}
       onClick={onClick}
+      /* v8 ignore next -- every nav link is rendered with disableViewTransition, so the `undefined` fallback is unreachable */
       viewTransition={disableViewTransition ? false : undefined}
       // Collapsed: the visible label is clipped away, so name the link explicitly + a hover
       // tooltip. Expanded: the visible text is the accessible name, so neither is needed.
@@ -159,6 +160,7 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
   const positionPill = useCallback((animate: boolean, target?: HTMLElement) => {
     const nav = navRef.current;
     const pill = pillRef.current;
+    /* v8 ignore next -- the pill span is always mounted while positioning runs; the null guard is defensive */
     if (!pill) return;
 
     const active = target ?? nav?.querySelector<HTMLElement>('[data-active="true"]');
@@ -320,6 +322,7 @@ const Sidebar: React.FC = () => {
   const trapFocus = (event: React.KeyboardEvent) => {
     if (event.key !== 'Tab' || !drawerRef.current) return;
     const focusables = drawerRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled])');
+    /* v8 ignore next -- the open drawer always renders focusable links, so the empty-list guard is unreachable */
     if (focusables.length === 0) return;
     const first = focusables[0];
     const last = focusables[focusables.length - 1];

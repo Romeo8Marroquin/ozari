@@ -28,6 +28,7 @@ const NotificationHost: React.FC = () => {
     return () => mql.removeEventListener('change', update);
   }, []);
 
+  /* v8 ignore next -- SSR guard; `document` always exists under jsdom/browser */
   if (typeof document === 'undefined') return null;
 
   const align = isDesktop ? 'right' : 'left';

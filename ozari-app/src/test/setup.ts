@@ -27,16 +27,17 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('i18next-browser-languagedetector', () => ({ default: vi.fn() }));
 
-// jsdom doesn't implement matchMedia; anything reading `prefers-reduced-motion` needs it.
-if (!window.matchMedia) {
-  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  }));
-}
+// jsdom doesn't implement matchMedia. We report `prefers-reduced-motion: reduce` as TRUE so animated
+// components skip their GSAP timelines and render in their final, visible, accessible state — tests
+// assert content/behaviour, not animation frames (GSAP's `autoAlpha:0` start-state would otherwise
+// leave elements `visibility:hidden` and invisible to role queries).
+window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+  matches: query === '(prefers-reduced-motion: reduce)',
+  media: query,
+  onchange: null,
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  addListener: vi.fn(),
+  removeListener: vi.fn(),
+  dispatchEvent: vi.fn(),
+}));

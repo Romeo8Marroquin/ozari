@@ -20,9 +20,14 @@ import type { AppError } from "./models/common/error.js";
 import authRouter from "./modules/auth/auth.route.js";
 // import productsRouter from "./modules/products/products.route.js";
 import healthRouter from "./modules/health/health.route.js";
+import { mountApiDocs } from "./docs/swagger.js";
 
 export function createApp(): Express {
   const app = express();
+
+  // Interactive API docs are mounted first, BEFORE the security chain, so the Swagger UI and its
+  // assets are reachable without an API key and aren't blocked by the strict global CSP.
+  mountApiDocs(app);
 
   configureMiddlewares(app);
 

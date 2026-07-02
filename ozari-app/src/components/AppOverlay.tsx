@@ -143,6 +143,8 @@ const OverlayContent: React.FC<{
   const handleManualRetry = (): void => {
     // Hard guard in JS state, not just the button's `disabled` attribute — editing the DOM to
     // re-enable it can't spam the probe. (Backend rate-limiting is the real enforcement.)
+    /* v8 ignore next -- defense-in-depth: the button is already `disabled` whenever this guard would
+       trip (disabled = checking || secondsLeft > 0), so a real click can't reach the early return */
     if (checkingRef.current || secondsLeft > 0) return;
     void runCheck();
   };

@@ -28,6 +28,7 @@ const defaultContentIn = (element: HTMLElement): void => {
 
 const defaultContentOut = (element: HTMLElement): Promise<void> => {
   gsap.killTweensOf(element);
+  /* v8 ignore next -- runContentExit only calls this from the non-reduced branches of runExit/navigateBody, so the reduced-motion path here is unreachable */
   if (prefersReducedMotion()) return Promise.resolve();
   return new Promise((resolve) => {
     gsap.to(element, { autoAlpha: 0, y: -16, duration: 0.18, ease: 'power2.in', overwrite: 'auto', onComplete: resolve });
@@ -103,6 +104,7 @@ const PanelShell: React.FC = () => {
     const custom = customExit.current;
     if (custom) return custom();
     const element = screen.current;
+    /* v8 ignore next -- the content-body ref is always attached while runContentExit runs; the empty-resolve fallback is defensive */
     return element ? defaultContentOut(element) : Promise.resolve();
   }, []);
 

@@ -90,4 +90,16 @@ describe('sessionLifecycle', () => {
     requestForcedLogout();
     await vi.waitFor(() => expect(clearAuthState).toHaveBeenCalledTimes(1));
   });
+
+  it('unsubscribe is a no-op once a newer handler has replaced it', () => {
+    const a = vi.fn();
+    const b = vi.fn();
+    const unsubA = setForcedLogoutHandler(a);
+    unsubscribe = setForcedLogoutHandler(b); // b replaces a
+    unsubA(); // handler is now b, not a → must NOT clear it
+
+    requestForcedLogout();
+    expect(b).toHaveBeenCalledTimes(1);
+    expect(a).not.toHaveBeenCalled();
+  });
 });

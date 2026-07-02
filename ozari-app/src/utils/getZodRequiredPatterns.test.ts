@@ -35,4 +35,22 @@ describe('getZodRequiredPatterns', () => {
     expect(requires(patterns, 'username')).toBe(false);
     expect(requires(patterns, 'name.first')).toBe(false);
   });
+
+  it('recurses into intersections', () => {
+    const schema = z.intersection(z.object({ a: z.string() }), z.object({ b: z.string() }));
+    const patterns = getZodRequiredPatterns(schema);
+    expect(requires(patterns, 'a')).toBe(true);
+    expect(requires(patterns, 'b')).toBe(true);
+  });
+
+  it('recurses into a required array of objects (array + element are required)', () => {
+    const patterns = getZodRequiredPatterns(z.object({ items: z.array(z.object({ name: z.string() })) }));
+    expect(requires(patterns, 'items')).toBe(true);
+    expect(requires(patterns, 'items.0.name')).toBe(true);
+  });
+
+  it('does not mark an optional array as required', () => {
+    const patterns = getZodRequiredPatterns(z.object({ tags: z.array(z.string()).optional() }));
+    expect(requires(patterns, 'tags')).toBe(false);
+  });
 });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from './storage';
 
@@ -45,6 +45,14 @@ describe('Storage', () => {
     Storage.set(StorageKeys.CSRF, 'csrf');
     Storage.clear();
     expect(Storage.get(StorageKeys.TOKEN)).toBeNull();
+    expect(Storage.get(StorageKeys.CSRF)).toBeNull();
+  });
+
+  it('set swallows serialization errors instead of throwing', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const circular: Record<string, unknown> = {};
+    circular.self = circular; // JSON.stringify throws on a cycle
+    expect(() => Storage.set(StorageKeys.CSRF, circular)).not.toThrow();
     expect(Storage.get(StorageKeys.CSRF)).toBeNull();
   });
 });
