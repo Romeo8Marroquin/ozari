@@ -1,12 +1,13 @@
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineArrowPath, HiOutlineExclamationTriangle } from 'react-icons/hi2';
 import Button from '@components/Button';
 import { getInitials } from '@utils/nameFormat';
 import { useMe } from '../hooks/useMe';
 import { usePanelPageExit } from '../PanelPageTransitionContext';
+import ChangePasswordModal from './ChangePasswordModal';
 import SettingsSection from './SettingsSection';
 
 const prefersReducedMotion = (): boolean => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -134,6 +135,7 @@ const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
   const { data: me, isLoading, isError, isFetching, refetch } = useMe();
   const root = useRef<HTMLDivElement>(null);
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
 
   const loading = isLoading && !me;
   // Only a COLD failure (no cached profile to show) becomes the error state; a failed background
@@ -258,14 +260,18 @@ const SettingsPage: React.FC = () => {
       <SettingsSection
         title={t('modules.panel.settings.security.title')}
         description={t('modules.panel.settings.security.description')}
-        badge={t('modules.panel.settings.soon')}
       >
         <div className="divide-y divide-charcoal/[0.06]">
           <SecurityRow
             label={t('modules.panel.settings.security.password.label')}
             description={t('modules.panel.settings.security.password.description')}
             action={
-              <Button variant="soft" color={SECONDARY_COLOR} size="sm" disabled title={t('modules.panel.settings.soon')}>
+              <Button
+                variant="soft"
+                color={SECONDARY_COLOR}
+                size="sm"
+                onClick={() => setPasswordModalOpen(true)}
+              >
                 {t('modules.panel.settings.security.password.action')}
               </Button>
             }
@@ -283,6 +289,8 @@ const SettingsPage: React.FC = () => {
           />
         </div>
       </SettingsSection>
+
+      <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
     </div>
   );
 };

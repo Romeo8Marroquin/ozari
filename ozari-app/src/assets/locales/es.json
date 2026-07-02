@@ -204,7 +204,28 @@
           "password": {
             "label": "Contraseña",
             "description": "Cambia la contraseña con la que accedes a tu cuenta.",
-            "action": "Cambiar"
+            "action": "Cambiar",
+            "modal": {
+              "title": "Cambiar contraseña",
+              "description": "Ingresa tu contraseña actual y elige una nueva. Cerraremos la sesión en tus otros dispositivos.",
+              "currentLabel": "Contraseña actual",
+              "currentPlaceholder": "Ingresa tu contraseña actual",
+              "newLabel": "Nueva contraseña",
+              "newPlaceholder": "Ingresa tu nueva contraseña",
+              "confirmLabel": "Confirmar nueva contraseña",
+              "confirmPlaceholder": "Repite tu nueva contraseña",
+              "submit": "Actualizar contraseña",
+              "cancel": "Cancelar",
+              "successTitle": "Contraseña actualizada",
+              "successToast": "Tu contraseña se actualizó correctamente.",
+              "errors": {
+                "requiredCurrent": "Ingresa tu contraseña actual.",
+                "requiredConfirm": "Confirma tu nueva contraseña.",
+                "mismatch": "Las contraseñas no coinciden.",
+                "sameAsCurrent": "La nueva contraseña debe ser diferente a la actual.",
+                "invalidCurrent": "La contraseña actual es incorrecta."
+              }
+            }
           },
           "mfa": {
             "label": "Verificación en dos pasos",

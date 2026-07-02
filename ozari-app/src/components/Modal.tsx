@@ -1,3 +1,4 @@
+import gsap from 'gsap';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -44,10 +45,15 @@ const SIZES: Record<ModalSize, string> = {
   lg: 'max-w-lg',
 };
 
-// A graceful, unhurried open/close — long enough to read as deliberate, not a snap.
-const DURATION = 300;
+// A graceful, unhurried open/close — long enough to read as deliberate, not a snap. On close the
+// panel/backdrop fade is delayed ~150ms (see the classNames) so the content slides out FIRST and is
+// clearly "gone" before the card leaves; this window covers that delay + the fade.
+const DURATION = 480;
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+const prefersReducedMotion = (): boolean =>
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /**
  * The app's single modal primitive. A centered dialog over a blurred scrim (matching the mobile
@@ -103,11 +109,58 @@ const Modal: React.FC<ModalProps> = ({
   }, [open]);
 
   // Play the enter transition a frame after mount; unmount a beat after close (the timeout also
-  // covers reduced-motion, where no transitionend would ever fire).
+  // covers reduced-motion, where no transitionend would ever fire). Layered over the panel's own
+  // rise/fade, the content blocks (`.modal-stagger`) do a subtle staggered reveal — and the exact
+  // reverse (last-first) on close, kept inside the unmount window. Gated on reduced motion.
   useEffect(() => {
+    const content = panelRef.current?.querySelectorAll<HTMLElement>('.modal-stagger');
+    const footer = panelRef.current?.querySelector<HTMLElement>('.modal-stagger-footer');
+    const hasContent = !!content && content.length > 0;
+    const animate = !prefersReducedMotion() && (hasContent || !!footer);
+
     if (open) {
-      const raf = requestAnimationFrame(() => setEntered(true));
+      const raf = requestAnimationFrame(() => {
+        setEntered(true);
+        if (animate) {
+          // Content sweeps in FROM THE LEFT (staggered top-to-bottom); the actions come in FROM THE
+          // RIGHT (the opposite) at the same time — a horizontal reveal that suits a modal better than
+          // a vertical drop. Travel stays under the panel's padding so nothing overflows.
+          if (hasContent) {
+            gsap.fromTo(
+              content,
+              { x: -20, autoAlpha: 0 },
+              { x: 0, autoAlpha: 1, duration: 0.4, ease: 'power3.out', stagger: 0.1, delay: 0.05, overwrite: true },
+            );
+          }
+          if (footer) {
+            gsap.fromTo(
+              footer,
+              { x: 20, autoAlpha: 0 },
+              { x: 0, autoAlpha: 1, duration: 0.4, ease: 'power3.out', delay: 0.05, overwrite: true },
+            );
+          }
+        }
+      });
       return () => cancelAnimationFrame(raf);
+    }
+
+    // Exit = the mirror: content leaves TO THE LEFT (reverse order), actions TO THE RIGHT. Kept
+    // inside the unmount window; the panel's own fade is `ease-in` (below) so this is visible, not
+    // masked by the card vanishing instantly.
+    if (animate) {
+      if (hasContent) {
+        gsap.to(content, {
+          x: -18,
+          autoAlpha: 0,
+          duration: 0.22,
+          ease: 'power2.in',
+          stagger: { each: 0.065, from: 'end' },
+          overwrite: true,
+        });
+      }
+      if (footer) {
+        gsap.to(footer, { x: 18, autoAlpha: 0, duration: 0.2, ease: 'power2.in', overwrite: true });
+      }
     }
     const timer = window.setTimeout(() => setEntered(false), DURATION);
     return () => window.clearTimeout(timer);
@@ -173,7 +226,7 @@ const Modal: React.FC<ModalProps> = ({
         aria-hidden
         onClick={handleBackdrop}
         className={`absolute inset-0 bg-charcoal/45 backdrop-blur-[3px] transition-opacity duration-300 motion-reduce:transition-none ${
-          shown ? 'opacity-100' : 'opacity-0'
+          shown ? 'opacity-100' : 'opacity-0 delay-150'
         }`}
       />
 
@@ -184,8 +237,10 @@ const Modal: React.FC<ModalProps> = ({
         aria-label={title ? undefined : ariaLabel}
         aria-labelledby={title ? titleId : undefined}
         aria-describedby={description ? descId : undefined}
-        className={`relative z-[1] w-full ${SIZES[size]} rounded-card bg-white p-6 shadow-[0_24px_60px_-20px_rgba(38,38,38,0.45)] transition duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
-          shown ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-[0.96] opacity-0'
+        className={`relative z-[1] w-full ${SIZES[size]} rounded-card bg-white p-6 shadow-[0_24px_60px_-20px_rgba(38,38,38,0.45)] transition duration-300 motion-reduce:transition-none ${
+          shown
+            ? 'translate-y-0 scale-100 opacity-100 ease-[var(--ease-settle)]'
+            : 'translate-y-2 scale-[0.96] opacity-0 ease-in delay-150'
         }`}
       >
         {dismissible && (
@@ -194,24 +249,32 @@ const Modal: React.FC<ModalProps> = ({
             onClick={onClose}
             disabled={locked}
             aria-label={t('components.modal.close')}
-            className="absolute right-3 top-3 grid size-9 cursor-pointer place-items-center rounded-control text-charcoal/45 transition-colors hover:bg-charcoal/[0.06] hover:text-charcoal disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+            // `z-10` keeps the close button above the content blocks — the stagger leaves an inline
+            // `transform` on the title/description, which promotes them to the positioned paint layer;
+            // without this they'd paint over the (earlier-in-DOM) ✕ and swallow its hover/clicks.
+            className="absolute right-3 top-3 z-10 grid size-9 cursor-pointer place-items-center rounded-control text-charcoal/45 transition-colors hover:bg-charcoal/[0.06] hover:text-charcoal disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta focus-visible:ring-offset-2 focus-visible:ring-offset-white"
           >
             <HiOutlineXMark aria-hidden className="size-5" />
           </button>
         )}
 
         {title && (
-          <h2 id={titleId} className={`text-xl font-semibold text-charcoal ${dismissible ? 'pr-8' : ''}`}>
+          <h2 id={titleId} className={`modal-stagger text-xl font-semibold text-charcoal ${dismissible ? 'pr-8' : ''}`}>
             {title}
           </h2>
         )}
         {description && (
-          <p id={descId} className="mt-2 text-[15px] leading-relaxed text-charcoal/60">
+          <p id={descId} className="modal-stagger mt-2 text-[15px] leading-relaxed text-charcoal/60">
             {description}
           </p>
         )}
+        {/* Children are NOT auto-staggered as one block — a modal whose body wants a per-item reveal
+            tags its own elements with `modal-stagger` (e.g. ChangePasswordModal's fields); they then
+            join the same sweep as the title/description. */}
         {children && <div className="mt-4 text-[15px] text-charcoal/75">{children}</div>}
-        {footer && <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">{footer}</div>}
+        {footer && (
+          <div className="modal-stagger-footer mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">{footer}</div>
+        )}
       </div>
     </div>,
     document.body,
