@@ -97,6 +97,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref,
   ) => {
+    /* v8 ignore next 3 -- dev-only a11y warning; `import.meta.env.DEV` is false under test */
     if (import.meta.env.DEV && !children && !rest['aria-label'] && (startIcon || endIcon)) {
       console.warn('[Button] An icon-only button needs an `aria-label` for screen readers.');
     }

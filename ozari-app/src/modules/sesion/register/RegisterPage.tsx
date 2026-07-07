@@ -1,5 +1,5 @@
-import logo from '@assets/svgs/logo.svg';
-import React, { useMemo, useRef, type MouseEvent } from 'react';
+import LogoMark from '@components/LogoMark';
+import React, { useMemo, useRef, useState, type MouseEvent } from 'react';
 import { FaUserAlt } from 'react-icons/fa';
 import { HiOutlineMail } from 'react-icons/hi';
 import CustomInputForm from '@components/CustomInputForm';
@@ -15,6 +15,8 @@ import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { useTranslation } from 'react-i18next';
 import Button from '@components/Button';
 import Checkbox from '@components/Checkbox';
+import FormError from '@components/FormError';
+import { toFormError } from '@utils/apiError';
 import useRegister from '../hooks/useRegister';
 import useAuthCard from '../hooks/useAuthCard';
 import useDesktopAutoFocus from '@hooks/useDesktopAutoFocus';
@@ -34,10 +36,13 @@ const RegisterPage: React.FC = () => {
   // Synchronous in-flight lock: blocks a second submit fired in the same frame, before
   // React re-renders with `isPending` (and disables the button). Released on settle.
   const submitLockRef = useRef(false);
+  // Server-side submit error (e.g. email already registered), rendered inline above the button.
+  const [formError, setFormError] = useState<string | undefined>(undefined);
 
   const onSubmit = (data: RegisterType) => {
     if (isPending || submitLockRef.current) return;
     submitLockRef.current = true;
+    setFormError(undefined); // clear any prior error as we retry
     registerUser(data, {
       onSettled: () => {
         submitLockRef.current = false;
@@ -52,8 +57,13 @@ const RegisterPage: React.FC = () => {
         });
         leaveTo('/sesion/inicio');
       },
-      // Backend/network errors (email taken, rate limit, 5xx, offline) are surfaced as a
-      // friendly toast by the axios interceptor — nothing to handle here.
+      // Route the failure: a validation/duplicate error (400/409/422) renders INLINE above the
+      // button; the global concerns (429/5xx/offline) still surface as a toast.
+      onError: (error) => {
+        const { inline, toast } = toFormError(error, t('modules.sesion.register.api.registerError'));
+        if (inline) setFormError(inline);
+        if (toast) notify.error(toast);
+      },
     });
   };
 
@@ -158,6 +168,7 @@ const RegisterPage: React.FC = () => {
                   />
                 </div>
                 <div className="form-element w-full flex flex-col items-center">
+                  <FormError message={formError} id="register-form-error" />
                   <Button
                     type="submit"
                     fullWidth
@@ -191,13 +202,8 @@ const RegisterPage: React.FC = () => {
             <p className="article-element text-xl text-black select-none text-center max-w-64">
               {t('modules.sesion.register.subtitle')}
             </p>
-            <div className="article-element w-28 h-36 overflow-hidden">
-              <img
-                src={logo}
-                alt={t('components.pageLoader.logo')}
-                className="w-full h-full object-cover object-center select-none"
-                aria-label={t('components.pageLoader.logo')}
-              />
+            <div className="article-element w-28" role="img" aria-label={t('components.pageLoader.logo')}>
+              <LogoMark className="w-full select-none text-charcoal" />
             </div>
           </div>
         </div>

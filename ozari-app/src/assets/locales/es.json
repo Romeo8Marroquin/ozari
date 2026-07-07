@@ -5,10 +5,38 @@
   },
   "errors": {
     "network": "No pudimos conectar con el servidor. Revisa tu conexión.",
+    "offline": "Parece que estás sin conexión a internet.",
     "server": "Tuvimos un problema en el servidor. Inténtalo más tarde.",
     "tooManyRequests": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
+    "tooManyRequestsWait": "Demasiados intentos. Inténtalo de nuevo en {{seconds}} s.",
+    "maintenance": "Estamos en mantenimiento. Vuelve en unos minutos.",
     "unauthorized": "Tu sesión no es válida o ha expirado.",
+    "sessionExpired": "Tu sesión expiró. Inicia sesión de nuevo.",
     "generic": "Ocurrió un error inesperado. Inténtalo de nuevo."
+  },
+  "errorScreen": {
+    "overlayLabel": "Estado del servicio",
+    "crash": {
+      "title": "Algo salió mal",
+      "message": "Ocurrió un error inesperado de nuestro lado. Puedes intentar recargar la página.",
+      "action": "Recargar"
+    },
+    "maintenance": {
+      "title": "Volvemos pronto",
+      "message": "No pudimos conectar con el servicio. Estamos trabajando para restablecerlo.",
+      "action": "Reintentar",
+      "retryIn": "Reintentar en {{seconds}} s",
+      "autoRetrying": "Reintentando automáticamente…",
+      "autoStopped": "No pudimos reconectar. Inténtalo manualmente.",
+      "retryFailed": "El servicio sigue sin responder. Inténtalo de nuevo en un momento."
+    },
+    "offline": {
+      "title": "Sin conexión",
+      "message": "Parece que perdiste la conexión a internet. Te reconectaremos automáticamente.",
+      "action": "Reintentar",
+      "autoWaiting": "Esperando la conexión…",
+      "retryFailed": "Sigues sin conexión. Revisa tu internet e inténtalo de nuevo."
+    }
   },
   "components": {
     "modal": {
@@ -50,10 +78,10 @@
           "lowercaseLetterPassword": "Se debe tener una minúscula",
           "numberPassword": "Se debe tener un número",
           "safeSymbolPassword": "Se debe tener un símbolo",
-          "invalidSymbolPassword": "Un símbolo no válido",
-          "minLengthPassword": "La contraseña es muy corta",
-          "maxLengthPassword": "La contraseña es muy larga",
-          "invalidPassword": "La contraseña es inválida",
+          "invalidSymbolPassword": "No uses espacios, acentos ni emojis.",
+          "minLengthPassword": "Debe tener al menos 12 caracteres.",
+          "maxLengthPassword": "No debe superar los 128 caracteres.",
+          "invalidPassword": "La contraseña no cumple los requisitos.",
           "submitButton": "Iniciar Sesión",
           "noAccount": "Si no posees una cuenta",
           "signUpLink": "regístrate",
@@ -84,13 +112,13 @@
           "lowercaseLetterPassword": "Se debe tener una minúscula",
           "numberPassword": "Se debe tener un número",
           "safeSymbolPassword": "Se debe tener un símbolo",
-          "invalidSymbolPassword": "Un símbolo no válido",
-          "minLengthPassword": "La contraseña es muy corta",
-          "maxLengthPassword": "La contraseña es muy larga",
+          "invalidSymbolPassword": "No uses espacios, acentos ni emojis.",
+          "minLengthPassword": "Debe tener al menos 12 caracteres.",
+          "maxLengthPassword": "No debe superar los 128 caracteres.",
           "fullNameLabel": "Nombre completo",
           "fullNamePlaceholder": "Ingrese su nombre completo",
           "requiredFullName": "El nombre es obligatorio",
-          "invalidFullName": "El nombre no es válido",
+          "invalidFullName": "Solo letras, números y espacios (5–255 caracteres).",
           "confirmPasswordLabel": "Confirmar contraseña",
           "confirmPasswordPlaceholder": "Confirme su contraseña",
           "requiredConfirmPassword": "Debe confirmar la contraseña",
@@ -134,6 +162,7 @@
       },
       "user": {
         "fallbackName": "Usuario",
+        "loadError": "No pudimos cargar tu información.",
         "roles": {
           "Client": "Cliente",
           "Admin": "Administrador",
@@ -153,9 +182,88 @@
       },
       "logout": {
         "title": "Cerrar sesión",
-        "message": "¿Seguro que deseas cerrar sesión? Tendrás que iniciar sesión de nuevo para volver a entrar.",
+        "message": "¿Seguro que deseas cerrar sesión?",
         "confirm": "Cerrar sesión",
         "cancel": "Cancelar"
+      },
+      "settings": {
+        "lead": "Administra tu información y la seguridad de tu cuenta.",
+        "account": {
+          "title": "Cuenta",
+          "description": "Tu información de perfil en Party Rentals.",
+          "role": "Rol",
+          "memberSince": "Miembro desde",
+          "error": {
+            "message": "No pudimos cargar tu información.",
+            "retry": "Reintentar"
+          }
+        },
+        "security": {
+          "title": "Seguridad",
+          "description": "Protege el acceso a tu cuenta y cómo inicias sesión.",
+          "password": {
+            "label": "Contraseña",
+            "description": "Cambia la contraseña con la que accedes a tu cuenta.",
+            "action": "Cambiar",
+            "modal": {
+              "title": "Cambiar contraseña",
+              "description": "Ingresa tu contraseña actual y elige una nueva. Cerraremos la sesión en tus otros dispositivos.",
+              "currentLabel": "Contraseña actual",
+              "currentPlaceholder": "Ingresa tu contraseña actual",
+              "newLabel": "Nueva contraseña",
+              "newPlaceholder": "Ingresa tu nueva contraseña",
+              "confirmLabel": "Confirmar nueva contraseña",
+              "confirmPlaceholder": "Repite tu nueva contraseña",
+              "submit": "Actualizar contraseña",
+              "cancel": "Cancelar",
+              "successTitle": "Contraseña actualizada",
+              "successToast": "Tu contraseña se actualizó correctamente.",
+              "errors": {
+                "requiredCurrent": "Ingresa tu contraseña actual.",
+                "requiredConfirm": "Confirma tu nueva contraseña.",
+                "mismatch": "Las contraseñas no coinciden.",
+                "sameAsCurrent": "La nueva contraseña debe ser diferente a la actual.",
+                "invalidCurrent": "La contraseña actual es incorrecta."
+              }
+            }
+          },
+          "mfa": {
+            "label": "Verificación en dos pasos",
+            "description": "Añade una capa extra de seguridad al iniciar sesión.",
+            "toggleOn": "Activar verificación en dos pasos",
+            "toggleOff": "Desactivar verificación en dos pasos",
+            "enabledLabel": "Verificación en dos pasos activada",
+            "enable": {
+              "title": "Activar verificación en dos pasos",
+              "scanDescription": "Escanea el código QR con tu app de autenticación e ingresa el código de 6 dígitos que aparece.",
+              "qrTitle": "Código QR para configurar la verificación en dos pasos",
+              "manualIntro": "¿No puedes escanear? Ingresa esta clave manualmente:",
+              "copySecret": "Copiar clave",
+              "copied": "Copiado",
+              "codeLabel": "Código de verificación",
+              "confirm": "Activar",
+              "cancel": "Cancelar",
+              "retry": "Reintentar",
+              "alreadyEnabledToast": "La verificación en dos pasos ya está activada.",
+              "errors": {
+                "codeLength": "Ingresa el código de 6 dígitos.",
+                "invalidCode": "El código es incorrecto. Vuelve a intentarlo.",
+                "setupExpired": "La configuración expiró. Generamos un código nuevo para ti.",
+                "setupFailed": "No pudimos iniciar la configuración. Inténtalo de nuevo."
+              },
+              "recovery": {
+                "title": "Guarda tus códigos de recuperación",
+                "description": "Úsalos para entrar si pierdes acceso a tu app de autenticación. Cada código funciona una sola vez.",
+                "warning": "Guárdalos en un lugar seguro. No volverás a verlos y son la única forma de entrar si pierdes tu teléfono.",
+                "copy": "Copiar códigos",
+                "copied": "Copiado",
+                "download": "Descargar",
+                "done": "Listo"
+              }
+            }
+          }
+        },
+        "soon": "Próximamente"
       }
     }
   }

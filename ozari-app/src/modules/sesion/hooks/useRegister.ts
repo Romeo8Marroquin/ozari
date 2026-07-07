@@ -7,7 +7,9 @@ import i18next from 'i18next';
 function useRegister() {
   const mutation = useMutation({
     mutationFn: async (body: RegisterType) => {
-      const config = { public: true };
+      // This form renders its own submit errors inline (see RegisterPage `onError`), so opt out of
+      // the global toast — the page decides inline vs toast per status.
+      const config = { public: true, skipErrorNotification: true };
       const response = await api.post<RegisterResponseInterface>('/auth/user', body, config);
       return response;
     },

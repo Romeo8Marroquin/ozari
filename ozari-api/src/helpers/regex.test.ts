@@ -98,6 +98,19 @@ describe("Regex Patterns", () => {
       expect(passwordRegex.test("Short1!")).toBe(false);
       expect(passwordRegex.test("A1!" + "a".repeat(126))).toBe(false);
     });
+
+    it("should accept any printable-ASCII symbol (dots, dashes, brackets, quotes, …)", () => {
+      expect(passwordRegex.test("Passw0rd.qdq-pmk")).toBe(true); // dots + dash
+      expect(passwordRegex.test("Aa1{}[]()<>~`|/")).toBe(true); // brackets, tilde, pipe, slash
+      expect(passwordRegex.test("Aa1'\"\\.,:;password")).toBe(true); // quotes + backslash
+    });
+
+    it("should reject spaces, control characters and non-ASCII (accents/emoji)", () => {
+      expect(passwordRegex.test("Passw0rd! 123")).toBe(false); // space
+      expect(passwordRegex.test("Passw0rd!\t123")).toBe(false); // tab (control char)
+      expect(passwordRegex.test("Contraseñ0!abc")).toBe(false); // accent (ñ)
+      expect(passwordRegex.test("Passw0rd!123🔥")).toBe(false); // emoji
+    });
   });
 
   describe("genericUuidRegex", () => {

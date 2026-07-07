@@ -22,7 +22,7 @@ const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
 
     const colorVars = {
       '--cb': color,
-      '--cb-halo': `color-mix(in srgb, ${color} 32%, transparent)`,
+      '--cb-halo': `color-mix(in srgb, ${color} 28%, transparent)`,
       '--cb-ring': `color-mix(in srgb, ${color} 45%, transparent)`,
     } as React.CSSProperties;
 
@@ -46,13 +46,14 @@ const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
             {...props}
           />
           {/* Box — color/halo all driven by the input's :checked/:hover/:focus-visible.
-              Hover is a soft halo only (no border color jump) so it stays smooth and never
-              looks "almost checked"; focus-visible adds the stronger ring for keyboard. */}
+              Hover is a soft ring halo (matching the Switch), never a border-color jump, so it
+              stays smooth and never looks "almost checked"; focus-visible grows the stronger ring
+              for keyboard. */}
           <span
             aria-hidden
             className="absolute inset-0 rounded-[6px] border-2 border-gray-300 bg-white transition-[background-color,border-color,box-shadow] duration-200 ease-out
               peer-checked:border-[var(--cb)] peer-checked:bg-[var(--cb)]
-              peer-hover:shadow-[0_0_9px_2px_var(--cb-halo)]
+              peer-hover:shadow-[0_0_0_4px_var(--cb-halo)]
               peer-focus-visible:border-[var(--cb)] peer-focus-visible:shadow-[0_0_0_3px_var(--cb-ring)]
               motion-reduce:transition-none"
           />

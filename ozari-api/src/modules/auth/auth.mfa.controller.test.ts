@@ -164,7 +164,7 @@ describe("enableMfa", () => {
     await enableMfa(authedReq({ code: "invalid" }), res);
     expect(sendOzariError).toHaveBeenCalledWith(
       res,
-      HttpEnum.UNAUTHORIZED,
+      HttpEnum.UNPROCESSABLE_ENTITY,
       expect.any(String),
     );
   });
@@ -206,7 +206,7 @@ describe("verifyMfaLogin", () => {
     expect(recordFailedMfa).toHaveBeenCalledWith(1);
     expect(sendOzariError).toHaveBeenCalledWith(
       res,
-      HttpEnum.UNAUTHORIZED,
+      HttpEnum.UNPROCESSABLE_ENTITY,
       expect.any(String),
     );
   });
@@ -237,7 +237,7 @@ describe("verifyMfaLogin", () => {
     expect(issueAuthenticatedSession).not.toHaveBeenCalled();
     expect(sendOzariError).toHaveBeenCalledWith(
       res,
-      HttpEnum.UNAUTHORIZED,
+      HttpEnum.UNPROCESSABLE_ENTITY,
       expect.any(String),
     );
   });
@@ -250,7 +250,7 @@ describe("disableMfa", () => {
     await disableMfa(authedReq({ password: "WrongPass123!" }), res);
     expect(sendOzariError).toHaveBeenCalledWith(
       res,
-      HttpEnum.UNAUTHORIZED,
+      HttpEnum.UNPROCESSABLE_ENTITY,
       expect.any(String),
     );
   });

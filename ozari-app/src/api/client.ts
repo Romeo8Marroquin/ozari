@@ -2,43 +2,42 @@ import { StorageKeys } from '@constants/StorageKeys';
 import { notify } from '@components/notifications/notify';
 import { getOrCreateDeviceUuid } from '@utils/deviceUuid';
 import { Storage } from '@utils/storage';
+import { getStatus, isNetworkError, isOutageStatus, isTransientStatus, resolveApiErrorMessage } from '@utils/apiError';
+import { isForcedLogoutInFlight } from '@utils/sessionLifecycle';
+import { probeBackendMaybeOutage } from '@utils/outageProbe';
+import { isOutageActive, reportOutage } from '../stores/outageStore';
 import { refreshAccessToken, subscribeTokenRefresh, getIsRefreshing } from '@utils/tokenRefresh';
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
-import i18next from 'i18next';
 
 const SAFE_METHODS = new Set(['get', 'head', 'options']);
 
 /**
- * Resolves a single, user-friendly message for a failed request. The backend already
- * returns a localized, friendly `message` (see `sendOzariError`) so we prefer that; we
- * only synthesize copy for cases the server can't speak to (no response = network/timeout)
- * or a response that somehow carries no message (e.g. a bare 5xx).
- */
-function resolveApiErrorMessage(error: AxiosError): string {
-  if (!error.response) return i18next.t('errors.network');
-
-  const data = error.response.data as { message?: string } | undefined;
-  if (typeof data?.message === 'string' && data.message.trim()) return data.message;
-
-  const status = error.response.status;
-  if (status === 429) return i18next.t('errors.tooManyRequests');
-  if (status >= 500) return i18next.t('errors.server');
-  if (status === 401 || status === 403) return i18next.t('errors.unauthorized');
-  return i18next.t('errors.generic');
-}
-
-/**
- * Whether a failed request should raise a notification. Default policy: notify on failed
- * **mutations** (non-GET) — those are user-initiated actions where the user is owed
- * feedback — and stay silent on reads (queries / route-guard probes handle their own
- * empty/error states). Always silent for the token-refresh round-trip and for any request
- * that explicitly opted out via `skipErrorNotification`.
+ * Whether a failed request should raise a notification. The policy, by *concern* rather than by
+ * status code alone:
+ *  - **Transient/global** failures (network, 429, 5xx) always surface — the user must know to slow
+ *    down or that the server is down — even on a read.
+ *  - **403 forbidden** always surfaces ("you're not allowed"), it's never silent.
+ *  - Everything else notifies only on **mutations** (user-initiated actions owed feedback); reads
+ *    stay quiet and handle their own empty/error states.
+ * Always silent for the token-refresh round-trip (its own flow owns the outcome), for a request
+ * that opted out via `skipErrorNotification`, and while a forced logout is in flight (the teardown
+ * owns the messaging then).
  */
 function shouldNotifyError(error: AxiosError): boolean {
   const config = error.config as
     | (InternalAxiosRequestConfig & { skipErrorNotification?: boolean; _isRefreshRequest?: boolean })
     | undefined;
   if (!config || config.skipErrorNotification || config._isRefreshRequest) return false;
+  if (isForcedLogoutInFlight()) return false;
+  // Offline → the app overlay owns it; a network-error toast would just be noise.
+  if (!navigator.onLine) return false;
+
+  const status = getStatus(error);
+  // The outage overlay owns backend-down states — don't also toast (before AND while it's up).
+  if (isOutageStatus(status) || isOutageActive()) return false;
+  if (isTransientStatus(status) || status === 403) return true;
+
+  /* v8 ignore next -- `?? 'get'` is a defensive fallback; axios always sets config.method */
   return !SAFE_METHODS.has(config.method?.toLowerCase() ?? 'get');
 }
 
@@ -49,6 +48,7 @@ function rejectWithNotice(error: AxiosError): Promise<never> {
 }
 
 export const api = axios.create({
+  /* v8 ignore next -- module-load config; only the DEV branch runs under test */
   baseURL: import.meta.env.DEV ? '/api' : `${import.meta.env.VITE_API_URL}/api`,
   timeout: 10000,
   headers: { 'Content-Type': 'application/json' },
@@ -67,6 +67,7 @@ api.interceptors.request.use((config) => {
   // request header on state-changing calls. It's read from storage — not a cookie —
   // because the FE and API are on different domains in deployed envs, where a cookie set
   // by the API can't be read by the FE's JS. See csrf.middleware.ts on the backend.
+  /* v8 ignore next -- `?? 'get'` is a defensive fallback; axios always sets config.method */
   const method = config.method?.toLowerCase() ?? 'get';
   const csrfToken = csrfSafeMethods.has(method)
     ? null
@@ -94,6 +95,24 @@ api.interceptors.response.use(
       _isRefreshRequest?: boolean;
     };
 
+    // Backend down (gateway/unavailable) → raise the global outage overlay, which then polls health
+    // and recovers. Skip when this failure IS the health probe (it drives its own retry loop).
+    if (isOutageStatus(error.response?.status) && !originalRequest._isHealthCheck) {
+      reportOutage();
+    }
+
+    // A dead/unreachable backend fails as a NETWORK error (connection refused / DNS / timeout), not a
+    // 5xx. Confirm via a single health probe before raising the overlay, so a one-off blip on an
+    // otherwise-live backend doesn't false-trigger it. (Offline is handled by the `offline` event.)
+    if (
+      isNetworkError(error) &&
+      navigator.onLine &&
+      !originalRequest._isHealthCheck &&
+      !originalRequest._isRefreshRequest
+    ) {
+      void probeBackendMaybeOutage();
+    }
+
     // If error is 401 and we haven't retried yet
     if (error.response?.status === 401 && !originalRequest._retry) {
       // Don't retry if this is a public endpoint (login, etc.) or the refresh request itself
@@ -104,10 +123,14 @@ api.interceptors.response.use(
       // Mark request as retried to prevent infinite loops
       originalRequest._retry = true;
 
-      // If already refreshing, wait for it to complete
+      // If already refreshing, wait for it to complete (or fail — `null` = give up quietly).
       if (getIsRefreshing()) {
         return new Promise((resolve) => {
-          subscribeTokenRefresh((token: string) => {
+          subscribeTokenRefresh((token) => {
+            if (!token) {
+              resolve(Promise.reject(error));
+              return;
+            }
             originalRequest.headers.Authorization = `Bearer ${token}`;
             resolve(api(originalRequest));
           });
@@ -115,6 +138,7 @@ api.interceptors.response.use(
       }
 
       // Attempt to refresh token
+      /* v8 ignore next 3 -- dev-only logging; `import.meta.env.DEV` is false under test */
       if (import.meta.env.DEV) {
         console.log('[API] 401 detected, attempting token refresh...');
       }
@@ -126,8 +150,10 @@ api.interceptors.response.use(
         return api(originalRequest);
       }
 
-      // If refresh failed, reject the original request
-      return rejectWithNotice(error);
+      // Refresh failed: `refreshAccessToken` already owned the outcome — either the graceful
+      // forced-logout choreography (auth-dead) or a transient warning toast. Reject quietly so we
+      // never double-notify with a misleading "session invalid" on a transient blip.
+      return Promise.reject(error);
     }
 
     // For all other errors, just reject (notifying for failed mutations)

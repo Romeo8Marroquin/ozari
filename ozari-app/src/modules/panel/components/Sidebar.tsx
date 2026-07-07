@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineChevronLeft, HiOutlineXMark } from 'react-icons/hi2';
-import { PANEL_NAV, type PanelNavItem } from '../navConfig';
+import { PANEL_NAV, type PanelNavItem, type PanelPath } from '../navConfig';
 import { usePanelChrome } from '../hooks/usePanelChrome';
+import { usePanelNavigate } from '../PanelNavContext';
 import BrandMark from './BrandMark';
+
+// A plain primary click (no modifier keys, main button) is the one we intercept for the body
+// transition; a modified/middle click (open-in-new-tab, etc.) is left to the browser + <Link>.
+const isPlainClick = (event: React.MouseEvent): boolean =>
+  event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 
 // Shared motion for the chrome (collapse rail + drawer): a slower, symmetric ease-in-out so it
 // glides in and out instead of snapping at the start. Reused everywhere so the whole panel moves
@@ -27,20 +33,48 @@ interface NavItemProps {
   item: PanelNavItem;
   collapsed: boolean;
   active: boolean;
+  /** This item is the one being LEFT during a tab change — its tint fades out now (in step with the
+   *  content exit), while the destination's fades in at the swap. Keeps the tint in the flow. */
+  leaving?: boolean;
   onNavigate?: () => void;
+  /** Glide the active pill to this item now (before the route commits), for a simultaneous start. */
+  onActivate?: (target: HTMLElement) => void;
   /** Opt this link out of the router's view transition (see the drawer note in SidebarContent). */
   disableViewTransition?: boolean;
 }
 
-const NavItem: React.FC<NavItemProps> = ({ item, collapsed, active, onNavigate, disableViewTransition }) => {
+const NavItem: React.FC<NavItemProps> = ({
+  item,
+  collapsed,
+  active,
+  leaving,
+  onNavigate,
+  onActivate,
+  disableViewTransition,
+}) => {
   const { t } = useTranslation();
+  const panelNavigate = usePanelNavigate();
   const label = t(`modules.panel.nav.${item.labelKey}`);
   const Icon = item.icon;
+
+  // Drive navigation through the panel's body transition instead of <Link>'s instant swap. The
+  // active tab is a no-op (still closes the mobile drawer); modified clicks fall through to <Link>.
+  // On a real move, glide the pill immediately so it travels with the body fade — not after it.
+  const onClick = (event: React.MouseEvent<HTMLElement>) => {
+    if (!isPlainClick(event)) return;
+    event.preventDefault();
+    onNavigate?.();
+    if (!active) {
+      onActivate?.(event.currentTarget);
+      panelNavigate(item.to);
+    }
+  };
 
   return (
     <Link
       to={item.to}
-      onClick={onNavigate}
+      onClick={onClick}
+      /* v8 ignore next -- every nav link is rendered with disableViewTransition, so the `undefined` fallback is unreachable */
       viewTransition={disableViewTransition ? false : undefined}
       // Collapsed: the visible label is clipped away, so name the link explicitly + a hover
       // tooltip. Expanded: the visible text is the accessible name, so neither is needed.
@@ -48,20 +82,31 @@ const NavItem: React.FC<NavItemProps> = ({ item, collapsed, active, onNavigate, 
       aria-label={collapsed ? label : undefined}
       aria-current={active ? 'page' : undefined}
       // The active PILL is a single shared element that glides between items (see SidebarContent);
-      // this marks the target it measures. The soft active background stays per-item, below.
+      // this marks the target it measures.
       data-active={active ? 'true' : undefined}
       className={`panel-nav-item group relative flex h-11 items-center rounded-xl px-3.5 transition-colors ${FOCUS_RING} ${
-        active ? 'bg-magenta/[0.08]' : 'hover:bg-charcoal/[0.04]'
+        active ? '' : 'hover:bg-charcoal/[0.04]'
       }`}
     >
+      {/* The soft active tint is its OWN layer so it can cross-fade on its own (opacity) timing —
+          gently in on the new item, out on the old — instead of popping. It's decoupled from the
+          link's `transition-colors` so hover/text stay snappy while this settles softly. Marking the
+          departing item `leaving` drops it here (at click) so it fades out with the content exit,
+          while the destination lights up at the route swap with the content entrance. */}
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute inset-0 rounded-xl bg-magenta/[0.08] transition-opacity duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
+          active && !leaving ? 'opacity-100' : 'opacity-0'
+        }`}
+      />
       <Icon
         aria-hidden
-        className={`size-5 shrink-0 transition-colors ${
+        className={`relative size-5 shrink-0 transition-colors ${
           active ? 'text-magenta' : 'text-charcoal/55 group-hover:text-charcoal/80'
         }`}
       />
       <span
-        className={`${labelTransition} text-sm font-medium ${
+        className={`${labelTransition} relative text-sm font-medium ${
           active ? 'text-charcoal' : 'text-charcoal/70 group-hover:text-charcoal/90'
         } ${collapsed ? 'ml-0 max-w-0 opacity-0' : 'ml-3 max-w-[160px] opacity-100'}`}
       >
@@ -84,24 +129,41 @@ const PILL_INSET = 4;
 
 const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onClose, onNavigate }) => {
   const { t } = useTranslation();
+  const panelNavigate = usePanelNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
+  const HOME: PanelPath = '/panel/inicio';
 
   const navRef = useRef<HTMLElement>(null);
   const pillRef = useRef<HTMLSpanElement>(null);
   const firstRun = useRef(true);
   const pillVisible = useRef(false);
+  // The tab being LEFT during a click-driven change (set on click), so its tint fades out with the
+  // content exit; the destination lights up at the swap. Reset the moment the route commits — the
+  // React "adjust state when a value changes during render" pattern (not an effect), so returning to
+  // that tab later (even via browser back) correctly lights it up again.
+  const [leavingKey, setLeavingKey] = useState<string | null>(null);
+  const [lastPath, setLastPath] = useState(pathname);
+  if (pathname !== lastPath) {
+    setLastPath(pathname);
+    setLeavingKey(null);
+  }
+  const currentActiveKey = () => PANEL_NAV.find((navItem) => pathname.startsWith(navItem.to))?.to ?? null;
 
   // Position the single active pill over the active item, measuring its LAYOUT position (offset*,
   // so it's scroll-, transform-, and viewport-proof — correct on any size and after a rotation).
   // `animate` glides (the bounce); otherwise it snaps in place (first paint, re-appearing from a
   // no-active route, and on resize/rotate). Same code serves the expanded rail, collapsed rail, and
-  // drawer, since all three are one vertical list.
-  const positionPill = useCallback((animate: boolean) => {
+  // drawer, since all three are one vertical list. An explicit `target` lets a click glide the pill
+  // to the just-clicked item immediately — before the route (and thus `data-active`) has changed —
+  // so the pill and the body transition start together; the route commit then re-runs to the same
+  // spot (a no-op glide).
+  const positionPill = useCallback((animate: boolean, target?: HTMLElement) => {
     const nav = navRef.current;
     const pill = pillRef.current;
+    /* v8 ignore next -- the pill span is always mounted while positioning runs; the null guard is defensive */
     if (!pill) return;
 
-    const active = nav?.querySelector<HTMLElement>('[data-active="true"]');
+    const active = target ?? nav?.querySelector<HTMLElement>('[data-active="true"]');
     if (!nav || !active) {
       pill.style.opacity = '0';
       pillVisible.current = false;
@@ -146,8 +208,16 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
           (just clipped to 0 width) so the link keeps its name in the icon-only rail too. */}
       <div className="flex h-[var(--spacing-header)] shrink-0 items-center px-3.5">
         <Link
-          to="/panel/inicio"
-          onClick={onNavigate}
+          to={HOME}
+          onClick={(event) => {
+            if (!isPlainClick(event)) return;
+            event.preventDefault();
+            onNavigate?.();
+            if (pathname !== HOME) {
+              setLeavingKey(currentActiveKey());
+              panelNavigate(HOME);
+            }
+          }}
           // Same reason as the nav items: no view transition, so the active pill glides for real.
           viewTransition={false}
           aria-label={t('modules.panel.brand')}
@@ -206,7 +276,13 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
             item={item}
             collapsed={collapsed}
             active={pathname.startsWith(item.to)}
+            leaving={item.to === leavingKey}
             onNavigate={onNavigate}
+            onActivate={(target) => {
+              positionPill(true, target);
+              // Mark the tab we're leaving so its tint fades out now (with the content exit).
+              setLeavingKey(currentActiveKey());
+            }}
             // Opt every nav link out of the router's view transition. Two reasons: (1) in the mobile
             // drawer it would snapshot the still-open drawer and cross-fade a "ghost" duplicate; and
             // (2) on any variant it would cross-fade old/new page snapshots OVER the live DOM, hiding
@@ -246,6 +322,7 @@ const Sidebar: React.FC = () => {
   const trapFocus = (event: React.KeyboardEvent) => {
     if (event.key !== 'Tab' || !drawerRef.current) return;
     const focusables = drawerRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled])');
+    /* v8 ignore next -- the open drawer always renders focusable links, so the empty-list guard is unreachable */
     if (focusables.length === 0) return;
     const first = focusables[0];
     const last = focusables[focusables.length - 1];

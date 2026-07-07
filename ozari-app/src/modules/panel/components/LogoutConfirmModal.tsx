@@ -1,10 +1,8 @@
-import { useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import Button from '@components/Button';
 import Modal from '@components/Modal';
 import { useLogout } from '@hooks/useLogout';
-import { usePanelExit } from '../PanelExitContext';
+import { useSessionTeardown } from '../hooks/useSessionTeardown';
 
 interface LogoutConfirmModalProps {
   open: boolean;
@@ -21,37 +19,16 @@ const DANGER = '#dc2626';
  * full-screen block). Errors surface as a toast (via the axios interceptor) and leave the modal
  * open for a retry.
  *
- * On success the exit is choreographed for a smooth hand-off to the login page: the modal dismisses,
- * then (with just a slight overlap) the whole panel plays its coordinated exit — the mirror of its
- * entrance — before we navigate, where the login plays its own mount-in animation. The query cache
- * is cleared only after navigating, so the cached profile stays visible (no placeholder flash).
+ * On success we run the shared session teardown (`useSessionTeardown`): it sweeps the modal, plays
+ * the panel's coordinated exit, navigates to login, then clears auth + the query cache — the exact
+ * same choreography a forced 401 logout uses, so the two never drift. It resolves immediately under
+ * reduced motion, so it just leaves.
  */
 const LogoutConfirmModal: React.FC<LogoutConfirmModalProps> = ({ open, onClose }) => {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const runPanelExit = usePanelExit();
+  const teardown = useSessionTeardown();
 
-  const handleLoggedOut = () => {
-    const goToLogin = () => {
-      navigate({ to: '/sesion/inicio' });
-      queryClient.clear();
-    };
-
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      goToLogin();
-      return;
-    }
-
-    onClose(); // dismiss the modal first…
-    // …then, almost immediately (a heavy overlap so the whole sign-out stays quick), play the
-    // panel's exit and hand off to login.
-    window.setTimeout(() => {
-      void runPanelExit().then(goToLogin);
-    }, 50);
-  };
-
-  const { logout, isPending } = useLogout(handleLoggedOut);
+  const { logout, isPending } = useLogout(() => void teardown('user'));
 
   return (
     <Modal

@@ -41,9 +41,47 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    setupFiles: './src/setup.test.ts',
+    setupFiles: './src/test/setup.ts',
     coverage: {
       provider: 'v8',
+      reporter: ['text', 'text-summary', 'html'],
+      // Full coverage is enforced: the suite fails if any metric regresses below 100%. Genuinely
+      // untestable code (DEV-only logs, SSR guards, trusted-gesture paths, pure GSAP orchestration)
+      // is either `/* v8 ignore */`d with a reason at the source or excluded below — never left as a
+      // silent gap. Keep it honest: prefer a real test; reach for an ignore/exclude only when a line
+      // truly cannot run under jsdom.
+      thresholds: { statements: 100, branches: 100, functions: 100, lines: 100 },
+      // Vitest 4 reports every file matched by `include` (untested ones show as 0%) by default,
+      // so no `all` flag is needed — this keeps the coverage picture honest.
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        // Tests + test infra
+        'src/**/*.test.{ts,tsx}',
+        'src/test/**',
+        // Type-only / generated / config — no runtime logic to cover
+        'src/**/*.d.ts',
+        'src/types/**',
+        'src/constants/**',
+        'src/routeTree.gen.ts',
+        // App bootstrap + framework wiring (exercised e2e, not unit): entry, i18n init, route defs
+        'src/main.tsx',
+        'src/i18n.ts',
+        'src/routes/**',
+        'src/assets/**',
+        // Genuinely untestable in jsdom: relies on **trusted** DOM gestures, which jsdom forces to
+        // `isTrusted: false` and can't forge — so the real-gesture path can't be exercised.
+        'src/hooks/useUserGesture.ts',
+        // Unused legacy component (only self-referenced) whose loading state is driven by a GSAP
+        // mid-timeline callback that doesn't tick under jsdom.
+        'src/components/CustomButton.tsx',
+        // Pure GSAP animation orchestration for the auth card (enter/leave/redirect timelines,
+        // COVER keyframes, resize-snap) — no business logic; verified visually, not by unit tests.
+        'src/modules/sesion/hooks/useAuthCard.ts',
+        // Pure GSAP orchestration for a modal's phase swap (out → resize → in). Only "which phase is
+        // rendered" is logic, and it's exercised (reduced-motion instant path) via MfaEnableModal;
+        // the tween branch doesn't tick under jsdom. Verified visually, like useAuthCard.
+        'src/components/useModalPhaseTransition.ts',
+      ],
     },
   },
 });

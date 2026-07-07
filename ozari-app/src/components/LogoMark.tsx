@@ -2,8 +2,11 @@
  * The Party Rentals brand mark — the hexagon + arch only, with the "PARTY"/"RENTALS" wordmarks
  * that surround it in the full `logo.svg` removed, and the viewBox tightened to the mark's exact
  * bounds (measured via getBBox). Inline SVG (not an <img>) so it inherits `currentColor`, stays
- * crisp at every size, and adds no network request. Purely decorative: the brand link that wraps
- * it supplies the accessible name, so this is `aria-hidden`.
+ * crisp at every size, and adds no network request. Purely decorative: the wrapping element supplies
+ * the accessible name, so this is `aria-hidden`.
+ *
+ * Shared across the app (panel chrome via `BrandMark`, the auth cards, the error screens) — the one
+ * place the isotype lives. Use this instead of cropping the wordmark `logo.svg` (which clips the tip).
  */
 const LogoMark: React.FC<{ className?: string }> = ({ className = '' }) => (
   <svg
@@ -16,7 +19,7 @@ const LogoMark: React.FC<{ className?: string }> = ({ className = '' }) => (
   >
     {/* The source paths are filled outlines that render sub-pixel-thin at this size, so we add a
         same-color stroke to fatten the visible lines. It's in viewBox units, so the weight scales
-        proportionally at every render size (expanded tile, collapsed rail, drawer). */}
+        proportionally at every render size (expanded tile, collapsed rail, drawer, error card). */}
     <g
       transform="translate(-352.1,0)"
       stroke="currentColor"

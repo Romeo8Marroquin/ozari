@@ -1,4 +1,4 @@
-import LogoMark from './LogoMark';
+import LogoMark from '@components/LogoMark';
 
 /**
  * The brand tile: a cream→blossom gradient square (echoing the auth card) holding the Party Rentals
