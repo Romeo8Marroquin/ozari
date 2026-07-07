@@ -65,7 +65,10 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ open, onClose
         if (isOutageStatus(status)) return; // the app-overlay owns backend-down states
 
         const serverMessage = getServerMessage(error);
-        if (status === 401) {
+        // 422 = the current password is wrong (the session is still valid). We keep 401 too as a
+        // defensive fallback, but a genuine 401 is caught upstream by the interceptor's silent
+        // refresh + retry, so in practice a wrong current password now arrives here as 422.
+        if (status === 422 || status === 401) {
           setError(
             'currentPassword',
             { message: serverMessage ?? t(`${KEY}.errors.invalidCurrent`) },

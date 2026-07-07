@@ -39,7 +39,8 @@ const passwordField: Schema = {
   maxLength: 128,
   description:
     "12–128 characters with at least one lowercase letter, one uppercase letter, one digit, and " +
-    "one symbol from `!@#$%^&*_-+=?,:;`. No characters outside that set are allowed.",
+    "one symbol. Any printable ASCII character except space is allowed; spaces, control characters " +
+    "and non-ASCII characters (accents, emoji) are rejected.",
   example: EXAMPLE_PASSWORD,
 };
 

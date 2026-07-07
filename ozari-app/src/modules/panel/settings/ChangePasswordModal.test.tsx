@@ -78,17 +78,17 @@ describe('ChangePasswordModal', () => {
     expect(error).toHaveBeenCalledWith('errors.generic');
   });
 
-  it('a 401 marks the current-password field invalid (server message wins)', async () => {
+  it('a 422 (wrong current password) marks the current-password field invalid (server message wins)', async () => {
     render(<ChangePasswordModal open onClose={vi.fn()} />);
     const handlers = await submitValid();
 
-    act(() => handlers.onError(axiosError(401, 'Contraseña incorrecta')));
+    act(() => handlers.onError(axiosError(422, 'Contraseña incorrecta')));
     expect(document.getElementById('current-password')).toHaveAttribute('aria-invalid', 'true');
     expect(document.getElementById('new-password')).not.toHaveAttribute('aria-invalid');
     expect(error).not.toHaveBeenCalled();
   });
 
-  it('a 401 without a server message uses the fallback copy inline', async () => {
+  it('a 401 (defensive fallback) also marks the current-password field invalid, using fallback copy', async () => {
     render(<ChangePasswordModal open onClose={vi.fn()} />);
     const handlers = await submitValid();
 

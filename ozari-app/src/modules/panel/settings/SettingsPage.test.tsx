@@ -21,6 +21,18 @@ vi.mock('./ChangePasswordModal', () => ({
     ) : null,
 }));
 
+// Same isolation for the MFA enable wizard — its internals live in MfaEnableModal.test.
+vi.mock('./MfaEnableModal', () => ({
+  default: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
+    open ? (
+      <div data-testid="mfa-modal">
+        <button type="button" onClick={onClose}>
+          close-mfa
+        </button>
+      </div>
+    ) : null,
+}));
+
 import { PanelPageTransitionContext } from '../PanelPageTransitionContext';
 import SettingsPage from './SettingsPage';
 
@@ -98,7 +110,7 @@ describe('SettingsPage', () => {
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
   });
 
-  it('renders a populated account with a valid join date and an enabled MFA toggle', () => {
+  it('renders a populated account with a valid join date and an enabled MFA toggle', async () => {
     setMe({
       data: {
         id: 1,
@@ -119,12 +131,13 @@ describe('SettingsPage', () => {
     expect(screen.getByText(/2026/)).toBeInTheDocument();
 
     const toggle = screen.getByRole('switch');
+    // When on, the switch is a non-interactive status indicator (disable ships later).
+    expect(toggle).toBeChecked();
     expect(toggle).toBeDisabled();
-    expect(toggle).toHaveAttribute('aria-checked', 'true');
-    expect(toggle).toHaveAttribute(
-      'aria-label',
-      'modules.panel.settings.security.mfa.toggleOff',
-    );
+    expect(toggle).toHaveAccessibleName('modules.panel.settings.security.mfa.enabledLabel');
+    // Activating the on-switch does nothing (no disable flow yet, no wizard).
+    await userEvent.click(toggle);
+    expect(screen.queryByTestId('mfa-modal')).not.toBeInTheDocument();
   });
 
   it('falls back gracefully for an empty name/email + bad join date, and an off MFA toggle', () => {
@@ -149,8 +162,8 @@ describe('SettingsPage', () => {
     expect(screen.getByText('—')).toBeInTheDocument();
 
     const toggle = screen.getByRole('switch');
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
-    expect(toggle).toHaveAttribute('aria-label', 'modules.panel.settings.security.mfa.toggleOn');
+    expect(toggle).not.toBeChecked();
+    expect(toggle).toHaveAccessibleName('modules.panel.settings.security.mfa.toggleOn');
   });
 
   it('shows the cold error state and retries via refetch', async () => {
@@ -163,6 +176,20 @@ describe('SettingsPage', () => {
     });
     await userEvent.click(retry);
     expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens and closes the MFA enable wizard from the off toggle', async () => {
+    setMe({
+      data: { id: 3, fullName: 'Ana', email: 'a@b.com', role: 'Client', mfaEnabled: false, createdAt: '2026-01-01' },
+    });
+    renderPage();
+
+    expect(screen.queryByTestId('mfa-modal')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('switch'));
+    expect(screen.getByTestId('mfa-modal')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'close-mfa' }));
+    expect(screen.queryByTestId('mfa-modal')).not.toBeInTheDocument();
   });
 
   it('opens and closes the change-password modal', async () => {

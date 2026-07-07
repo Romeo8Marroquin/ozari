@@ -11,8 +11,9 @@ import { fullNameRegex, passwordRegex } from "./regex.js";
  * here, change it there too.
  *
  * Password policy: 12–128 chars, at least one lowercase, one uppercase, one
- * digit and one symbol from the safe set `!@#$%^&*_-+=?,:;`, and no characters
- * outside that set (enforced by `passwordRegex`).
+ * digit and one symbol. The allowed character set is all printable ASCII except
+ * space (every keyboard symbol is fine); spaces, control characters and non-ASCII
+ * (accents/emoji) are rejected (enforced by `passwordRegex`).
  */
 export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_MAX_LENGTH = 128;

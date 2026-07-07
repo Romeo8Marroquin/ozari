@@ -16,9 +16,14 @@ describe('emailField', () => {
   });
 });
 
-describe('passwordField (12–128, upper+lower+digit+allowed symbol, nothing else)', () => {
+describe('passwordField (12–128, upper+lower+digit+symbol, any printable ASCII but no space)', () => {
   it('accepts a policy-compliant password', () => {
     expect(ok(passwordField, 'Passw0rd!123')).toBe(true);
+  });
+
+  it('accepts any printable-ASCII symbol (dots, dashes, brackets, tilde, …)', () => {
+    expect(ok(passwordField, 'Passw0rd.qdq-pmk')).toBe(true); // the previously-rejected case
+    expect(ok(passwordField, 'Aa1<>[](){}~password')).toBe(true);
   });
 
   it.each([
@@ -27,21 +32,23 @@ describe('passwordField (12–128, upper+lower+digit+allowed symbol, nothing els
     ['no lowercase', 'PASSW0RD!123'],
     ['no digit', 'Password!!!!'],
     ['no symbol', 'Password12345'],
-    ['disallowed char (space)', 'Passw0rd! 123'],
-    ['disallowed symbol', 'Passw0rd~123('],
+    ['a space', 'Passw0rd! 123'],
+    ['an accent', 'Contraseñ0!abc'],
+    ['an emoji', 'Passw0rd!123🔥'],
   ])('rejects: %s', (_label, value) => {
     expect(ok(passwordField, value)).toBe(false);
   });
 });
 
 describe('fullNameField', () => {
-  it('accepts letters, accents and spaces', () => {
+  it('accepts letters, accents, spaces, apostrophes and hyphens', () => {
     expect(ok(fullNameField, 'Ana María López')).toBe(true);
     expect(ok(fullNameField, "O'Brien-Núñez")).toBe(true);
   });
 
-  it('rejects empty and clearly invalid characters', () => {
+  it('rejects empty, too-short and invalid characters', () => {
     expect(ok(fullNameField, '')).toBe(false);
-    expect(ok(fullNameField, 'Juan@Pérez')).toBe(false);
+    expect(ok(fullNameField, 'Ana')).toBe(false); // < 5 chars
+    expect(ok(fullNameField, 'Juan@Pérez')).toBe(false); // invalid char
   });
 });

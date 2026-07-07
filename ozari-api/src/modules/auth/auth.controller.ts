@@ -683,9 +683,12 @@ export const changePassword = async (
           userId,
         }),
       );
+      // 422 (not 401): the access token is valid — the *current password* the user typed
+      // is wrong. A genuine bad/expired access token is already a 401 from `verifyJwt`
+      // upstream, so returning 401 here would wrongly trigger a client token refresh.
       sendOzariError(
         res,
-        HttpEnum.UNAUTHORIZED,
+        HttpEnum.UNPROCESSABLE_ENTITY,
         i18next.t("user.changePassword.invalidCurrentPassword"),
       );
       return;

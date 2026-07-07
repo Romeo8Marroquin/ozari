@@ -2,7 +2,9 @@ import { render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 const { setForcedLogoutHandler } = vi.hoisted(() => ({
-  setForcedLogoutHandler: vi.fn((_handler: (r: string) => void) => vi.fn()),
+  // Typed via the generic (not a named param) so the captured handler stays typed for the assertion
+  // below without leaving an unused parameter.
+  setForcedLogoutHandler: vi.fn<(handler: (reason: string) => void) => () => void>(() => vi.fn()),
 }));
 vi.mock('@utils/sessionLifecycle', () => ({ setForcedLogoutHandler }));
 

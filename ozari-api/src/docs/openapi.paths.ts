@@ -180,9 +180,14 @@ export const paths: OpenAPIV3.PathsObject = {
         ),
         "400": errorResponse("Malformed `code`.", 400, "Invalid code"),
         "401": errorResponse(
-          "Wrong code, or the 5-minute `mfaToken` expired/invalid (restart from `/auth/signin`).",
+          "The 5-minute `mfaToken` expired or is invalid — restart from `/auth/signin`.",
           401,
-          "Invalid or expired verification",
+          "Verification expired",
+        ),
+        "422": errorResponse(
+          "The code is wrong (valid `mfaToken`) — let the user try again.",
+          422,
+          "Incorrect code",
         ),
         "429": {
           description: "Too many failed codes — the challenge is temporarily locked (~15 min).",
@@ -296,7 +301,8 @@ export const paths: OpenAPIV3.PathsObject = {
       responses: {
         "200": messageResponse("Password changed; other-device sessions revoked.", "Password changed"),
         "400": errorResponse("Validation failed, or the new password reuses the current one.", 400, "The new password cannot be the same as the current one"),
-        "401": errorResponse("The current password is wrong, or the access token is invalid.", 401, "The current password is incorrect"),
+        "401": unauthorized("Missing, invalid, or expired access token."),
+        "422": errorResponse("The current password is wrong (the access token is valid).", 422, "The current password is incorrect"),
         "403": csrfForbidden(),
         "404": userNotFound(),
         "429": rateLimited,
@@ -344,7 +350,8 @@ export const paths: OpenAPIV3.PathsObject = {
           recoveryCodes: ["A1B2-C3D4-E5F6", "G7H8-J9K0-L1M2", "N3P4-Q5R6-S7T8"],
         }, "Two-factor authentication enabled"),
         "400": errorResponse("Malformed code, or setup was never started (no pending secret).", 400, "Complete MFA setup first"),
-        "401": errorResponse("The code is invalid, or the access token is invalid.", 401, "Invalid code"),
+        "401": unauthorized("Missing, invalid, or expired access token."),
+        "422": errorResponse("The confirmation code is wrong (the access token is valid).", 422, "Invalid code"),
         "403": csrfForbidden(),
         "404": userNotFound(),
         "409": errorResponse("2FA is already enabled.", 409, "Two-factor authentication is already enabled"),
@@ -367,7 +374,8 @@ export const paths: OpenAPIV3.PathsObject = {
       responses: {
         "200": messageResponse("2FA disabled; secret and recovery codes cleared.", "Two-factor authentication disabled"),
         "400": errorResponse("Invalid body, or 2FA is not currently enabled.", 400, "Two-factor authentication is not enabled"),
-        "401": errorResponse("The password is wrong, or the access token is invalid.", 401, "Incorrect password"),
+        "401": unauthorized("Missing, invalid, or expired access token."),
+        "422": errorResponse("The confirming password is wrong (the access token is valid).", 422, "Incorrect password"),
         "403": csrfForbidden(),
         "404": userNotFound(),
         "429": rateLimited,

@@ -141,9 +141,12 @@ export const enableMfa = async (
     const { valid, step } = verifyTotp(decryptKms(user.mfaSecretKms), code);
     if (!valid) {
       logger.warn(i18next.t("user.mfaEnable.logs.invalidCode", { userId }));
+      // 422 (not 401): the caller IS authenticated (valid access token) — it's the
+      // submitted code that's wrong. A 401 here would tell the client its session is
+      // stale and trigger a spurious token refresh + retry of the same bad code.
       sendOzariError(
         res,
-        HttpEnum.UNAUTHORIZED,
+        HttpEnum.UNPROCESSABLE_ENTITY,
         i18next.t("user.mfaEnable.invalidCode"),
       );
       return;
@@ -223,9 +226,11 @@ export const disableMfa = async (
     const passwordValid = await comparePassword(password, user.passwordSha);
     if (!passwordValid) {
       logger.warn(i18next.t("user.mfaDisable.logs.invalidPassword", { userId }));
+      // 422 (not 401): the session is valid; the confirming password is wrong. Keeps the
+      // client from misreading this as an expired access token and refreshing.
       sendOzariError(
         res,
-        HttpEnum.UNAUTHORIZED,
+        HttpEnum.UNPROCESSABLE_ENTITY,
         i18next.t("user.mfaDisable.invalidPassword"),
       );
       return;
@@ -294,7 +299,14 @@ export const verifyMfaLogin = async (
       logger.warn(
         i18next.t("user.mfaVerifyLogin.logs.invalidCode", { userId }),
       );
-      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
+      // 422 = "the code is wrong, try again"; distinct from the middleware's 401 = "the
+      // 5-minute challenge token expired/invalid, restart from /auth/signin". The client
+      // needs to tell those apart, and 401 would otherwise imply a token refresh.
+      sendOzariError(
+        res,
+        HttpEnum.UNPROCESSABLE_ENTITY,
+        i18next.t("user.mfaVerifyLogin.invalidCode"),
+      );
       return;
     }
 

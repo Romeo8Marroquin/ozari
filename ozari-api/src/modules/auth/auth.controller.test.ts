@@ -484,7 +484,7 @@ describe("signOutUser", () => {
 // --- changePassword ------------------------------------------------------
 
 describe("changePassword", () => {
-  it("rejects an incorrect current password with 401", async () => {
+  it("rejects an incorrect current password with 422", async () => {
     const passwordSha = await hashPassword("CurrentPass1!");
     mockPrisma({ user: buildUser({ passwordSha }) });
     await changePassword(
@@ -493,7 +493,7 @@ describe("changePassword", () => {
     );
     expect(sendOzariError).toHaveBeenCalledWith(
       expect.anything(),
-      HttpEnum.UNAUTHORIZED,
+      HttpEnum.UNPROCESSABLE_ENTITY,
       expect.any(String),
     );
   });

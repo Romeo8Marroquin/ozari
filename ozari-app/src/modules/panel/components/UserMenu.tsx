@@ -9,6 +9,7 @@ import {
   HiOutlineUser,
   HiOutlineUserCircle,
 } from 'react-icons/hi2';
+import SkeletonFade from '@components/SkeletonFade';
 import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from '@utils/storage';
 import { decodeToken } from '@utils/jwt';
@@ -232,36 +233,43 @@ const UserMenu: React.FC = () => {
         }
         className={`flex cursor-pointer items-center gap-2.5 rounded-full p-1 pr-2.5 transition-colors hover:bg-charcoal/[0.05] sm:gap-3 sm:pr-3.5 ${FOCUS_RING}`}
       >
-        {loading ? (
-          <>
-            <span aria-hidden className={`size-10 shrink-0 rounded-full ${skeletonBar}`} />
-            <span className="hidden flex-col items-start gap-1.5 sm:flex">
-              <span aria-hidden className={`h-3.5 w-24 ${skeletonBar}`} />
-              <span aria-hidden className={`h-2.5 w-16 ${skeletonBar}`} />
-            </span>
-          </>
-        ) : hasError ? (
-          <>
-            <NeutralAvatar sizeClass="size-10" iconClass="size-5" />
-            {/* Only the real role (from the token) — no fabricated name. */}
-            <span className="hidden flex-col items-start leading-tight sm:flex">
-              <span className="text-[15px] font-medium text-charcoal/70">{roleLabel}</span>
-            </span>
-          </>
-        ) : (
-          <>
-            <span
-              aria-hidden
-              className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-cream to-blossom text-base font-semibold text-charcoal shadow-sm"
-            >
-              {initials}
-            </span>
-            <span className="hidden flex-col items-start leading-tight sm:flex">
-              <span className="max-w-[14ch] truncate text-[15px] font-medium text-charcoal">{displayName}</span>
-              <span className="text-[13px] text-charcoal/50">{roleLabel}</span>
-            </span>
-          </>
-        )}
+        <SkeletonFade
+          loading={loading}
+          animateSize
+          contentClassName="flex items-center gap-2.5 sm:gap-3"
+          skeleton={
+            <>
+              <span aria-hidden className={`size-10 shrink-0 rounded-full ${skeletonBar}`} />
+              <span className="hidden flex-col items-start gap-1.5 sm:flex">
+                <span aria-hidden className={`h-3.5 w-24 ${skeletonBar}`} />
+                <span aria-hidden className={`h-2.5 w-16 ${skeletonBar}`} />
+              </span>
+            </>
+          }
+        >
+          {hasError ? (
+            <>
+              <NeutralAvatar sizeClass="size-10" iconClass="size-5" />
+              {/* Only the real role (from the token) — no fabricated name. */}
+              <span className="hidden flex-col items-start leading-tight sm:flex">
+                <span className="text-[15px] font-medium text-charcoal/70">{roleLabel}</span>
+              </span>
+            </>
+          ) : (
+            <>
+              <span
+                aria-hidden
+                className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-cream to-blossom text-base font-semibold text-charcoal shadow-sm"
+              >
+                {initials}
+              </span>
+              <span className="hidden flex-col items-start leading-tight sm:flex">
+                <span className="max-w-[14ch] truncate text-[15px] font-medium text-charcoal">{displayName}</span>
+                <span className="text-[13px] text-charcoal/50">{roleLabel}</span>
+              </span>
+            </>
+          )}
+        </SkeletonFade>
         <HiOutlineChevronDown
           aria-hidden
           className={`hidden size-4 text-charcoal/40 transition-transform duration-200 ease-[var(--ease-settle)] motion-reduce:transition-none sm:block ${
@@ -289,43 +297,50 @@ const UserMenu: React.FC = () => {
             }`}
           >
             {/* Identity summary — presentational, not a menu item. */}
-            <div className="flex items-center gap-3 px-2.5 pb-2.5 pt-2">
-              {loading ? (
-                <>
-                  <span aria-hidden className={`size-[3.25rem] shrink-0 rounded-full ${skeletonBar}`} />
-                  <span className="flex flex-1 flex-col gap-2 py-0.5">
-                    <span aria-hidden className={`h-3.5 w-28 ${skeletonBar}`} />
-                    <span aria-hidden className={`h-3 w-36 ${skeletonBar}`} />
-                    <span aria-hidden className={`h-2.5 w-16 ${skeletonBar}`} />
-                  </span>
-                </>
-              ) : hasError ? (
-                <>
-                  <NeutralAvatar sizeClass="size-[3.25rem]" iconClass="size-6" />
-                  {/* Honest about what didn't load; still shows the real role. Recovery is passive
-                      (shared query) or via the settings page — no retry control wedged in the menu. */}
-                  <span className="flex min-w-0 flex-col leading-tight">
-                    <span className="text-[13px] text-charcoal/60">{t('modules.panel.user.loadError')}</span>
-                    <span className="mt-1 truncate text-xs font-medium text-magenta">{roleLabel}</span>
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span
-                    aria-hidden
-                    className="grid size-[3.25rem] shrink-0 place-items-center rounded-full bg-gradient-to-br from-cream to-blossom text-lg font-semibold text-charcoal shadow-sm"
-                  >
-                    {initials}
-                  </span>
-                  {/* min-w-0 lets the flex child shrink so `truncate` (…) can engage on absurdly long
-                      names/emails — the menu has a fixed width, so it degrades gracefully. */}
-                  <span className="flex min-w-0 flex-col leading-tight">
-                    <span className="truncate text-[15px] font-semibold text-charcoal">{fullName || fallbackName}</span>
-                    {me?.email && <span className="truncate text-[13px] text-charcoal/50">{me.email}</span>}
-                    <span className="mt-1 truncate text-xs font-medium text-magenta">{roleLabel}</span>
-                  </span>
-                </>
-              )}
+            <div className="px-2.5 pb-2.5 pt-2">
+              <SkeletonFade
+                loading={loading}
+                className="block"
+                contentClassName="flex items-center gap-3"
+                skeleton={
+                  <>
+                    <span aria-hidden className={`size-[3.25rem] shrink-0 rounded-full ${skeletonBar}`} />
+                    <span className="flex flex-1 flex-col gap-2 py-0.5">
+                      <span aria-hidden className={`h-3.5 w-28 ${skeletonBar}`} />
+                      <span aria-hidden className={`h-3 w-36 ${skeletonBar}`} />
+                      <span aria-hidden className={`h-2.5 w-16 ${skeletonBar}`} />
+                    </span>
+                  </>
+                }
+              >
+                {hasError ? (
+                  <>
+                    <NeutralAvatar sizeClass="size-[3.25rem]" iconClass="size-6" />
+                    {/* Honest about what didn't load; still shows the real role. Recovery is passive
+                        (shared query) or via the settings page — no retry control wedged in the menu. */}
+                    <span className="flex min-w-0 flex-col leading-tight">
+                      <span className="text-[13px] text-charcoal/60">{t('modules.panel.user.loadError')}</span>
+                      <span className="mt-1 truncate text-xs font-medium text-magenta">{roleLabel}</span>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span
+                      aria-hidden
+                      className="grid size-[3.25rem] shrink-0 place-items-center rounded-full bg-gradient-to-br from-cream to-blossom text-lg font-semibold text-charcoal shadow-sm"
+                    >
+                      {initials}
+                    </span>
+                    {/* min-w-0 lets the flex child shrink so `truncate` (…) can engage on absurdly long
+                        names/emails — the menu has a fixed width, so it degrades gracefully. */}
+                    <span className="flex min-w-0 flex-col leading-tight">
+                      <span className="truncate text-[15px] font-semibold text-charcoal">{fullName || fallbackName}</span>
+                      {me?.email && <span className="truncate text-[13px] text-charcoal/50">{me.email}</span>}
+                      <span className="mt-1 truncate text-xs font-medium text-magenta">{roleLabel}</span>
+                    </span>
+                  </>
+                )}
+              </SkeletonFade>
             </div>
 
             <div aria-hidden className="mx-1 my-1 h-px bg-charcoal/[0.06]" />

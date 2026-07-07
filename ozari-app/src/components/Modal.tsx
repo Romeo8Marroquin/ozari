@@ -1,8 +1,8 @@
-import gsap from 'gsap';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineXMark } from 'react-icons/hi2';
+import { collectStaggerTargets, playStaggerIn, playStaggerOut } from './modalStagger';
 import { registerModal } from './modalRegistry';
 
 type ModalSize = 'sm' | 'md' | 'lg';
@@ -37,6 +37,13 @@ export interface ModalProps {
   role?: 'dialog' | 'alertdialog';
   /** Accessible name when there's no visible `title`. */
   'aria-label'?: string;
+  /**
+   * Optional out-ref to the panel element, for consumers that animate the modal's own content
+   * between steps (see {@link useModalPhaseTransition}). The primitive still owns the panel; this
+   * just exposes it so a multi-step modal can drive the shared sweep on the real `.modal-stagger`
+   * nodes.
+   */
+  panelRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 const SIZES: Record<ModalSize, string> = {
@@ -79,6 +86,7 @@ const Modal: React.FC<ModalProps> = ({
   locked = false,
   role = 'dialog',
   'aria-label': ariaLabel,
+  panelRef: externalPanelRef,
 }) => {
   const { t } = useTranslation();
 
@@ -93,6 +101,16 @@ const Modal: React.FC<ModalProps> = ({
   const openerRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const descId = useId();
+
+  // Attach the panel to our internal ref AND (if provided) the consumer's out-ref, so a multi-step
+  // modal can reach the real panel to drive the step transition on its `.modal-stagger` nodes.
+  const setPanelNode = useCallback(
+    (node: HTMLDivElement | null) => {
+      panelRef.current = node;
+      if (externalPanelRef) externalPanelRef.current = node;
+    },
+    [externalPanelRef],
+  );
 
   // Latest handlers/flags, read lazily by the key handler — so the open effect depends only on
   // `open` and doesn't tear down + re-focus when `locked`/`dismissible` toggle mid-request.
@@ -113,33 +131,17 @@ const Modal: React.FC<ModalProps> = ({
   // rise/fade, the content blocks (`.modal-stagger`) do a subtle staggered reveal — and the exact
   // reverse (last-first) on close, kept inside the unmount window. Gated on reduced motion.
   useEffect(() => {
-    const content = panelRef.current?.querySelectorAll<HTMLElement>('.modal-stagger');
-    const footer = panelRef.current?.querySelector<HTMLElement>('.modal-stagger-footer');
-    const hasContent = !!content && content.length > 0;
-    const animate = !prefersReducedMotion() && (hasContent || !!footer);
+    const panel = panelRef.current;
+    const targets = panel ? collectStaggerTargets(panel) : { content: [], footer: null };
+    const animate = !prefersReducedMotion() && (targets.content.length > 0 || !!targets.footer);
 
     if (open) {
       const raf = requestAnimationFrame(() => {
         setEntered(true);
-        if (animate) {
-          // Content sweeps in FROM THE LEFT (staggered top-to-bottom); the actions come in FROM THE
-          // RIGHT (the opposite) at the same time — a horizontal reveal that suits a modal better than
-          // a vertical drop. Travel stays under the panel's padding so nothing overflows.
-          if (hasContent) {
-            gsap.fromTo(
-              content,
-              { x: -20, autoAlpha: 0 },
-              { x: 0, autoAlpha: 1, duration: 0.4, ease: 'power3.out', stagger: 0.1, delay: 0.05, overwrite: true },
-            );
-          }
-          if (footer) {
-            gsap.fromTo(
-              footer,
-              { x: 20, autoAlpha: 0 },
-              { x: 0, autoAlpha: 1, duration: 0.4, ease: 'power3.out', delay: 0.05, overwrite: true },
-            );
-          }
-        }
+        // Content sweeps in FROM THE LEFT (staggered top-to-bottom); the actions come in FROM THE
+        // RIGHT — a horizontal reveal that suits a modal better than a vertical drop. Same sweep the
+        // step transition reuses (see modalStagger).
+        if (animate) playStaggerIn(targets);
       });
       return () => cancelAnimationFrame(raf);
     }
@@ -147,21 +149,7 @@ const Modal: React.FC<ModalProps> = ({
     // Exit = the mirror: content leaves TO THE LEFT (reverse order), actions TO THE RIGHT. Kept
     // inside the unmount window; the panel's own fade is `ease-in` (below) so this is visible, not
     // masked by the card vanishing instantly.
-    if (animate) {
-      if (hasContent) {
-        gsap.to(content, {
-          x: -18,
-          autoAlpha: 0,
-          duration: 0.22,
-          ease: 'power2.in',
-          stagger: { each: 0.065, from: 'end' },
-          overwrite: true,
-        });
-      }
-      if (footer) {
-        gsap.to(footer, { x: 18, autoAlpha: 0, duration: 0.2, ease: 'power2.in', overwrite: true });
-      }
-    }
+    if (animate) playStaggerOut(targets);
     const timer = window.setTimeout(() => setEntered(false), DURATION);
     return () => window.clearTimeout(timer);
   }, [open]);
@@ -231,13 +219,17 @@ const Modal: React.FC<ModalProps> = ({
       />
 
       <div
-        ref={panelRef}
+        ref={setPanelNode}
         role={role}
         aria-modal="true"
         aria-label={title ? undefined : ariaLabel}
         aria-labelledby={title ? titleId : undefined}
         aria-describedby={description ? descId : undefined}
-        className={`relative z-[1] w-full ${SIZES[size]} rounded-card bg-white p-6 shadow-[0_24px_60px_-20px_rgba(38,38,38,0.45)] transition duration-300 motion-reduce:transition-none ${
+        // Capped to the viewport (minus the container gutter) and a flex column, so its body can
+        // scroll rather than overflow off-screen on short/mobile screens. `overflow-hidden` keeps the
+        // scrolling body clipped to the rounded corners. Small modals never reach the cap, so they
+        // size to their content exactly as before.
+        className={`relative z-[1] flex max-h-[calc(100dvh-2rem)] w-full ${SIZES[size]} flex-col overflow-hidden rounded-card bg-white shadow-[0_24px_60px_-20px_rgba(38,38,38,0.45)] transition duration-300 motion-reduce:transition-none ${
           shown
             ? 'translate-y-0 scale-100 opacity-100 ease-[var(--ease-settle)]'
             : 'translate-y-2 scale-[0.96] opacity-0 ease-in delay-150'
@@ -258,23 +250,28 @@ const Modal: React.FC<ModalProps> = ({
           </button>
         )}
 
-        {title && (
-          <h2 id={titleId} className={`modal-stagger text-xl font-semibold text-charcoal ${dismissible ? 'pr-8' : ''}`}>
-            {title}
-          </h2>
-        )}
-        {description && (
-          <p id={descId} className="modal-stagger mt-2 text-[15px] leading-relaxed text-charcoal/60">
-            {description}
-          </p>
-        )}
-        {/* Children are NOT auto-staggered as one block — a modal whose body wants a per-item reveal
-            tags its own elements with `modal-stagger` (e.g. ChangePasswordModal's fields); they then
-            join the same sweep as the title/description. */}
-        {children && <div className="mt-4 text-[15px] text-charcoal/75">{children}</div>}
-        {footer && (
-          <div className="modal-stagger-footer mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">{footer}</div>
-        )}
+        {/* The scrollable body: caps the modal to the screen and scrolls (with momentum, no chaining to
+            the page behind) only when the content would otherwise overflow. `overflow-x-hidden` keeps
+            the modal-stagger x-slide from spawning a horizontal scrollbar. */}
+        <div data-modal-body className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-6">
+          {title && (
+            <h2 id={titleId} className={`modal-stagger text-xl font-semibold text-charcoal ${dismissible ? 'pr-8' : ''}`}>
+              {title}
+            </h2>
+          )}
+          {description && (
+            <p id={descId} className="modal-stagger mt-2 text-[15px] leading-relaxed text-charcoal/60">
+              {description}
+            </p>
+          )}
+          {/* Children are NOT auto-staggered as one block — a modal whose body wants a per-item reveal
+              tags its own elements with `modal-stagger` (e.g. ChangePasswordModal's fields); they then
+              join the same sweep as the title/description. */}
+          {children && <div className="mt-4 text-[15px] text-charcoal/75">{children}</div>}
+          {footer && (
+            <div className="modal-stagger-footer mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">{footer}</div>
+          )}
+        </div>
       </div>
     </div>,
     document.body,

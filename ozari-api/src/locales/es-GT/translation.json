@@ -218,6 +218,7 @@
     },
     "mfaVerifyLogin": {
       "userAuthenticated": "Usuario autenticado exitosamente.",
+      "invalidCode": "El código es incorrecto. Vuelve a intentarlo.",
 
       "genericError": "Código de verificación inválido.",
       "logs": {

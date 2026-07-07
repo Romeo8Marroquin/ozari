@@ -4,10 +4,13 @@ import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineArrowPath, HiOutlineExclamationTriangle } from 'react-icons/hi2';
 import Button from '@components/Button';
+import SkeletonFade from '@components/SkeletonFade';
+import Switch from '@components/Switch';
 import { getInitials } from '@utils/nameFormat';
 import { useMe } from '../hooks/useMe';
 import { usePanelPageExit } from '../PanelPageTransitionContext';
 import ChangePasswordModal from './ChangePasswordModal';
+import MfaEnableModal from './MfaEnableModal';
 import SettingsSection from './SettingsSection';
 
 const prefersReducedMotion = (): boolean => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -16,10 +19,6 @@ const prefersReducedMotion = (): boolean => window.matchMedia('(prefers-reduced-
 // the header pill/menu use, so a slow `/auth/me` reads as "loading", never as a fake value.
 // `animate-pulse` is disabled under reduced-motion.
 const SKELETON = 'animate-pulse rounded bg-charcoal/10 motion-reduce:animate-none';
-
-// The on-brand keyboard focus indicator, matching the rest of the panel chrome (used by the toggle).
-const FOCUS_RING =
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta focus-visible:ring-offset-2 focus-visible:ring-offset-white';
 
 // Secondary actions reuse the app's Button primitive — the same `soft` charcoal as the logout
 // modal's "Cancelar" — so they get cursor, hover-lift, press-scale, focus ring, and motion-reduce
@@ -44,41 +43,35 @@ const AccountField: React.FC<{ label: string; value: string; loading: boolean; s
   <div className="flex flex-col gap-1 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
     <dt className="text-sm text-charcoal/55">{label}</dt>
     <dd className="text-sm font-medium text-charcoal sm:text-right">
-      {loading ? (
-        <span aria-hidden className={`inline-block h-4 align-middle ${skeletonWidth} ${SKELETON}`} />
-      ) : (
-        value || '—'
-      )}
+      <SkeletonFade
+        loading={loading}
+        contentClassName="inline-block"
+        skeleton={<span aria-hidden className={`inline-block h-4 align-middle ${skeletonWidth} ${SKELETON}`} />}
+      >
+        {value || '—'}
+      </SkeletonFade>
     </dd>
   </div>
 );
 
 /**
- * The 2FA on/off switch — the real enable/disable control, shown in its off state and disabled
- * until the MFA phase wires it up. `role="switch"` + `aria-checked` make the state and the control
- * legible to assistive tech; the magenta track is the app accent, reused from the active nav pill.
+ * The 2FA switch, built on the shared {@link Switch} primitive (smooth track/knob, hover halo,
+ * transitioned focus ring). When OFF it's the entry point to the enable wizard — toggling it opens
+ * the setup modal rather than flipping instantly, since enabling is a multi-step confirm; the switch
+ * only reads "on" once the backend actually turns it on (via `useMe`). When ON it's a solid,
+ * non-interactive status indicator (`disabled`, but still full-colour) — turning MFA back off ships
+ * in a later phase.
  */
-const MfaToggle: React.FC<{ enabled: boolean }> = ({ enabled }) => {
+const MfaToggle: React.FC<{ enabled: boolean; onEnable: () => void }> = ({ enabled, onEnable }) => {
   const { t } = useTranslation();
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      disabled
-      title={t('modules.panel.settings.soon')}
-      aria-label={t(enabled ? 'modules.panel.settings.security.mfa.toggleOff' : 'modules.panel.settings.security.mfa.toggleOn')}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
-        enabled ? 'bg-magenta' : 'bg-charcoal/20'
-      } ${FOCUS_RING}`}
-    >
-      <span
-        aria-hidden
-        className={`inline-block size-5 rounded-full bg-white shadow-sm transition-transform duration-200 ease-[var(--ease-settle)] ${
-          enabled ? 'translate-x-[1.375rem]' : 'translate-x-0.5'
-        }`}
-      />
-    </button>
+  return enabled ? (
+    <Switch checked disabled aria-label={t('modules.panel.settings.security.mfa.enabledLabel')} />
+  ) : (
+    <Switch
+      checked={false}
+      onChange={onEnable}
+      aria-label={t('modules.panel.settings.security.mfa.toggleOn')}
+    />
   );
 };
 
@@ -136,6 +129,7 @@ const SettingsPage: React.FC = () => {
   const { data: me, isLoading, isError, isFetching, refetch } = useMe();
   const root = useRef<HTMLDivElement>(null);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [mfaModalOpen, setMfaModalOpen] = useState(false);
 
   const loading = isLoading && !me;
   // Only a COLD failure (no cached profile to show) becomes the error state; a failed background
@@ -210,31 +204,34 @@ const SettingsPage: React.FC = () => {
         ) : (
           <>
             {/* Identity: brand avatar + name + email, mirroring the header menu's identity block. */}
-            <div className="flex items-center gap-4 py-5">
-              {loading ? (
-                <>
-                  <span aria-hidden className={`size-14 shrink-0 rounded-full ${SKELETON}`} />
-                  <span className="flex flex-1 flex-col gap-2">
-                    <span aria-hidden className={`h-4 w-40 ${SKELETON}`} />
-                    <span aria-hidden className={`h-3 w-52 max-w-full ${SKELETON}`} />
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span
-                    aria-hidden
-                    className="grid size-14 shrink-0 place-items-center rounded-full bg-gradient-to-br from-cream to-blossom text-lg font-semibold text-charcoal shadow-sm"
-                  >
-                    {getInitials(me?.fullName ?? '') || getInitials(t('modules.panel.user.fallbackName'))}
-                  </span>
-                  <span className="flex min-w-0 flex-col leading-tight">
-                    <span className="truncate text-base font-semibold text-charcoal">
-                      {me?.fullName || t('modules.panel.user.fallbackName')}
+            <div className="py-5">
+              <SkeletonFade
+                loading={loading}
+                className="block"
+                contentClassName="flex items-center gap-4"
+                skeleton={
+                  <>
+                    <span aria-hidden className={`size-14 shrink-0 rounded-full ${SKELETON}`} />
+                    <span className="flex flex-1 flex-col gap-2">
+                      <span aria-hidden className={`h-4 w-40 ${SKELETON}`} />
+                      <span aria-hidden className={`h-3 w-52 max-w-full ${SKELETON}`} />
                     </span>
-                    {me?.email && <span className="truncate text-sm text-charcoal/55">{me.email}</span>}
+                  </>
+                }
+              >
+                <span
+                  aria-hidden
+                  className="grid size-14 shrink-0 place-items-center rounded-full bg-gradient-to-br from-cream to-blossom text-lg font-semibold text-charcoal shadow-sm"
+                >
+                  {getInitials(me?.fullName ?? '') || getInitials(t('modules.panel.user.fallbackName'))}
+                </span>
+                <span className="flex min-w-0 flex-col leading-tight">
+                  <span className="truncate text-base font-semibold text-charcoal">
+                    {me?.fullName || t('modules.panel.user.fallbackName')}
                   </span>
-                </>
-              )}
+                  {me?.email && <span className="truncate text-sm text-charcoal/55">{me.email}</span>}
+                </span>
+              </SkeletonFade>
             </div>
 
             <div aria-hidden className="h-px bg-charcoal/[0.06]" />
@@ -281,17 +278,20 @@ const SettingsPage: React.FC = () => {
             label={t('modules.panel.settings.security.mfa.label')}
             description={t('modules.panel.settings.security.mfa.description')}
             action={
-              loading ? (
-                <span aria-hidden className={`inline-block h-6 w-11 rounded-full ${SKELETON}`} />
-              ) : (
-                <MfaToggle enabled={Boolean(me?.mfaEnabled)} />
-              )
+              <SkeletonFade
+                loading={loading}
+                contentClassName="inline-flex"
+                skeleton={<span aria-hidden className={`inline-block h-6 w-11 rounded-full ${SKELETON}`} />}
+              >
+                <MfaToggle enabled={Boolean(me?.mfaEnabled)} onEnable={() => setMfaModalOpen(true)} />
+              </SkeletonFade>
             }
           />
         </div>
       </SettingsSection>
 
       <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
+      <MfaEnableModal open={mfaModalOpen} onClose={() => setMfaModalOpen(false)} />
     </div>
   );
 };
