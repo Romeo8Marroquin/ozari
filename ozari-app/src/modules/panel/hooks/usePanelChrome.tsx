@@ -91,6 +91,9 @@ export const PanelChromeProvider: React.FC<{ children: React.ReactNode }> = ({ c
   return <PanelChromeContext.Provider value={value}>{children}</PanelChromeContext.Provider>;
 };
 
+// This module intentionally co-locates the context, its provider, and the accessor hook (the standard
+// context pattern); the provider's own fast-refresh isn't worth splitting the file across three.
+// eslint-disable-next-line react-refresh/only-export-components
 export const usePanelChrome = (): PanelChrome => {
   const context = useContext(PanelChromeContext);
   if (!context) throw new Error('usePanelChrome must be used within a PanelChromeProvider');

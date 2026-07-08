@@ -137,6 +137,16 @@ export default [
     },
   },
 
+  // The products module is WIP (route not mounted — see CLAUDE.md; also coverage-excluded). Its
+  // validators are large, schema-driven functions whose cyclomatic complexity trips the threshold;
+  // suppress here rather than prematurely refactor unmounted code — revisit when it's productionized.
+  {
+    files: ["**/products.validator.ts"],
+    rules: {
+      complexity: "off",
+    },
+  },
+
   // Ignore patterns
   {
     ignores: [

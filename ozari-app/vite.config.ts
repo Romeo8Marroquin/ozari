@@ -77,10 +77,6 @@ export default defineConfig({
         // Pure GSAP animation orchestration for the auth card (enter/leave/redirect timelines,
         // COVER keyframes, resize-snap) — no business logic; verified visually, not by unit tests.
         'src/modules/sesion/hooks/useAuthCard.ts',
-        // Pure GSAP orchestration for a modal's phase swap (out → resize → in). Only "which phase is
-        // rendered" is logic, and it's exercised (reduced-motion instant path) via MfaEnableModal;
-        // the tween branch doesn't tick under jsdom. Verified visually, like useAuthCard.
-        'src/components/useModalPhaseTransition.ts',
       ],
     },
   },
