@@ -56,3 +56,13 @@ resource "google_secret_manager_secret" "ozari_api_key" {
     auto {}
   }
 }
+
+# Resend API key (EMAIL_KEY) for transactional email. Container only — add the value out-of-band:
+#   printf '%s' "re_..." | gcloud secrets versions add ozari-email-key --data-file=-
+resource "google_secret_manager_secret" "ozari_email_key" {
+  project   = var.project_id
+  secret_id = "ozari-email-key"
+  replication {
+    auto {}
+  }
+}

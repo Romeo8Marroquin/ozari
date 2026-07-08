@@ -276,7 +276,8 @@ export const schemas: Record<string, Schema> = {
       otpauthUri: {
         type: "string",
         description: "`otpauth://` URI to render as a QR code.",
-        example: "otpauth://totp/Ozari:ana.garcia@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Ozari",
+        example:
+          "otpauth://totp/Party%20Rentals:ana.garcia@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Party%20Rentals",
       },
     },
   },

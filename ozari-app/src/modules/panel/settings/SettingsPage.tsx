@@ -10,6 +10,7 @@ import { getInitials } from '@utils/nameFormat';
 import { useMe } from '../hooks/useMe';
 import { usePanelPageExit } from '../PanelPageTransitionContext';
 import ChangePasswordModal from './ChangePasswordModal';
+import MfaDisableModal from './MfaDisableModal';
 import MfaEnableModal from './MfaEnableModal';
 import SettingsSection from './SettingsSection';
 
@@ -56,16 +57,19 @@ const AccountField: React.FC<{ label: string; value: string; loading: boolean; s
 
 /**
  * The 2FA switch, built on the shared {@link Switch} primitive (smooth track/knob, hover halo,
- * transitioned focus ring). When OFF it's the entry point to the enable wizard — toggling it opens
- * the setup modal rather than flipping instantly, since enabling is a multi-step confirm; the switch
- * only reads "on" once the backend actually turns it on (via `useMe`). When ON it's a solid,
- * non-interactive status indicator (`disabled`, but still full-colour) — turning MFA back off ships
- * in a later phase.
+ * transitioned focus ring). Toggling it never flips instantly — it opens a confirm modal (enabling is
+ * a multi-step wizard; disabling is a password-confirmed step-up) and the switch only reflects the new
+ * state once the backend actually changes it (via `useMe`), so its visual position always matches
+ * reality even mid-request.
  */
-const MfaToggle: React.FC<{ enabled: boolean; onEnable: () => void }> = ({ enabled, onEnable }) => {
+const MfaToggle: React.FC<{ enabled: boolean; onEnable: () => void; onDisable: () => void }> = ({
+  enabled,
+  onEnable,
+  onDisable,
+}) => {
   const { t } = useTranslation();
   return enabled ? (
-    <Switch checked disabled aria-label={t('modules.panel.settings.security.mfa.enabledLabel')} />
+    <Switch checked onChange={onDisable} aria-label={t('modules.panel.settings.security.mfa.toggleOff')} />
   ) : (
     <Switch
       checked={false}
@@ -119,10 +123,9 @@ const AccountError: React.FC<{ onRetry: () => void; retrying: boolean }> = ({ on
 };
 
 /**
- * Settings shell — the panel's first real (non-placeholder) screen and the host for the account
- * and security features that follow (change-password, MFA setup/enable/disable). Account shows the
- * live profile from `/auth/me`; the security actions are intentional "coming soon" placeholders
- * until their phases land — the structure, motion, and a11y around them are production-ready.
+ * Settings shell — the panel's first real screen and the host for the account + security features:
+ * the live profile from `/auth/me`, change-password, and MFA setup/enable/disable (each a confirm
+ * dialog off this page). Structure, motion, and a11y are production-ready.
  */
 const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -130,6 +133,7 @@ const SettingsPage: React.FC = () => {
   const root = useRef<HTMLDivElement>(null);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [mfaModalOpen, setMfaModalOpen] = useState(false);
+  const [mfaDisableModalOpen, setMfaDisableModalOpen] = useState(false);
 
   const loading = isLoading && !me;
   // Only a COLD failure (no cached profile to show) becomes the error state; a failed background
@@ -283,7 +287,11 @@ const SettingsPage: React.FC = () => {
                 contentClassName="inline-flex"
                 skeleton={<span aria-hidden className={`inline-block h-6 w-11 rounded-full ${SKELETON}`} />}
               >
-                <MfaToggle enabled={Boolean(me?.mfaEnabled)} onEnable={() => setMfaModalOpen(true)} />
+                <MfaToggle
+                  enabled={Boolean(me?.mfaEnabled)}
+                  onEnable={() => setMfaModalOpen(true)}
+                  onDisable={() => setMfaDisableModalOpen(true)}
+                />
               </SkeletonFade>
             }
           />
@@ -292,6 +300,7 @@ const SettingsPage: React.FC = () => {
 
       <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
       <MfaEnableModal open={mfaModalOpen} onClose={() => setMfaModalOpen(false)} />
+      <MfaDisableModal open={mfaDisableModalOpen} onClose={() => setMfaDisableModalOpen(false)} />
     </div>
   );
 };

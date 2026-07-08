@@ -39,16 +39,22 @@ const CopyButton: React.FC<CopyButtonProps> = ({ value, label, copiedLabel, full
   }, [value]);
 
   return (
-    <Button
-      variant="soft"
-      color="#262626"
-      size="sm"
-      fullWidth={fullWidth}
-      onClick={() => void onCopy()}
-      startIcon={copied ? <HiOutlineCheck className="size-4" /> : <HiOutlineClipboard className="size-4" />}
-    >
-      {copied ? copiedLabel : label}
-    </Button>
+    <>
+      <Button
+        variant="soft"
+        color="#262626"
+        size="sm"
+        fullWidth={fullWidth}
+        onClick={() => void onCopy()}
+        startIcon={copied ? <HiOutlineCheck className="size-4" /> : <HiOutlineClipboard className="size-4" />}
+      >
+        {copied ? copiedLabel : label}
+      </Button>
+      {/* The visual label swap isn't reliably announced, so mirror "copied" into a live region. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {copied ? copiedLabel : ''}
+      </span>
+    </>
   );
 };
 

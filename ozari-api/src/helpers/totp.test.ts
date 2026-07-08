@@ -95,6 +95,8 @@ describe("secrets, recovery codes and otpauth uri", () => {
     const uri = buildOtpauthUri(secret, "user@example.com");
     expect(uri.startsWith("otpauth://totp/")).toBe(true);
     expect(uri).toContain(`secret=${secret}`);
-    expect(uri).toContain("issuer=Ozari");
+    // The user-facing brand, percent-encoded (a space is `%20`, never `+`).
+    expect(uri).toContain("issuer=Party%20Rentals");
+    expect(uri).not.toContain("+");
   });
 });

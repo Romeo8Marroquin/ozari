@@ -19,13 +19,14 @@ import { toFormError } from '@utils/apiError';
 import useLogin from '../hooks/useLogin';
 import { useSearch } from '@tanstack/react-router';
 import useAuthCard from '../hooks/useAuthCard';
+import MfaLoginStep from './MfaLoginStep';
 import useDesktopAutoFocus from '@hooks/useDesktopAutoFocus';
 import { hasUserGestured } from '@hooks/useUserGesture';
 
 const LoginPage: React.FC = () => {
   const { t } = useTranslation();
   const search = useSearch({ from: '/sesion' });
-  const { containerRef, leaveTo, redirectAfterSuccess } = useAuthCard('login');
+  const { containerRef, leaveTo, redirectAfterSuccess, swapFormColumn } = useAuthCard('login');
   const methods = useForm<LoginType>({
     resolver: zodResolver(loginSchema),
     defaultValues: loginSchemaDefaultValues,
@@ -43,6 +44,10 @@ const LoginPage: React.FC = () => {
   const [isRedirecting, setIsRedirecting] = useState(false);
   // Server-side submit error (bad credentials etc.), rendered inline above the button — NOT a toast.
   const [formError, setFormError] = useState<string | undefined>(undefined);
+  // Which column the card shows: the credentials form or the in-card MFA second step. `mfaToken`
+  // holds the 5-min challenge token IN MEMORY ONLY (component state, never storage) between steps.
+  const [step, setStep] = useState<'credentials' | 'mfa'>('credentials');
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
   const autoFocusFirst = useDesktopAutoFocus();
   const formRef = useRef<HTMLFormElement>(null);
   // Synchronous in-flight lock: blocks a second submit fired in the same frame, before
@@ -113,8 +118,11 @@ const LoginPage: React.FC = () => {
       onSuccess: (response) => {
         const payload = response.data?.data;
         if (payload && 'mfaRequired' in payload) {
-          // 2FA is enabled on this account; the second step isn't wired up yet.
-          notify.error(t('modules.sesion.login.api.mfaNotSupported'));
+          // 2FA is on: keep the challenge token in memory and swap the card's form-column to the
+          // MFA step in place (no navigation), same motion as the login↔register sweep.
+          setMfaToken(payload.mfaToken);
+          setFormError(undefined);
+          swapFormColumn(() => setStep('mfa'));
           return;
         }
         // Only proceed once a session actually exists (access token in the header).
@@ -193,6 +201,32 @@ const LoginPage: React.FC = () => {
             </div>
           </div>
         </div>
+        {step === 'mfa' && mfaToken ? (
+          <MfaLoginStep
+            mfaToken={mfaToken}
+            onVerified={() => {
+              setIsRedirecting(true);
+              redirectAfterSuccess(search.redirect ?? '/panel/productos');
+            }}
+            onExpired={() => {
+              // Clear the token INSIDE the commit (with the step change) — clearing it earlier would
+              // unmount the MFA step immediately (its render is gated on `mfaToken`), killing the
+              // out-animation and causing an abrupt jump + flicker.
+              swapFormColumn(() => {
+                setStep('credentials');
+                setMfaToken(null);
+                setFormError(t('modules.sesion.login.mfa.errors.expired'));
+              });
+            }}
+            onBack={() => {
+              swapFormColumn(() => {
+                setStep('credentials');
+                setMfaToken(null);
+              });
+            }}
+            disabled={isRedirecting}
+          />
+        ) : (
         <div className="flex flex-col gap-7 justify-center items-center z-10 w-full max-w-md">
           <h2 className="form-element text-2xl sm:text-3xl font-bold text-black select-none">
             {t('modules.sesion.login.title')}
@@ -271,6 +305,7 @@ const LoginPage: React.FC = () => {
             </FormProvider>
           </RequiredPatternsContext.Provider>
         </div>
+        )}
       </section>
     </div>
   );

@@ -33,6 +33,18 @@ vi.mock('./MfaEnableModal', () => ({
     ) : null,
 }));
 
+// …and for the MFA disable dialog — its internals live in MfaDisableModal.test.
+vi.mock('./MfaDisableModal', () => ({
+  default: ({ open, onClose }: { open: boolean; onClose: () => void }) =>
+    open ? (
+      <div data-testid="mfa-disable-modal">
+        <button type="button" onClick={onClose}>
+          close-mfa-disable
+        </button>
+      </div>
+    ) : null,
+}));
+
 import { PanelPageTransitionContext } from '../PanelPageTransitionContext';
 import SettingsPage from './SettingsPage';
 
@@ -131,13 +143,18 @@ describe('SettingsPage', () => {
     expect(screen.getByText(/2026/)).toBeInTheDocument();
 
     const toggle = screen.getByRole('switch');
-    // When on, the switch is a non-interactive status indicator (disable ships later).
+    // When on, the switch is interactive; its accessible name is the "turn off" action.
     expect(toggle).toBeChecked();
-    expect(toggle).toBeDisabled();
-    expect(toggle).toHaveAccessibleName('modules.panel.settings.security.mfa.enabledLabel');
-    // Activating the on-switch does nothing (no disable flow yet, no wizard).
+    expect(toggle).toBeEnabled();
+    expect(toggle).toHaveAccessibleName('modules.panel.settings.security.mfa.toggleOff');
+    // Activating it opens the disable confirmation (it won't flip until the backend disables), and
+    // it must NOT open the enable wizard.
     await userEvent.click(toggle);
+    expect(await screen.findByTestId('mfa-disable-modal')).toBeInTheDocument();
     expect(screen.queryByTestId('mfa-modal')).not.toBeInTheDocument();
+    // Closing it (the mock's close button → onClose) unmounts the dialog.
+    await userEvent.click(screen.getByRole('button', { name: 'close-mfa-disable' }));
+    expect(screen.queryByTestId('mfa-disable-modal')).not.toBeInTheDocument();
   });
 
   it('falls back gracefully for an empty name/email + bad join date, and an off MFA toggle', () => {

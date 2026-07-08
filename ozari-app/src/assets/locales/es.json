@@ -91,8 +91,24 @@
           "loginError": "Ha ocurrido un error al iniciar la sesión.",
           "invalidCredentials": "Correo o contraseña incorrectos.",
           "tooManyAttempts": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
-          "networkError": "No pudimos conectar con el servidor. Revisa tu conexión.",
-          "mfaNotSupported": "Tu cuenta requiere verificación en dos pasos, que aún no está disponible aquí."
+          "networkError": "No pudimos conectar con el servidor. Revisa tu conexión."
+        },
+        "mfa": {
+          "title": "Verificación en dos pasos",
+          "subtitle": "Ingresa el código de tu app de autenticación para continuar.",
+          "codeLabel": "Código de verificación",
+          "recoveryLabel": "Código de recuperación",
+          "verifyButton": "Verificar",
+          "useRecoveryCode": "Usar un código de recuperación",
+          "useAuthenticator": "Usar la app de autenticación",
+          "back": "Volver al inicio de sesión",
+          "errors": {
+            "codeLength": "Ingresa el código de 6 dígitos.",
+            "recoveryLength": "Ingresa tu código de recuperación de 16 caracteres.",
+            "invalidCode": "El código es incorrecto. Vuelve a intentarlo.",
+            "expired": "La verificación expiró. Inicia sesión de nuevo.",
+            "locked": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo."
+          }
         }
       },
       "register": {
@@ -232,7 +248,6 @@
             "description": "Añade una capa extra de seguridad al iniciar sesión.",
             "toggleOn": "Activar verificación en dos pasos",
             "toggleOff": "Desactivar verificación en dos pasos",
-            "enabledLabel": "Verificación en dos pasos activada",
             "enable": {
               "title": "Activar verificación en dos pasos",
               "scanDescription": "Escanea el código QR con tu app de autenticación e ingresa el código de 6 dígitos que aparece.",
@@ -255,10 +270,26 @@
                 "title": "Guarda tus códigos de recuperación",
                 "description": "Úsalos para entrar si pierdes acceso a tu app de autenticación. Cada código funciona una sola vez.",
                 "warning": "Guárdalos en un lugar seguro. No volverás a verlos y son la única forma de entrar si pierdes tu teléfono.",
+                "listLabel": "Códigos de recuperación",
                 "copy": "Copiar códigos",
                 "copied": "Copiado",
                 "download": "Descargar",
                 "done": "Listo"
+              }
+            },
+            "disable": {
+              "title": "Desactivar verificación en dos pasos",
+              "description": "Confirma tu contraseña para desactivar la verificación en dos pasos.",
+              "warning": "Tu cuenta quedará protegida solo con tu contraseña y se eliminarán tus códigos de recuperación.",
+              "passwordLabel": "Contraseña",
+              "passwordPlaceholder": "Ingresa tu contraseña",
+              "confirm": "Desactivar",
+              "cancel": "Cancelar",
+              "successTitle": "Verificación desactivada",
+              "successToast": "La verificación en dos pasos se desactivó.",
+              "errors": {
+                "requiredPassword": "La contraseña es obligatoria.",
+                "invalidPassword": "La contraseña es incorrecta."
               }
             }
           }

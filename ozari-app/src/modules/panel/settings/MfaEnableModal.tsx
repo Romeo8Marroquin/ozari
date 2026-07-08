@@ -7,13 +7,13 @@ import { useTranslation } from 'react-i18next';
 import { HiOutlineExclamationTriangle } from 'react-icons/hi2';
 import Button from '@components/Button';
 import Modal from '@components/Modal';
+import MfaCodeField from '@components/MfaCodeField';
 import SkeletonFade from '@components/SkeletonFade';
 import { useModalPhaseTransition } from '@components/useModalPhaseTransition';
 import { notify } from '@components/notifications/notify';
 import { QueryKeys } from '@constants/QueryKeys';
 import { getServerMessage, getStatus, isOutageStatus, resolveApiErrorMessage } from '@utils/apiError';
 import CopyButton from './CopyButton';
-import MfaCodeField from './MfaCodeField';
 import MfaQrCode from './MfaQrCode';
 import RecoveryCodesPanel from './RecoveryCodesPanel';
 import { mfaCodeDefaultValues, mfaCodeSchema, type MfaCodeType } from './SchemaMfaCode';
@@ -204,7 +204,8 @@ const MfaEnableModal: React.FC<MfaEnableModalProps> = ({ open, onClose }) => {
   return (
     <Modal open={open} onClose={onClose} size="md" locked={isEnabling} title={title} description={description} footer={footer} panelRef={panelRef}>
       <FormProvider {...methods}>
-        <div>
+        {/* Announce the pending state while the secret is being generated (form phase only). */}
+        <div aria-busy={renderedPhase === 'form' && !ready}>
           {renderedPhase === 'error' && (
             <div className="modal-stagger flex flex-col items-center gap-3 py-8 text-center">
               <span aria-hidden className="grid size-11 place-items-center rounded-full bg-amber-50 text-amber-500">

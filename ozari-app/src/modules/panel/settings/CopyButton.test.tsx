@@ -26,12 +26,17 @@ describe('CopyButton', () => {
     render(<CopyButton value="SECRET-123" label="copy" copiedLabel="copied" />);
     expect(screen.getByRole('button')).toHaveTextContent('copy');
 
+    expect(screen.getByRole('status')).toHaveTextContent('');
+
     await clickCopy();
     expect(writeText).toHaveBeenCalledWith('SECRET-123');
     expect(screen.getByRole('button')).toHaveTextContent('copied');
+    // The confirmation is mirrored into a live region for screen readers.
+    expect(screen.getByRole('status')).toHaveTextContent('copied');
 
     act(() => vi.advanceTimersByTime(1800));
     expect(screen.getByRole('button')).toHaveTextContent('copy');
+    expect(screen.getByRole('status')).toHaveTextContent('');
   });
 
   it('stays quiet (no confirmation) when the clipboard write is rejected', async () => {

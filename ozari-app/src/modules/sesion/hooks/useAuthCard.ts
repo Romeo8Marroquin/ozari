@@ -199,6 +199,50 @@ const useAuthCard = (variant: AuthVariant) => {
     }
   };
 
+  // In-place form-column swap (e.g. login → the MFA second step) that STAYS on the card: the current
+  // `.form-element`s sweep out (like the leave), `commit()` swaps the content, then the new
+  // `.form-element`s sweep in while the card height tweens old→new — the same "cover, settle, resize"
+  // language as the modal phase transition, so a mid-login step change reads as one continuous beat,
+  // never a jump. Deferred swap (out → commit → in) so React has painted the new content first.
+  const swapFormColumn = (commit: () => void) => {
+    const container = containerRef.current;
+    const card = container?.querySelector<HTMLElement>(CARD_SELECTOR);
+    const outEls = container?.querySelectorAll<HTMLElement>('.form-element');
+    const fromHeight = card?.offsetHeight ?? null;
+
+    if (!outEls || outEls.length === 0) {
+      commit();
+      return;
+    }
+
+    gsap.to(outEls, {
+      x: formShift,
+      opacity: 0,
+      stagger: 0.05,
+      duration: 0.22,
+      ease: 'power3.in',
+      overwrite: true,
+      onComplete: () => {
+        commit();
+        requestAnimationFrame(() => {
+          const inEls = container?.querySelectorAll<HTMLElement>('.form-element');
+          const tl = gsap.timeline({ defaults: { ease: 'power2.out' } });
+          if (card && fromHeight != null && Math.abs(fromHeight - card.offsetHeight) > 2) {
+            tl.fromTo(
+              card,
+              { height: fromHeight },
+              { height: 'auto', duration: 0.42, ease: 'power3.inOut', clearProps: 'height' },
+              0,
+            );
+          }
+          if (inEls && inEls.length > 0) {
+            tl.from(inEls, { x: formShift, opacity: 0, stagger: 0.06, duration: 0.3 }, 0);
+          }
+        });
+      },
+    });
+  };
+
   const redirectAfterSuccess = (path: string) => {
     const container = containerRef.current;
     const geo = container ? gradientGeometry(container, variant, isMobileViewport()) : null;
@@ -226,7 +270,7 @@ const useAuthCard = (variant: AuthVariant) => {
     );
   };
 
-  return { containerRef, leaveTo, redirectAfterSuccess };
+  return { containerRef, leaveTo, redirectAfterSuccess, swapFormColumn };
 };
 
 export default useAuthCard;

@@ -11,6 +11,8 @@ import {
   hashPassword,
 } from "@helpers/encryption.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
+import { getMailer } from "@helpers/mailer.js";
+import { buildWelcomeEmail } from "../../emails/welcomeEmail.js";
 import { logger } from "@/config/logger.js";
 import {
   AuditAction,
@@ -133,6 +135,20 @@ export const createUser = async (
         ipAddress: req.ip,
         success: true,
       });
+    }
+
+    // Welcome email — best-effort. A delivery failure must NEVER fail registration (the account is
+    // already created); we log it and still return success. Awaited so it runs while Cloud Run keeps
+    // the request's CPU active (fire-and-forget after the response can be dropped on scale-down).
+    try {
+      await getMailer().send(buildWelcomeEmail({ to: email, name: fullName }));
+    } catch (error) {
+      logger.error(
+        i18next.t("user.createUser.logs.welcomeEmailFailed", {
+          email,
+          error: String(error),
+        }),
+      );
     }
 
     sendOzariSuccess(

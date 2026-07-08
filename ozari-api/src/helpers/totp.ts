@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import { URLSearchParams } from "node:url";
 import { appConfig } from "@/config/app.js";
 
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -103,14 +102,18 @@ export function verifyTotp(
 
 export function buildOtpauthUri(secretBase32: string, account: string): string {
   const label = encodeURIComponent(`${appConfig.mfa.issuerLabel}:${account}`);
-  const params = new URLSearchParams({
-    secret: secretBase32,
-    issuer: appConfig.mfa.issuerLabel,
-    algorithm: "SHA1",
-    digits: String(appConfig.mfa.totpDigits),
-    period: String(appConfig.mfa.totpStepSeconds),
-  });
-  return `otpauth://totp/${label}?${params.toString()}`;
+  // Percent-encode each query value (a space becomes `%20`, per the Key URI Format). `URLSearchParams`
+  // would emit `+` for the space in a multi-word issuer (e.g. "Party Rentals"), which some
+  // authenticator apps render literally as "Party+Rentals".
+  const params: [string, string][] = [
+    ["secret", secretBase32],
+    ["issuer", appConfig.mfa.issuerLabel],
+    ["algorithm", "SHA1"],
+    ["digits", String(appConfig.mfa.totpDigits)],
+    ["period", String(appConfig.mfa.totpStepSeconds)],
+  ];
+  const query = params.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
+  return `otpauth://totp/${label}?${query}`;
 }
 
 export function generateRecoveryCodes(

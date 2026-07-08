@@ -53,6 +53,18 @@
       }
     }
   },
+  "email": {
+    "welcome": {
+      "subject": "Te damos la bienvenida a Party Rentals",
+      "preview": "Tu cuenta ya está lista. Inicia sesión cuando quieras.",
+      "heading": "¡Bienvenido a Party Rentals!",
+      "greeting": "Hola, {{name}}:",
+      "body": "Tu cuenta se creó correctamente. Ya puedes iniciar sesión y comenzar a explorar nuestros servicios de alquiler para eventos.",
+      "cta": "Iniciar sesión",
+      "footerNote": "Si no reconoces esta cuenta, puedes ignorar este mensaje.",
+      "signature": "Gracias por unirte, el equipo de Party Rentals."
+    }
+  },
   "user": {
     "createUser": {
       "userCreated": "Usuario creado exitosamente.",
@@ -77,7 +89,8 @@
       "logs": {
         "userCreated": "Usuario creado exitosamente con el correo <{{-email}}> y el nombre.",
         "userAlreadyExists": "El usuario con el correo <{{-email}}> ya existe.",
-        "internalServerError": "Error interno al crear usuario."
+        "internalServerError": "Error interno al crear usuario.",
+        "welcomeEmailFailed": "No se pudo enviar el correo de bienvenida a <{{-email}}>: {{-error}}."
       }
     },
     "signInUser": {
