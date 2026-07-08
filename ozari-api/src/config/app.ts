@@ -43,6 +43,9 @@ export const appConfig = {
     from: {
       default: "Party Rentals <no-reply@partyrentalsgt.com>",
       welcome: "Party Rentals <bienvenida@partyrentalsgt.com>",
+      // Security notifications (password changed, 2FA enabled/disabled) — a recognizable sender for
+      // account-safety mail.
+      security: "Party Rentals <seguridad@partyrentalsgt.com>",
     },
     // Hosted logo for the email header. MUST be a publicly reachable PNG (email clients block data:
     // URIs and don't render SVG — Gmail strips both). Served from the frontend's `public/` — so it

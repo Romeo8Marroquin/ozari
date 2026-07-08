@@ -550,6 +550,26 @@ describe("changePassword", () => {
       buildRes(),
     );
     expect(client.$transaction).toHaveBeenCalled();
+    // A best-effort security notification is sent.
+    expect(welcomeMailerSend).toHaveBeenCalledTimes(1);
+    expect(sendOzariSuccess).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.OK,
+      expect.any(String),
+    );
+  });
+
+  it("still returns 200 when the security email fails", async () => {
+    const passwordSha = await hashPassword("CurrentPass1!");
+    mockPrisma({ user: buildUser({ passwordSha }) });
+    welcomeMailerSend.mockRejectedValueOnce(new Error("smtp down"));
+    await changePassword(
+      authedReq({
+        currentPassword: "CurrentPass1!",
+        newPassword: "BrandNewPass1!",
+      }),
+      buildRes(),
+    );
     expect(sendOzariSuccess).toHaveBeenCalledWith(
       expect.anything(),
       HttpEnum.OK,
