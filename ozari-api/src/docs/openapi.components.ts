@@ -224,6 +224,29 @@ export const schemas: Record<string, Schema> = {
       },
     },
   },
+  ForgotPasswordRequest: {
+    type: "object",
+    required: ["email"],
+    properties: { email: emailField },
+  },
+  ResetPasswordRequest: {
+    type: "object",
+    required: ["token", "newPassword", "confirmPassword"],
+    properties: {
+      token: {
+        type: "string",
+        minLength: 1,
+        description: "The opaque reset token delivered in the emailed link (`?token=`).",
+        example: "M2Q0YmYxYzhhOTdlNGQ2ZmIyN2E1ZTgxYzBkM2Y0YjY",
+      },
+      newPassword: passwordField,
+      confirmPassword: {
+        type: "string",
+        description: "Must exactly match `newPassword`.",
+        example: "N3w!Passw0rd",
+      },
+    },
+  },
 
   // Response payloads (the `data` field of the success envelope)
   UserProfile: {

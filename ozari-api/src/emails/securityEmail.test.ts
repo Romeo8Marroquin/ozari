@@ -4,6 +4,7 @@ import {
   buildMfaDisabledEmail,
   buildMfaEnabledEmail,
   buildPasswordChangedEmail,
+  buildPasswordResetEmail,
 } from "./securityEmail.js";
 
 // Real i18n so the rendered copy + name interpolation/escaping are exercised for real.
@@ -40,6 +41,26 @@ describe("security notification emails", () => {
     expect(message.from).toBe("Party Rentals <seguridad@partyrentalsgt.com>");
     expect(message.subject).toBe("Desactivaste la verificación en dos pasos");
     expect(message.html).toContain("Verificación en dos pasos desactivada");
+  });
+
+  it("builds the password-reset email with the tokenized link as the CTA", () => {
+    const resetUrl =
+      "https://app.example.com/sesion/restablecer?token=abc123def456";
+    const message = buildPasswordResetEmail({
+      to: "ana@example.com",
+      name: "Ana",
+      resetUrl,
+    });
+
+    expect(message.to).toBe("ana@example.com");
+    expect(message.from).toBe("Party Rentals <seguridad@partyrentalsgt.com>");
+    expect(message.subject).toBe(
+      "Restablece tu contraseña de Party Rentals",
+    );
+    expect(message.html).toContain("Restablece tu contraseña");
+    // The CTA points at the tokenized reset link, NOT the login page.
+    expect(message.html).toContain(`href="${resetUrl}"`);
+    expect(message.text).toContain(resetUrl);
   });
 
   it("HTML-escapes the name in the HTML part but keeps the text part raw", () => {

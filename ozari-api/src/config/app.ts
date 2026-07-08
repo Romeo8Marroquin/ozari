@@ -22,6 +22,13 @@ export const appConfig = {
     issuer: "ozari",
   },
 
+  passwordReset: {
+    // Raw token bytes (sent in the email link); only its SHA-256 hash is stored. Single-use, and
+    // short-lived so a leaked/forgotten link can't be replayed long after.
+    tokenBytes: 32,
+    tokenTtlMinutes: 30,
+  },
+
   mfa: {
     // User-facing brand shown in the authenticator app (Google Authenticator, 1Password, …) — the
     // commercial name, NOT the internal project codename. Distinct from the JWT `issuer`/`iss` claim

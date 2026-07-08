@@ -26,6 +26,16 @@ export interface MfaDisableRequestModel {
   password: string;
 }
 
+export interface ForgotPasswordRequestModel {
+  email: string;
+}
+
+export interface ResetPasswordRequestModel {
+  token: string;
+  newPassword: string;
+  confirmPassword: string;
+}
+
 export interface GetAllUsersResponseModel {
   createdAt: Date;
   email: string | undefined;

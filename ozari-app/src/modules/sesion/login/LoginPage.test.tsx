@@ -31,6 +31,20 @@ vi.mock('./MfaLoginStep', () => ({
     return <div data-testid="mfa-step">mfa</div>;
   },
 }));
+
+// The forgot-password step is likewise a black box here (covered by its own test); capture its props
+// to exercise the page's wiring (link → swap to the step, onBack → revert to credentials).
+interface ForgotStepProps {
+  onBack: () => void;
+  disabled?: boolean;
+}
+const forgotStep = vi.hoisted(() => ({ props: null as ForgotStepProps | null }));
+vi.mock('./ForgotPasswordStep', () => ({
+  default: (props: ForgotStepProps) => {
+    forgotStep.props = props;
+    return <div data-testid="forgot-step">forgot</div>;
+  },
+}));
 // Mutable state read by the mock factories on every render.
 const state = vi.hoisted(() => ({ isPending: false }));
 const searchState = vi.hoisted(() => ({ value: {} as { redirect?: string } }));
@@ -84,6 +98,7 @@ beforeEach(() => {
   searchState.value = {};
   gestureState.value = false;
   mfaStep.props = null;
+  forgotStep.props = null;
   swapFormColumn.mockImplementation((commit: () => void) => commit());
 });
 afterEach(() => vi.restoreAllMocks());
@@ -378,6 +393,27 @@ describe('LoginPage', () => {
       await user.tab(); // blur submit button (non-INPUT) -> early return
       await new Promise((r) => setTimeout(r, 120));
       expect(login).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('forgot-password step', () => {
+    const forgotLink = () =>
+      screen.getByRole('button', { name: 'modules.sesion.login.form.forgotPassword' });
+
+    it('swaps the card to the forgot step when the link is clicked', async () => {
+      const user = userEvent.setup();
+      render(<LoginPage />);
+      await user.click(forgotLink());
+      expect(swapFormColumn).toHaveBeenCalled();
+      expect(screen.getByTestId('forgot-step')).toBeInTheDocument();
+    });
+
+    it('reverts to the credentials step from the forgot step onBack', async () => {
+      const user = userEvent.setup();
+      render(<LoginPage />);
+      await user.click(forgotLink());
+      act(() => forgotStep.props!.onBack());
+      expect(screen.getByTestId('email-input')).toBeInTheDocument();
     });
   });
 });

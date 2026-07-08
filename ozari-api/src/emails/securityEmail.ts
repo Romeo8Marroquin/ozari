@@ -77,3 +77,47 @@ export function buildMfaDisabledEmail(params: {
 }): MailMessage {
   return buildSecurityEmail("email.mfaDisabled", params);
 }
+
+/**
+ * Sent when a password reset is REQUESTED — the one security email whose CTA is a tokenized action
+ * link (`resetUrl`), not a link to sign in. The footer reassures that ignoring it leaves the account
+ * unchanged (so a mistaken/spoofed request is harmless).
+ */
+export function buildPasswordResetEmail(params: {
+  to: string;
+  name: string;
+  resetUrl: string;
+}): MailMessage {
+  const { to, name, resetUrl } = params;
+  const key = "email.passwordReset";
+
+  const subject = i18next.t(`${key}.subject`);
+  const heading = i18next.t(`${key}.heading`);
+  const preview = i18next.t(`${key}.preview`);
+  const body = i18next.t(`${key}.body`);
+  const security = i18next.t(`${key}.security`);
+  const footer = i18next.t(`${key}.footerNote`);
+  const ctaLabel = i18next.t(`${key}.cta`);
+
+  const greetingHtml = i18next.t(`${key}.greeting`, { name });
+  const greetingText = i18next.t(`${key}.greeting`, {
+    name,
+    interpolation: { escapeValue: false },
+  });
+
+  const html = renderBrandedEmail({
+    preview,
+    heading,
+    bodyHtml: [
+      `<p style="margin:0 0 16px;">${greetingHtml}</p>`,
+      `<p style="margin:0 0 16px;">${body}</p>`,
+      `<p style="margin:0;">${security}</p>`,
+    ].join(""),
+    cta: { label: ctaLabel, href: resetUrl },
+    footer,
+  });
+
+  const text = `${greetingText}\n\n${body}\n\n${ctaLabel}: ${resetUrl}\n\n${security}\n\n${footer}`;
+
+  return { to, from: appConfig.email.from.security, subject, text, html };
+}

@@ -10,8 +10,10 @@ import {
  * intentionally omitted until they ship. All paths are relative to the `/api` server base.
  */
 
-// Obviously-fake example password reused across request-body examples (meets the policy).
+// Obviously-fake example passwords reused across request-body examples (both meet the policy).
 const EXAMPLE_PASSWORD = "Ex4mple!Secret";
+const EXAMPLE_NEW_PASSWORD = "N3w!Passw0rd";
+const EXAMPLE_EMAIL = "ana.garcia@example.com";
 
 const rateLimited: OpenAPIV3.ReferenceObject = {
   $ref: "#/components/responses/TooManyRequests",
@@ -75,7 +77,7 @@ export const paths: OpenAPIV3.PathsObject = {
       security: [{ ApiKeyAuth: [] }],
       requestBody: bodyRef("RegisterRequest", {
         fullName: "Ana García López",
-        email: "ana.garcia@example.com",
+        email: EXAMPLE_EMAIL,
         password: EXAMPLE_PASSWORD,
         confirmPassword: EXAMPLE_PASSWORD,
         termsAccepted: true,
@@ -108,7 +110,7 @@ export const paths: OpenAPIV3.PathsObject = {
       security: [{ ApiKeyAuth: [] }],
       parameters: [deviceUuidHeader],
       requestBody: bodyRef("SignInRequest", {
-        email: "ana.garcia@example.com",
+        email: EXAMPLE_EMAIL,
         password: EXAMPLE_PASSWORD,
       }),
       responses: {
@@ -230,6 +232,60 @@ export const paths: OpenAPIV3.PathsObject = {
     },
   },
 
+  "/auth/forgot-password": {
+    post: {
+      tags: ["Authentication"],
+      summary: "Request a password reset",
+      operationId: "forgotPassword",
+      description:
+        "**Public.** Starts the reset flow. **Always** returns the same generic `200` whether or " +
+        "not the email maps to an account (no enumeration). When the email is known, a single-use, " +
+        "30-minute reset link is emailed (only a hash of the token is stored). Own 5/min limiter.",
+      security: [{ ApiKeyAuth: [] }],
+      requestBody: bodyRef("ForgotPasswordRequest", {
+        email: EXAMPLE_EMAIL,
+      }),
+      responses: {
+        "200": messageResponse(
+          "Generic acknowledgement (identical regardless of whether the email exists).",
+          "Check your email — we sent you a link to reset your password",
+        ),
+        "400": errorResponse("Invalid body or email format.", 400, "The email is required and must be valid"),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/auth/reset-password": {
+    post: {
+      tags: ["Authentication"],
+      summary: "Reset the password with a token",
+      operationId: "resetPassword",
+      description:
+        "**Public.** Completes the reset using the emailed token. Invalid, used, and expired tokens " +
+        "all return the same generic `400`. On success it sets the new password (rejecting reuse of " +
+        "the current one), consumes the token, and **revokes ALL of the user's sessions on every " +
+        "device**. Own 5/min limiter.",
+      security: [{ ApiKeyAuth: [] }],
+      requestBody: bodyRef("ResetPasswordRequest", {
+        token: "M2Q0YmYxYzhhOTdlNGQ2ZmIyN2E1ZTgxYzBkM2Y0YjY",
+        newPassword: EXAMPLE_NEW_PASSWORD,
+        confirmPassword: EXAMPLE_NEW_PASSWORD,
+      }),
+      responses: {
+        "200": messageResponse("Password reset; every session was revoked.", "Your password has been reset"),
+        "400": errorResponse(
+          "Invalid/used/expired token, validation failure, or the new password reuses the current one.",
+          400,
+          "The reset link is invalid or has expired",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
   "/auth/signout": {
     post: {
       tags: ["Authentication"],
@@ -268,7 +324,7 @@ export const paths: OpenAPIV3.PathsObject = {
       responses: {
         "200": dataResponse("The current user's profile.", "UserProfile", {
           id: 42,
-          email: "ana.garcia@example.com",
+          email: EXAMPLE_EMAIL,
           fullName: "Ana García López",
           role: "Client",
           mfaEnabled: false,
@@ -295,8 +351,8 @@ export const paths: OpenAPIV3.PathsObject = {
       security: [{ ApiKeyAuth: [], BearerAuth: [], CsrfToken: [] }],
       requestBody: bodyRef("ChangePasswordRequest", {
         currentPassword: EXAMPLE_PASSWORD,
-        newPassword: "N3w!Passw0rd",
-        confirmPassword: "N3w!Passw0rd",
+        newPassword: EXAMPLE_NEW_PASSWORD,
+        confirmPassword: EXAMPLE_NEW_PASSWORD,
       }),
       responses: {
         "200": messageResponse("Password changed; other-device sessions revoked.", "Password changed"),
@@ -396,7 +452,7 @@ export const paths: OpenAPIV3.PathsObject = {
         "200": dataResponse("The list of active users.", "UserListItemArray", [
           {
             id: 42,
-            email: "ana.garcia@example.com",
+            email: EXAMPLE_EMAIL,
             fullName: "Ana García López",
             role: "Client",
             createdAt: "2026-06-01T12:00:00.000Z",

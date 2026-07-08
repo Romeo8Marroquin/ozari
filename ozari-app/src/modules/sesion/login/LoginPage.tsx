@@ -20,6 +20,7 @@ import useLogin from '../hooks/useLogin';
 import { useSearch } from '@tanstack/react-router';
 import useAuthCard from '../hooks/useAuthCard';
 import MfaLoginStep from './MfaLoginStep';
+import ForgotPasswordStep from './ForgotPasswordStep';
 import useDesktopAutoFocus from '@hooks/useDesktopAutoFocus';
 import { hasUserGestured } from '@hooks/useUserGesture';
 
@@ -46,7 +47,7 @@ const LoginPage: React.FC = () => {
   const [formError, setFormError] = useState<string | undefined>(undefined);
   // Which column the card shows: the credentials form or the in-card MFA second step. `mfaToken`
   // holds the 5-min challenge token IN MEMORY ONLY (component state, never storage) between steps.
-  const [step, setStep] = useState<'credentials' | 'mfa'>('credentials');
+  const [step, setStep] = useState<'credentials' | 'mfa' | 'forgot'>('credentials');
   const [mfaToken, setMfaToken] = useState<string | null>(null);
   const autoFocusFirst = useDesktopAutoFocus();
   const formRef = useRef<HTMLFormElement>(null);
@@ -179,6 +180,13 @@ const LoginPage: React.FC = () => {
     leaveTo('/sesion/registro');
   };
 
+  // Swap the card's form-column to the in-card "request a reset" step (no navigation), same motion as
+  // the MFA step and the login↔register sweep.
+  const handleForgot = () => {
+    setFormError(undefined);
+    swapFormColumn(() => setStep('forgot'));
+  };
+
   const requiredPatternsContextValue = useMemo(
     () => ({ requiredPatterns: loginRequiredPatterns }),
     [],
@@ -224,6 +232,11 @@ const LoginPage: React.FC = () => {
                 setMfaToken(null);
               });
             }}
+            disabled={isRedirecting}
+          />
+        ) : step === 'forgot' ? (
+          <ForgotPasswordStep
+            onBack={() => swapFormColumn(() => setStep('credentials'))}
             disabled={isRedirecting}
           />
         ) : (
@@ -288,6 +301,14 @@ const LoginPage: React.FC = () => {
                   >
                     {t('modules.sesion.login.form.submitButton')}
                   </Button>
+                  <button
+                    type="button"
+                    onClick={handleForgot}
+                    disabled={isRedirecting}
+                    className="form-element mt-2 cursor-pointer rounded px-1 py-0.5 text-xs font-medium text-magenta outline-none transition-colors hover:underline focus-visible:underline focus-visible:ring-2 focus-visible:ring-magenta focus-visible:ring-offset-2"
+                  >
+                    {t('modules.sesion.login.form.forgotPassword')}
+                  </button>
                 </div>
 
                 <p className="form-element text-xs text-gray-500 flex flex-col items-center">

@@ -12,6 +12,7 @@ import { sendOzariError } from "@models/http/ozariErrorModel.js";
 
 const invalidBodyKey = "common.logs.invalidBody";
 const invalidBodyMessageKey = "common.invalidBody";
+const passwordsMismatchMessage = "Passwords do not match";
 
 // Zod schemas for validation
 const createUserSchema = z
@@ -25,7 +26,7 @@ const createUserSchema = z
       .refine((val) => val === true, "Terms must be accepted"),
   })
   .refine((data) => data.password === data.confirmPassword, {
-    message: "Passwords do not match",
+    message: passwordsMismatchMessage,
     path: ["confirmPassword"],
   });
 
@@ -42,7 +43,7 @@ const changePasswordSchema = z
     confirmPassword: z.string().min(1, "Confirm password is required"),
   })
   .refine((data) => data.newPassword === data.confirmPassword, {
-    message: "Passwords do not match",
+    message: passwordsMismatchMessage,
     path: ["confirmPassword"],
   });
 
@@ -53,6 +54,21 @@ const mfaCodeSchema = z.object({
 const mfaDisableSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });
+
+const forgotPasswordSchema = z.object({
+  email: emailField,
+});
+
+const resetPasswordSchema = z
+  .object({
+    token: z.string().min(1, "Token is required"),
+    newPassword: passwordField,
+    confirmPassword: z.string().min(1, "Confirm password is required"),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: passwordsMismatchMessage,
+    path: ["confirmPassword"],
+  });
 
 export function validateCreateUser(
   req: Request,
@@ -110,7 +126,7 @@ export function validateCreateUser(
         logger.warn(i18next.t(logTranslationKey));
         break;
       case "confirmPassword":
-        if (firstError.message === "Passwords do not match") {
+        if (firstError.message === passwordsMismatchMessage) {
           translationKey = "user.createUser.validators.passwordsDoNotMatch";
           logTranslationKey =
             "user.createUser.validators.logs.passwordsDoNotMatch";
@@ -247,7 +263,7 @@ export function validateChangePassword(
       translationKey = "user.changePassword.validators.invalidCurrentPassword";
     } else if (field === "newPassword") {
       translationKey = "user.changePassword.validators.invalidNewPassword";
-    } else if (firstError?.message === "Passwords do not match") {
+    } else if (firstError?.message === passwordsMismatchMessage) {
       translationKey = "user.changePassword.validators.passwordsDoNotMatch";
     } else if (field === "confirmPassword") {
       translationKey = "user.changePassword.validators.invalidConfirmPassword";
@@ -315,6 +331,80 @@ export function validateMfaDisable(
       HttpEnum.BAD_REQUEST,
       i18next.t("user.mfa.validators.invalidPassword"),
     );
+    return;
+  }
+
+  req.body = result.data;
+  next();
+}
+
+export function validateForgotPassword(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (!req.body || typeof req.body !== "object") {
+    logger.warn(i18next.t(invalidBodyKey));
+    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(invalidBodyMessageKey));
+    return;
+  }
+
+  const result = forgotPasswordSchema.safeParse(req.body);
+  if (!result.success) {
+    logger.warn(
+      i18next.t("user.forgotPassword.validators.logs.invalidEmail", {
+        email: req.body.email,
+      }),
+    );
+    sendOzariError(
+      res,
+      HttpEnum.BAD_REQUEST,
+      i18next.t("user.forgotPassword.validators.invalidEmail"),
+    );
+    return;
+  }
+
+  req.body = result.data;
+  next();
+}
+
+export function validateResetPassword(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (!req.body || typeof req.body !== "object") {
+    logger.warn(i18next.t(invalidBodyKey));
+    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(invalidBodyMessageKey));
+    return;
+  }
+
+  const result = resetPasswordSchema.safeParse(req.body);
+  if (!result.success) {
+    const firstError = result.error.issues[0];
+    const field = firstError?.path[0] as string | undefined;
+
+    let translationKey: string;
+    if (field === "token") {
+      translationKey = "user.resetPassword.validators.invalidToken";
+    } else if (field === "newPassword") {
+      translationKey = "user.resetPassword.validators.invalidNewPassword";
+    } else if (firstError?.message === passwordsMismatchMessage) {
+      translationKey = "user.resetPassword.validators.passwordsDoNotMatch";
+    } else if (field === "confirmPassword") {
+      translationKey = "user.resetPassword.validators.invalidConfirmPassword";
+      /* c8 ignore start -- unreachable: the schema only errors on the three known fields */
+    } else {
+      translationKey = invalidBodyMessageKey;
+    }
+    /* c8 ignore stop */
+
+    logger.warn(
+      i18next.t("user.resetPassword.validators.logs.validationError", {
+        field,
+      }),
+    );
+    sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(translationKey));
     return;
   }
 

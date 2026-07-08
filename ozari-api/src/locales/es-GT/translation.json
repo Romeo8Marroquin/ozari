@@ -93,6 +93,16 @@
       "security": "Si no realizaste este cambio, vuelve a activarla y cambia tu contraseña de inmediato para proteger tu cuenta.",
       "cta": "Revisar mi cuenta",
       "footerNote": "Este es un mensaje de seguridad automático; no es necesario responderlo."
+    },
+    "passwordReset": {
+      "subject": "Restablece tu contraseña de Party Rentals",
+      "preview": "Usa este enlace para crear una nueva contraseña.",
+      "heading": "Restablece tu contraseña",
+      "greeting": "Hola, {{name}}:",
+      "body": "Recibimos una solicitud para restablecer la contraseña de tu cuenta. Crea una nueva contraseña con el siguiente botón; el enlace vence en 30 minutos.",
+      "security": "Si no solicitaste este cambio, puedes ignorar este mensaje: tu contraseña seguirá siendo la misma.",
+      "cta": "Restablecer contraseña",
+      "footerNote": "Este es un mensaje de seguridad automático; no es necesario responderlo."
     }
   },
   "user": {
@@ -147,6 +157,43 @@
         "invalidCredentials": "La contraseña del usuario id <{{-userId}}> es inválida.",
         "invalidPassword": "La contraseña es inválida.",
         "internalServerError": "Error al iniciar sesión: {{-error}}."
+      }
+    },
+    "forgotPassword": {
+      "genericSuccess": "Revisa tu correo: te enviamos un enlace para restablecer tu contraseña.",
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidEmail": "El correo electrónico es requerido y debe ser válido.",
+        "logs": {
+          "invalidEmail": "El correo electrónico <{{-email}}> no es válido."
+        }
+      },
+      "logs": {
+        "resetRequested": "Solicitud de restablecimiento de contraseña para el usuario id <{{-userId}}>.",
+        "unknownEmail": "Solicitud de restablecimiento para un correo no registrado.",
+        "emailFailed": "No se pudo enviar el correo de restablecimiento al usuario id <{{-userId}}>: {{-error}}.",
+        "internalServerError": "Error al solicitar el restablecimiento de contraseña: {{-error}}."
+      }
+    },
+    "resetPassword": {
+      "passwordReset": "Tu contraseña se restableció exitosamente. Inicia sesión con tu nueva contraseña.",
+      "invalidToken": "El enlace de restablecimiento es inválido o ha expirado.",
+      "passwordReused": "La nueva contraseña no puede ser igual a la anterior.",
+      "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidToken": "El enlace de restablecimiento es inválido.",
+        "invalidNewPassword": "La contraseña debe tener al menos 12 caracteres, incluyendo letras, símbolos y números.",
+        "invalidConfirmPassword": "La confirmación de la contraseña es requerida y debe ser válida.",
+        "passwordsDoNotMatch": "Las contraseñas no coinciden.",
+        "logs": {
+          "validationError": "Error de validación al restablecer la contraseña: campo <{{-field}}>."
+        }
+      },
+      "logs": {
+        "passwordReset": "Contraseña restablecida para el usuario id <{{-userId}}>.",
+        "invalidToken": "Intento de restablecimiento con un token inválido o expirado.",
+        "emailFailed": "No se pudo enviar la confirmación de cambio al usuario id <{{-userId}}>: {{-error}}.",
+        "internalServerError": "Error al restablecer la contraseña: {{-error}}."
       }
     },
     "refreshToken": {
