@@ -85,7 +85,8 @@
           "submitButton": "Iniciar Sesión",
           "noAccount": "Si no posees una cuenta",
           "signUpLink": "regístrate",
-          "here": "aquí"
+          "here": "aquí",
+          "forgotPassword": "¿Olvidaste tu contraseña?"
         },
         "api": {
           "loginError": "Ha ocurrido un error al iniciar la sesión.",
@@ -154,6 +155,38 @@
           "emailAlreadyExists": "Este correo ya está registrado.",
           "tooManyAttempts": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",
           "networkError": "No pudimos conectar con el servidor. Revisa tu conexión."
+        }
+      },
+      "forgot": {
+        "title": "Restablecer contraseña",
+        "subtitle": "Ingresa tu correo y te enviaremos un enlace para restablecer tu contraseña.",
+        "emailLabel": "Correo electrónico",
+        "emailPlaceholder": "Ingrese su correo",
+        "submitButton": "Enviar enlace",
+        "back": "Volver al inicio de sesión",
+        "api": {
+          "successTitle": "Solicitud enviada",
+          "successToast": "Revisa tu correo: te enviamos un enlace para restablecer tu contraseña.",
+          "requestError": "No se pudo procesar la solicitud. Inténtalo de nuevo."
+        }
+      },
+      "reset": {
+        "title": "Nueva contraseña",
+        "welcomeMessage": "Party Rentals",
+        "subtitle": "Crea una nueva contraseña para tu cuenta.",
+        "passwordLabel": "Nueva contraseña",
+        "passwordPlaceholder": "Ingrese su nueva contraseña",
+        "confirmPasswordLabel": "Confirmar contraseña",
+        "confirmPasswordPlaceholder": "Confirme su nueva contraseña",
+        "requiredConfirmPassword": "Debe confirmar la contraseña",
+        "passwordsDoNotMatch": "Las contraseñas no coinciden",
+        "submitButton": "Restablecer contraseña",
+        "back": "Volver al inicio de sesión",
+        "api": {
+          "successTitle": "Contraseña actualizada",
+          "successToast": "Tu contraseña se restableció. Inicia sesión con tu nueva contraseña.",
+          "invalidToken": "El enlace es inválido o ha expirado. Solicita uno nuevo.",
+          "resetError": "No se pudo restablecer la contraseña. Inténtalo de nuevo."
         }
       }
     },

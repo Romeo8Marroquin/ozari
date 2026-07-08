@@ -25,10 +25,16 @@ import {
   verifyMfaLogin,
 } from "./auth.mfa.controller.js";
 import {
+  forgotPassword,
+  resetPassword,
+} from "./auth.password.controller.js";
+import {
   validateChangePassword,
   validateCreateUser,
+  validateForgotPassword,
   validateMfaCode,
   validateMfaDisable,
+  validateResetPassword,
   validateSignIn,
 } from "./auth.validator.js";
 
@@ -74,10 +80,32 @@ router.post(
   disableMfa,
 );
 
+// Password reset rate limiter (per instance) — throttles both the request (email bombing /
+// enumeration timing) and the token-submit endpoints.
+const passwordResetLimiter = rateLimit({
+  windowMs: 60_000, // 1 minute
+  limit: 5,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: "Too many password reset requests, please try again later.",
+});
+
 // Public Routes
 router.post("/user", validateCreateUser, createUser);
 router.post("/signin", validateSignIn, checkLoginRateLimit, signInUser);
 router.post("/refresh", refreshTokenLimiter, verifyCsrfToken, refreshToken);
+router.post(
+  "/forgot-password",
+  passwordResetLimiter,
+  validateForgotPassword,
+  forgotPassword,
+);
+router.post(
+  "/reset-password",
+  passwordResetLimiter,
+  validateResetPassword,
+  resetPassword,
+);
 
 // MFA login challenge (second step of login; authenticated by the MFA token)
 router.post(

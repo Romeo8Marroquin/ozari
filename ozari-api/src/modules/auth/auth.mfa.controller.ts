@@ -17,11 +17,16 @@ import {
   getTotpStep,
   verifyTotp,
 } from "@helpers/totp.js";
+import { getMailer } from "@helpers/mailer.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import {
   clearMfaAttempts,
   recordFailedMfa,
 } from "@middlewares/mfaRateLimit.middleware.js";
+import {
+  buildMfaDisabledEmail,
+  buildMfaEnabledEmail,
+} from "../../emails/securityEmail.js";
 import {
   type CustomRequest,
   type MfaTokenPayloadModel,
@@ -178,6 +183,23 @@ export const enableMfa = async (
       });
     }
 
+    // Best-effort security notification — a send failure is logged, never fails the request.
+    try {
+      await getMailer().send(
+        buildMfaEnabledEmail({
+          to: decryptKms(user.emailKms),
+          name: decryptKms(user.fullNameKms),
+        }),
+      );
+    } catch (emailError) {
+      logger.error(
+        i18next.t("user.mfaEnable.logs.securityEmailFailed", {
+          userId,
+          error: String(emailError),
+        }),
+      );
+    }
+
     sendOzariSuccess(res, HttpEnum.OK, i18next.t("user.mfaEnable.mfaEnabled"), {
       recoveryCodes,
     });
@@ -253,6 +275,23 @@ export const disableMfa = async (
         ipAddress: req.ip,
         success: true,
       });
+    }
+
+    // Best-effort security notification — a send failure is logged, never fails the request.
+    try {
+      await getMailer().send(
+        buildMfaDisabledEmail({
+          to: decryptKms(user.emailKms),
+          name: decryptKms(user.fullNameKms),
+        }),
+      );
+    } catch (emailError) {
+      logger.error(
+        i18next.t("user.mfaDisable.logs.securityEmailFailed", {
+          userId,
+          error: String(emailError),
+        }),
+      );
     }
 
     sendOzariSuccess(

@@ -9,6 +9,8 @@ const EXPECTED_OPERATIONS: ReadonlyArray<readonly [string, string]> = [
   ["/auth/signin", "post"],
   ["/auth/mfa/verify-login", "post"],
   ["/auth/refresh", "post"],
+  ["/auth/forgot-password", "post"],
+  ["/auth/reset-password", "post"],
   ["/auth/signout", "post"],
   ["/auth/me", "get"],
   ["/auth/change-password", "post"],

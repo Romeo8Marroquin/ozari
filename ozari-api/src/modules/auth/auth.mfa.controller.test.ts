@@ -69,6 +69,12 @@ vi.mock("@models/http/ozariErrorModel.js", () => ({
   sendOzariError: vi.fn(),
 }));
 
+// Isolate the best-effort security-email side effect (its internals live in securityEmail.test).
+const { securityMailerSend } = vi.hoisted(() => ({ securityMailerSend: vi.fn() }));
+vi.mock("@helpers/mailer.js", () => ({
+  getMailer: () => ({ send: securityMailerSend }),
+}));
+
 const SECRET = generateTotpSecret();
 const res = {} as Response;
 
@@ -77,6 +83,7 @@ function buildUser(overrides: Record<string, unknown> = {}) {
     id: 1,
     roleId: RolesEnum.Client,
     emailKms: encryptKms("user@example.com"),
+    fullNameKms: encryptKms("Test User"),
     passwordSha: "",
     mfaSecretKms: encryptKms(SECRET),
     mfaEnabledAt: null,
@@ -176,6 +183,21 @@ describe("enableMfa", () => {
     expect(client.$transaction).toHaveBeenCalled();
     const data = (sendOzariSuccess as Mock).mock.calls[0]?.[3];
     expect(data.recoveryCodes).toHaveLength(appConfig.mfa.recoveryCodeCount);
+    // A best-effort security notification is sent.
+    expect(securityMailerSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("still enables MFA when the security email fails", async () => {
+    mockPrisma(buildUser());
+    securityMailerSend.mockRejectedValueOnce(new Error("smtp down"));
+    const code = generateTotp(SECRET);
+    await enableMfa(authedReq({ code }), res);
+    expect(sendOzariSuccess).toHaveBeenCalledWith(
+      res,
+      HttpEnum.OK,
+      expect.any(String),
+      expect.anything(),
+    );
   });
 });
 
@@ -261,5 +283,7 @@ describe("disableMfa", () => {
     await disableMfa(authedReq({ password: "CorrectPass123!" }), res);
     expect(client.$transaction).toHaveBeenCalled();
     expect(sendOzariSuccess).toHaveBeenCalled();
+    // A best-effort security notification is sent.
+    expect(securityMailerSend).toHaveBeenCalledTimes(1);
   });
 });

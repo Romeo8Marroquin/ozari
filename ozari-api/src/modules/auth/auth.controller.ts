@@ -13,6 +13,7 @@ import {
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { getMailer } from "@helpers/mailer.js";
 import { buildWelcomeEmail } from "../../emails/welcomeEmail.js";
+import { buildPasswordChangedEmail } from "../../emails/securityEmail.js";
 import { logger } from "@/config/logger.js";
 import {
   AuditAction,
@@ -744,6 +745,23 @@ export const changePassword = async (
         ipAddress: req.ip,
         success: true,
       });
+    }
+
+    // Best-effort security notification — a send failure is logged, never fails the request.
+    try {
+      await getMailer().send(
+        buildPasswordChangedEmail({
+          to: decryptKms(user.emailKms),
+          name: decryptKms(user.fullNameKms),
+        }),
+      );
+    } catch (emailError) {
+      logger.error(
+        i18next.t("user.changePassword.logs.securityEmailFailed", {
+          userId,
+          error: String(emailError),
+        }),
+      );
     }
 
     sendOzariSuccess(
