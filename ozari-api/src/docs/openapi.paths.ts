@@ -323,7 +323,8 @@ export const paths: OpenAPIV3.PathsObject = {
       responses: {
         "200": dataResponse("Pending TOTP secret + provisioning URI.", "MfaSetupData", {
           secret: "JBSWY3DPEHPK3PXP",
-          otpauthUri: "otpauth://totp/Ozari:ana.garcia@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Ozari",
+          otpauthUri:
+            "otpauth://totp/Party%20Rentals:ana.garcia@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Party%20Rentals",
         }, "MFA secret generated"),
         "401": unauthorized("Missing or invalid access token."),
         "403": csrfForbidden(),

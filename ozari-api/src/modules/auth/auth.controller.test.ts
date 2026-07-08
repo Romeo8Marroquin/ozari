@@ -66,6 +66,14 @@ vi.mock("@middlewares/csrf.middleware.js", () => ({
   setCsrfToken: vi.fn(),
 }));
 
+// Isolate the welcome-email side effect of registration (its internals live in mailer.test /
+// welcomeEmail.test). The spy lets us assert it's attempted and simulate a delivery failure.
+const { welcomeMailerSend } = vi.hoisted(() => ({ welcomeMailerSend: vi.fn() }));
+vi.mock("@helpers/mailer.js", () => ({ getMailer: () => ({ send: welcomeMailerSend }) }));
+vi.mock("../../emails/welcomeEmail.js", () => ({
+  buildWelcomeEmail: vi.fn(() => ({ to: "new@example.com", subject: "welcome", text: "hi" })),
+}));
+
 vi.mock("@models/http/ozariSuccessModel.js", () => ({
   sendOzariSuccess: vi.fn(),
 }));
@@ -229,6 +237,22 @@ describe("createUser", () => {
     // PII is stored encrypted, not in plaintext.
     expect(createArg.data.emailKms).not.toBe(body.email);
     expect(createArg.data.passwordSha).not.toBe(body.password);
+    expect(sendOzariSuccess).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CREATED,
+      expect.any(String),
+    );
+    // A welcome email is sent on successful registration.
+    expect(welcomeMailerSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("still returns 201 when the welcome email fails (best-effort, non-fatal)", async () => {
+    mockPrisma({ userFindUnique: null });
+    welcomeMailerSend.mockRejectedValueOnce(new Error("smtp down"));
+
+    await createUser(authedReq(body), buildRes());
+
+    // Registration succeeds regardless — the account was already created.
     expect(sendOzariSuccess).toHaveBeenCalledWith(
       expect.anything(),
       HttpEnum.CREATED,

@@ -113,6 +113,15 @@ resource "google_cloud_run_v2_service" "ozari_api" {
           }
         }
       }
+      env {
+        name = "EMAIL_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.ozari_email_key.secret_id
+            version = "latest"
+          }
+        }
+      }
     }
   }
 

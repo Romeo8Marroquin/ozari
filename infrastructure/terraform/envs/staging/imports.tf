@@ -55,6 +55,13 @@ import {
   id = "projects/ozari-500103/secrets/ozari-api-key"
 }
 
+# ozari-email-key was created out-of-band (gcloud) before Terraform managed it, so adopt it via
+# import instead of letting apply try to create a secret that already exists.
+import {
+  to = google_secret_manager_secret.ozari_email_key
+  id = "projects/ozari-500103/secrets/ozari-email-key"
+}
+
 import {
   to = google_cloud_run_v2_service.ozari_api
   id = "projects/ozari-500103/locations/northamerica-south1/services/ozari-api"

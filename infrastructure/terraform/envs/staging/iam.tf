@@ -23,6 +23,7 @@ locals {
     jwt_refresh_secret = google_secret_manager_secret.ozari_jwt_refresh_secret.secret_id
     encryption_key     = google_secret_manager_secret.ozari_encryption_key.secret_id
     api_key            = google_secret_manager_secret.ozari_api_key.secret_id
+    email_key          = google_secret_manager_secret.ozari_email_key.secret_id
   }
 
   # Cloud Build (ozari-build-sa) needs DB URLs for the migration step.

@@ -7,11 +7,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // The data hook is mocked so the test drives every outcome via the callbacks the
 // page passes to `login(data, { onSuccess, onError, onSettled })`.
 const { login } = vi.hoisted(() => ({ login: vi.fn() }));
-const { leaveTo, redirectAfterSuccess } = vi.hoisted(() => ({
+const { leaveTo, redirectAfterSuccess, swapFormColumn } = vi.hoisted(() => ({
   leaveTo: vi.fn(),
   redirectAfterSuccess: vi.fn(),
+  // Drives the deferred content swap; run the commit synchronously so the step change is testable.
+  swapFormColumn: vi.fn((commit: () => void) => commit()),
 }));
 const notifyMock = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }));
+
+// The MFA step is a black box here (covered by its own test); capture its props to exercise the
+// page's wiring (verified → redirect, expired/back → revert to credentials).
+interface MfaStepProps {
+  mfaToken: string;
+  onVerified: () => void;
+  onExpired: () => void;
+  onBack: () => void;
+  disabled?: boolean;
+}
+const mfaStep = vi.hoisted(() => ({ props: null as MfaStepProps | null }));
+vi.mock('./MfaLoginStep', () => ({
+  default: (props: MfaStepProps) => {
+    mfaStep.props = props;
+    return <div data-testid="mfa-step">mfa</div>;
+  },
+}));
 // Mutable state read by the mock factories on every render.
 const state = vi.hoisted(() => ({ isPending: false }));
 const searchState = vi.hoisted(() => ({ value: {} as { redirect?: string } }));
@@ -19,7 +38,7 @@ const gestureState = vi.hoisted(() => ({ value: false }));
 
 vi.mock('../hooks/useLogin', () => ({ default: () => ({ login, isPending: state.isPending }) }));
 vi.mock('../hooks/useAuthCard', () => ({
-  default: () => ({ containerRef: { current: null }, leaveTo, redirectAfterSuccess }),
+  default: () => ({ containerRef: { current: null }, leaveTo, redirectAfterSuccess, swapFormColumn }),
 }));
 vi.mock('@tanstack/react-router', () => ({ useSearch: () => searchState.value }));
 vi.mock('@components/notifications/notify', () => ({ notify: notifyMock }));
@@ -64,6 +83,8 @@ beforeEach(() => {
   state.isPending = false;
   searchState.value = {};
   gestureState.value = false;
+  mfaStep.props = null;
+  swapFormColumn.mockImplementation((commit: () => void) => commit());
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -108,15 +129,65 @@ describe('LoginPage', () => {
     expect(redirectAfterSuccess).toHaveBeenCalledWith('/panel/settings');
   });
 
-  it('on success with mfaRequired shows the not-supported toast', async () => {
+  it('on success with mfaRequired swaps to the in-card MFA step (no redirect, no toast)', async () => {
     const user = userEvent.setup();
     render(<LoginPage />);
     await fillValid(user);
     const handlers = await submitAndGetHandlers(user);
 
-    act(() => handlers.onSuccess({ data: { data: { mfaRequired: true } }, headers: {} }));
-    expect(notifyMock.error).toHaveBeenCalledWith('modules.sesion.login.api.mfaNotSupported');
+    act(() =>
+      handlers.onSuccess({ data: { data: { mfaRequired: true, mfaToken: 'MT' } }, headers: {} }),
+    );
+    expect(swapFormColumn).toHaveBeenCalledTimes(1);
+    expect(await screen.findByTestId('mfa-step')).toBeInTheDocument();
+    expect(mfaStep.props?.mfaToken).toBe('MT');
     expect(redirectAfterSuccess).not.toHaveBeenCalled();
+    expect(notifyMock.error).not.toHaveBeenCalled();
+  });
+
+  it('MFA verified runs the leave-to-panel redirect', async () => {
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await fillValid(user);
+    const handlers = await submitAndGetHandlers(user);
+    act(() =>
+      handlers.onSuccess({ data: { data: { mfaRequired: true, mfaToken: 'MT' } }, headers: {} }),
+    );
+    await screen.findByTestId('mfa-step');
+
+    act(() => mfaStep.props?.onVerified());
+    expect(redirectAfterSuccess).toHaveBeenCalledWith('/panel/productos');
+  });
+
+  it('MFA expired (401) reverts to the credentials step with a message', async () => {
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await fillValid(user);
+    const handlers = await submitAndGetHandlers(user);
+    act(() =>
+      handlers.onSuccess({ data: { data: { mfaRequired: true, mfaToken: 'MT' } }, headers: {} }),
+    );
+    await screen.findByTestId('mfa-step');
+
+    act(() => mfaStep.props?.onExpired());
+    expect(screen.queryByTestId('mfa-step')).toBeNull();
+    expect(emailInput()).toBeInTheDocument();
+    expect(await screen.findByText('modules.sesion.login.mfa.errors.expired')).toBeInTheDocument();
+  });
+
+  it('MFA "back" reverts to the credentials step', async () => {
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await fillValid(user);
+    const handlers = await submitAndGetHandlers(user);
+    act(() =>
+      handlers.onSuccess({ data: { data: { mfaRequired: true, mfaToken: 'MT' } }, headers: {} }),
+    );
+    await screen.findByTestId('mfa-step');
+
+    act(() => mfaStep.props?.onBack());
+    expect(screen.queryByTestId('mfa-step')).toBeNull();
+    expect(emailInput()).toBeInTheDocument();
   });
 
   it('on success with neither header nor mfa shows the generic login error toast', async () => {

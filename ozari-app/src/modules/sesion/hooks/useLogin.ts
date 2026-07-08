@@ -2,12 +2,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@api/client';
 import type { LoginResponseInterface } from '@sesion/interfaces/LoginInterfaces';
 import type { LoginType } from '@sesion/login/SchemaLogin';
-import { StorageKeys } from '@constants/StorageKeys';
-import { Storage } from '@utils/storage';
-import { setupRefreshTimer } from '@utils/tokenRefresh';
-import { resetForcedLogout } from '@utils/sessionLifecycle';
+import { establishSessionFromResponse } from '@utils/session';
 import i18next from 'i18next';
-import { QueryKeys } from '@constants/QueryKeys';
 
 function useLogin() {
   const queryClient = useQueryClient();
@@ -25,26 +21,10 @@ function useLogin() {
       return response;
     },
     retry: false,
-    onSuccess: (response) => {
-      const bearerToken = response.headers['authorization'];
-      if (bearerToken) {
-        const token = bearerToken.split(' ')[1];
-        Storage.set(StorageKeys.TOKEN, token);
-
-        // Store the CSRF token issued alongside the session (response header). Needed for
-        // every later state-changing call (refresh, signout, change-password, MFA).
-        const csrfToken = response.headers['x-csrf-token'];
-        if (csrfToken) Storage.set(StorageKeys.CSRF, csrfToken);
-
-        queryClient.invalidateQueries({ queryKey: [QueryKeys.ME] });
-
-        // A fresh session re-arms the forced-logout guard, so a later death can tear down again.
-        resetForcedLogout();
-
-        // Setup proactive token refresh timer
-        setupRefreshTimer(token);
-      }
-    },
+    // A normal login carries the session in the response header; the MFA branch (`mfaRequired`,
+    // no header) no-ops here and is picked up by LoginPage. Session setup is shared with the MFA
+    // second step via `establishSessionFromResponse`.
+    onSuccess: (response) => establishSessionFromResponse(response, queryClient),
     onError: (e) => {
       console.error(i18next.t('modules.sesion.login.api.loginError'), e);
     },
