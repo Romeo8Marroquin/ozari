@@ -89,7 +89,10 @@ The project is configured for automatic deployments:
 - **Frontend**: Push to `dev` branch triggers Cloudflare Pages deployment
 - **Database Migrations**: Cloud Build runs `prisma migrate deploy` once per backend deployment using the Neon direct URL secret
 
-See individual README files for detailed deployment configuration.
+📘 **Full runbook: [DEPLOYMENT.md](./DEPLOYMENT.md)** — the ordered, from-zero guide (Neon → secrets →
+Terraform → Cloud Build → Cloud Run → Cloudflare → Resend), the production-cutover plan, the DB-role
+model (`infrastructure/scripts/db-roles.sql`), and the migration-squash strategy. See also
+`infrastructure/README.md` for the Terraform ownership rules.
 
 ## Repository Structure
 

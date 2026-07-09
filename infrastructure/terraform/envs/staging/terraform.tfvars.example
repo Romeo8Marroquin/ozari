@@ -15,13 +15,23 @@ app_host     = "https://ozari-c28.pages.dev"
 node_env     = "staging"
 log_level    = "info"
 
+# Cloudflare R2 (public asset storage) — plain, non-secret runtime config. Fill these in your real
+# terraform.tfvars (gitignored) so they flow to Cloud Run + the build trigger. The R2 CREDENTIALS
+# (access/secret key) are NOT here — load them into Secret Manager (ozari-r2-access-key /
+# ozari-r2-secret-key) via gcloud. See DEPLOYMENT.md §3b.
+r2_endpoint    = "https://<account-id>.r2.cloudflarestorage.com"
+r2_bucket_name = "ozari-assets-staging"
+r2_public_url  = "https://<your-r2-public-domain>"
+
 artifact_repository_id = "ozari-images"
 image_name             = "ozari-api"
 
 max_instances   = 3
 min_instances   = 0
 concurrency     = 40
-timeout_seconds = 300
+# Keep this at 60 to match cloudbuild.yaml's `--timeout=60` and the live service — or Terraform and
+# Cloud Build will thrash the value on every apply/deploy (a backstop above the app's own 30s timeout).
+timeout_seconds = 60
 cpu             = "1"
 memory          = "512Mi"
 

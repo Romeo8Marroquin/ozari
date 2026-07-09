@@ -47,13 +47,16 @@ model User {
   @@map("users")
 }
 
+// A pending password-reset request. Only the SHA-256 hash of the token is stored. Rows are
+// short-lived: consumed (hard-deleted) on a successful reset or a new request, and the cleanup job
+// purges any abandoned/expired ones — so the table never accumulates stale data. There is no
+// `usedAt`: "used" tokens are deleted, not tombstoned (fail-secure, no garbage).
 model PasswordResetToken {
-  id        Int       @id @default(autoincrement())
-  userId    Int       @map("user_id")
-  tokenSha  String    @unique @map("token_sha")
-  expiresAt DateTime  @map("expires_at")
-  usedAt    DateTime? @map("used_at")
-  createdAt DateTime  @default(now()) @map("created_at")
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  tokenSha  String   @unique @map("token_sha")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id])
 

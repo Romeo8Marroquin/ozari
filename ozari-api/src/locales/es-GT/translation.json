@@ -170,6 +170,7 @@
       },
       "logs": {
         "resetRequested": "Solicitud de restablecimiento de contraseña para el usuario id <{{-userId}}>.",
+        "resendThrottled": "Reenvío de restablecimiento omitido por enfriamiento para el usuario id <{{-userId}}>.",
         "unknownEmail": "Solicitud de restablecimiento para un correo no registrado.",
         "emailFailed": "No se pudo enviar el correo de restablecimiento al usuario id <{{-userId}}>: {{-error}}.",
         "internalServerError": "Error al solicitar el restablecimiento de contraseña: {{-error}}."

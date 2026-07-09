@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+﻿import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import type { Request, Response } from "express";
 import { forgotPassword, resetPassword } from "./auth.password.controller.js";
@@ -54,6 +54,7 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
     },
     passwordResetToken: {
       findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue(undefined),
       deleteMany: vi.fn().mockResolvedValue(undefined),
     },
@@ -121,6 +122,34 @@ describe("forgotPassword", () => {
     expect(sendOzariSuccess).toHaveBeenCalledWith(res, HttpEnum.OK, expect.any(String));
   });
 
+  it("skips resending (no new token, no email) within the cooldown window", async () => {
+    const client = mockPrisma();
+    client.user.findFirst.mockResolvedValue(buildUser());
+    // A token minted just now -> still inside the cooldown.
+    client.passwordResetToken.findFirst.mockResolvedValue({ userId: 1, createdAt: new Date() });
+
+    await forgotPassword(req({ email: "user@example.com" }), res);
+
+    expect(client.passwordResetToken.create).not.toHaveBeenCalled();
+    expect(mailerSend).not.toHaveBeenCalled();
+    // Still the SAME generic success (an attacker learns nothing from the throttle).
+    expect(sendOzariSuccess).toHaveBeenCalledWith(res, HttpEnum.OK, expect.any(String));
+  });
+
+  it("resends when the previous request is older than the cooldown", async () => {
+    const client = mockPrisma();
+    client.user.findFirst.mockResolvedValue(buildUser());
+    client.passwordResetToken.findFirst.mockResolvedValue({
+      userId: 1,
+      createdAt: new Date(Date.now() - 10 * 60_000), // 10 min ago -> past the 60s cooldown
+    });
+
+    await forgotPassword(req({ email: "user@example.com" }), res);
+
+    expect(client.passwordResetToken.create).toHaveBeenCalledTimes(1);
+    expect(mailerSend).toHaveBeenCalledTimes(1);
+  });
+
   it("returns 500 on an unexpected error", async () => {
     (getPrismaClient as Mock).mockRejectedValueOnce(new Error("db down"));
 
@@ -150,27 +179,10 @@ describe("resetPassword", () => {
     expect(sendOzariError).toHaveBeenCalledWith(res, HttpEnum.BAD_REQUEST, expect.any(String));
   });
 
-  it("rejects an already-used token", async () => {
-    const client = mockPrisma();
-    client.passwordResetToken.findUnique.mockResolvedValue({
-      userId: 1,
-      usedAt: new Date(),
-      expiresAt: future(),
-    });
-
-    await resetPassword(
-      req({ token: "x", newPassword: "N3w!Passw0rd", confirmPassword: "N3w!Passw0rd" }),
-      res,
-    );
-
-    expect(sendOzariError).toHaveBeenCalledWith(res, HttpEnum.BAD_REQUEST, expect.any(String));
-  });
-
   it("rejects an expired token", async () => {
     const client = mockPrisma();
     client.passwordResetToken.findUnique.mockResolvedValue({
       userId: 1,
-      usedAt: null,
       expiresAt: past(),
     });
 
@@ -186,7 +198,6 @@ describe("resetPassword", () => {
     const client = mockPrisma();
     client.passwordResetToken.findUnique.mockResolvedValue({
       userId: 1,
-      usedAt: null,
       expiresAt: future(),
     });
     client.user.findFirst.mockResolvedValue(null);
@@ -204,7 +215,6 @@ describe("resetPassword", () => {
     const client = mockPrisma();
     client.passwordResetToken.findUnique.mockResolvedValue({
       userId: 1,
-      usedAt: null,
       expiresAt: future(),
     });
     client.user.findFirst.mockResolvedValue(buildUser({ passwordSha }));
@@ -227,7 +237,6 @@ describe("resetPassword", () => {
     const client = mockPrisma();
     client.passwordResetToken.findUnique.mockResolvedValue({
       userId: 1,
-      usedAt: null,
       expiresAt: future(),
     });
     client.user.findFirst.mockResolvedValue(buildUser({ passwordSha }));
@@ -249,7 +258,6 @@ describe("resetPassword", () => {
     const client = mockPrisma();
     client.passwordResetToken.findUnique.mockResolvedValue({
       userId: 1,
-      usedAt: null,
       expiresAt: future(),
     });
     client.user.findFirst.mockResolvedValue(buildUser({ passwordSha }));
@@ -269,7 +277,6 @@ describe("resetPassword", () => {
     const client = mockPrisma();
     client.passwordResetToken.findUnique.mockResolvedValue({
       userId: 1,
-      usedAt: null,
       expiresAt: future(),
     });
     client.user.findFirst.mockResolvedValue(buildUser({ passwordSha }));
