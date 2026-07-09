@@ -26,6 +26,7 @@ services (Neon, Cloudflare, Resend).
 | **GCP Cloud Build** | CI/CD pipeline: verify → build → migrate → deploy. | Terraform owns the **trigger + substitutions**; steps in `ozari-api/cloudbuild.yaml` |
 | **GCP Cloud Run** | Runs the API container. | Terraform owns **structure**; Cloud Build owns the **image tag** |
 | **Cloudflare Pages** | Builds + hosts the frontend, serves the apex domain. | 🔒 manual (Cloudflare dashboard) |
+| **Cloudflare R2** | Public object storage for asset images (product photos, …). S3-compatible. | 🔒 manual (bucket + token) — secrets in Secret Manager; see §3b |
 | **Resend** | Transactional email (welcome, reset, security). Domain `partyrentalsgt.com` is verified. | 🔒 manual (Resend dashboard) — one API key per env |
 
 **Environment switch:** `NODE_ENV` is the single switch. `staging` → audit logging on, `/api/docs`
@@ -47,9 +48,12 @@ Backend reads these at runtime from Secret Manager (see `cloudbuild.yaml` `--set
 | `ozari-encryption-key` | `ENCRYPTION_KEY` | **exactly 32 bytes, hex** (AES-256-GCM) | API runtime |
 | `ozari-api-key` | `API_KEY` | random shared secret for non-browser callers | API runtime |
 | `ozari-email-key` | `EMAIL_KEY` | **Resend API key** (one per env) | API runtime |
+| `ozari-r2-access-key` | `R2_ACCESS_KEY` | R2 S3 **Access Key ID** (see §3b) | API runtime |
+| `ozari-r2-secret-key` | `R2_SECRET_KEY` | R2 S3 **Secret Access Key** (see §3b) | API runtime |
 
-Plain (non-secret) runtime env vars: `NODE_ENV`, `LOG_LEVEL`, `APP_HOST`. `PORT` is injected by Cloud
-Run (8080). **Frontend:** `VITE_API_URL` (set 🔒 manually in Cloudflare Pages).
+Plain (non-secret) runtime env vars: `NODE_ENV`, `LOG_LEVEL`, `APP_HOST`, and the three R2 URL/name
+vars `R2_ENDPOINT`/`R2_BUCKET_NAME`/`R2_PUBLIC_URL` (§3b). `PORT` is injected by Cloud Run (8080).
+**Frontend:** `VITE_API_URL` (set 🔒 manually in Cloudflare Pages). **Not used:** `R2_TOKEN` (§3b).
 
 > ⚠️ `ENCRYPTION_KEY` **must never change** once data is encrypted with it — rotating it makes all
 > existing encrypted PII unreadable. Generate it once per environment and keep it stable.
@@ -181,17 +185,26 @@ Domain `partyrentalsgt.com` is already verified (shared account). Create a **sep
 in Resend → that value is `ozari-email-key`. (Senders are code config on the verified domain; no DNS
 work needed.)
 
+### Step 2b — 🔒 Cloudflare R2 (asset storage)
+Create the prod bucket + public read (custom domain recommended) + an R2 API token — full detail in
+**§3b**. This yields `R2_ENDPOINT`/`R2_BUCKET_NAME`/`R2_PUBLIC_URL` (plain → `terraform.tfvars`) and
+`R2_ACCESS_KEY`/`R2_SECRET_KEY` (→ secrets `ozari-r2-access-key`/`ozari-r2-secret-key`).
+
 ### Step 3 — 🔒 Generate the remaining secret values
 `ozari-jwt-secret`, `ozari-jwt-refresh-secret` (two distinct random 32+ byte secrets),
 `ozari-encryption-key` (exactly 32 bytes hex), `ozari-api-key` (random). Keep them only in your local
-gitignored `infrastructure/secrets/prod.env` (mirrors `staging.env`).
+gitignored `infrastructure/secrets/prod.env` (mirrors `staging.env`). The two R2 credentials
+(`ozari-r2-access-key`/`ozari-r2-secret-key`) go here too — load them **values-first** (§3b) since
+Cloud Run binds them at `:latest`.
 
 ### Step 4 — GCP project + Terraform (infra)
 1. Create the prod GCP project; enable billing.
 2. Create the prod Terraform env: **copy `infrastructure/terraform/envs/staging/` → `envs/prod/`**,
    then change: `backend.tf` state prefix → `ozari/prod`; `variables.tf` defaults (project id, region,
-   `_NODE_ENV=production`, `_APP_HOST=<apex>`, service name, etc.); drop `imports.tf` (prod is created
-   fresh, not adopted). Everything else mirrors staging.
+   `_NODE_ENV=production`, `_APP_HOST=<apex>`, service name, etc.); set the R2 plain values
+   (`r2_endpoint`/`r2_bucket_name`/`r2_public_url`) in the prod `terraform.tfvars`; drop `imports.tf`
+   (prod is created fresh, not adopted). Everything else mirrors staging (incl. the R2 secret
+   containers + IAM + Cloud Run/trigger R2 wiring).
 3. Create the state bucket (or reuse with the new prefix): `infrastructure/bootstrap/create-tfstate-bucket.*`.
 4. `terraform init && terraform plan` (review) → `terraform apply` (🔒 after human approval). This
    creates: APIs, service accounts, Artifact Registry, **secret containers + IAM**, the Cloud Run

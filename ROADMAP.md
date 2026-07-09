@@ -89,56 +89,36 @@ need inventory. We can enrich Admin-MVP tooling within each epic as needed.
 
 ---
 
-## 3. EPIC 1 — Inventory (Products) — detailed steps
+## 3. EPIC 1 — Inventory (Products)
+
+> **Full, living plan: [`EPIC-1-INVENTORY.md`](./EPIC-1-INVENTORY.md)** — the detailed workstreams,
+> role architecture, pricing/image/schema decisions, and step-by-step. The summary below is the compass.
 
 The WIP module exists (`src/modules/products/`: controller/validator/models/route all commented out;
-route not mounted). Steps below take it to production quality + build the panel. Read = Admin+Employee;
-write = Admin+Employee (both operate the business).
+route not mounted). Steps take it to production quality + build the panel. **Product writes = Admin
+only; reads = Admin+Employee; Client not in the panel yet** (see the epic doc for the full role model).
+Scope grew from the owner Q&A: a **role-access foundation** (DB-verified role middleware + 403 +
+role-filtered nav + graceful fallbacks), a **multi-image gallery** (R2), **pricing/replacement + rent-
+period** fields, and a **nav refactor** (only-built tabs, default → products).
 
-### Backend
+**Steps (full detail in [`EPIC-1-INVENTORY.md`](./EPIC-1-INVENTORY.md)):**
 
-- [ ] **1.1 — Products read + list API.**
-  Un-WIP `getAllProducts` to the standing bar; add **search + filter + pagination** (by name,
-  `categoryId`, `businessTypeId`, active). Mount `GET /products` (authenticated tier) in `app.ts`.
-  Response maps `Decimal → number`, includes category/businessType/currency/details names. Validator
-  for the query params. OpenAPI + `EXPECTED_OPERATIONS`. i18n keys. Tests (mirror the auth controller
-  test style with mocked Prisma).
+- [ ] **Step 0 — Schema refinement & migration** — `ProductImage` (gallery), `replacementPrice`,
+  rent-period unit; extend seed. *(Confirm the open items in the epic doc first.)*
+- [ ] **Step 1 — Role-access foundation** — DB-verified role middleware + `403`; frontend
+  `useRole`/`RoleGate`, role-filtered nav, panel = staff-only, `forbidden` fallback, nav refactor.
+- [ ] **Step 2 — Products read + list** — `GET /products` (+ `/:id`) + `/panel/productos` list with
+  role-aware empty states + skeletons.
+- [ ] **Step 3 — Products create/update/delete (Admin)** — CRUD API + form (conditional pricing);
+  write actions hidden for non-admins.
+- [ ] **Step 4 — Image gallery (R2)** — multi-upload + reorder/primary/delete; the gallery + lightbox.
+- [ ] **Step 5 — Polish & un-WIP** — a11y, all states per role, OpenAPI, remove products from
+  `CLAUDE.md` WIP, both suites 100%.
 
-- [ ] **1.2 — Products create / update / soft-delete API.**
-  `POST /products` (create, incl. nested `productDetails`), `PUT /products/:id` (update; **fix the
-  detail sync** so details can be added/removed/updated, not only updated-in-place), `DELETE
-  /products/:id` (soft delete → `isActive=false` cascading to its details). Admin+Employee gated.
-  Mirrored validators (compose shared field helpers; prices are `Decimal(15,2)`, `quantity` is total
-  units owned). OpenAPI + `EXPECTED_OPERATIONS` + components. i18n. Tests (success + validation + not-
-  found + conflict paths).
-
-- [ ] **1.3 — R2 asset service + presigned-upload endpoint.**
-  Add `@aws-sdk/client-s3`. A small `assets` helper/module: `POST /assets/upload-url` → presigned PUT
-  URL (auth'd, validates content-type/size, namespaced key e.g. `products/<uuid>.<ext>`), and a
-  server-side `deleteAsset(key)` used when a product image is replaced/removed. Config in
-  `appConfig` + env reads (§R2). OpenAPI + tests. **No secrets in the repo.**
-
-### Frontend (`/panel/productos`)
-
-- [ ] **1.4 — Products list panel.**
-  Replace the placeholder route with a real inventory view (table/grid), search + filter, loading
-  **skeletons**, empty state — all in the design system (radius/motion tokens, notifications). A
-  `useProducts` React Query hook. Role-aware (Admin+Employee).
-
-- [ ] **1.5 — Product create/edit modal + form.**
-  `Modal` + RHF + **mirrored Zod** (`SchemaProduct`), the concern-#4 error pattern
-  (`skipErrorNotification` + `toFormError`), a product-details sub-editor, business-type/category/
-  currency selects (seeded lookups via a `useProductRefData` query), create/edit/deactivate with
-  cache invalidation + success toasts. 100% coverage.
-
-- [ ] **1.6 — Image upload UI.**
-  A reusable image-upload control: request the presigned URL (1.3), upload directly to R2, preview,
-  store the returned public URL on the product; handle replace/remove. Wire into the product form.
-  100% coverage (mock the upload).
-
-**Epic 1 exit criteria:** products route mounted + un-WIP'd in `CLAUDE.md`; Admin/Employee can fully
-manage inventory incl. images; OpenAPI documents every products/assets endpoint; both suites green at
-100%; `DEPLOYMENT.md` R2 section done.
+**Exit criteria:** admin fully manages inventory (CRUD + gallery + stock + pricing); employee is
+read-only; client is gracefully kept out; every endpoint role-gated + documented; both suites green at
+100%; nav shows only built modules with products as default. *(R2 infra is already done — see the
+DEPLOYMENT.md R2 section.)*
 
 ---
 
