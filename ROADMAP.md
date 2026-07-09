@@ -103,7 +103,7 @@ period** fields, and a **nav refactor** (only-built tabs, default → products).
 
 **Steps (full detail in [`EPIC-1-INVENTORY.md`](./EPIC-1-INVENTORY.md)):**
 
-- [ ] **Step 0 — Schema refinement & migration** — `ProductImage` (gallery), `replacementPrice`,
+- [x] **Step 0 — Schema refinement & migration** — `ProductImage` (gallery), `replacementPrice`,
   rent-period unit; extend seed. *(Confirm the open items in the epic doc first.)*
 - [ ] **Step 1 — Role-access foundation** — DB-verified role middleware + `403`; frontend
   `useRole`/`RoleGate`, role-filtered nav, panel = staff-only, `forbidden` fallback, nav refactor.

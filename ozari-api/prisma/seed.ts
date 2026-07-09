@@ -140,6 +140,28 @@ async function main(): Promise<void> {
     });
   }
 
+  // rent_time_units — RentTimeUnitEnum: Hora=1, Día=2, Semana=3, Mes=4, Evento=5.
+  // The period an Alquiler product's rentPrice is quoted against; "Evento" is a flat
+  // per-event rate (duration-agnostic). "Día" (id 2) is the form default at create time.
+  const rentTimeUnits = [
+    { id: 1, name: "Hora", description: "Precio de alquiler por hora" },
+    { id: 2, name: "Día", description: "Precio de alquiler por día" },
+    { id: 3, name: "Semana", description: "Precio de alquiler por semana" },
+    { id: 4, name: "Mes", description: "Precio de alquiler por mes" },
+    {
+      id: 5,
+      name: "Evento",
+      description: "Tarifa plana por evento, independiente de la duración",
+    },
+  ];
+  for (const row of rentTimeUnits) {
+    await prisma.rentTimeUnit.upsert({
+      where: { id: row.id },
+      update: { name: row.name, description: row.description },
+      create: row,
+    });
+  }
+
   // product_category
   const categories = [
     { id: 1, name: "Mesas", description: "Mesas rígidas con patas plegables para fiesta" },
@@ -237,6 +259,7 @@ async function main(): Promise<void> {
     "municipalities",
     "user_phone_types",
     "product_business_type",
+    "rent_time_units",
     "product_category",
     "service_status",
     "payment_status",
