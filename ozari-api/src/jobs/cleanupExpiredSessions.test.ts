@@ -16,15 +16,20 @@ vi.mock("@/config/logger.js", () => ({
 
 describe("Cleanup Expired Sessions Job", () => {
   let mockDeleteMany: ReturnType<typeof vi.fn>;
+  let mockResetTokenDeleteMany: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
     mockDeleteMany = vi.fn();
+    mockResetTokenDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
 
     const { getPrismaClient } = await import("@/services/prisma.service.js");
     (getPrismaClient as ReturnType<typeof vi.fn>).mockResolvedValue({
       jwtSession: {
         deleteMany: mockDeleteMany,
+      },
+      passwordResetToken: {
+        deleteMany: mockResetTokenDeleteMany,
       },
     });
   });
@@ -118,5 +123,20 @@ describe("Cleanup Expired Sessions Job", () => {
       issuedAtCondition.getTime() - sevenDaysAgo.getTime(),
     );
     expect(diff).toBeLessThan(1000); // Within 1 second
+  });
+
+  it("should purge expired password-reset tokens and log the count", async () => {
+    const { logger } = await import("@/config/logger.js");
+    mockDeleteMany.mockResolvedValue({ count: 0 });
+    mockResetTokenDeleteMany.mockResolvedValue({ count: 3 });
+
+    await cleanupExpiredSessions();
+
+    expect(mockResetTokenDeleteMany).toHaveBeenCalledWith({
+      where: { expiresAt: { lte: expect.any(Date) } },
+    });
+    expect(logger.info).toHaveBeenCalledWith(
+      "[Cleanup Job] Successfully cleaned up 3 expired password-reset tokens",
+    );
   });
 });

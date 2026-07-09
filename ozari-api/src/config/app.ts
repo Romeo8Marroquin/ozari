@@ -27,6 +27,11 @@ export const appConfig = {
     // short-lived so a leaked/forgotten link can't be replayed long after.
     tokenBytes: 32,
     tokenTtlMinutes: 30,
+    // Anti-abuse: once a reset email is sent, suppress re-sending to the SAME account for this
+    // window (a persistent per-account cooldown, derived from the live token's createdAt) so an
+    // attacker who knows an email can't bomb the victim's inbox by hammering the endpoint. This is
+    // in addition to the per-IP rate limiter and, unlike it, is global (DB-backed, not per-instance).
+    resendCooldownSeconds: 60,
   },
 
   mfa: {
@@ -61,6 +66,31 @@ export const appConfig = {
     // "" to fall back to the text wordmark. Many clients block remote images by default, so the
     // wordmark still carries the brand when the image doesn't load.
     logoUrl: "https://ozari-c28.pages.dev/email-logo.png",
+  },
+
+  storage: {
+    // Cloudflare R2 (S3-compatible) object storage for public assets (product images, …). Only the
+    // NON-secret policy lives here; the connection/credentials are read from env by the storage helper
+    // (R2_ENDPOINT/R2_BUCKET_NAME/R2_PUBLIC_URL + the R2_ACCESS_KEY/R2_SECRET_KEY secrets) — mirroring
+    // how appConfig.email holds `from` while the mailer reads EMAIL_KEY. The bucket is PUBLIC-READ, so
+    // never put anything private in it.
+    //
+    // Uploads never pass through the API: a caller requests a short-lived presigned PUT URL and uploads
+    // straight to R2 (keeps image bytes out of Cloud Run and honours the 10 kB body cap).
+    uploadUrlTtlSeconds: 300, // 5 min: long enough to upload, short enough that a leaked URL dies fast.
+    // Max upload size, bound INTO the presigned signature (ContentLength) so a client can't exceed it.
+    maxUploadBytes: 5 * 1024 * 1024, // 5 MB
+    // Whitelisted upload content types → their canonical file extension (the object key's suffix).
+    allowedImageTypes: {
+      "image/jpeg": "jpg",
+      "image/png": "png",
+      "image/webp": "webp",
+      "image/avif": "avif",
+    } as Record<string, string>,
+    // Key namespace per asset kind (keeps the bucket organized; lets a lifecycle policy target a prefix).
+    keyPrefixes: {
+      product: "products",
+    },
   },
 
   cookieConfig: {

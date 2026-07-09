@@ -50,47 +50,66 @@ export const forgotPassword = async (
     });
 
     if (user) {
-      const rawToken = crypto
-        .randomBytes(appConfig.passwordReset.tokenBytes)
-        .toString("base64url");
-      const tokenSha = encryptSha256Sync(rawToken);
-      const expiresAt = new Date(
-        Date.now() + appConfig.passwordReset.tokenTtlMinutes * 60_000,
-      );
+      // Persistent per-account cooldown: if a reset email was sent to this account very recently,
+      // don't send another (anti-bombing). The existing valid link still stands. Backed by the live
+      // token's createdAt, so it holds across instances — unlike the per-IP in-memory rate limiter.
+      const existing = await prismaClient.passwordResetToken.findFirst({
+        where: { userId: user.id },
+        orderBy: { createdAt: "desc" },
+      });
+      const cooldownMs = appConfig.passwordReset.resendCooldownSeconds * 1000;
+      const withinCooldown =
+        existing !== null && Date.now() - existing.createdAt.getTime() < cooldownMs;
 
-      // One live token per user: drop any outstanding ones, then create the fresh token.
-      await prismaClient.$transaction([
-        prismaClient.passwordResetToken.deleteMany({
-          where: { userId: user.id },
-        }),
-        prismaClient.passwordResetToken.create({
-          data: { userId: user.id, tokenSha, expiresAt },
-        }),
-      ]);
-
-      const resetUrl = `${getAppHost() || FALLBACK_URL}${RESET_PATH}?token=${rawToken}`;
-      try {
-        await getMailer().send(
-          buildPasswordResetEmail({
-            to: decryptKms(user.emailKms),
-            name: decryptKms(user.fullNameKms),
-            resetUrl,
+      if (withinCooldown) {
+        logger.info(
+          i18next.t("user.forgotPassword.logs.resendThrottled", {
+            userId: user.id,
           }),
         );
-      } catch (emailError) {
-        logger.error(
-          i18next.t("user.forgotPassword.logs.emailFailed", {
+      } else {
+        const rawToken = crypto
+          .randomBytes(appConfig.passwordReset.tokenBytes)
+          .toString("base64url");
+        const tokenSha = encryptSha256Sync(rawToken);
+        const expiresAt = new Date(
+          Date.now() + appConfig.passwordReset.tokenTtlMinutes * 60_000,
+        );
+
+        // One live token per user: drop any outstanding ones, then create the fresh token.
+        await prismaClient.$transaction([
+          prismaClient.passwordResetToken.deleteMany({
+            where: { userId: user.id },
+          }),
+          prismaClient.passwordResetToken.create({
+            data: { userId: user.id, tokenSha, expiresAt },
+          }),
+        ]);
+
+        const resetUrl = `${getAppHost() || FALLBACK_URL}${RESET_PATH}?token=${rawToken}`;
+        try {
+          await getMailer().send(
+            buildPasswordResetEmail({
+              to: decryptKms(user.emailKms),
+              name: decryptKms(user.fullNameKms),
+              resetUrl,
+            }),
+          );
+        } catch (emailError) {
+          logger.error(
+            i18next.t("user.forgotPassword.logs.emailFailed", {
+              userId: user.id,
+              error: String(emailError),
+            }),
+          );
+        }
+
+        logger.info(
+          i18next.t("user.forgotPassword.logs.resetRequested", {
             userId: user.id,
-            error: String(emailError),
           }),
         );
       }
-
-      logger.info(
-        i18next.t("user.forgotPassword.logs.resetRequested", {
-          userId: user.id,
-        }),
-      );
     } else {
       logger.info(i18next.t("user.forgotPassword.logs.unknownEmail"));
     }
@@ -132,11 +151,9 @@ export const resetPassword = async (
       where: { tokenSha },
     });
 
-    if (
-      !resetToken ||
-      resetToken.usedAt ||
-      resetToken.expiresAt.getTime() < Date.now()
-    ) {
+    // Invalid (unknown) or expired tokens collapse to the same generic error. There is no "used"
+    // state: a consumed token is deleted (below), so a replay simply finds nothing.
+    if (!resetToken || resetToken.expiresAt.getTime() < Date.now()) {
       logger.warn(i18next.t("user.resetPassword.logs.invalidToken"));
       sendOzariError(
         res,

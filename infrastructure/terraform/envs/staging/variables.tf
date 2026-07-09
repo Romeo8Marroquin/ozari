@@ -50,6 +50,28 @@ variable "log_level" {
   default     = "info"
 }
 
+# --- Cloudflare R2 (plain, NON-secret runtime env). Env-specific + semi-sensitive (bucket/account),
+#     so defaults are empty here — set real values in the gitignored terraform.tfvars (never in this
+#     public repo). Empty is harmless until the storage helper is actually used (Epic 1). The R2
+#     CREDENTIALS (access/secret key) are NOT here — they are Secret Manager secrets (secrets.tf). ---
+variable "r2_endpoint" {
+  description = "Cloudflare R2 S3 API endpoint, https://<account-id>.r2.cloudflarestorage.com (R2_ENDPOINT)."
+  type        = string
+  default     = ""
+}
+
+variable "r2_bucket_name" {
+  description = "Cloudflare R2 bucket name for public assets (R2_BUCKET_NAME)."
+  type        = string
+  default     = ""
+}
+
+variable "r2_public_url" {
+  description = "Public read base URL for R2 assets — r2.dev or a custom domain, no trailing slash (R2_PUBLIC_URL)."
+  type        = string
+  default     = ""
+}
+
 variable "artifact_repository_id" {
   description = "Artifact Registry Docker repository ID."
   type        = string

@@ -34,5 +34,10 @@ resource "google_cloudbuild_trigger" "ozari_api_dev" {
     _REGION       = var.region
     _RUN_SA       = google_service_account.run.email
     _SERVICE_NAME = var.service_name
+    # R2 plain values (kept out of the public cloudbuild.yaml; sourced from gitignored terraform.tfvars).
+    # These must match the R2_* env values in cloud-run.tf, or Cloud Build and Terraform will thrash them.
+    _R2_ENDPOINT    = var.r2_endpoint
+    _R2_BUCKET_NAME = var.r2_bucket_name
+    _R2_PUBLIC_URL  = var.r2_public_url
   }
 }

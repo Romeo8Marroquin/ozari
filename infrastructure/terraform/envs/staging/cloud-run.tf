@@ -65,6 +65,21 @@ resource "google_cloud_run_v2_service" "ozari_api" {
         name  = "APP_HOST"
         value = var.app_host
       }
+      # Cloudflare R2 plain (non-secret) config. Must mirror cloudbuild.yaml's --set-env-vars
+      # (fed by the trigger's _R2_* substitutions) so a Cloud Build deploy and a terraform apply
+      # don't overwrite each other. Empty until set in terraform.tfvars — harmless until Epic 1.
+      env {
+        name  = "R2_ENDPOINT"
+        value = var.r2_endpoint
+      }
+      env {
+        name  = "R2_BUCKET_NAME"
+        value = var.r2_bucket_name
+      }
+      env {
+        name  = "R2_PUBLIC_URL"
+        value = var.r2_public_url
+      }
 
       # --- Secret env vars (DATABASE_URL, JWT_SECRET, JWT_REFRESH_SECRET,
       #     ENCRYPTION_KEY, API_KEY) -> Secret Manager :latest ---
@@ -118,6 +133,26 @@ resource "google_cloud_run_v2_service" "ozari_api" {
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.ozari_email_key.secret_id
+            version = "latest"
+          }
+        }
+      }
+      # R2 credentials (SECRET). These bind to :latest, so their secret VERSIONS must exist before this
+      # applies (load values via gcloud first — see DEPLOYMENT.md §3b), or the service deploy fails.
+      env {
+        name = "R2_ACCESS_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.ozari_r2_access_key.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "R2_SECRET_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.ozari_r2_secret_key.secret_id
             version = "latest"
           }
         }

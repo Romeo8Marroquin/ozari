@@ -15,7 +15,7 @@ import { refreshAccessToken } from '@utils/tokenRefresh';
 let silentRefreshProbed = false;
 
 export const Route = createFileRoute('/sesion')({
-  beforeLoad: async () => {
+  beforeLoad: async ({ location }) => {
     const token = Storage.get<string>(StorageKeys.TOKEN);
     let isLogged = isTokenValid(token);
 
@@ -33,9 +33,19 @@ export const Route = createFileRoute('/sesion')({
     }
 
     if (isLogged) {
-      throw redirect({
-        to: '/panel/productos',
-      });
+      // The password-reset page is reachable WITH a token even while authenticated: the user is
+      // resetting their password (completing it revokes every session anyway), so we don't bounce
+      // them to the panel. Every OTHER /sesion/* screen sends a logged-in user straight to the panel.
+      const resetToken = (location.search as { token?: unknown }).token;
+      const isResetWithToken =
+        location.pathname === '/sesion/restablecer' &&
+        typeof resetToken === 'string' &&
+        resetToken.length > 0;
+      if (!isResetWithToken) {
+        throw redirect({
+          to: '/panel/productos',
+        });
+      }
     }
   },
   component: SesionLayout,

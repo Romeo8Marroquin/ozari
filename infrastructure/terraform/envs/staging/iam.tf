@@ -24,6 +24,8 @@ locals {
     encryption_key     = google_secret_manager_secret.ozari_encryption_key.secret_id
     api_key            = google_secret_manager_secret.ozari_api_key.secret_id
     email_key          = google_secret_manager_secret.ozari_email_key.secret_id
+    r2_access_key      = google_secret_manager_secret.ozari_r2_access_key.secret_id
+    r2_secret_key      = google_secret_manager_secret.ozari_r2_secret_key.secret_id
   }
 
   # Cloud Build (ozari-build-sa) needs DB URLs for the migration step.

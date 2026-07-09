@@ -11,6 +11,7 @@ import { getPrismaClient } from "@/services/prisma.service.js";
  * Cleanup Rules:
  * 1. Delete sessions that have expired (expiresAt <= now)
  * 2. Delete inactive sessions older than 7 days (soft delete cleanup)
+ * 3. Delete expired password-reset tokens (abandoned requests that were never used)
  *
  * Usage:
  * - Manual: `pnpm run cleanup:sessions`
@@ -43,6 +44,16 @@ export async function cleanupExpiredSessions(): Promise<void> {
 
     logger.info(
       `[Cleanup Job] Successfully cleaned up ${result.count} expired/inactive sessions`,
+    );
+
+    // Purge abandoned password-reset tokens (requested, never used, now past their TTL). Used tokens
+    // are already hard-deleted at reset time, so only expired-and-abandoned rows can linger here.
+    const resetTokens = await prismaClient.passwordResetToken.deleteMany({
+      where: { expiresAt: { lte: now } },
+    });
+
+    logger.info(
+      `[Cleanup Job] Successfully cleaned up ${resetTokens.count} expired password-reset tokens`,
     );
 
     return;
