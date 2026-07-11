@@ -2,10 +2,8 @@ import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { prefersReducedMotion } from '@utils/motion';
 import LogoMark from './LogoMark';
-
-const prefersReducedMotion = (): boolean =>
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /**
  * The full-screen route loader — TanStack Router's `defaultPendingComponent`, shown while a route's

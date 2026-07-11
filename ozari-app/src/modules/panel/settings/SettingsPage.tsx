@@ -1,6 +1,4 @@
-import { useGSAP } from '@gsap/react';
-import gsap from 'gsap';
-import { useCallback, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineArrowPath, HiOutlineExclamationTriangle } from 'react-icons/hi2';
 import Button from '@components/Button';
@@ -8,13 +6,12 @@ import SkeletonFade from '@components/SkeletonFade';
 import Switch from '@components/Switch';
 import { getInitials } from '@utils/nameFormat';
 import { useMe } from '../hooks/useMe';
-import { usePanelPageExit } from '../PanelPageTransitionContext';
+import { staggerIn, staggerOut } from '../pageMotion';
+import { usePanelPageMotion } from '../PanelPageTransitionContext';
 import ChangePasswordModal from './ChangePasswordModal';
 import MfaDisableModal from './MfaDisableModal';
 import MfaEnableModal from './MfaEnableModal';
 import SettingsSection from './SettingsSection';
-
-const prefersReducedMotion = (): boolean => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // One shimmer bar for any loading placeholder, sized by the caller — the same skeleton language
 // the header pill/menu use, so a slow `/auth/me` reads as "loading", never as a fake value.
@@ -143,53 +140,22 @@ const SettingsPage: React.FC = () => {
     defaultValue: t('modules.panel.user.roles.unknown'),
   });
 
-  // ── This page's OWN entrance ─────────────────────────────────────────────────────────────────
+  // ── This page's OWN motion ───────────────────────────────────────────────────────────────────
   // Restrained on purpose: only the few `.reveal-block`s (the lead + each section as a whole) move —
-  // a gentle fade + rise + faint settle, softly staggered. Nothing inside the cards moves, and it's
-  // vertical only, so there's no sideways overflow. Runs on every appearance (fresh load or tab
-  // change). Gated on reduced-motion; reverted by `useGSAP` on unmount.
-  useGSAP(
-    () => {
-      const mm = gsap.matchMedia();
-      mm.add('(prefers-reduced-motion: no-preference)', () => {
-        gsap.from('.reveal-block', {
-          y: 16,
-          autoAlpha: 0,
-          scale: 0.99,
-          duration: 0.5,
-          ease: 'power3.out',
-          stagger: 0.1,
-          clearProps: 'transform',
-        });
-      });
-    },
-    { scope: root },
-  );
+  // the shared panel stagger (gentle fade + rise + faint settle in; quick accelerating lift out).
+  // Nothing inside the cards moves, and it's vertical only, so there's no sideways overflow. The
+  // entrance runs on every appearance (fresh load or tab change); the registered pair lets the
+  // layout play the exit before ANY departure and resume the entrance if a departure is cancelled.
+  useLayoutEffect(() => {
+    staggerIn(root.current, '.reveal-block');
+  }, []);
 
-  // ── This page's OWN exit — the reverse of the entrance ───────────────────────────────────────
-  // Registered with the layout so it plays before ANY departure (tab change or logout), never the
-  // default. The same few blocks lift up and fade, quick and accelerating — the mirror of the
-  // entrance. Resolves when finished (immediately if there's nothing to animate / reduced motion).
-  usePanelPageExit(
-    useCallback(
-      () =>
-        new Promise<void>((resolve) => {
-          const element = root.current;
-          /* v8 ignore next -- root is always mounted when the exit runs, so the null-element fallback is unreachable */
-          const blocks = element ? gsap.utils.selector(element)('.reveal-block') : [];
-          if (blocks.length === 0 || prefersReducedMotion()) {
-            resolve();
-            return;
-          }
-          gsap.to(blocks, {
-            y: -12,
-            autoAlpha: 0,
-            duration: 0.22,
-            ease: 'power2.in',
-            stagger: 0.05,
-            onComplete: resolve,
-          });
-        }),
+  usePanelPageMotion(
+    useMemo(
+      () => ({
+        enter: (options) => staggerIn(root.current, '.reveal-block', options),
+        exit: () => staggerOut(root.current, '.reveal-block'),
+      }),
       [],
     ),
   );

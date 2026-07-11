@@ -105,8 +105,9 @@ period** fields, and a **nav refactor** (only-built tabs, default → products).
 
 - [x] **Step 0 — Schema refinement & migration** — `ProductImage` (gallery), `replacementPrice`,
   rent-period unit; extend seed. *(Confirm the open items in the epic doc first.)*
-- [ ] **Step 1 — Role-access foundation** — DB-verified role middleware + `403`; frontend
-  `useRole`/`RoleGate`, role-filtered nav, panel = staff-only, `forbidden` fallback, nav refactor.
+- [x] **Step 1 — Role-access foundation** — DB-verified role middleware + `403`; frontend
+  `useRole`/`RoleGate`, role-filterable nav; panel open to all authenticated roles (role restricts
+  capabilities within shared views, not access); `403` → non-blocking toast; nav refactor.
 - [ ] **Step 2 — Products read + list** — `GET /products` (+ `/:id`) + `/panel/productos` list with
   role-aware empty states + skeletons.
 - [ ] **Step 3 — Products create/update/delete (Admin)** — CRUD API + form (conditional pricing);

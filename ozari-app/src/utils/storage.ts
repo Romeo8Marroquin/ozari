@@ -35,6 +35,12 @@ export const Storage = {
   },
 };
 
+// Per-tab, non-persistent values live in sessionStorage; durable preferences in localStorage.
+const SESSION_KEYS: readonly StorageKeys[] = [
+  StorageKeyValues.TOKEN,
+  StorageKeyValues.PRODUCT_CREATE_DRAFT,
+];
+
 function getStorage(key: StorageKeys): globalThis.Storage {
-  return key === StorageKeyValues.TOKEN ? sessionStorage : localStorage;
+  return SESSION_KEYS.includes(key) ? sessionStorage : localStorage;
 }

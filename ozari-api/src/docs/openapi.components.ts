@@ -323,6 +323,140 @@ export const schemas: Record<string, Schema> = {
       timestamp: { type: "string", format: "date-time", example: "2026-07-02T13:00:00.000Z" },
     },
   },
+
+  ProductImage: {
+    type: "object",
+    description: "A product photo (R2). Ordered primary-first, then by `sortOrder`.",
+    properties: {
+      id: { type: "integer", example: 1 },
+      url: { type: "string", format: "uri", example: "https://cdn.example.com/products/7/hero.webp" },
+      isPrimary: { type: "boolean", example: true },
+      sortOrder: { type: "integer", example: 0 },
+    },
+  },
+  ProductDetailItem: {
+    type: "object",
+    description: "A product spec (color, material, dimensions, …).",
+    properties: {
+      id: { type: "integer", example: 12 },
+      detail: { type: "string", example: "Blanco" },
+      detailType: { type: "string", example: "Color" },
+    },
+  },
+  ProductListItem: {
+    type: "object",
+    description:
+      "A catalog product. The base fields are visible to **every** role; the remaining fields are " +
+      "**role-projected** (minimum privilege): `inStock` is added for Employee + Admin, and " +
+      "`quantity`, `replacementPrice`, `isActive` are **Admin only** (a Client/Employee never receives " +
+      "the exact stock count).",
+    properties: {
+      id: { type: "integer", example: 7 },
+      name: { type: "string", example: "Mesa redonda" },
+      description: { type: "string", nullable: true, example: "Mesa para 8 personas" },
+      businessType: { type: "string", example: "Alquiler" },
+      category: { type: "string", example: "Mesas" },
+      currency: {
+        type: "object",
+        properties: {
+          id: { type: "integer", example: 1 },
+          iso4217Code: { type: "string", example: "GTQ" },
+          name: { type: "string", example: "Quetzal Guatemalteco" },
+          symbol: { type: "string", example: "Q" },
+        },
+      },
+      rentPrice: { type: "number", nullable: true, description: "Alquiler price per `rentTimeUnit`.", example: 75 },
+      sellPrice: { type: "number", nullable: true, description: "Venta price.", example: null },
+      rentTimeUnit: { type: "string", nullable: true, description: "Period the rent price is quoted against (Alquiler only).", example: "Día" },
+      images: { type: "array", items: schemaRef("ProductImage") },
+      details: { type: "array", items: schemaRef("ProductDetailItem") },
+      inStock: { type: "boolean", description: "Availability signal — **Employee + Admin only**.", example: true },
+      quantity: { type: "integer", description: "Exact total stock — **Admin only**.", example: 40 },
+      replacementPrice: { type: "number", description: "As-new replacement value — **Admin only**.", example: 900 },
+      isActive: { type: "boolean", description: "Soft-delete flag — **Admin only**.", example: true },
+    },
+  },
+  Pagination: {
+    type: "object",
+    properties: {
+      page: { type: "integer", example: 1 },
+      pageSize: { type: "integer", example: 15 },
+      total: { type: "integer", example: 1 },
+      totalPages: { type: "integer", example: 1 },
+    },
+  },
+  ProductListResponse: {
+    type: "object",
+    properties: {
+      products: { type: "array", items: schemaRef("ProductListItem") },
+      pagination: schemaRef("Pagination"),
+    },
+  },
+  CatalogOption: {
+    type: "object",
+    description: "A seeded lookup row — just enough to render a select option.",
+    properties: {
+      id: { type: "integer", example: 1 },
+      name: { type: "string", example: "Alquiler" },
+    },
+  },
+  ProductCatalog: {
+    type: "object",
+    description:
+      "The reference lists the product create/edit form renders as selects: every ACTIVE row of the " +
+      "five seeded lookups.",
+    properties: {
+      businessTypes: { type: "array", items: schemaRef("CatalogOption") },
+      categories: { type: "array", items: schemaRef("CatalogOption") },
+      currencies: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "integer", example: 1 },
+            name: { type: "string", example: "Quetzal Guatemalteco" },
+            iso4217Code: { type: "string", example: "GTQ" },
+            symbol: { type: "string", example: "Q" },
+          },
+        },
+      },
+      detailTypes: { type: "array", items: schemaRef("CatalogOption") },
+      rentTimeUnits: { type: "array", items: schemaRef("CatalogOption") },
+    },
+  },
+  CreateProductRequest: {
+    type: "object",
+    required: ["businessTypeId", "categoryId", "currencyId", "name", "quantity"],
+    description:
+      "Creates a product (+ nested details). The CONDITIONAL price rule applies by business type: " +
+      "**Alquiler** requires `rentPrice` + `rentTimeUnitId` and forbids `sellPrice`; **Venta** " +
+      "requires `sellPrice` and forbids the rent fields. `replacementPrice` (as-new value billed for " +
+      "a lost/damaged rental) is optional for both. Images are attached later by the gallery flow.",
+    properties: {
+      name: { type: "string", minLength: 5, maxLength: 255, example: "Mesa redonda" },
+      description: { type: "string", nullable: true, minLength: 5, maxLength: 500, example: "Mesa para 8 personas" },
+      businessTypeId: { type: "integer", description: "1 = Alquiler, 2 = Venta.", example: 1 },
+      categoryId: { type: "integer", example: 1 },
+      currencyId: { type: "integer", example: 1 },
+      quantity: { type: "integer", minimum: 0, maximum: 5000, example: 40 },
+      rentPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Alquiler; forbidden for Venta.", example: 75 },
+      rentTimeUnitId: { type: "integer", nullable: true, description: "Required for Alquiler; forbidden for Venta.", example: 2 },
+      replacementPrice: { type: "number", nullable: true, minimum: 0, example: 900 },
+      sellPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Venta; forbidden for Alquiler.", example: null },
+      productDetails: {
+        type: "array",
+        description: "Optional specs created with the product.",
+        items: {
+          type: "object",
+          required: ["detailTypeId", "detail"],
+          properties: {
+            detailTypeId: { type: "integer", example: 1 },
+            detail: { type: "string", minLength: 5, maxLength: 255, example: "Blanco" },
+          },
+        },
+      },
+    },
+  },
 };
 
 // ── Response helpers ──────────────────────────────────────────────────────────────────────────────

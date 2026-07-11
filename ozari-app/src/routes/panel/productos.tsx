@@ -1,12 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useTranslation } from 'react-i18next';
-import PanelPlaceholder from '../../modules/panel/components/PanelPlaceholder';
+import ProductsPage from '../../modules/panel/products/ProductsPage';
 
 export const Route = createFileRoute('/panel/productos')({
-  component: RouteComponent,
+  component: ProductsPage,
 });
-
-function RouteComponent() {
-  const { t } = useTranslation();
-  return <PanelPlaceholder section={t('modules.panel.nav.products')} />;
-}

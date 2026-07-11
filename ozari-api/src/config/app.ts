@@ -104,6 +104,11 @@ export const appConfig = {
   maxGlobalAmount: 1000000,
   maxGlobalQuantity: 5000,
 
+  // Product list pagination: the grid's default page size and the hard upper bound a caller can
+  // request (so a single list call can never fetch an unbounded number of rows).
+  defaultProductPageSize: 15,
+  maxProductPageSize: 50,
+
   sensitiveKeys: ["password", "token", "secret", "creditCard", "cvv", "auth"],
   basePath: "/api",
 } as const;

@@ -15,8 +15,10 @@ const Header: React.FC = () => {
   const { mode, openMobile } = usePanelChrome();
   const pathname = useLocation({ select: (location) => location.pathname });
 
+  // Products is the default landing, so it's the sensible fallback title for any path that isn't a
+  // known nav section (unreachable in practice — the panel only routes to built modules).
   const current = PANEL_NAV.find((item) => pathname.startsWith(item.to));
-  const title = t(`modules.panel.nav.${current?.labelKey ?? 'dashboard'}`);
+  const title = t(`modules.panel.nav.${current?.labelKey ?? 'products'}`);
 
   return (
     // `relative z-[var(--z-header)]` places the header in the app stacking order — above page

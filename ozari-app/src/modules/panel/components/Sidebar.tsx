@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { Link, useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineChevronLeft, HiOutlineXMark } from 'react-icons/hi2';
-import { PANEL_NAV, type PanelNavItem, type PanelPath } from '../navConfig';
+import { PANEL_NAV, filterNavByRole, type PanelNavItem, type PanelPath } from '../navConfig';
 import { usePanelChrome } from '../hooks/usePanelChrome';
-import { usePanelNavigate } from '../PanelNavContext';
+import { usePanelNavigate, usePanelNavPending } from '../PanelNavContext';
+import { useRole } from '@hooks/useRole';
 import BrandMark from './BrandMark';
 
 // A plain primary click (no modifier keys, main button) is the one we intercept for the body
@@ -37,37 +38,25 @@ interface NavItemProps {
    *  content exit), while the destination's fades in at the swap. Keeps the tint in the flow. */
   leaving?: boolean;
   onNavigate?: () => void;
-  /** Glide the active pill to this item now (before the route commits), for a simultaneous start. */
-  onActivate?: (target: HTMLElement) => void;
   /** Opt this link out of the router's view transition (see the drawer note in SidebarContent). */
   disableViewTransition?: boolean;
 }
 
-const NavItem: React.FC<NavItemProps> = ({
-  item,
-  collapsed,
-  active,
-  leaving,
-  onNavigate,
-  onActivate,
-  disableViewTransition,
-}) => {
+const NavItem: React.FC<NavItemProps> = ({ item, collapsed, active, leaving, onNavigate, disableViewTransition }) => {
   const { t } = useTranslation();
   const panelNavigate = usePanelNavigate();
   const label = t(`modules.panel.nav.${item.labelKey}`);
   const Icon = item.icon;
 
-  // Drive navigation through the panel's body transition instead of <Link>'s instant swap. The
-  // active tab is a no-op (still closes the mobile drawer); modified clicks fall through to <Link>.
-  // On a real move, glide the pill immediately so it travels with the body fade — not after it.
+  // Drive navigation through the panel's body transition instead of <Link>'s instant swap; modified
+  // clicks fall through to <Link>. EVERY plain click goes to the controller — it decides (no-op on
+  // the settled active tab, retarget mid-transition, cancel when re-clicking the tab being left) —
+  // so nothing is ever "blocked" here. The pill/tint follow the controller's `pending` state.
   const onClick = (event: React.MouseEvent<HTMLElement>) => {
     if (!isPlainClick(event)) return;
     event.preventDefault();
     onNavigate?.();
-    if (!active) {
-      onActivate?.(event.currentTarget);
-      panelNavigate(item.to);
-    }
+    panelNavigate(item.to);
   };
 
   return (
@@ -82,8 +71,9 @@ const NavItem: React.FC<NavItemProps> = ({
       aria-label={collapsed ? label : undefined}
       aria-current={active ? 'page' : undefined}
       // The active PILL is a single shared element that glides between items (see SidebarContent);
-      // this marks the target it measures.
+      // `data-nav-to` is how it finds this item's element for a given path (route-active or pending).
       data-active={active ? 'true' : undefined}
+      data-nav-to={item.to}
       className={`panel-nav-item group relative flex h-11 items-center rounded-xl px-3.5 transition-colors ${FOCUS_RING} ${
         active ? '' : 'hover:bg-charcoal/[0.04]'
       }`}
@@ -131,39 +121,40 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
   const { t } = useTranslation();
   const panelNavigate = usePanelNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
-  const HOME: PanelPath = '/panel/inicio';
+  // Nav is role-filtered (a UX layer): hide tabs the current role can't use. `HOME` is the brand
+  // link target and the default landing now that the dashboard placeholder is gone.
+  const role = useRole();
+  const visibleNav = filterNavByRole(PANEL_NAV, role);
+  const HOME: PanelPath = '/panel/productos';
 
   const navRef = useRef<HTMLElement>(null);
   const pillRef = useRef<HTMLSpanElement>(null);
   const firstRun = useRef(true);
   const pillVisible = useRef(false);
-  // The tab being LEFT during a click-driven change (set on click), so its tint fades out with the
-  // content exit; the destination lights up at the swap. Reset the moment the route commits — the
-  // React "adjust state when a value changes during render" pattern (not an effect), so returning to
-  // that tab later (even via browser back) correctly lights it up again.
-  const [leavingKey, setLeavingKey] = useState<string | null>(null);
-  const [lastPath, setLastPath] = useState(pathname);
-  if (pathname !== lastPath) {
-    setLastPath(pathname);
-    setLeavingKey(null);
-  }
-  const currentActiveKey = () => PANEL_NAV.find((navItem) => pathname.startsWith(navItem.to))?.to ?? null;
+  // The chrome follows the transition controller's INTENT, not just the committed route: while a
+  // tab change is in flight, `pending` is the destination — the pill/tint glide there immediately,
+  // and glide back home for free if the move is cancelled (pending returns to null). All derived;
+  // no imperative click bookkeeping.
+  const pending = usePanelNavPending();
+  const routeActiveKey = visibleNav.find((navItem) => pathname.startsWith(navItem.to))?.to ?? null;
+  // Where the pill should sit right now: the in-flight destination, else the committed route.
+  const visualTarget = pending ?? routeActiveKey;
+  // The tab being LEFT mid-transition — its tint fades out now (with the content exit), while the
+  // destination's fades in. Null again the moment the move commits or is cancelled.
+  const leavingKey = pending !== null && pending !== routeActiveKey ? routeActiveKey : null;
 
-  // Position the single active pill over the active item, measuring its LAYOUT position (offset*,
+  // Position the single active pill over a target item, measuring its LAYOUT position (offset*,
   // so it's scroll-, transform-, and viewport-proof — correct on any size and after a rotation).
   // `animate` glides (the bounce); otherwise it snaps in place (first paint, re-appearing from a
   // no-active route, and on resize/rotate). Same code serves the expanded rail, collapsed rail, and
-  // drawer, since all three are one vertical list. An explicit `target` lets a click glide the pill
-  // to the just-clicked item immediately — before the route (and thus `data-active`) has changed —
-  // so the pill and the body transition start together; the route commit then re-runs to the same
-  // spot (a no-op glide).
-  const positionPill = useCallback((animate: boolean, target?: HTMLElement) => {
+  // drawer, since all three are one vertical list.
+  const positionPill = useCallback((animate: boolean, targetPath: PanelPath | null) => {
     const nav = navRef.current;
     const pill = pillRef.current;
     /* v8 ignore next -- the pill span is always mounted while positioning runs; the null guard is defensive */
     if (!pill) return;
 
-    const active = target ?? nav?.querySelector<HTMLElement>('[data-active="true"]');
+    const active = targetPath ? nav?.querySelector<HTMLElement>(`[data-nav-to="${targetPath}"]`) : null;
     if (!nav || !active) {
       pill.style.opacity = '0';
       pillVisible.current = false;
@@ -187,18 +178,20 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
     pillVisible.current = true;
   }, []);
 
-  // Glide only for a genuine tab→tab change (already visible); snap otherwise.
+  // Glide only for a genuine target change while visible (tab→tab, an in-flight retarget, or a
+  // cancel gliding home); snap otherwise. Keyed on `visualTarget`, so the pill starts moving the
+  // moment a click lands — with the body exit, not after it.
   useLayoutEffect(() => {
-    positionPill(!firstRun.current && pillVisible.current);
+    positionPill(!firstRun.current && pillVisible.current, visualTarget);
     firstRun.current = false;
-  }, [pathname, collapsed, positionPill]);
+  }, [visualTarget, collapsed, positionPill]);
 
   // Re-anchor (no animation) on resize / orientation change, so it stays perfectly placed.
   useEffect(() => {
-    const onResize = () => positionPill(false);
+    const onResize = () => positionPill(false, visualTarget);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [positionPill]);
+  }, [positionPill, visualTarget]);
 
   return (
     <div className="flex h-full flex-col">
@@ -213,10 +206,8 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
             if (!isPlainClick(event)) return;
             event.preventDefault();
             onNavigate?.();
-            if (pathname !== HOME) {
-              setLeavingKey(currentActiveKey());
-              panelNavigate(HOME);
-            }
+            // The controller decides (no-op when already home, retarget/cancel mid-transition).
+            panelNavigate(HOME);
           }}
           // Same reason as the nav items: no view transition, so the active pill glides for real.
           viewTransition={false}
@@ -270,7 +261,7 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
           // `>1` end control for a gentle overshoot — a little bounce, less than before. 250ms.
           className="pointer-events-none absolute left-0 top-0 z-10 h-5 w-1 rounded-full bg-magenta opacity-0 transition-[transform,opacity] duration-[250ms] ease-[cubic-bezier(0.42,0,0.5,1.17)] motion-reduce:transition-none"
         />
-        {PANEL_NAV.map((item) => (
+        {visibleNav.map((item) => (
           <NavItem
             key={item.to}
             item={item}
@@ -278,11 +269,6 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
             active={pathname.startsWith(item.to)}
             leaving={item.to === leavingKey}
             onNavigate={onNavigate}
-            onActivate={(target) => {
-              positionPill(true, target);
-              // Mark the tab we're leaving so its tint fades out now (with the content exit).
-              setLeavingKey(currentActiveKey());
-            }}
             // Opt every nav link out of the router's view transition. Two reasons: (1) in the mobile
             // drawer it would snapshot the still-open drawer and cross-fade a "ghost" duplicate; and
             // (2) on any variant it would cross-fade old/new page snapshots OVER the live DOM, hiding

@@ -25,14 +25,19 @@ what's out right now, what's free on a given date, and the delivery schedule.*
 | Role | Products (this epic) | Business ops (later epics) |
 |---|---|---|
 | **Admin** | **Full** — create/update/delete, stock, images | Everything |
-| **Employee** | **Read-only** | Operate the business — orders, deliveries, availability, sell/rent — but **never create/delete/modify entities** |
-| **Client** | none yet | *future portal:* view + create their own orders |
+| **Employee** | **View only** (same shared product screens as everyone, no write controls) | Operate the business — orders, deliveries, availability, sell/rent — but **never create/delete/modify entities** |
+| **Client** | **View only** (sees the catalog / empty state; no write controls) | *future portal:* view + create their own orders |
 
-- **Focus is ADMIN now.** Employee/Client actions may legitimately be "not implemented yet" — that's
-  fine, as long as their view never *breaks*.
-- **Panel = staff only (Admin + Employee).** A curious Client who has a session must get a graceful
-  bounce/forbidden, **never** a broken panel.
-- **Product writes = Admin only. Product reads = Admin + Employee.**
+- **The panel is OPEN to every authenticated role** (Client, Employee, Admin). Role does **not** gate
+  panel *access* — it restricts *capabilities* **within the shared views**. Same route, same component,
+  same everything; the difference is which controls render. (Decided with the owner, 2026-07 — this
+  supersedes the earlier "panel = staff only / bounce clients" idea.)
+- **Settings is available to everyone** (account/security is every user's own).
+- **Products view is shared:** Client and Employee see the catalog / empty state with **no** write
+  controls; **only Admin** sees the "add product" action + management. **Product reads = all
+  authenticated; product writes = Admin only.**
+- **Focus is ADMIN now.** Employee/Client capabilities may legitimately be "not implemented yet" —
+  fine, as long as their (shared) view never *breaks* and never shows a control they can't use.
 
 ### Role enforcement — a security requirement, not just UX
 - **Backend:** a role middleware taking an **array of allowed roles**, where the role is **verified
@@ -40,10 +45,13 @@ what's out right now, what's free on a given date, and the delivery schedule.*
   role is enforced on the very next request. Deny → **`403`** (distinct from `401` not-authenticated
   and `422` bad-input). Efficient: fold the user's current `roleId` into the existing `verifyJwt` DB
   session lookup so there's **no extra query**.
-- **Frontend:** role drives **what's visible** (nav tabs, action buttons, empty-state CTAs) — a **UX
-  layer, NOT the security boundary.** The backend `403` is the real guard. Denial is handled
-  **gracefully**: hide the control so the call never fires; if it fires anyway (poking), degrade to a
-  friendly forbidden/empty state — never a jarring error.
+- **Frontend:** role drives **what's visible** (action buttons, empty-state CTAs, any role-specific
+  tabs) — a **UX layer, NOT the security boundary.** The backend `403` is the real guard. Controls a
+  role can't use are **hidden** (`RoleGate`/`useHasRole`) so the call never fires.
+- **A `403` should therefore never happen in normal use** (defense-in-depth). If one does — a
+  stale-role race, a bug, or someone poking devtools — it is **not** a screen takeover: surface the
+  backend's localized message as a **non-blocking toast** ("no tienes permiso") and leave the app
+  where it is. (No "forbidden" full-screen; that's reserved for genuine dead-ends like crash/outage.)
 
 ### Pricing model
 - A product is **exactly one** business type: **Venta** (sell) **or** **Alquiler** (rent).
@@ -102,10 +110,13 @@ updated for any endpoint. (Standing bar: see `ROADMAP.md` §0.)
   `401`/`403`/`422` split holds.
 **Frontend**
 - `useRole()` / `useHasRole(roles)` (decoded token for instant UX; `useMe` for the verified profile).
-- `<RoleGate roles={…}>` for conditional UI; **role-filtered** panel nav.
-- **Panel route guard → Admin + Employee only**; Client → graceful redirect/forbidden.
-- **`forbidden` `ErrorScreen` variant** (on-brand, friendly) + interceptor handling so a role-denied
-  `403` degrades gracefully (not a jarring toast).
+- `<RoleGate roles={…}>` for conditional UI; **role-filterable** panel nav (mechanism in place; both
+  current tabs are visible to everyone).
+- **Panel route guard = authenticated only (any role).** The panel is open to Client/Employee/Admin;
+  role restricts capabilities *within* the shared views, not access.
+- **`403` handling:** a non-blocking **toast** with the backend's localized message. A 403 is
+  defense-in-depth (controls are role-hidden, so it shouldn't happen in normal use); it is never a
+  full-screen takeover.
 - **Nav refactor:** Products + Settings only; default → products; remove placeholder tabs.
 
 ### Step 2 — Products read + list
@@ -117,14 +128,26 @@ category/businessType/currency/details/images. Mount the route + un-comment the 
 states** (admin → "Agregar producto" CTA; employee → friendly message, no CTA), graceful error
 fallback. `useProducts` query.
 
-### Step 3 — Products create / update / delete  *(Admin only)*
-**Backend** `POST /products` (create + nested details), `PUT /products/:id` (update — **fix** detail
-add/remove/update, not just in-place), `DELETE /products/:id` (soft-delete, cascade to details/images).
-Mirrored validators incl. the **conditional price rule** by business type. OpenAPI + tests + i18n.
-**Frontend** create/edit `Modal` + RHF + mirrored Zod, conditional pricing UI, details sub-editor,
-seeded-lookup selects (business type / category / currency / rent unit), soft-delete confirm. Write
-actions **hidden for non-admins** (backend `403` as defense-in-depth). Cache invalidation + `toFormError`
-(concern-#4).
+### Step 3a — Product CREATE  *(Admin only)* ✅ shipped
+**Backend** `POST /products` (create + nested details; the **conditional price rule** by business
+type in the rebuilt validator) + `GET /products/catalog` (the five seeded lookups the form's selects
+need — ids, which the role-projected reads never expose). OpenAPI + tests + i18n done.
+**Frontend** a dedicated **PAGE** `/panel/productos/nuevo` (decision revised 2026-07 with the owner —
+supersedes this step's original "create/edit Modal": ~10 fields + a details sub-editor + the Step-4
+gallery outgrow a 512px dialog; modals stay for confirmations/quick actions). Wired through the
+panel's animated transition (`PanelPath` extended; the Products tab stays lit via `startsWith`).
+`ProductForm` (reusable by the future edit page) + mirrored Zod + conditional pricing UI + details
+sub-editor + seeded-lookup selects (new `CustomSelect`/`CustomTextarea` primitives) + **silent
+sessionStorage draft** (autosave/restore/discard — no blocking "leave?" dialogs; cleared on submit
+and on logout). Non-admin deep-links get a friendly no-permission panel. Cache invalidation +
+`toFormError` (concern-#4).
+
+### Step 3b — Product UPDATE / DELETE  *(Admin only — pending)*
+**Backend** `PUT /products/:id` (update — **fix** detail add/remove/update, not just in-place),
+`DELETE /products/:id` (soft-delete, cascade to details/images). Follow `createProduct`'s shape.
+**Frontend** edit page reusing `ProductForm` (mode prop / initial values), soft-delete confirm
+`Modal`. The likely companion: a product **detail page** `/panel/productos/:id` (view for all
+roles, admin sees Editar/Eliminar) — decide when building.
 
 ### Step 4 — Image gallery (R2)
 **Backend** presigned endpoint for **multiple** uploads (reuse `storage.ts`), persist `ProductImage`
@@ -150,6 +173,14 @@ progress + optional client downscale, graceful single/zero-image. Reusable `Prod
    (`isPrimary`, defaults to the first, admin-changeable) is what shows in grid/list/hero.
 3. **`replacementPrice` is included now** (always captured, even though billing uses it later).
 4. **Product photos use a vertical 4:3 (portrait) frame.** Other galleries (events/landing) may vary.
+5. **Entity create/edit = a dedicated PAGE, not a modal** (revised with the owner, 2026-07; supersedes
+   Step 3's original "create/edit Modal"). The decision tool: a modal only fits ≤ ~5-6 fields / one
+   decision / seconds / no sub-editors / no media / never needs a URL; anything with sections, dynamic
+   rows, media, growth, or draft-loss risk is a page. Product forms hit every page criterion;
+   delete confirms stay modals.
+6. **Unsaved work = silent draft persistence, never `beforeunload` nagging.** The create form
+   autosaves to sessionStorage (survives refresh/navigation, dies with the tab), restores with a
+   visible note + an explicit discard, and clears on success and on logout (user-scoped state).
 
 ## 4. Definition of done
 Admin fully manages inventory (CRUD + multi-image gallery + stock + pricing) from `/panel/productos`;

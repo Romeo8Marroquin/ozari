@@ -6,8 +6,8 @@ import {
 } from "./openapi.components.js";
 
 /**
- * Path definitions for every CURRENTLY-MOUNTED endpoint. WIP modules (e.g. products) are
- * intentionally omitted until they ship. All paths are relative to the `/api` server base.
+ * Path definitions for every CURRENTLY-MOUNTED endpoint. WIP endpoints (e.g. product update/delete)
+ * are intentionally omitted until they ship. All paths are relative to the `/api` server base.
  */
 
 // Obviously-fake example passwords reused across request-body examples (both meet the policy).
@@ -461,6 +461,159 @@ export const paths: OpenAPIV3.PathsObject = {
         ], "Users fetched"),
         "401": unauthorized("Missing or invalid access token."),
         "403": errorResponse("Authenticated but not an admin.", 403, "Forbidden"),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/products": {
+    get: {
+      tags: ["Products"],
+      summary: "List the product catalog (role-projected)",
+      operationId: "getProducts",
+      description:
+        "Returns the paginated **active** catalog. Available to **any authenticated role**; the " +
+        "response fields are **role-projected** (minimum privilege): Admin sees the exact `quantity` " +
+        "plus internal fields, Employee gets an `inStock` signal, and a Client sees only the shared " +
+        "catalog fields. Pagination via `page`/`pageSize` is clamped (never rejected), so there is no " +
+        "400. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "page",
+          in: "query",
+          required: false,
+          description: "1-based page number (clamped to ≥ 1).",
+          schema: { type: "integer", minimum: 1, default: 1 },
+        },
+        {
+          name: "pageSize",
+          in: "query",
+          required: false,
+          description: "Items per page (clamped to 1–50).",
+          schema: { type: "integer", minimum: 1, maximum: 50, default: 15 },
+        },
+      ],
+      responses: {
+        "200": dataResponse("The role-projected page of products (example shows the Admin view).", "ProductListResponse", {
+          products: [
+            {
+              id: 7,
+              name: "Mesa redonda",
+              description: "Mesa para 8 personas",
+              businessType: "Alquiler",
+              category: "Mesas",
+              currency: { id: 1, iso4217Code: "GTQ", name: "Quetzal Guatemalteco", symbol: "Q" },
+              rentPrice: 75,
+              sellPrice: null,
+              rentTimeUnit: "Día",
+              images: [{ id: 1, url: "https://cdn.example.com/products/7/hero.webp", isPrimary: true, sortOrder: 0 }],
+              details: [{ id: 12, detail: "Blanco", detailType: "Color" }],
+              inStock: true,
+              quantity: 40,
+              replacementPrice: 900,
+              isActive: true,
+            },
+          ],
+          pagination: { page: 1, pageSize: 15, total: 1, totalPages: 1 },
+        }, "Products fetched"),
+        "401": unauthorized("Missing, invalid, or revoked access token."),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    post: {
+      tags: ["Products"],
+      summary: "Create a product (admin only)",
+      operationId: "createProduct",
+      description:
+        "Creates a product (+ nested details). Requires the `Admin` role. The **conditional price " +
+        "rule** applies by business type — Alquiler: `rentPrice` + `rentTimeUnitId`, no `sellPrice`; " +
+        "Venta: `sellPrice` only. Any rule violation or unknown lookup id is a `400`. Returns the " +
+        "created product in the SAME role-projected shape the list uses. Images are attached later by " +
+        "the gallery flow. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      requestBody: bodyRef("CreateProductRequest", {
+        name: "Mesa redonda",
+        description: "Mesa para 8 personas",
+        businessTypeId: 1,
+        categoryId: 1,
+        currencyId: 1,
+        quantity: 40,
+        rentPrice: 75,
+        rentTimeUnitId: 2,
+        replacementPrice: 900,
+        productDetails: [{ detailTypeId: 1, detail: "Blanco" }],
+      }),
+      responses: {
+        "201": dataResponse(
+          "The created product, projected for the caller's role (Admin — full view).",
+          "ProductListItem",
+          {
+            id: 7,
+            name: "Mesa redonda",
+            description: "Mesa para 8 personas",
+            businessType: "Alquiler",
+            category: "Mesas",
+            currency: { id: 1, iso4217Code: "GTQ", name: "Quetzal Guatemalteco", symbol: "Q" },
+            rentPrice: 75,
+            sellPrice: null,
+            rentTimeUnit: "Día",
+            images: [],
+            details: [{ id: 12, detail: "Blanco", detailType: "Color" }],
+            inStock: true,
+            quantity: 40,
+            replacementPrice: 900,
+            isActive: true,
+          },
+          "Product created",
+          201,
+        ),
+        "400": errorResponse(
+          "A field failed validation — bad lookup id, out-of-range value, or a conditional-pricing violation.",
+          400,
+          "Los precios enviados no corresponden al tipo de negocio del producto.",
+        ),
+        "401": unauthorized("Missing, invalid, or revoked access token."),
+        "403": errorResponse("Authenticated but not an admin.", 403, "Forbidden"),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/products/catalog": {
+    get: {
+      tags: ["Products"],
+      summary: "Product reference lookups (selects data)",
+      operationId: "getProductCatalog",
+      description:
+        "The seeded reference lists the product create/edit form renders as selects — business types, " +
+        "categories, currencies, rent time units, and detail types (active rows, id order). Available " +
+        "to **any authenticated role**. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      responses: {
+        "200": dataResponse("The five reference lists.", "ProductCatalog", {
+          businessTypes: [
+            { id: 1, name: "Alquiler" },
+            { id: 2, name: "Venta" },
+          ],
+          categories: [
+            { id: 1, name: "Mesas" },
+            { id: 2, name: "Sillas" },
+          ],
+          currencies: [{ id: 1, name: "Quetzal Guatemalteco", iso4217Code: "GTQ", symbol: "Q" }],
+          detailTypes: [
+            { id: 1, name: "Color" },
+            { id: 2, name: "Material" },
+          ],
+          rentTimeUnits: [
+            { id: 1, name: "Hora" },
+            { id: 2, name: "Día" },
+          ],
+        }, "Catalog fetched"),
+        "401": unauthorized("Missing, invalid, or revoked access token."),
         "429": rateLimited,
         "500": serverError,
       },

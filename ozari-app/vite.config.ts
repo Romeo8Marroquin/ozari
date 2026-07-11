@@ -77,6 +77,10 @@ export default defineConfig({
         // Pure GSAP animation orchestration for the auth card (enter/leave/redirect timelines,
         // COVER keyframes, resize-snap) — no business logic; verified visually, not by unit tests.
         'src/modules/sesion/hooks/useAuthCard.ts',
+        // Pure GSAP choreography shared by the panel pages (stagger in/out sweeps, header title,
+        // default body fade) — no business logic; the pages' STATE decisions and the layout's
+        // transition CONTROLLER are tested, these timelines are visual-only.
+        'src/modules/panel/pageMotion.ts',
       ],
     },
   },

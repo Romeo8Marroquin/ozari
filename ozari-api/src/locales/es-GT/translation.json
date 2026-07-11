@@ -421,13 +421,17 @@
         "invalidCategoryId": "La categoría es requerida y debe ser válida.",
         "invalidCurrencyId": "La moneda es requerida y debe ser válida.",
         "invalidDescription": "La descripción debe ser válida.",
-        "invalidImageUrl": "La imagen debe ser válida.",
         "invalidName": "El nombre es requerido y debe ser válido.",
         "invalidDetailTypeId": "El tipo de un detalle del producto no es válido.",
         "invalidDetail": "El nombre de un detalle del producto no es válido.",
         "invalidQuantity": "La cantidad es requerida y debe ser válida.",
         "invalidRentPrice": "El precio de renta debe ser válido.",
         "invalidSellPrice": "El precio de venta debe ser válido.",
+        "invalidReplacementPrice": "El precio de reposición debe ser válido.",
+        "invalidRentTimeUnitId": "La unidad de tiempo de renta es requerida y debe ser válida.",
+        "rentPricingRequired": "Un producto de alquiler requiere precio de renta.",
+        "sellPricingRequired": "Un producto de venta requiere precio de venta.",
+        "pricingMismatch": "Los precios enviados no corresponden al tipo de negocio del producto.",
         "invalidRentAndSellPrice": "El precio de renta y el precio de venta no pueden ser vacíos al mismo tiempo.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
@@ -435,21 +439,35 @@
           "invalidCategoryId": "El id de la categoría <{{-categoryId}}> no es válido.",
           "invalidCurrencyId": "El id de la moneda <{{-currencyId}}> no es válido.",
           "invalidDescription": "La descripción <{{-description}}> no es válida.",
-          "invalidImageUrl": "La imagen <{{-imageUrl}}> no es válida.",
           "invalidName": "El nombre <{{-name}}> no es válido.",
           "invalidDetailTypeId": "El id del tipo de detalle <{{-detailTypeId}}> del producto no es válido.",
           "invalidDetail": "El nombre del detalle <{{-detail}}> del producto no es válido.",
           "invalidQuantity": "La cantidad <{{-quantity}}> no es válida.",
           "invalidRentPrice": "El precio de renta <{{-rentPrice}}> no es válido.",
           "invalidSellPrice": "El precio de venta <{{-sellPrice}}> no es válido.",
+          "invalidReplacementPrice": "El precio de reposición <{{-replacementPrice}}> no es válido.",
+          "invalidRentTimeUnitId": "El id de la unidad de tiempo de renta <{{-rentTimeUnitId}}> no es válido.",
+          "rentPricingRequired": "Producto de alquiler sin precio de renta <{{-rentPrice}}>.",
+          "sellPricingRequired": "Producto de venta sin precio de venta <{{-sellPrice}}>.",
+          "pricingMismatch": "Precios inconsistentes con el tipo de negocio <{{-businessTypeId}}>: renta <{{-rentPrice}}>, venta <{{-sellPrice}}>, unidad <{{-rentTimeUnitId}}>.",
           "invalidRentAndSellPrice": "El precio de renta <{{-rentPrice}}> y el precio de venta <{{-sellPrice}}> no pueden ser vacíos al mismo tiempo.",
           "validationError": "Error de validación: {{-error}}."
         }
       },
       "logs": {
-        "productCreated": "Producto id <{{-id}}> creado exitosamente.",
+        "productCreated": "Producto id <{{-id}}> <{{-name}}> creado exitosamente.",
 
         "errorCreatingProduct": "Error al crear producto: {{-error}}."
+      }
+    },
+    "catalog": {
+      "catalogFetched": "Catálogo de referencia obtenido exitosamente.",
+
+      "errorFetchingCatalog": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "catalogFetched": "Catálogo de referencia de productos obtenido exitosamente.",
+
+        "errorFetchingCatalog": "Error al obtener el catálogo de referencia: {{-error}}."
       }
     },
     "updateProduct": {

@@ -26,6 +26,8 @@ let refreshSubscribers: Array<(token: string | null) => void> = [];
 export function clearAuthState(): void {
   Storage.remove(StorageKeys.TOKEN);
   Storage.remove(StorageKeys.CSRF);
+  // User-scoped work-in-progress: another user on this browser must never inherit a draft.
+  Storage.remove(StorageKeys.PRODUCT_CREATE_DRAFT);
   clearRefreshTimer();
 
   // 🔴 TODO: reset Zustand stores here when implemented (authStore/userStore .reset()).

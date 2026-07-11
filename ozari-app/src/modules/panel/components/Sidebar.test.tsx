@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Sidebar reads the pathname via useLocation({ select }) and renders TanStack <Link>s. Stub the Link
 // as a plain <a> (dropping the router-only `viewTransition` prop so React doesn't warn), and drive
 // the pathname through a hoisted holder.
-const { currentPath } = vi.hoisted(() => ({ currentPath: { value: '/panel/inicio' } }));
+const { currentPath } = vi.hoisted(() => ({ currentPath: { value: '/panel/productos' } }));
 vi.mock('@tanstack/react-router', () => ({
   useLocation: (opts: { select: (l: { pathname: string }) => unknown }) => opts.select({ pathname: currentPath.value }),
   Link: ({
@@ -32,7 +32,7 @@ vi.mock('@tanstack/react-router', () => ({
 import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from '@utils/storage';
 import { PanelChromeProvider, usePanelChrome } from '../hooks/usePanelChrome';
-import { PanelNavContext } from '../PanelNavContext';
+import { PanelNavContext, type PanelNav } from '../PanelNavContext';
 import type { PanelPath } from '../navConfig';
 import Sidebar from './Sidebar';
 
@@ -68,12 +68,13 @@ const ChromeControl: React.FC = () => {
   );
 };
 
-const renderSidebar = (withControl = false) => {
+const renderSidebar = (options: { withControl?: boolean; pending?: PanelPath | null } = {}) => {
   const navigate = vi.fn();
+  const value: PanelNav = { navigateTo: navigate as (to: PanelPath) => void, pending: options.pending ?? null };
   const ui = (
     <PanelChromeProvider>
-      <PanelNavContext.Provider value={navigate as (to: PanelPath) => void}>
-        {withControl && <ChromeControl />}
+      <PanelNavContext.Provider value={value}>
+        {options.withControl && <ChromeControl />}
         <Sidebar />
       </PanelNavContext.Provider>
     </PanelChromeProvider>
@@ -81,8 +82,11 @@ const renderSidebar = (withControl = false) => {
   return { navigate, ...render(ui) };
 };
 
+/** The soft active-tint layer of a nav link (its first aria-hidden span). */
+const tintOf = (link: HTMLElement): HTMLElement => link.querySelector('span[aria-hidden]') as HTMLElement;
+
 beforeEach(() => {
-  currentPath.value = '/panel/inicio';
+  currentPath.value = '/panel/productos';
   localStorage.clear();
   sessionStorage.clear();
   vi.clearAllMocks();
@@ -99,11 +103,11 @@ describe('Sidebar (inline, desktop/tablet)', () => {
     renderSidebar();
 
     expect(screen.getByRole('link', { name: 'modules.panel.brand' })).toBeInTheDocument();
-    expect(screen.getAllByRole('link')).toHaveLength(6); // brand + 5 nav items
+    expect(screen.getAllByRole('link')).toHaveLength(3); // brand + 2 nav items (products, settings)
 
-    const active = screen.getByRole('link', { name: 'modules.panel.nav.dashboard' });
+    const active = screen.getByRole('link', { name: 'modules.panel.nav.products' });
     expect(active).toHaveAttribute('aria-current', 'page');
-    const inactive = screen.getByRole('link', { name: 'modules.panel.nav.orders' });
+    const inactive = screen.getByRole('link', { name: 'modules.panel.nav.settings' });
     expect(inactive).not.toHaveAttribute('aria-current');
 
     expect(screen.getByRole('button', { name: 'modules.panel.actions.collapse' })).toBeInTheDocument();
@@ -112,42 +116,67 @@ describe('Sidebar (inline, desktop/tablet)', () => {
   it('navigates through the panel nav context when an inactive tab is clicked', async () => {
     setViewport('desktop');
     const { navigate } = renderSidebar();
-    await userEvent.click(screen.getByRole('link', { name: 'modules.panel.nav.products' }));
-    expect(navigate).toHaveBeenCalledWith('/panel/productos');
+    await userEvent.click(screen.getByRole('link', { name: 'modules.panel.nav.settings' }));
+    expect(navigate).toHaveBeenCalledWith('/panel/ajustes');
   });
 
-  it('does not navigate when the already-active tab is clicked', async () => {
+  it('forwards a click on the active tab too — the controller owns the decision (cancel/no-op)', async () => {
     setViewport('desktop');
     const { navigate } = renderSidebar();
-    await userEvent.click(screen.getByRole('link', { name: 'modules.panel.nav.dashboard' }));
-    expect(navigate).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('link', { name: 'modules.panel.nav.products' }));
+    // The sidebar never swallows intent: re-clicking the tab being left is how a user CANCELS an
+    // in-flight transition, and the controller no-ops when truly idle on the active tab.
+    expect(navigate).toHaveBeenCalledWith('/panel/productos');
   });
 
   it('lets a modified click fall through to the browser (no intercept)', () => {
     setViewport('desktop');
     const { navigate } = renderSidebar();
-    fireEvent.click(screen.getByRole('link', { name: 'modules.panel.nav.products' }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole('link', { name: 'modules.panel.nav.settings' }), { ctrlKey: true });
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('brand link navigates home only when not already home', async () => {
+  it('brand link navigates home through the controller (which no-ops when already home)', async () => {
     setViewport('desktop');
-    currentPath.value = '/panel/productos'; // not home
+    currentPath.value = '/panel/ajustes'; // not home (home is products)
     const { navigate } = renderSidebar();
     await userEvent.click(screen.getByRole('link', { name: 'modules.panel.brand' }));
-    expect(navigate).toHaveBeenCalledWith('/panel/inicio');
+    expect(navigate).toHaveBeenCalledWith('/panel/productos');
   });
 
-  it('brand link is a no-op when already home, and ignores modified clicks', async () => {
+  it('brand link always forwards the intent, and ignores modified clicks', async () => {
     setViewport('desktop');
-    currentPath.value = '/panel/inicio'; // home
+    currentPath.value = '/panel/productos'; // home
     const { navigate } = renderSidebar();
     const brand = screen.getByRole('link', { name: 'modules.panel.brand' });
-    await userEvent.click(brand); // plain click, but already home → no nav
-    expect(navigate).not.toHaveBeenCalled();
+    await userEvent.click(brand); // plain click → forwarded (controller no-ops when idle at home)
+    expect(navigate).toHaveBeenCalledWith('/panel/productos');
 
+    navigate.mockClear();
     fireEvent.click(brand, { metaKey: true }); // modified → falls through
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('an in-flight `pending` moves the tint: the tab being left fades, the pill follows the intent', () => {
+    setViewport('desktop');
+    // Idle on products: its tint is lit.
+    const { unmount } = renderSidebar();
+    const productsIdle = screen.getByRole('link', { name: 'modules.panel.nav.products' });
+    expect(tintOf(productsIdle).className).toContain('opacity-100');
+    unmount();
+
+    // Mid-transition products → ajustes: products is "leaving", so its tint drops NOW (with the
+    // content exit) while the destination lights up only at the route commit.
+    renderSidebar({ pending: '/panel/ajustes' });
+    const productsLeaving = screen.getByRole('link', { name: 'modules.panel.nav.products' });
+    expect(tintOf(productsLeaving).className).toContain('opacity-0');
+  });
+
+  it('a `pending` equal to the active tab does not mark it as leaving', () => {
+    setViewport('desktop');
+    renderSidebar({ pending: '/panel/productos' });
+    const products = screen.getByRole('link', { name: 'modules.panel.nav.products' });
+    expect(tintOf(products).className).toContain('opacity-100');
   });
 
   it('collapse toggle flips the label and persists the preference', async () => {
@@ -164,7 +193,7 @@ describe('Sidebar (inline, desktop/tablet)', () => {
     setViewport('tablet');
     renderSidebar();
     // Collapsed → the nav link is named by its aria-label; the collapse toggle offers "expand".
-    expect(screen.getByRole('link', { name: 'modules.panel.nav.dashboard' })).toHaveAttribute('title', 'modules.panel.nav.dashboard');
+    expect(screen.getByRole('link', { name: 'modules.panel.nav.products' })).toHaveAttribute('title', 'modules.panel.nav.products');
     expect(screen.getByRole('button', { name: 'modules.panel.actions.expand' })).toBeInTheDocument();
   });
 
@@ -173,12 +202,12 @@ describe('Sidebar (inline, desktop/tablet)', () => {
     currentPath.value = '/panel/nowhere';
     renderSidebar();
     // No item is current; the component renders without throwing (pill hidden).
-    expect(screen.queryByRole('link', { name: 'modules.panel.nav.dashboard' })).not.toHaveAttribute('aria-current');
+    expect(screen.queryByRole('link', { name: 'modules.panel.nav.products' })).not.toHaveAttribute('aria-current');
   });
 
-  it('navigates from an inactive tab even when nothing is currently active (no leaving key)', async () => {
+  it('navigates from an inactive tab even when nothing is currently active', async () => {
     setViewport('desktop');
-    currentPath.value = '/panel/nowhere'; // no active tab → currentActiveKey() resolves to null
+    currentPath.value = '/panel/nowhere'; // no active tab → routeActiveKey resolves to null
     const { navigate } = renderSidebar();
     await userEvent.click(screen.getByRole('link', { name: 'modules.panel.nav.products' }));
     expect(navigate).toHaveBeenCalledWith('/panel/productos');
@@ -191,18 +220,18 @@ describe('Sidebar (inline, desktop/tablet)', () => {
     expect(screen.getByRole('link', { name: 'modules.panel.brand' })).toBeInTheDocument();
   });
 
-  it('glides the pill and resets the leaving key when the route changes', () => {
+  it('glides the pill to the new tab when the route changes', () => {
     setViewport('desktop');
     const { rerender } = renderSidebar();
-    currentPath.value = '/panel/pedidos';
+    currentPath.value = '/panel/ajustes';
     rerender(
       <PanelChromeProvider>
-        <PanelNavContext.Provider value={vi.fn() as (to: PanelPath) => void}>
+        <PanelNavContext.Provider value={{ navigateTo: vi.fn() as (to: PanelPath) => void, pending: null }}>
           <Sidebar />
         </PanelNavContext.Provider>
       </PanelChromeProvider>,
     );
-    expect(screen.getByRole('link', { name: 'modules.panel.nav.orders' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'modules.panel.nav.settings' })).toHaveAttribute('aria-current', 'page');
   });
 });
 
@@ -219,7 +248,7 @@ describe('Sidebar (mobile drawer)', () => {
 
   it('opening the drawer moves focus to the close button', async () => {
     setViewport('mobile');
-    renderSidebar(true);
+    renderSidebar({ withControl: true });
     await userEvent.click(screen.getByTestId('open-drawer'));
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'modules.panel.actions.closeMenu' })).toHaveFocus(),
@@ -228,7 +257,7 @@ describe('Sidebar (mobile drawer)', () => {
 
   it('traps Tab within the open drawer (wrap forward, wrap backward, pass-through middle, ignore non-Tab)', async () => {
     setViewport('mobile');
-    renderSidebar(true);
+    renderSidebar({ withControl: true });
     await userEvent.click(screen.getByTestId('open-drawer'));
 
     const drawer = screen.getByRole('dialog');
@@ -259,7 +288,7 @@ describe('Sidebar (mobile drawer)', () => {
 
   it('closes on a backdrop click and returns focus to the trigger', async () => {
     setViewport('mobile');
-    renderSidebar(true);
+    renderSidebar({ withControl: true });
     const opener = screen.getByTestId('open-drawer');
     opener.focus();
     await userEvent.click(opener);
@@ -271,7 +300,7 @@ describe('Sidebar (mobile drawer)', () => {
 
   it('closes via the drawer close button', async () => {
     setViewport('mobile');
-    renderSidebar(true);
+    renderSidebar({ withControl: true });
     await userEvent.click(screen.getByTestId('open-drawer'));
     await userEvent.click(screen.getByRole('button', { name: 'modules.panel.actions.closeMenu' }));
     await waitFor(() => expect(screen.getByTestId('open-drawer')).toHaveFocus());
@@ -279,10 +308,11 @@ describe('Sidebar (mobile drawer)', () => {
 
   it('a nav click inside the drawer navigates and closes it', async () => {
     setViewport('mobile');
-    const { navigate } = renderSidebar(true);
+    const { navigate } = renderSidebar({ withControl: true });
     await userEvent.click(screen.getByTestId('open-drawer'));
-    await userEvent.click(screen.getByRole('link', { name: 'modules.panel.nav.products' }));
-    expect(navigate).toHaveBeenCalledWith('/panel/productos');
+    // Products is the active/home tab, so click Settings (inactive) to trigger a navigation.
+    await userEvent.click(screen.getByRole('link', { name: 'modules.panel.nav.settings' }));
+    expect(navigate).toHaveBeenCalledWith('/panel/ajustes');
     await waitFor(() => expect(screen.getByTestId('open-drawer')).toHaveFocus());
   });
 });

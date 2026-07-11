@@ -3,11 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import { i18next } from "@/config/i18n.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { logger } from "@/config/logger.js";
-import {
-  descriptionTextRegex,
-  fullNameRegex,
-  genericHttpsUrlRegex,
-} from "@helpers/regex.js";
+import { descriptionTextRegex, fullNameRegex } from "@helpers/regex.js";
 import { isValidEnumValue } from "@helpers/utils.js";
 import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
@@ -20,6 +16,44 @@ import {
   type UpdateProductRequestModel,
 } from "./products.models.js";
 
+/**
+ * Sanitizes an OPTIONAL money field: absent stays absent; a present value must be a number within
+ * `[0, maxGlobalAmount]` and is truncated to 2 decimals (never rounded up — we don't invent cents).
+ * `ok: false` means the field was present but invalid (the caller sends its own 400).
+ */
+const sanitizeOptionalMoney = (
+  value: unknown,
+): { ok: true; value: number | undefined } | { ok: false } => {
+  if (value === undefined || value === null) {
+    return { ok: true, value: undefined };
+  }
+  if (
+    typeof value !== "number" ||
+    Number.isNaN(value) ||
+    value < 0 ||
+    value > appConfig.maxGlobalAmount
+  ) {
+    return { ok: false };
+  }
+  return { ok: true, value: Math.trunc(value * 100) / 100 };
+};
+
+/** Log the create-validator warning for `key` and send its standard 400 (both share the key name). */
+const rejectCreate = (
+  res: Response,
+  key: string,
+  logParams: Record<string, unknown>,
+): void => {
+  logger.warn(
+    i18next.t(`products.createProduct.validators.logs.${key}`, logParams),
+  );
+  sendOzariError(
+    res,
+    HttpEnum.BAD_REQUEST,
+    i18next.t(`products.createProduct.validators.${key}`),
+  );
+};
+
 export const validateCreateProduct = async (
   req: Request,
   res: Response,
@@ -31,11 +65,12 @@ export const validateCreateProduct = async (
       categoryId,
       currencyId,
       description,
-      imageUrl,
       name,
       productDetails,
       quantity,
       rentPrice,
+      rentTimeUnitId,
+      replacementPrice,
       sellPrice,
     } = req.body as CreateProductRequestModel;
 
@@ -43,19 +78,7 @@ export const validateCreateProduct = async (
       !businessTypeId ||
       !isValidEnumValue(BusinessTypeEnum, businessTypeId)
     ) {
-      logger.warn(
-        i18next.t(
-          "products.createProduct.validators.logs.invalidBusinessTypeId",
-          {
-            businessTypeId,
-          },
-        ),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidBusinessTypeId"),
-      );
+      rejectCreate(res, "invalidBusinessTypeId", { businessTypeId });
       return;
     }
     const prismaClient = await getPrismaClient();
@@ -63,16 +86,7 @@ export const validateCreateProduct = async (
       where: { id: (categoryId as number | undefined) ?? 0, isActive: true },
     });
     if (!categoryId || !validCategories) {
-      logger.warn(
-        i18next.t("products.createProduct.validators.logs.invalidCategoryId", {
-          categoryId,
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidCategoryId"),
-      );
+      rejectCreate(res, "invalidCategoryId", { categoryId });
       return;
     }
 
@@ -80,58 +94,17 @@ export const validateCreateProduct = async (
       where: { id: (currencyId as number | undefined) ?? 0, isActive: true },
     });
     if (!currencyId || !validCurrencies) {
-      logger.warn(
-        i18next.t("products.createProduct.validators.logs.invalidCurrencyId", {
-          currencyId,
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidCurrencyId"),
-      );
+      rejectCreate(res, "invalidCurrencyId", { currencyId });
       return;
     }
 
     if (description?.trim() && !descriptionTextRegex.test(description)) {
-      logger.warn(
-        i18next.t("products.createProduct.validators.logs.invalidDescription", {
-          description,
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidDescription"),
-      );
-      return;
-    }
-
-    if (imageUrl?.trim() && !genericHttpsUrlRegex.test(imageUrl)) {
-      logger.warn(
-        i18next.t("products.createProduct.validators.logs.invalidImageUrl", {
-          imageUrl,
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidImageUrl"),
-      );
+      rejectCreate(res, "invalidDescription", { description });
       return;
     }
 
     if (!name || !fullNameRegex.test(name)) {
-      logger.warn(
-        i18next.t("products.createProduct.validators.logs.invalidName", {
-          name,
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidName"),
-      );
+      rejectCreate(res, "invalidName", { name });
       return;
     }
 
@@ -148,32 +121,13 @@ export const validateCreateProduct = async (
         !detail.detailTypeId ||
         !validProductDetails.some((d) => d.id === detail.detailTypeId)
       ) {
-        logger.warn(
-          i18next.t(
-            "products.createProduct.validators.logs.invalidDetailTypeId",
-            {
-              detailTypeId: detail.detailTypeId,
-            },
-          ),
-        );
-        sendOzariError(
-          res,
-          HttpEnum.BAD_REQUEST,
-          i18next.t("products.createProduct.validators.invalidDetailTypeId"),
-        );
+        rejectCreate(res, "invalidDetailTypeId", {
+          detailTypeId: detail.detailTypeId,
+        });
         return;
       }
       if (!detail.detail || !fullNameRegex.test(detail.detail)) {
-        logger.warn(
-          i18next.t("products.createProduct.validators.logs.invalidDetail", {
-            detail: detail.detail,
-          }),
-        );
-        sendOzariError(
-          res,
-          HttpEnum.BAD_REQUEST,
-          i18next.t("products.createProduct.validators.invalidDetail"),
-        );
+        rejectCreate(res, "invalidDetail", { detail: detail.detail });
         return;
       }
       sanitizedProductDetails.push({
@@ -188,94 +142,76 @@ export const validateCreateProduct = async (
       quantity < 0 ||
       quantity > appConfig.maxGlobalQuantity
     ) {
-      logger.warn(
-        i18next.t("products.createProduct.validators.logs.invalidQuantity", {
-          quantity,
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidQuantity"),
-      );
+      rejectCreate(res, "invalidQuantity", { quantity });
       return;
     }
 
-    let sanitizedRentPrice: number | undefined;
-    if (rentPrice || rentPrice === 0) {
-      if (
-        typeof rentPrice !== "number" ||
-        rentPrice < 0 ||
-        rentPrice > appConfig.maxGlobalAmount
-      ) {
-        logger.warn(
-          i18next.t("products.createProduct.validators.logs.invalidRentPrice", {
-            rentPrice,
-          }),
-        );
-        sendOzariError(
-          res,
-          HttpEnum.BAD_REQUEST,
-          i18next.t("products.createProduct.validators.invalidRentPrice"),
-        );
-        return;
-      } else {
-        sanitizedRentPrice = Math.trunc(rentPrice * 100) / 100;
-      }
-    }
-
-    let sanitizedSellPrice: number | undefined;
-    if (sellPrice || sellPrice === 0) {
-      if (
-        typeof sellPrice !== "number" ||
-        sellPrice < 0 ||
-        sellPrice > appConfig.maxGlobalAmount
-      ) {
-        logger.warn(
-          i18next.t("products.createProduct.validators.logs.invalidSellPrice", {
-            sellPrice,
-          }),
-        );
-        sendOzariError(
-          res,
-          HttpEnum.BAD_REQUEST,
-          i18next.t("products.createProduct.validators.invalidSellPrice"),
-        );
-        return;
-      } else {
-        sanitizedSellPrice = Math.trunc(sellPrice * 100) / 100;
-      }
-    }
-
-    if (!sanitizedRentPrice && !sanitizedSellPrice) {
-      logger.warn(
-        i18next.t(
-          "products.createProduct.validators.logs.invalidRentAndSellPrice",
-          {
-            rentPrice: sanitizedRentPrice,
-            sellPrice: sanitizedSellPrice,
-          },
-        ),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidRentAndSellPrice"),
-      );
+    const rentMoney = sanitizeOptionalMoney(rentPrice);
+    if (!rentMoney.ok) {
+      rejectCreate(res, "invalidRentPrice", { rentPrice });
       return;
+    }
+
+    const sellMoney = sanitizeOptionalMoney(sellPrice);
+    if (!sellMoney.ok) {
+      rejectCreate(res, "invalidSellPrice", { sellPrice });
+      return;
+    }
+
+    const replacementMoney = sanitizeOptionalMoney(replacementPrice);
+    if (!replacementMoney.ok) {
+      rejectCreate(res, "invalidReplacementPrice", { replacementPrice });
+      return;
+    }
+
+    // The CONDITIONAL price rule — a product is exactly ONE business type:
+    // Alquiler → rentPrice + a valid rent time unit, sellPrice forbidden; Venta → sellPrice only,
+    // rent fields forbidden. `replacementPrice` is optional for both (always captured when given).
+    const isRent = businessTypeId === BusinessTypeEnum.RENT;
+    const hasRentTimeUnit =
+      rentTimeUnitId !== undefined && rentTimeUnitId !== null;
+    const pricingParams = { businessTypeId, rentPrice, sellPrice, rentTimeUnitId };
+    if (isRent) {
+      if (sellMoney.value !== undefined) {
+        rejectCreate(res, "pricingMismatch", pricingParams);
+        return;
+      }
+      if (rentMoney.value === undefined) {
+        rejectCreate(res, "rentPricingRequired", { rentPrice });
+        return;
+      }
+      const validRentTimeUnit = hasRentTimeUnit
+        ? await prismaClient.rentTimeUnit.findFirst({
+            where: { id: rentTimeUnitId, isActive: true },
+          })
+        : null;
+      if (!validRentTimeUnit) {
+        rejectCreate(res, "invalidRentTimeUnitId", { rentTimeUnitId });
+        return;
+      }
+    } else {
+      if (rentMoney.value !== undefined || hasRentTimeUnit) {
+        rejectCreate(res, "pricingMismatch", pricingParams);
+        return;
+      }
+      if (sellMoney.value === undefined) {
+        rejectCreate(res, "sellPricingRequired", { sellPrice });
+        return;
+      }
     }
 
     const validatedBody: CreateProductRequestModel = {
       businessTypeId,
       categoryId,
       currencyId,
-      description: description?.trim(),
-      imageUrl: imageUrl?.trim(),
+      description: description?.trim() ? description.trim() : undefined,
       name: name.trim(),
       productDetails: sanitizedProductDetails,
       quantity,
-      rentPrice: sanitizedRentPrice,
-      sellPrice: sanitizedSellPrice,
+      rentPrice: isRent ? rentMoney.value : undefined,
+      rentTimeUnitId: isRent ? rentTimeUnitId : undefined,
+      replacementPrice: replacementMoney.value,
+      sellPrice: isRent ? undefined : sellMoney.value,
     };
     req.body = validatedBody;
     next();
@@ -305,7 +241,6 @@ export const validateUpdateProduct = async (
       currencyId,
       description,
       id,
-      imageUrl,
       name,
       productDetails,
       quantity,
@@ -392,20 +327,6 @@ export const validateUpdateProduct = async (
         res,
         HttpEnum.BAD_REQUEST,
         i18next.t("products.updateProduct.validators.invalidId"),
-      );
-      return;
-    }
-
-    if (imageUrl?.trim() && !genericHttpsUrlRegex.test(imageUrl)) {
-      logger.warn(
-        i18next.t("products.createProduct.validators.logs.invalidImageUrl", {
-          imageUrl,
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidImageUrl"),
       );
       return;
     }
@@ -575,17 +496,21 @@ export const validateUpdateProduct = async (
       return;
     }
 
+    // WIP: update is NOT mounted yet. It still lacks the conditional price rule and the new
+    // fields — `rentTimeUnitId`/`replacementPrice` pass through as absent until the update rebuild
+    // lands. Kept compiling against the new request model only.
     const validatedBody: UpdateProductRequestModel = {
       businessTypeId,
       categoryId,
       currencyId,
       description: description?.trim(),
       id: id,
-      imageUrl: imageUrl?.trim(),
       name: name.trim(),
       productDetails: sanitizedProductDetails,
       quantity,
       rentPrice: sanitizedRentPrice,
+      rentTimeUnitId: undefined,
+      replacementPrice: undefined,
       sellPrice: sanitizedSellPrice,
     };
     req.body = validatedBody;

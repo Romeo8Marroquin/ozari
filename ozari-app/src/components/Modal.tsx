@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineXMark } from 'react-icons/hi2';
+import { prefersReducedMotion } from '@utils/motion';
 import { collectStaggerTargets, playStaggerIn, playStaggerOut } from './modalStagger';
 import { registerModal } from './modalRegistry';
 
@@ -52,15 +53,18 @@ const SIZES: Record<ModalSize, string> = {
   lg: 'max-w-lg',
 };
 
-// A graceful, unhurried open/close — long enough to read as deliberate, not a snap. On close the
-// panel/backdrop fade is delayed ~150ms (see the classNames) so the content slides out FIRST and is
-// clearly "gone" before the card leaves; this window covers that delay + the fade.
-const DURATION = 480;
+// A graceful, unhurried open/close — long enough to read as deliberate, not a snap. The shell is
+// CSS transitions on purpose (they retarget natively, so a rapid open/close/open never fights
+// itself). The unmount window below is DERIVED from the three motions it must outlast — keep them
+// in sync if any changes:
+//   - the panel/backdrop CSS transition (`duration-300` in the classNames),
+//   - its close `delay-150` (so the content sweeps out FIRST, clearly "gone" before the card),
+//   - the GSAP content stagger-out (~0.22s + stagger; see `modalStagger`).
+const PANEL_MS = 300;
+const CLOSE_DELAY_MS = 150;
+const DURATION = PANEL_MS + CLOSE_DELAY_MS + 30; // 480ms — small buffer past the slowest motion
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-const prefersReducedMotion = (): boolean =>
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /**
  * The app's single modal primitive. A centered dialog over a blurred scrim (matching the mobile

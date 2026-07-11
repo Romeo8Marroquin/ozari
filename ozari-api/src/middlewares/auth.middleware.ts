@@ -14,6 +14,16 @@ import { TokenEnum } from "@models/enums/tokenEnum.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { appConfig } from "@/config/app.js";
 
+/**
+ * The user's CURRENT role, taken from the DB session's joined user (source of truth), falling back to
+ * the token claim only if the relation is somehow absent (unreachable — a session always has a user).
+ * Kept as a tiny helper so the `?.`/`??` branches don't inflate `verifyJwt`'s cyclomatic complexity.
+ */
+const resolveCurrentRole = (
+  session: { user: { roleId: number } } | undefined,
+  fallback: RolesEnum,
+): RolesEnum => session?.user.roleId ?? fallback;
+
 export const verifyJwt = async (
   req: CustomRequest,
   res: Response,
@@ -65,6 +75,11 @@ export const verifyJwt = async (
         tokenTypeId: TokenEnum.ACCESS_TOKEN,
         userId: jwtPayload.userId,
       },
+      // Fold the user's CURRENT role into this existing session lookup (no extra query): the DB is
+      // the source of truth, so a role that was changed/revoked in the DB is enforced on the very
+      // next request instead of being trusted from the (possibly stale) JWT claim. `isGrantedRoles`
+      // reads `req.user.userRole`, which we set from this below.
+      include: { user: { select: { roleId: true } } },
     });
 
     if (jwtActiveTokens.length !== 1) {
@@ -99,10 +114,13 @@ export const verifyJwt = async (
       return;
     }
 
-    req.user = jwtPayload;
+    // The DB role wins over the token claim (see the `include` above), so a mid-session role change
+    // takes effect immediately.
+    const currentRole = resolveCurrentRole(jwtActiveTokens[0], jwtPayload.userRole);
+    req.user = { ...jwtPayload, userRole: currentRole };
     logger.info(
       i18next.t("middlewares.auth.logs.successAuth", {
-        role: RolesEnum[jwtPayload.userRole],
+        role: RolesEnum[currentRole],
         userId: jwtPayload.userId,
       }),
     );

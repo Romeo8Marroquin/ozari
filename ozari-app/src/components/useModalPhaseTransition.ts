@@ -1,9 +1,7 @@
 import gsap from 'gsap';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { prefersReducedMotion } from '@utils/motion';
 import { collectStaggerTargets, playStaggerIn, playStaggerOut } from './modalStagger';
-
-const prefersReducedMotion = (): boolean =>
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /**
  * Transitions a modal's content between "phases" (e.g. an MFA wizard's scan → recovery step) using
@@ -33,17 +31,25 @@ export function useModalPhaseTransition<T>(
   const [rendered, setRendered] = useState<T>(target);
   // Panel height captured just before the out-sweep, handed to the in-sweep across the swap.
   const fromHeight = useRef<number | null>(null);
+  // The in-flight out-sweep. A rapid re-flip of `target` must KILL it (cancelling its pending
+  // commit) before sweeping again from the current frame — never stack a second sweep.
+  const outSweep = useRef<gsap.core.Timeline | null>(null);
 
   // Target diverged from what's on screen → sweep the current content OUT, then commit the swap.
   useEffect(() => {
     if (target === rendered) return;
+    outSweep.current?.kill();
     const panel = panelRef.current;
     if (!panel || prefersReducedMotion()) {
+      outSweep.current = null;
       setRendered(target);
       return;
     }
     fromHeight.current = panel.getBoundingClientRect().height;
-    playStaggerOut(collectStaggerTargets(panel), () => setRendered(target));
+    outSweep.current = playStaggerOut(collectStaggerTargets(panel), () => {
+      outSweep.current = null;
+      setRendered(target);
+    });
   }, [target, rendered, panelRef]);
 
   // New content committed → sweep it IN and tween the panel height old→new. Runs only when an

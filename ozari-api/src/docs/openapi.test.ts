@@ -18,6 +18,9 @@ const EXPECTED_OPERATIONS: ReadonlyArray<readonly [string, string]> = [
   ["/auth/mfa/enable", "post"],
   ["/auth/mfa/disable", "post"],
   ["/auth/all", "get"],
+  ["/products", "get"],
+  ["/products", "post"],
+  ["/products/catalog", "get"],
   ["/health/check", "get"],
 ];
 

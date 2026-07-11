@@ -18,7 +18,7 @@ import { HttpEnum } from "./models/enums/httpEnum.js";
 import type { AppError } from "./models/common/error.js";
 
 import authRouter from "./modules/auth/auth.route.js";
-// import productsRouter from "./modules/products/products.route.js";
+import productsRouter from "./modules/products/products.route.js";
 import healthRouter from "./modules/health/health.route.js";
 import { mountApiDocs } from "./docs/swagger.js";
 
@@ -228,7 +228,7 @@ function configureRoutes(app: Express): void {
   apiRouter.use("/auth", rateLimiters["auth"], authRouter);
 
   // Products endpoints - authenticated limiter (lenient)
-  // apiRouter.use("/products", rateLimiters["authenticated"], productsRouter);
+  apiRouter.use("/products", rateLimiters["authenticated"], productsRouter);
 
   // Mount API router at base path
   app.use(appConfig.basePath, apiRouter);

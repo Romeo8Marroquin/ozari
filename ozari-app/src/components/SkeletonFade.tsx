@@ -1,9 +1,7 @@
 import gsap from 'gsap';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { twMerge } from 'tailwind-merge';
-
-const prefersReducedMotion = (): boolean =>
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+import { prefersReducedMotion } from '@utils/motion';
 
 export interface SkeletonFadeProps {
   /** While true the skeleton is shown; when it flips false the real content crossfades in. */

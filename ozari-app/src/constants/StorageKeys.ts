@@ -8,4 +8,8 @@ export enum StorageKeys {
   // The inline panel sidebar's collapsed/expanded preference. localStorage (not a credential):
   // the user's manual choice survives reloads and is shared across tabs.
   PANEL_SIDEBAR_COLLAPSED = 'app_panel_sidebar_collapsed',
+  // The product create form's silent draft (autosaved as the admin types). sessionStorage on
+  // purpose: it must survive a refresh / navigating away and back, but a closed tab shouldn't
+  // resurrect a weeks-old half-form. User-scoped → cleared by `clearAuthState` on logout.
+  PRODUCT_CREATE_DRAFT = 'app_product_create_draft',
 }
