@@ -108,6 +108,27 @@ export interface ProductListItemResponseModel {
   isActive?: boolean;
 }
 
+/**
+ * The parsed `GET /products` query — pagination plus the optional catalog filters. Everything is
+ * produced by `parseProductListQuery` under the clamp-never-reject stance: a bad value falls back
+ * (pagination) or drops out (filters), so this shape is always safe to hand to Prisma.
+ */
+export interface ProductListQueryModel {
+  page: number;
+  pageSize: number;
+  /** Case-insensitive name substring; absent when not searching. */
+  search: string | undefined;
+  categoryId: number | undefined;
+  businessTypeId: number | undefined;
+  /**
+   * Availability filter — Employee/Admin only (a Client gets no stock signal, so it could otherwise
+   * probe availability through the filter). `true` = in stock, `false` = out of stock, absent = all.
+   */
+  inStock: boolean | undefined;
+  /** Admin-only: include soft-deleted rows. Always false for every other role. */
+  includeInactive: boolean;
+}
+
 export interface PaginationMeta {
   page: number;
   pageSize: number;

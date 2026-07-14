@@ -150,9 +150,11 @@ const CustomSelect = forwardRef<HTMLSelectElement, CustomSelectProps>(
             </option>
           ))}
         </select>
+        {/* `truncate` + a max-width that clears the chevron: an overlong label ellipsizes on ONE
+            line instead of wrapping under the arrow (see CustomInput — same doctrine). */}
         <label
           htmlFor={id}
-          className={`absolute left-2 text-md pointer-events-none transition-all duration-300 origin-left peer-focus:-translate-y-6 peer-focus:scale-75 peer-disabled:text-gray-disabled
+          className={`absolute left-2 text-md pointer-events-none transition-all duration-300 origin-left peer-focus:-translate-y-6 peer-focus:scale-75 peer-disabled:text-gray-disabled truncate max-w-[calc(100%-2.5rem)]
           ${error ? 'text-red-600' : `text-black ${peerFocusTextClass[focusColor]}`}
           ${isFilled ? '-translate-y-6 scale-75' : ''}
         `}

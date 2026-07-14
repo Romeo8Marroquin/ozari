@@ -110,6 +110,9 @@ export const appConfig = {
   // request (so a single list call can never fetch an unbounded number of rows).
   defaultProductPageSize: 15,
   maxProductPageSize: 50,
+  // Longest name-search string the list endpoint honours; longer input is truncated, not rejected
+  // (the same clamp stance as the pagination params).
+  maxProductSearchLength: 100,
 
   sensitiveKeys: ["password", "token", "secret", "creditCard", "cvv", "auth"],
   basePath: "/api",

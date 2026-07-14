@@ -120,9 +120,11 @@ const CustomTextarea = forwardRef<HTMLTextAreaElement, CustomTextareaProps>(
             className,
           )}
         />
+        {/* `truncate` + max-width: an overlong label ellipsizes on ONE line instead of wrapping
+            (see CustomInput — same doctrine). */}
         <label
           htmlFor={id}
-          className={`absolute left-2 top-2 text-md pointer-events-none transition-all duration-300 origin-left peer-focus:-translate-y-6 peer-focus:scale-75 peer-disabled:text-gray-disabled
+          className={`absolute left-2 top-2 text-md pointer-events-none transition-all duration-300 origin-left peer-focus:-translate-y-6 peer-focus:scale-75 peer-disabled:text-gray-disabled truncate max-w-[calc(100%-1rem)]
           ${error ? 'text-red-600' : `text-black ${peerFocusTextClass[focusColor]}`}
           ${isFilled ? '-translate-y-6 scale-75' : ''}
         `}

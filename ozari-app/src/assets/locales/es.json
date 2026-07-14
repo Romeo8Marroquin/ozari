@@ -249,6 +249,34 @@
             "order": "Ordenar"
           }
         },
+        "filters": {
+          "label": "Filtrar productos",
+          "search": "Buscar por nombre",
+          "category": "Categoría",
+          "businessType": "Tipo",
+          "stock": "Disponibilidad",
+          "stockIn": "Disponibles",
+          "stockOut": "Agotados",
+          "allFeminine": "Todas",
+          "allMasculine": "Todos",
+          "clear": "Limpiar filtros",
+          "toggle": "Filtros",
+          "toggleWithCount": "Filtros ({{total}})"
+        },
+        "filteredEmpty": {
+          "title": "Sin resultados",
+          "description": "Ningún producto coincide con los filtros actuales. Ajusta la búsqueda o límpialos.",
+          "clear": "Limpiar filtros"
+        },
+        "count": {
+          "partial": "Mostrando {{shown}} de {{total}} productos",
+          "all_one": "{{count}} producto",
+          "all_other": "{{count}} productos"
+        },
+        "nextPage": {
+          "error": "No pudimos cargar más productos.",
+          "retry": "Reintentar"
+        },
         "empty": {
           "title": "Aún no hay productos",
           "description": "Cuando haya productos disponibles, aparecerán aquí.",

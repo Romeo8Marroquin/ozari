@@ -32,6 +32,8 @@ import {
  * response is **role-projected** so each role sees only the fields it should (minimum privilege — the
  * exact stock count is Admin-only, an in-stock signal is Employee+, everything else is shared). Row
  * visibility is uniform (the active catalog); the role axis is the *fields* (`projectProductForRole`).
+ * Optional filters (`search`/`categoryId`/`businessTypeId`, Employee+ `inStock`, Admin-only
+ * `includeInactive`) narrow the rows; like the pagination params they clamp or drop, never 400.
  */
 export const getProducts = async (
   req: CustomRequest,
@@ -39,11 +41,13 @@ export const getProducts = async (
 ): Promise<void> => {
   try {
     // Role is DB-verified in verifyJwt; fall back to the least-privileged view if somehow absent.
+    // The role feeds the parser too: `includeInactive` is honoured for Admin only.
     const role = req.user?.userRole ?? RolesEnum.Client;
-    const { page, pageSize } = parseProductListQuery(req.query);
+    const query = parseProductListQuery(req.query, role);
+    const { page, pageSize } = query;
 
     const prismaClient = await getPrismaClient();
-    const where = buildProductListWhere();
+    const where = buildProductListWhere(query);
     const [rawProducts, total] = await Promise.all([
       prismaClient.product.findMany({
         where,

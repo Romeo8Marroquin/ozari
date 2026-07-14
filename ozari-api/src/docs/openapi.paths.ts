@@ -477,8 +477,8 @@ export const paths: OpenAPIV3.PathsObject = {
         "Returns the paginated **active** catalog. Available to **any authenticated role**; the " +
         "response fields are **role-projected** (minimum privilege): Admin sees the exact `quantity` " +
         "plus internal fields, Employee gets an `inStock` signal, and a Client sees only the shared " +
-        "catalog fields. Pagination via `page`/`pageSize` is clamped (never rejected), so there is no " +
-        "400. Authenticated limiter (100/min).",
+        "catalog fields. Pagination and the optional filters are clamped or dropped (never " +
+        "rejected), so there is no 400. Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         {
@@ -494,6 +494,51 @@ export const paths: OpenAPIV3.PathsObject = {
           required: false,
           description: "Items per page (clamped to 1–50).",
           schema: { type: "integer", minimum: 1, maximum: 50, default: 15 },
+        },
+        {
+          name: "search",
+          in: "query",
+          required: false,
+          description:
+            "Case-insensitive product-name substring. Trimmed; truncated to 100 chars; " +
+            "empty/invalid values are ignored.",
+          schema: { type: "string", maxLength: 100 },
+        },
+        {
+          name: "categoryId",
+          in: "query",
+          required: false,
+          description:
+            "Filter by product category id (see `GET /products/catalog`). A non-positive or " +
+            "unknown id is ignored or matches nothing.",
+          schema: { type: "integer", minimum: 1 },
+        },
+        {
+          name: "businessTypeId",
+          in: "query",
+          required: false,
+          description:
+            "Filter by business type id (1 = Alquiler, 2 = Venta). Values outside the known " +
+            "enum are ignored.",
+          schema: { type: "integer", minimum: 1 },
+        },
+        {
+          name: "inStock",
+          in: "query",
+          required: false,
+          description:
+            "**Employee/Admin only** — `true` = only products in stock, `false` = only out of " +
+            "stock. Silently ignored for a Client (stock is invisible to that role).",
+          schema: { type: "boolean" },
+        },
+        {
+          name: "includeInactive",
+          in: "query",
+          required: false,
+          description:
+            "**Admin only** — `true` widens the rows to include soft-deleted products. Silently " +
+            "ignored for every other role.",
+          schema: { type: "boolean", default: false },
         },
       ],
       responses: {

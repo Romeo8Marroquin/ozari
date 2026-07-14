@@ -109,6 +109,46 @@ describe("getProducts", () => {
     expect(successData().pagination).toEqual({ page: 2, pageSize: 10, total: 0, totalPages: 1 });
   });
 
+  it("passes the parsed filters through to the where clause (findMany AND count)", async () => {
+    const { findMany, count } = mockPrisma([], 0);
+    await getProducts(
+      buildReq(RolesEnum.Employee, {
+        search: " mesa ",
+        categoryId: "3",
+        businessTypeId: "1",
+        inStock: "true",
+      }),
+      {} as Response,
+    );
+    const expectedWhere = expect.objectContaining({
+      isActive: true,
+      name: { contains: "mesa", mode: "insensitive" },
+      productCategoryId: 3,
+      productBusinessTypeId: 1,
+      quantity: { gt: 0 },
+    });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expectedWhere }));
+    expect(count).toHaveBeenCalledWith({ where: expectedWhere });
+  });
+
+  it("ignores the role-gated filters for a Client (no stock probe, no inactive rows)", async () => {
+    const { findMany } = mockPrisma([], 0);
+    await getProducts(
+      buildReq(RolesEnum.Client, { inStock: "true", includeInactive: "true" }),
+      {} as Response,
+    );
+    const where = (findMany.mock.calls[0]![0] as { where: Record<string, unknown> }).where;
+    expect(where["quantity"]).toBeUndefined();
+    expect(where["isActive"]).toBe(true);
+  });
+
+  it("widens to inactive rows for an Admin sending includeInactive", async () => {
+    const { findMany } = mockPrisma([], 0);
+    await getProducts(buildReq(RolesEnum.Admin, { includeInactive: "true" }), {} as Response);
+    const where = (findMany.mock.calls[0]![0] as { where: Record<string, unknown> }).where;
+    expect(where["isActive"]).toBeUndefined();
+  });
+
   it("sends a 500 when the query fails", async () => {
     (getPrismaClient as Mock).mockRejectedValue(new Error("db down"));
     await getProducts(buildReq(RolesEnum.Admin), {} as Response);

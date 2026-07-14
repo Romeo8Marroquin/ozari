@@ -1,11 +1,14 @@
 import { Prisma } from "@prisma/client";
+import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
 import { appConfig } from "@/config/app.js";
+import { isValidEnumValue } from "@helpers/utils.js";
 import { getStorage } from "@helpers/storage.js";
 import {
   type CreateProductImageRequestModel,
   type PaginationMeta,
   type ProductListItemResponseModel,
+  type ProductListQueryModel,
 } from "./products.models.js";
 
 /**
@@ -38,17 +41,33 @@ const toMoney = (value: Prisma.Decimal | null): number | undefined =>
   value !== null ? Number(value) : undefined;
 
 /**
- * Which rows the product list returns. Currently the **active catalog** for every role (row
- * visibility is uniform; the role axis is the *fields*, see `projectProductForRole`). Kept as a
- * builder so search / category / business-type / admin-sees-inactive filters slot in here later
- * without touching the controller.
+ * Which rows the product list returns: the **active catalog**, narrowed by the parsed filters. Row
+ * visibility stays uniform across roles (the role axis is the *fields*, see `projectProductForRole`)
+ * with ONE exception already resolved upstream: `includeInactive` is only ever true for an Admin
+ * (`parseProductListQuery` gates it), and it widens visibility to soft-deleted rows. Filter ids are
+ * matched directly — a nonexistent id simply matches nothing (no 400, consistent with the clamp
+ * stance).
  */
-export function buildProductListWhere(): Prisma.ProductWhereInput {
+export function buildProductListWhere(
+  query: ProductListQueryModel,
+): Prisma.ProductWhereInput {
   return {
-    isActive: true,
+    ...(query.includeInactive ? {} : { isActive: true }),
     businessType: { isActive: true },
     category: { isActive: true },
     currency: { isActive: true },
+    ...(query.search !== undefined
+      ? { name: { contains: query.search, mode: "insensitive" as const } }
+      : {}),
+    ...(query.categoryId !== undefined
+      ? { productCategoryId: query.categoryId }
+      : {}),
+    ...(query.businessTypeId !== undefined
+      ? { productBusinessTypeId: query.businessTypeId }
+      : {}),
+    ...(query.inStock !== undefined
+      ? { quantity: query.inStock ? { gt: 0 } : 0 }
+      : {}),
   };
 }
 
@@ -111,14 +130,17 @@ export function projectProductForRole(
 }
 
 /**
- * Parses the list query into a safe `{ page, pageSize }`. Everything **clamps** (never rejects): a
- * bad/absent value falls back to the default, `page` floors at 1, and `pageSize` is bounded to
- * `[1, maxProductPageSize]` — so an unbounded grid fetch is impossible and there is no 400 to handle.
+ * Parses the list query into a safe {@link ProductListQueryModel}. Everything **clamps or drops,
+ * never rejects**: a bad pagination value falls back to the default (`page` floors at 1, `pageSize`
+ * is bounded to `[1, maxProductPageSize]`), and a bad/absent FILTER simply drops out — so an
+ * unbounded grid fetch is impossible and there is no 400 to handle. `includeInactive` is
+ * **role-gated here** (Admin only): every other role gets `false` no matter what it sends, so the
+ * widened row visibility can never leak past the projection's least-privileged consumers.
  */
-export function parseProductListQuery(query: unknown): {
-  page: number;
-  pageSize: number;
-} {
+export function parseProductListQuery(
+  query: unknown,
+  role: RolesEnum,
+): ProductListQueryModel {
   const source = (query ?? {}) as Record<string, unknown>;
   const page = clampInt(source["page"], 1, 1, Number.MAX_SAFE_INTEGER);
   const pageSize = clampInt(
@@ -127,7 +149,51 @@ export function parseProductListQuery(query: unknown): {
     1,
     appConfig.maxProductPageSize,
   );
-  return { page, pageSize };
+
+  const rawSearch = source["search"];
+  const trimmedSearch =
+    typeof rawSearch === "string"
+      ? rawSearch.trim().slice(0, appConfig.maxProductSearchLength)
+      : "";
+  const search = trimmedSearch === "" ? undefined : trimmedSearch;
+
+  const categoryId = parsePositiveInt(source["categoryId"]);
+
+  const rawBusinessTypeId = parsePositiveInt(source["businessTypeId"]);
+  const businessTypeId =
+    rawBusinessTypeId !== undefined &&
+    isValidEnumValue(BusinessTypeEnum, rawBusinessTypeId)
+      ? rawBusinessTypeId
+      : undefined;
+
+  // Stock is invisible to Clients in the projection, so the FILTER must be too (otherwise a Client
+  // could probe availability by filtering). Employee and Admin may filter both ways.
+  const canFilterStock =
+    role === RolesEnum.Admin || role === RolesEnum.Employee;
+  const rawInStock = source["inStock"];
+  const inStock =
+    canFilterStock && (rawInStock === "true" || rawInStock === "false")
+      ? rawInStock === "true"
+      : undefined;
+
+  const includeInactive =
+    role === RolesEnum.Admin && source["includeInactive"] === "true";
+
+  return {
+    page,
+    pageSize,
+    search,
+    categoryId,
+    businessTypeId,
+    inStock,
+    includeInactive,
+  };
+}
+
+/** Parse `value` to a positive integer, or `undefined` when it isn't one (the filter drops out). */
+function parsePositiveInt(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;
 }
 
 /** Parse `value` to an integer and clamp it to `[min, max]`; non-integers fall back to `fallback`. */

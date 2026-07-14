@@ -96,10 +96,54 @@ describe("projectProductForRole", () => {
   });
 });
 
+/** A parsed query with every filter absent — the where builder's baseline input. */
+const makeQuery = (
+  overrides: Partial<ReturnType<typeof parseProductListQuery>> = {},
+): ReturnType<typeof parseProductListQuery> => ({
+  page: 1,
+  pageSize: appConfig.defaultProductPageSize,
+  search: undefined,
+  categoryId: undefined,
+  businessTypeId: undefined,
+  inStock: undefined,
+  includeInactive: false,
+  ...overrides,
+});
+
 describe("buildProductListWhere", () => {
-  it("scopes to the active catalog (active product + active lookups)", () => {
-    expect(buildProductListWhere()).toEqual({
+  it("scopes to the active catalog (active product + active lookups) with no filters", () => {
+    expect(buildProductListWhere(makeQuery())).toEqual({
       isActive: true,
+      businessType: { isActive: true },
+      category: { isActive: true },
+      currency: { isActive: true },
+    });
+  });
+
+  it("adds a case-insensitive name contains for a search", () => {
+    expect(buildProductListWhere(makeQuery({ search: "mesa" }))).toMatchObject({
+      name: { contains: "mesa", mode: "insensitive" },
+    });
+  });
+
+  it("adds the id filters when present", () => {
+    expect(
+      buildProductListWhere(makeQuery({ categoryId: 3, businessTypeId: 1 })),
+    ).toMatchObject({ productCategoryId: 3, productBusinessTypeId: 1 });
+  });
+
+  it("maps the availability filter to a quantity clause (both directions)", () => {
+    expect(buildProductListWhere(makeQuery({ inStock: true }))).toMatchObject({
+      quantity: { gt: 0 },
+    });
+    expect(buildProductListWhere(makeQuery({ inStock: false }))).toMatchObject({
+      quantity: 0,
+    });
+  });
+
+  it("drops ONLY the product isActive clause for includeInactive (lookups stay active)", () => {
+    const where = buildProductListWhere(makeQuery({ includeInactive: true }));
+    expect(where).toEqual({
       businessType: { isActive: true },
       category: { isActive: true },
       currency: { isActive: true },
@@ -112,23 +156,70 @@ describe("parseProductListQuery", () => {
   const MAX = appConfig.maxProductPageSize;
 
   it("defaults when the query is absent or empty", () => {
-    expect(parseProductListQuery(undefined)).toEqual({ page: 1, pageSize: DEFAULT });
-    expect(parseProductListQuery({})).toEqual({ page: 1, pageSize: DEFAULT });
+    expect(parseProductListQuery(undefined, RolesEnum.Client)).toEqual(makeQuery());
+    expect(parseProductListQuery({}, RolesEnum.Client)).toEqual(makeQuery());
   });
 
   it("accepts valid numeric strings", () => {
-    expect(parseProductListQuery({ page: "3", pageSize: "10" })).toEqual({ page: 3, pageSize: 10 });
+    expect(
+      parseProductListQuery({ page: "3", pageSize: "10" }, RolesEnum.Client),
+    ).toEqual(makeQuery({ page: 3, pageSize: 10 }));
   });
 
   it("clamps page to >= 1 and pageSize to [1, max]", () => {
-    expect(parseProductListQuery({ page: "0" }).page).toBe(1);
-    expect(parseProductListQuery({ page: "-5" }).page).toBe(1);
-    expect(parseProductListQuery({ pageSize: "999" }).pageSize).toBe(MAX);
-    expect(parseProductListQuery({ pageSize: "0" }).pageSize).toBe(1);
+    expect(parseProductListQuery({ page: "0" }, RolesEnum.Client).page).toBe(1);
+    expect(parseProductListQuery({ page: "-5" }, RolesEnum.Client).page).toBe(1);
+    expect(parseProductListQuery({ pageSize: "999" }, RolesEnum.Client).pageSize).toBe(MAX);
+    expect(parseProductListQuery({ pageSize: "0" }, RolesEnum.Client).pageSize).toBe(1);
   });
 
   it("falls back to defaults for non-integer values", () => {
-    expect(parseProductListQuery({ page: "abc", pageSize: "2.5" })).toEqual({ page: 1, pageSize: DEFAULT });
+    expect(parseProductListQuery({ page: "abc", pageSize: "2.5" }, RolesEnum.Client)).toEqual(
+      makeQuery({ page: 1, pageSize: DEFAULT }),
+    );
+  });
+
+  it("trims and caps the search, dropping it when empty or non-string", () => {
+    expect(parseProductListQuery({ search: "  mesa  " }, RolesEnum.Client).search).toBe("mesa");
+    expect(parseProductListQuery({ search: "   " }, RolesEnum.Client).search).toBeUndefined();
+    expect(parseProductListQuery({ search: ["a"] }, RolesEnum.Client).search).toBeUndefined();
+    const long = "x".repeat(appConfig.maxProductSearchLength + 20);
+    expect(parseProductListQuery({ search: long }, RolesEnum.Client).search).toBe(
+      "x".repeat(appConfig.maxProductSearchLength),
+    );
+  });
+
+  it("keeps a positive integer categoryId and drops anything else", () => {
+    expect(parseProductListQuery({ categoryId: "3" }, RolesEnum.Client).categoryId).toBe(3);
+    expect(parseProductListQuery({ categoryId: "0" }, RolesEnum.Client).categoryId).toBeUndefined();
+    expect(parseProductListQuery({ categoryId: "abc" }, RolesEnum.Client).categoryId).toBeUndefined();
+  });
+
+  it("keeps businessTypeId only when it is a known enum value", () => {
+    expect(parseProductListQuery({ businessTypeId: "1" }, RolesEnum.Client).businessTypeId).toBe(1);
+    expect(parseProductListQuery({ businessTypeId: "2" }, RolesEnum.Client).businessTypeId).toBe(2);
+    expect(
+      parseProductListQuery({ businessTypeId: "99" }, RolesEnum.Client).businessTypeId,
+    ).toBeUndefined();
+  });
+
+  it("honours inStock for Employee and Admin only (a Client can never probe stock)", () => {
+    expect(parseProductListQuery({ inStock: "true" }, RolesEnum.Employee).inStock).toBe(true);
+    expect(parseProductListQuery({ inStock: "false" }, RolesEnum.Admin).inStock).toBe(false);
+    expect(parseProductListQuery({ inStock: "true" }, RolesEnum.Client).inStock).toBeUndefined();
+    expect(parseProductListQuery({ inStock: "yes" }, RolesEnum.Admin).inStock).toBeUndefined();
+  });
+
+  it("honours includeInactive for Admin only, and only the literal 'true'", () => {
+    expect(
+      parseProductListQuery({ includeInactive: "true" }, RolesEnum.Admin).includeInactive,
+    ).toBe(true);
+    expect(
+      parseProductListQuery({ includeInactive: "true" }, RolesEnum.Employee).includeInactive,
+    ).toBe(false);
+    expect(
+      parseProductListQuery({ includeInactive: "1" }, RolesEnum.Admin).includeInactive,
+    ).toBe(false);
   });
 });
 

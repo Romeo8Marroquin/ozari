@@ -121,12 +121,15 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
             className,
           )}
         />
+        {/* `truncate` + a max-width that respects the label's left offset: a label that doesn't
+            fit ellipsizes on ONE line instead of wrapping (a two-line floating label breaks the
+            field's rhythm and pushes the underline down). */}
         <label
           htmlFor={id}
-          className={`absolute text-md pointer-events-none transition-all duration-300 origin-left peer-focus:-translate-y-6 peer-focus:scale-75 peer-disabled:text-gray-disabled
+          className={`absolute text-md pointer-events-none transition-all duration-300 origin-left peer-focus:-translate-y-6 peer-focus:scale-75 peer-disabled:text-gray-disabled truncate
           ${error ? 'text-red-600' : `text-black ${peerFocusTextClass[focusColor]}`}
           ${isFilled ? '-translate-y-6 scale-75' : ''}
-          ${!icon && type !== 'password' ? 'left-2' : 'left-10'}
+          ${!icon && type !== 'password' ? 'left-2 max-w-[calc(100%-1rem)]' : 'left-10 max-w-[calc(100%-3rem)]'}
         `}
         >
           <span>{label}</span>
