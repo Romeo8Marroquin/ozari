@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import CustomSelect from './CustomSelect';
 
 /** Whether the floating label is in its floated (raised) position. */
@@ -141,6 +141,66 @@ describe('CustomSelect', () => {
       );
       fireEvent.pointerDown(screen.getByLabelText(/Tipo/));
       expect(chevron(container).getAttribute('class')).toContain('rotate-0');
+    });
+
+    it('ignores TOUCH pointers (the OS sheet gives no close signal; a scroll-swipe also starts here)', () => {
+      const { container } = renderSelect();
+      fireEvent.pointerDown(screen.getByLabelText(/Tipo/), { pointerType: 'touch' });
+      expect(chevron(container).getAttribute('class')).toContain('rotate-0');
+    });
+
+    describe('enhanced-picker detection (base-select)', () => {
+      const realMatchMedia = window.matchMedia;
+      afterEach(() => {
+        vi.unstubAllGlobals();
+        window.matchMedia = realMatchMedia;
+      });
+
+      const setFinePointer = (matches: boolean): void => {
+        window.matchMedia = vi.fn().mockReturnValue({
+          matches,
+          media: '',
+          onchange: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        });
+      };
+
+      it('stands the JS heuristic down when the enhanced picker is active (CSS :open drives it)', () => {
+        vi.stubGlobal('CSS', { supports: vi.fn().mockReturnValue(true) });
+        setFinePointer(true);
+        const { container } = renderSelect();
+        const select = screen.getByLabelText(/Tipo/);
+        fireEvent.pointerDown(select);
+        fireEvent.keyDown(select, { key: 'Enter' });
+        expect(chevron(container).getAttribute('class')).toContain('rotate-0');
+      });
+
+      it('keeps the heuristic on base-select engines WITHOUT a fine pointer', () => {
+        vi.stubGlobal('CSS', { supports: vi.fn().mockReturnValue(true) });
+        setFinePointer(false);
+        const { container } = renderSelect();
+        fireEvent.pointerDown(screen.getByLabelText(/Tipo/));
+        expect(chevron(container).getAttribute('class')).toContain('rotate-180');
+      });
+
+      it('keeps the heuristic when base-select is unsupported — or CSS.supports is missing entirely', () => {
+        vi.stubGlobal('CSS', { supports: vi.fn().mockReturnValue(false) });
+        setFinePointer(true);
+        const first = renderSelect();
+        fireEvent.pointerDown(screen.getByLabelText(/Tipo/));
+        expect(chevron(first.container).getAttribute('class')).toContain('rotate-180');
+        first.unmount();
+
+        // No CSS.supports at all (ancient engine / bare DOM) → the try/catch falls back safely.
+        vi.stubGlobal('CSS', undefined);
+        const second = renderSelect();
+        fireEvent.pointerDown(screen.getByLabelText(/Tipo/));
+        expect(chevron(second.container).getAttribute('class')).toContain('rotate-180');
+      });
     });
 
     it('still forwards the caller’s pointer/key/blur handlers', () => {

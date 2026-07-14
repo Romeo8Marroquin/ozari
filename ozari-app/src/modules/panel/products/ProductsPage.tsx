@@ -324,9 +324,14 @@ const ProductsPage: React.FC = () => {
                   </div>
                 )}
                 {/* The count line mounts with the populated resolution (tagged `.grid-enter`, so the
-                    hand-off sweeps it in with the surplus cards) and doubles as scroll progress. */}
+                    hand-off sweeps it in with the surplus cards) and doubles as scroll progress.
+                    `aria-live` = the standard results-count announcement for a filterable list, so
+                    non-visual users hear the result set change (filter applied, page appended). */}
                 {!loading && !hasError && products.length > 0 && total !== undefined && (
-                  <p className={`reveal-item text-center text-xs text-charcoal/45${showSkeleton ? ' grid-enter' : ''}`}>
+                  <p
+                    aria-live="polite"
+                    className={`reveal-item text-center text-xs text-charcoal/45${showSkeleton ? ' grid-enter' : ''}`}
+                  >
                     {products.length < total
                       ? t(`${KEY}.count.partial`, { shown: products.length, total })
                       : t(`${KEY}.count.all`, { count: total })}
