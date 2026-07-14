@@ -240,6 +240,15 @@
           "out": "Agotado",
           "count": "{{count}} en stock"
         },
+        "card": {
+          "viewDetails": "Ver detalles de {{name}}",
+          "noDescription": "Sin descripción todavía.",
+          "actions": {
+            "edit": "Editar",
+            "delete": "Eliminar",
+            "order": "Ordenar"
+          }
+        },
         "empty": {
           "title": "Aún no hay productos",
           "description": "Cuando haya productos disponibles, aparecerán aquí.",
@@ -277,6 +286,10 @@
               "title": "Información",
               "description": "Lo esencial del producto: cómo se llama y cómo se clasifica."
             },
+            "photos": {
+              "title": "Fotos",
+              "description": "Hasta 8 fotos del producto. La que lleve la estrella será la principal del catálogo. Las fotos no se guardan en el borrador."
+            },
             "pricing": {
               "title": "Precios e inventario",
               "description": "Los precios según el tipo de negocio y la cantidad disponible."
@@ -310,9 +323,32 @@
           },
           "actions": {
             "submit": "Crear producto",
+            "uploading": "Subiendo fotos…",
             "cancel": "Cancelar",
             "addDetail": "Agregar detalle",
             "removeDetail": "Quitar detalle"
+          },
+          "gallery": {
+            "dropzone": {
+              "cta": "Arrastra tus fotos aquí o haz clic para buscarlas",
+              "hint": "JPG, PNG, WebP o AVIF · máx. 5 MB por foto · hasta 8 fotos",
+              "add": "Agregar"
+            },
+            "counter": "{{count}} de {{max}} fotos",
+            "primaryBadge": "Principal",
+            "actions": {
+              "setPrimary": "Marcar {{name}} como foto principal",
+              "setPrimaryShort": "Marcar como principal",
+              "removeImage": "Quitar la foto {{name}}"
+            },
+            "errors": {
+              "invalidType": "Solo se permiten fotos JPG, PNG, WebP o AVIF.",
+              "tooLarge": "Cada foto debe pesar 5 MB o menos.",
+              "empty": "Una de las fotos está vacía o dañada.",
+              "duplicate": "Esa foto ya está en la galería.",
+              "tooMany": "Puedes agregar hasta {{max}} fotos.",
+              "uploadFailed": "No pudimos subir las fotos. Intenta de nuevo."
+            }
           },
           "errors": {
             "requiredName": "El nombre es requerido.",
@@ -331,6 +367,7 @@
             "requiredSellPrice": "Un producto de venta requiere precio de venta.",
             "forbiddenRentPrice": "Un producto de venta no lleva precio de renta.",
             "requiredDetailType": "Selecciona el tipo del detalle.",
+            "duplicateDetailType": "Este tipo de detalle ya está agregado.",
             "requiredDetail": "El detalle es requerido.",
             "invalidDetail": "Usa de 5 a 255 letras, números, espacios, apóstrofos o guiones.",
             "submitFallback": "No pudimos crear el producto. Revisa los datos e intenta de nuevo."

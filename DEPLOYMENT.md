@@ -105,6 +105,30 @@ or a deploy and an apply overwrite each other — §6). The two **credentials** 
    e.g. `https://assets.partyrentalsgt.com`) → this is `R2_PUBLIC_URL`.
 3. Create an **R2 API token** scoped to that bucket (Object Read & Write) → copy the **Access Key ID**
    (`R2_ACCESS_KEY`) and **Secret Access Key** (`R2_SECRET_KEY`). The **Account ID** is in the endpoint.
+4. Set the bucket's **CORS policy** (bucket → Settings → CORS) — REQUIRED for uploads: the browser
+   PUTs to the presigned URL **directly** (a cross-origin request to the S3 endpoint), so without
+   this every gallery upload fails preflight. Allow each frontend origin (no trailing slash):
+
+   ```json
+   [
+     {
+       "AllowedOrigins": ["http://localhost:5173", "https://ozari-c28.pages.dev"],
+       "AllowedMethods": ["PUT"],
+       "AllowedHeaders": ["content-type"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
+   ```
+
+   Public **reads** don't need CORS (plain `<img>` tags aren't CORS requests).
+
+   **Per-environment origins (security):** CORS here is a *browser gate*, not the upload
+   authorization — that is the presigned signature (admin-minted, 5-min TTL, bound to key + type +
+   size), so listing `localhost` grants an attacker nothing without an admin session. Still, keep
+   buckets scoped: the **staging** bucket lists `http://localhost:5173` (local dev uploads to it) +
+   the Pages origin; the future **production** bucket must list ONLY the production origins —
+   **never localhost** — so a compromised dev machine's browser context can't even preflight
+   against prod assets. Add the apex domain when the frontend moves.
 
 ### Ordered rollout on staging (the code + Terraform edits already exist in the repo)
 

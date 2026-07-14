@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { HiOutlineArrowPath, HiOutlinePlus } from 'react-icons/hi2';
 import Button from '@components/Button';
 import RoleGate from '@components/RoleGate';
+import SkeletonFade from '@components/SkeletonFade';
 import { Role } from '@constants/Roles';
 import { staggerIn, staggerOut } from '../pageMotion';
 import { usePanelNavigate } from '../PanelNavContext';
@@ -14,10 +15,11 @@ import { useProducts } from './useProducts';
 
 const KEY = 'modules.panel.products';
 
-// Responsive grid: two columns on phones up to six on ultrawide/vertical monitors, so the visible
-// area fills with cards on any display. Skeleton and real cards share this exact layout so each card
-// lands where its skeleton stood.
-const GRID = 'grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6';
+// Responsive grid: two columns on phones up to five on ultrawide. Deliberately FEWER columns than
+// the space could fit — the tiles are the product photography, and desktop was rendering them too
+// small to read; larger tiles carry the info (and the in-place hover transform) comfortably.
+// Skeleton and real cards share this exact layout so each card lands where its skeleton stood.
+const GRID = 'grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4 2xl:grid-cols-5';
 
 // Enough skeletons to fill several rows while the first page loads; any extras beyond the real count
 // simply sweep out (they never mounted a card). Kept a constant — dynamic viewport-fill is a future
@@ -31,11 +33,13 @@ const SECONDARY_COLOR = '#262626';
  * serves Client, Employee, and Admin, and only Admin sees the "add" affordance (a UX layer — the `403`
  * is the real guard).
  *
- * The whole screen is choreographed so no state ever "pops": a staggered **skeleton** grid fills the
- * view, then hands off — the skeletons sweep out and the resolved view (cards, an empty panel, or a
- * cold-error panel) staggers into their place. The page owns its entrance and registers its exit with
- * the panel, so departing any state animates out cleanly. All motion lives in the shared panel
- * `pageMotion` vocabulary and snaps under reduced motion; that path is an instant, correct swap.
+ * The whole screen is choreographed so no state ever "pops". The load is a **pairwise hand-off**
+ * over stable grid SLOTS (the SkeletonFade doctrine, per cell): a skeleton that received data
+ * **crossfades into its card in place**; orphan skeletons (no data partner) sweep out staggered,
+ * exactly as they entered; surplus cards beyond the skeleton count sweep in staggered. Empty and
+ * error resolutions still sweep the whole skeleton grid out before their panel staggers in. The
+ * page owns its entrance and registers its exit with the panel; all motion lives in the shared
+ * `pageMotion` vocabulary and snaps under reduced motion (an instant, correct swap).
  */
 const ProductsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -60,20 +64,35 @@ const ProductsPage: React.FC = () => {
     if (loading) setShowSkeleton(true);
   }
 
-  // Once loading finishes, sweep the still-mounted skeleton out, then unmount it. The state change
-  // lands in the async completion, never synchronously in the effect body.
+  // Once loading finishes, resolve the hand-off. POPULATED: the per-cell crossfades run on their
+  // own (SkeletonFade), the header + surplus cards sweep in (`.grid-enter`), and only the ORPHAN
+  // skeletons sweep out before the skeleton phase ends. EMPTY/ERROR: the whole skeleton grid
+  // sweeps out, then the panel staggers in (the effect below). State changes land in the async
+  // completions, never synchronously in the effect body.
   useEffect(() => {
     if (loading || !showSkeleton) return;
+    if (!hasError && products.length > 0) {
+      staggerIn(root.current, '.grid-enter');
+      void staggerOut(root.current, '.product-skel-orphan').then(() => setShowSkeleton(false));
+      return;
+    }
     void staggerOut(root.current, '.product-skel').then(() => setShowSkeleton(false));
-  }, [loading, showSkeleton]);
+  }, [loading, showSkeleton, hasError, products.length]);
 
-  // Everything on screen (the header row when populated, skeletons, cards, or a status panel) is a
-  // `.reveal-item` and staggers in on each phase change — mount included, so this IS the page's
-  // entrance — and the hand-off reads as "content settling into place", never a flash.
+  // Entrances that are NOT part of the pairwise hand-off: the mount (whatever state it lands in),
+  // a re-entered cold load (the skeleton grid returns), and the empty/error panels once the
+  // skeleton finished sweeping. A COMPLETED populated hand-off is deliberately excluded — its
+  // cards already crossfaded in place; re-staggering them would flash the settled grid.
   const empty = products.length === 0;
+  const isMounted = useRef(false);
   useLayoutEffect(() => {
-    staggerIn(root.current, '.reveal-item');
-  }, [showSkeleton, hasError, empty]);
+    const firstRender = !isMounted.current;
+    isMounted.current = true;
+    const populated = !loading && !hasError && !empty;
+    if (firstRender || loading || (!showSkeleton && !populated)) {
+      staggerIn(root.current, '.reveal-item');
+    }
+  }, [loading, showSkeleton, hasError, empty]);
 
   // The page's motion pair, registered with the panel: `exit` is the reverse sweep, played before
   // ANY departure (tab change or logout) for whichever state is on screen; `enter` resumes the
@@ -100,16 +119,63 @@ const ProductsPage: React.FC = () => {
     </Button>
   );
 
+  // How many grid SLOTS are on screen. Slots are keyed by INDEX so a cell keeps its identity
+  // across the loading → loaded flip — that identity is what lets its SkeletonFade crossfade the
+  // skeleton into the card in place instead of remounting.
+  const visibleSlots = loading
+    ? SKELETON_COUNT
+    : showSkeleton
+      ? Math.max(SKELETON_COUNT, products.length)
+      : products.length;
+
   return (
     <div ref={root} className="flex flex-1 flex-col gap-6">
-      {showSkeleton ? (
-        <div className={GRID} role="status" aria-label={t(`${KEY}.loading`)}>
-          {Array.from({ length: SKELETON_COUNT }).map((_, index) => (
-            <div key={index} className="reveal-item product-skel">
-              <ProductCardSkeleton />
-            </div>
-          ))}
-        </div>
+      {showSkeleton || (!hasError && products.length > 0) ? (
+        <>
+          {/* The header row needs NO data (static lead + role-gated add), so it's on screen from
+              the FIRST skeleton frame — the grid never has to jump down to make room for it later.
+              While the skeleton phase lasts it carries `product-skel`, so an empty/error resolution
+              sweeps it out together with the shimmer (those panels stand alone, headerless). */}
+          <div
+            className={`reveal-item${showSkeleton ? ' product-skel' : ''} flex flex-wrap items-center justify-between gap-3`}
+          >
+            <p className="text-sm text-charcoal/55">{t(`${KEY}.lead`)}</p>
+            <RoleGate roles={[Role.Admin]}>{addButton}</RoleGate>
+          </div>
+          <div
+            className={GRID}
+            role={loading ? 'status' : undefined}
+            aria-label={loading ? t(`${KEY}.loading`) : undefined}
+          >
+            {Array.from({ length: visibleSlots }).map((_, index) => {
+              const product = products[index];
+              const isSkeletonCell = loading || (showSkeleton && product === undefined);
+              const isOrphan = !loading && showSkeleton && product === undefined;
+              const isLateEntry = !loading && index >= SKELETON_COUNT;
+              const cellClass = `reveal-item${isSkeletonCell ? ' product-skel' : ''}${
+                isOrphan ? ' product-skel-orphan' : ''
+              }${isLateEntry ? ' grid-enter' : ''}`;
+              return (
+                <div key={`slot-${index}`} className={cellClass}>
+                  {isOrphan ? (
+                    // An orphan has no data partner to become — it waits (visually unchanged) for
+                    // its staggered sweep-out.
+                    <ProductCardSkeleton />
+                  ) : (
+                    <SkeletonFade
+                      loading={loading}
+                      skeleton={<ProductCardSkeleton />}
+                      className="block"
+                      contentClassName="block"
+                    >
+                      {product && <ProductCard product={product} />}
+                    </SkeletonFade>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
       ) : hasError ? (
         // Cold error stands alone (no header) — the centered panel IS the screen.
         <ProductsStatus
@@ -129,7 +195,7 @@ const ProductsPage: React.FC = () => {
             </Button>
           }
         />
-      ) : products.length === 0 ? (
+      ) : (
         // Empty catalog stands alone too — no "explore"/header chrome when there's nothing to explore.
         // Admin gets its single "add first product" CTA inside the panel (no redundant top button).
         <RoleGate
@@ -149,21 +215,6 @@ const ProductsPage: React.FC = () => {
             action={addButton}
           />
         </RoleGate>
-      ) : (
-        // Populated: the header row (lead + Admin "add") makes sense here, above the grid.
-        <>
-          <div className="reveal-item flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-charcoal/55">{t(`${KEY}.lead`)}</p>
-            <RoleGate roles={[Role.Admin]}>{addButton}</RoleGate>
-          </div>
-          <div className={GRID}>
-            {products.map((product) => (
-              <div key={product.id} className="reveal-item">
-                <ProductCard product={product} />
-              </div>
-            ))}
-          </div>
-        </>
       )}
     </div>
   );

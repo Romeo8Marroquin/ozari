@@ -4,10 +4,14 @@ import { isGrantedRoles } from "@middlewares/role.middleware.js";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
 import {
   createProduct,
+  createProductImageUploads,
   getProductCatalog,
   getProducts,
 } from "./products.controller.js";
-import { validateCreateProduct } from "./products.validator.js";
+import {
+  validateCreateProduct,
+  validateCreateProductImageUploads,
+} from "./products.validator.js";
 
 const router: RouterType = Router();
 
@@ -24,6 +28,16 @@ router.post(
   isGrantedRoles([RolesEnum.Admin]),
   validateCreateProduct,
   createProduct,
+);
+
+// Presigned R2 PUT URLs for gallery uploads (the browser uploads straight to R2, then references
+// the returned keys in the create body). Same Admin-only guard as the create it feeds.
+router.post(
+  "/images/upload-url",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  validateCreateProductImageUploads,
+  createProductImageUploads,
 );
 
 // Region: remaining writes — WIP, not mounted until rebuilt against the new Product shape.

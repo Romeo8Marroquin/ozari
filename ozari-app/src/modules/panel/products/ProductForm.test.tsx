@@ -18,6 +18,20 @@ vi.mock('./useCreateProduct', () => ({
 const { notify } = vi.hoisted(() => ({ notify: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@components/notifications/notify', () => ({ notify }));
 
+// The upload hook is mocked (its own test covers the presign + PUT mechanics); the REAL
+// useGalleryImages runs underneath so these tests exercise the actual staging behaviour.
+const { uploadImages, uploading } = vi.hoisted(() => ({
+  uploadImages: vi.fn(),
+  uploading: { value: false },
+}));
+vi.mock('./useProductImageUploads', () => ({
+  useProductImageUploads: () => ({
+    uploadImages,
+    isUploading: uploading.value,
+    progress: {},
+  }),
+}));
+
 import { QueryKeys } from '@constants/QueryKeys';
 import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from '@utils/storage';
@@ -109,8 +123,20 @@ beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
   pending.value = false;
+  uploading.value = false;
+  uploadImages.mockResolvedValue([]);
+  URL.createObjectURL = vi.fn(() => 'blob:mock');
+  URL.revokeObjectURL = vi.fn();
   setCatalog({ data: catalog });
 });
+
+/** Stages one valid photo in the gallery through its (hidden) file input. */
+const stagePhoto = (name = 'foto.png'): void => {
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(input, {
+    target: { files: [new File(['x'], name, { type: 'image/png' })] },
+  });
+};
 
 describe('ProductForm — reference data states', () => {
   it('shows skeleton section shells while the catalog loads', () => {
@@ -131,6 +157,45 @@ describe('ProductForm — reference data states', () => {
     setCatalog({ data: null });
     renderForm();
     expect(screen.getByRole('heading', { name: `${KEY}.catalogError.title` })).toBeInTheDocument();
+  });
+
+  // A "successful" 200 whose lookup lists are empty (wiped/unseeded DB) is just as unusable as a
+  // failed fetch — selects with nothing to pick would let the user fill a form they can't submit.
+  it.each([
+    'businessTypes',
+    'categories',
+    'currencies',
+    'rentTimeUnits',
+    'detailTypes',
+  ] as const)('treats a catalog with an empty %s list as a failure', (list) => {
+    setCatalog({ data: { ...catalog, [list]: [] } });
+    renderForm();
+    expect(screen.getByRole('heading', { name: `${KEY}.catalogError.title` })).toBeInTheDocument();
+  });
+
+  it('SWEEPS between the form and the retry panel (and back after a successful retry)', async () => {
+    const { rerender } = renderForm();
+    expect(screen.getByLabelText(new RegExp(`${KEY}.fields.nameLabel`))).toBeInTheDocument();
+
+    // The catalog turns into an error → the form sweeps out, then the panel renders.
+    setCatalog({ data: undefined, isError: true });
+    rerender(<ProductForm />);
+    expect(
+      await screen.findByRole('heading', { name: `${KEY}.catalogError.title` }),
+    ).toBeInTheDocument();
+
+    // A successful retry → the panel sweeps out and the loaded form returns.
+    setCatalog({ data: catalog });
+    rerender(<ProductForm />);
+    expect(await screen.findByLabelText(new RegExp(`${KEY}.fields.nameLabel`))).toBeInTheDocument();
+  });
+
+  it('abandons an in-flight view sweep cleanly on unmount (no stray commit)', async () => {
+    const { rerender, unmount } = renderForm();
+    setCatalog({ data: undefined, isError: true });
+    rerender(<ProductForm />);
+    unmount(); // the pending sweep's commit must be cancelled — no setState after unmount
+    await act(async () => {});
   });
 });
 
@@ -168,7 +233,46 @@ describe('ProductForm — details sub-editor', () => {
     expect(screen.getByLabelText(new RegExp(`${KEY}.fields.detailTypeLabel`))).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.removeDetail` }));
-    expect(screen.queryByLabelText(new RegExp(`${KEY}.fields.detailTypeLabel`))).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByLabelText(new RegExp(`${KEY}.fields.detailTypeLabel`))).not.toBeInTheDocument(),
+    );
+  });
+
+  it('hides types already used by other rows and caps the add button at the type count', async () => {
+    renderForm();
+    const addButton = screen.getByRole('button', { name: `${KEY}.actions.addDetail` });
+
+    // Row 1 takes "Color" → row 2's select must no longer offer it (but keeps its own choice).
+    await userEvent.click(addButton);
+    await userEvent.selectOptions(
+      screen.getByLabelText(new RegExp(`${KEY}.fields.detailTypeLabel`)),
+      '1',
+    );
+    await userEvent.click(addButton);
+
+    const selects = screen.getAllByLabelText(new RegExp(`${KEY}.fields.detailTypeLabel`));
+    const optionNames = (select: HTMLElement): string[] =>
+      Array.from(select.querySelectorAll('option')).map((option) => option.textContent ?? '');
+    expect(optionNames(selects[0])).toContain('Color');
+    expect(optionNames(selects[1])).not.toContain('Color');
+    expect(optionNames(selects[1])).toContain('Material');
+
+    // The catalog has TWO detail types → with two rows the add button caps out.
+    expect(addButton).toBeDisabled();
+  });
+
+  it('ignores a second remove click while the row is already animating out', async () => {
+    renderForm();
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.addDetail` }));
+
+    const trash = screen.getByRole('button', { name: `${KEY}.actions.removeDetail` });
+    // Two SYNCHRONOUS clicks — the second lands while the exit tween is still pending.
+    fireEvent.click(trash);
+    fireEvent.click(trash);
+
+    await waitFor(() =>
+      expect(screen.queryByLabelText(new RegExp(`${KEY}.fields.detailTypeLabel`))).not.toBeInTheDocument(),
+    );
   });
 });
 
@@ -191,13 +295,26 @@ describe('ProductForm — silent draft', () => {
     seedValidDraft();
     renderForm();
 
-    expect(screen.getByText(`${KEY}.draft.restored`)).toBeInTheDocument();
+    // The note lives in an always-mounted grid-rows collapse (so it eases, never pops); open =
+    // the collapse container is not hidden.
+    const noteContainer = screen.getByText(`${KEY}.draft.restored`).closest('[aria-hidden]');
+    expect(noteContainer).toHaveAttribute('aria-hidden', 'false');
+    expect(noteContainer?.className).toContain('grid-rows-[1fr]');
     expect(screen.getByLabelText(new RegExp(`${KEY}.fields.nameLabel`))).toHaveValue('Mesa redonda');
 
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.draft.discard` }));
-    expect(screen.queryByText(`${KEY}.draft.restored`)).not.toBeInTheDocument();
+    // Discard COLLAPSES the note (still mounted through the animation) instead of yanking it out.
+    expect(noteContainer).toHaveAttribute('aria-hidden', 'true');
+    expect(noteContainer?.className).toContain('grid-rows-[0fr]');
     expect(screen.getByLabelText(new RegExp(`${KEY}.fields.nameLabel`))).toHaveValue('');
     await waitFor(() => expect(Storage.get(StorageKeys.PRODUCT_CREATE_DRAFT)).toBeNull());
+  });
+
+  it('keeps the note collapsed (hidden and inert) when there is no draft to restore', () => {
+    renderForm();
+    const noteContainer = screen.getByText(`${KEY}.draft.restored`).closest('[aria-hidden]');
+    expect(noteContainer).toHaveAttribute('aria-hidden', 'true');
+    expect(noteContainer?.className).toContain('grid-rows-[0fr]');
   });
 });
 
@@ -268,6 +385,60 @@ describe('ProductForm — submit', () => {
     // Submit the FORM directly (the button is in its loading state) — the guard must still hold.
     fireEvent.submit(document.getElementById('create-product-form') as HTMLFormElement);
     await waitFor(() => expect(createProduct).not.toHaveBeenCalled());
+  });
+
+  it('uploads staged photos first and references their keys (the starred one primary)', async () => {
+    seedValidDraft();
+    uploadImages.mockResolvedValue(['products/k1.png']);
+    renderForm();
+    stagePhoto();
+
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createProduct).toHaveBeenCalled());
+
+    expect(uploadImages).toHaveBeenCalledWith([
+      expect.objectContaining({ file: expect.objectContaining({ name: 'foto.png' }) }),
+    ]);
+    expect(createProduct.mock.calls[0]?.[0]).toMatchObject({
+      images: [{ key: 'products/k1.png', isPrimary: true }],
+    });
+  });
+
+  it('an upload failure surfaces per the form doctrine and never reaches the create call', async () => {
+    seedValidDraft();
+    uploadImages.mockRejectedValue(axiosError(500));
+    renderForm();
+    stagePhoto();
+
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(notify.error).toHaveBeenCalled());
+
+    expect(createProduct).not.toHaveBeenCalled();
+    // The staged photo survives the failure — the user just retries the same submit.
+    expect(screen.getByAltText('foto.png')).toBeInTheDocument();
+  });
+
+  it('an inline-class upload failure (400) lands in the form banner', async () => {
+    seedValidDraft();
+    uploadImages.mockRejectedValue(axiosError(400, 'archivo inválido'));
+    renderForm();
+    stagePhoto();
+
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    expect(await screen.findByText('archivo inválido')).toBeInTheDocument();
+    expect(notify.error).not.toHaveBeenCalled();
+    expect(createProduct).not.toHaveBeenCalled();
+  });
+
+  it('guards re-submits while photos are uploading (button shows the uploading label)', async () => {
+    seedValidDraft();
+    uploading.value = true;
+    renderForm();
+
+    expect(screen.getByText(`${KEY}.actions.uploading`)).toBeInTheDocument();
+    fireEvent.submit(document.getElementById('create-product-form') as HTMLFormElement);
+    await waitFor(() => expect(uploadImages).not.toHaveBeenCalled());
+    expect(createProduct).not.toHaveBeenCalled();
   });
 
   it('cancel returns to the catalog, keeping the draft for a later visit', async () => {

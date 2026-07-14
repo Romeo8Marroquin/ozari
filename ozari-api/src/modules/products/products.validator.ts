@@ -11,10 +11,28 @@ import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { appConfig } from "@/config/app.js";
 import {
   type CreateProductDetailRequestModel,
+  type CreateProductImageRequestModel,
+  type CreateProductImageUploadsRequestModel,
   type CreateProductRequestModel,
+  type ProductImageUploadFileModel,
   type UpdateProductDetailRequestModel,
   type UpdateProductRequestModel,
 } from "./products.models.js";
+
+/**
+ * Matches an R2 object key OUR upload-url endpoint mints for product images:
+ * `products/<uuid v4>.<whitelisted extension>`. Built from the same config the mint uses, so the
+ * create endpoint only ever persists keys that could have come from our own presign flow — an
+ * arbitrary client-invented key (path traversal, another prefix, another bucket's layout) is a 400.
+ */
+const buildProductImageKeyRegex = (): RegExp => {
+  const prefix = appConfig.storage.keyPrefixes.product;
+  const extensions = Object.values(appConfig.storage.allowedImageTypes).join("|");
+  // eslint-disable-next-line security/detect-non-literal-regexp -- built ONLY from static appConfig constants (never user input)
+  return new RegExp(
+    `^${prefix}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(?:${extensions})$`,
+  );
+};
 
 /**
  * Sanitizes an OPTIONAL money field: absent stays absent; a present value must be a number within
@@ -65,6 +83,7 @@ export const validateCreateProduct = async (
       categoryId,
       currencyId,
       description,
+      images,
       name,
       productDetails,
       quantity,
@@ -113,6 +132,9 @@ export const validateCreateProduct = async (
       where: { isActive: true },
     });
     const sanitizedProductDetails: CreateProductDetailRequestModel[] = [];
+    // A product carries at most ONE detail per type (a table can't have two "Color"s) — which also
+    // caps the list at the number of active types.
+    const seenDetailTypes = new Set<number>();
     const reqProductDetails = productDetails as
       | CreateProductDetailRequestModel[]
       | undefined;
@@ -126,6 +148,13 @@ export const validateCreateProduct = async (
         });
         return;
       }
+      if (seenDetailTypes.has(detail.detailTypeId)) {
+        rejectCreate(res, "duplicateDetailType", {
+          detailTypeId: detail.detailTypeId,
+        });
+        return;
+      }
+      seenDetailTypes.add(detail.detailTypeId);
       if (!detail.detail || !fullNameRegex.test(detail.detail)) {
         rejectCreate(res, "invalidDetail", { detail: detail.detail });
         return;
@@ -136,9 +165,52 @@ export const validateCreateProduct = async (
       });
     }
 
+    // Gallery images (optional): keys must match OUR presign shape, no duplicates, at most one
+    // explicit primary. When none is flagged the FIRST image becomes the primary (the UI default).
+    const reqImages = images as CreateProductImageRequestModel[] | undefined;
+    if (reqImages !== undefined && !Array.isArray(reqImages)) {
+      rejectCreate(res, "invalidImages", { images });
+      return;
+    }
+    if ((reqImages?.length ?? 0) > appConfig.storage.maxImagesPerProduct) {
+      rejectCreate(res, "tooManyImages", {
+        count: reqImages?.length,
+        max: appConfig.storage.maxImagesPerProduct,
+      });
+      return;
+    }
+    const imageKeyRegex = buildProductImageKeyRegex();
+    const seenImageKeys = new Set<string>();
+    let primaryCount = 0;
+    for (const image of reqImages ?? []) {
+      if (typeof image?.key !== "string" || !imageKeyRegex.test(image.key)) {
+        rejectCreate(res, "invalidImageKey", { key: image?.key });
+        return;
+      }
+      if (seenImageKeys.has(image.key)) {
+        rejectCreate(res, "duplicateImageKey", { key: image.key });
+        return;
+      }
+      seenImageKeys.add(image.key);
+      if (image.isPrimary === true) {
+        primaryCount += 1;
+      }
+    }
+    if (primaryCount > 1) {
+      rejectCreate(res, "multiplePrimaryImages", { primaryCount });
+      return;
+    }
+    const sanitizedImages: CreateProductImageRequestModel[] = (
+      reqImages ?? []
+    ).map((image, index) => ({
+      key: image.key,
+      isPrimary: primaryCount === 0 ? index === 0 : image.isPrimary === true,
+    }));
+
     if (
       (!quantity && quantity !== 0) ||
       typeof quantity !== "number" ||
+      !Number.isInteger(quantity) ||
       quantity < 0 ||
       quantity > appConfig.maxGlobalQuantity
     ) {
@@ -205,6 +277,7 @@ export const validateCreateProduct = async (
       categoryId,
       currencyId,
       description: description?.trim() ? description.trim() : undefined,
+      images: sanitizedImages,
       name: name.trim(),
       productDetails: sanitizedProductDetails,
       quantity,
@@ -416,6 +489,7 @@ export const validateUpdateProduct = async (
     if (
       (!quantity && quantity !== 0) ||
       typeof quantity !== "number" ||
+      !Number.isInteger(quantity) ||
       quantity < 0 ||
       quantity > appConfig.maxGlobalQuantity
     ) {
@@ -505,6 +579,7 @@ export const validateUpdateProduct = async (
       currencyId,
       description: description?.trim(),
       id: id,
+      images: [], // WIP: gallery edits land with the update rebuild.
       name: name.trim(),
       productDetails: sanitizedProductDetails,
       quantity,
@@ -525,6 +600,92 @@ export const validateUpdateProduct = async (
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
       i18next.t("products.updateProduct.validators.validationError"),
+    );
+  }
+};
+
+/** Log the upload-url validator warning for `key` and send its standard 400. */
+const rejectUploads = (
+  res: Response,
+  key: string,
+  logParams: Record<string, unknown>,
+): void => {
+  logger.warn(
+    i18next.t(`products.imageUploads.validators.logs.${key}`, logParams),
+  );
+  sendOzariError(
+    res,
+    HttpEnum.BAD_REQUEST,
+    i18next.t(`products.imageUploads.validators.${key}`),
+  );
+};
+
+/**
+ * `POST /products/images/upload-url` body: `{ files: [{ contentType, contentLength }] }`.
+ * Mirrors the storage policy (whitelisted types, size cap, gallery cap) so a bad request is a clean
+ * 400 here and `StorageValidationError` in the controller is reserved for genuine drift. No DB reads.
+ */
+export const validateCreateProductImageUploads = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void => {
+  try {
+    const { files } = req.body as CreateProductImageUploadsRequestModel;
+
+    if (!Array.isArray(files) || files.length === 0) {
+      rejectUploads(res, "invalidFiles", { files });
+      return;
+    }
+    if (files.length > appConfig.storage.maxImagesPerProduct) {
+      rejectUploads(res, "tooManyFiles", {
+        count: files.length,
+        max: appConfig.storage.maxImagesPerProduct,
+      });
+      return;
+    }
+
+    const sanitizedFiles: ProductImageUploadFileModel[] = [];
+    for (const file of files) {
+      const contentType = file?.contentType;
+      if (
+        typeof contentType !== "string" ||
+        !(contentType in appConfig.storage.allowedImageTypes)
+      ) {
+        rejectUploads(res, "invalidContentType", { contentType });
+        return;
+      }
+      const contentLength = file.contentLength;
+      if (
+        typeof contentLength !== "number" ||
+        !Number.isInteger(contentLength) ||
+        contentLength <= 0 ||
+        contentLength > appConfig.storage.maxUploadBytes
+      ) {
+        rejectUploads(res, "invalidContentLength", {
+          contentLength,
+          max: appConfig.storage.maxUploadBytes,
+        });
+        return;
+      }
+      sanitizedFiles.push({ contentType, contentLength });
+    }
+
+    const validatedBody: CreateProductImageUploadsRequestModel = {
+      files: sanitizedFiles,
+    };
+    req.body = validatedBody;
+    next();
+  } catch (error) {
+    logger.error(
+      i18next.t("products.imageUploads.validators.logs.validationError", {
+        error,
+      }),
+    );
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("products.imageUploads.validators.validationError"),
     );
   }
 };

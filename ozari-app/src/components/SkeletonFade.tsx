@@ -19,13 +19,15 @@ export interface SkeletonFadeProps {
    */
   contentClassName?: string;
   /**
-   * Also morph the wrapper's WIDTH from the skeleton to the content on reveal, in step with the
-   * crossfade — for a container whose width depends on the data (e.g. the header pill adapting to the
-   * user's name) so it eases open/closed instead of snapping. Opt-in; fixed-width loaders don't need
-   * it. Needs a real `className` display where `width` applies (a flex item, `inline-block`, …).
+   * Also morph the wrapper's SIZE from the skeleton to the content on reveal, in step with the
+   * crossfade — for a container whose size depends on the data so it eases open/closed instead of
+   * snapping. `true`/`'width'` = width only (e.g. the header pill adapting to the user's name);
+   * `'height'` = height only (e.g. a block column whose skeleton approximates the final sections);
+   * `'both'` = both axes. Opt-in; fixed-size loaders don't need it. Needs a real `className` display
+   * where the dimension applies (a flex item, `inline-block`, `block`, …).
    */
-  animateSize?: boolean;
-  /** Crossfade duration (ms). Also the width-morph duration when `animateSize`. */
+  animateSize?: boolean | 'width' | 'height' | 'both';
+  /** Crossfade duration (ms). Also the size-morph duration when `animateSize`. */
   durationMs?: number;
 }
 
@@ -39,9 +41,10 @@ export interface SkeletonFadeProps {
  *
  * The reveal is a single GSAP tween pair (content opacity in, skeleton opacity out) — one mechanism
  * so the two never fight or mis-time (a CSS-transition + rAF approach was fragile, especially next to
- * the width morph). With `animateSize`, the wrapper width additionally eases from the skeleton width
- * to the content's natural width, concurrently. Reduced-motion → instant. Shared by every skeleton
- * loader (settings, the header pill/menu, the MFA setup modal) so "loading → loaded" reads the same.
+ * the size morph). With `animateSize`, the wrapper width and/or height additionally eases from the
+ * skeleton's size to the content's natural size, concurrently. Reduced-motion → instant. Shared by
+ * every skeleton loader (settings, the header pill/menu, the MFA setup modal, the product create
+ * form) so "loading → loaded" reads the same.
  */
 const SkeletonFade: React.FC<SkeletonFadeProps> = ({
   loading,
@@ -65,18 +68,23 @@ const SkeletonFade: React.FC<SkeletonFadeProps> = ({
     if (loading) setSkeletonMounted(true);
   }
 
+  const morphWidth = animateSize === true || animateSize === 'width' || animateSize === 'both';
+  const morphHeight = animateSize === 'height' || animateSize === 'both';
+
   const wrapperRef = useRef<HTMLSpanElement>(null);
   const contentRef = useRef<HTMLSpanElement>(null);
   const overlayRef = useRef<HTMLSpanElement>(null);
   const skeletonWidthRef = useRef(0);
+  const skeletonHeightRef = useRef(0);
 
-  // Remember the skeleton's rendered width while it's in flow, so we can morph FROM it on reveal.
+  // Remember the skeleton's rendered size while it's in flow, so we can morph FROM it on reveal.
   useLayoutEffect(() => {
-    if (!animateSize || !loading) return;
+    if ((!morphWidth && !morphHeight) || !loading) return;
     const el = wrapperRef.current;
     /* v8 ignore next -- the wrapper is always mounted while loading */
     if (!el) return;
     skeletonWidthRef.current = el.offsetWidth;
+    skeletonHeightRef.current = el.offsetHeight;
   });
 
   // The reveal. Crossfade the content in + the skeleton out together (GSAP, so they're guaranteed
@@ -102,35 +110,36 @@ const SkeletonFade: React.FC<SkeletonFadeProps> = ({
       ),
     ];
 
-    // Morph the width alongside the fade (same duration + ease) so the box resizes AS the content
+    // Morph the size alongside the fade (same duration + ease) so the box resizes AS the content
     // appears — one concurrent motion, not resize-then-pop.
-    if (animateSize && seconds > 0) {
-      const from = skeletonWidthRef.current;
-      const to = wrapper.offsetWidth;
-      if (from !== to) {
+    if (seconds > 0) {
+      const morphAxis = (property: 'width' | 'height', from: number, to: number): void => {
+        if (from === to) return;
         tweens.push(
           gsap.fromTo(
             wrapper,
-            { width: from },
+            { [property]: from },
             {
-              width: to,
+              [property]: to,
               duration: seconds,
               ease,
               onStart: () => {
                 wrapper.style.overflow = 'hidden';
               },
               onComplete: () => {
-                wrapper.style.width = '';
+                wrapper.style[property] = '';
                 wrapper.style.overflow = '';
               },
             },
           ),
         );
-      }
+      };
+      if (morphWidth) morphAxis('width', skeletonWidthRef.current, wrapper.offsetWidth);
+      if (morphHeight) morphAxis('height', skeletonHeightRef.current, wrapper.offsetHeight);
     }
 
     return () => tweens.forEach((tween) => tween.kill());
-  }, [loading, skeletonMounted, animateSize, durationMs]);
+  }, [loading, skeletonMounted, morphWidth, morphHeight, durationMs]);
 
   return (
     <span ref={wrapperRef} className={twMerge('relative', className)}>

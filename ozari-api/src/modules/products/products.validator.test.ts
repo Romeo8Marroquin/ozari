@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import type { Request, Response, NextFunction } from "express";
 import {
   validateCreateProduct,
+  validateCreateProductImageUploads,
   validateUpdateProduct,
 } from "./products.validator.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
@@ -36,8 +37,23 @@ vi.mock("@/config/app.js", () => ({
     host: "http://localhost:3000",
     maxGlobalAmount: 1000000,
     maxGlobalQuantity: 5000,
+    storage: {
+      maxUploadBytes: 5 * 1024 * 1024,
+      maxImagesPerProduct: 8,
+      allowedImageTypes: {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/webp": "webp",
+        "image/avif": "avif",
+      },
+      keyPrefixes: { product: "products" },
+    },
   },
 }));
+
+/** A key exactly as the upload-url endpoint mints them (uuid v4 + whitelisted extension). */
+const mintedKey = (n: number, ext = "webp") =>
+  `products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0${n}.${ext}`;
 
 /** Prisma with every lookup VALID — individual tests override the piece they need to fail. */
 const mockValidPrisma = async () => {
@@ -164,6 +180,19 @@ describe("Products Validator", () => {
       expectRejected("invalidDetailTypeId");
     });
 
+    it("should reject two details of the same type (one per type)", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validRentBody(),
+        productDetails: [
+          { detailTypeId: 1, detail: "Blanco nieve" },
+          { detailTypeId: 1, detail: "Negro mate ok" },
+        ],
+      };
+      await run();
+      expectRejected("duplicateDetailType");
+    });
+
     it("should reject a detail with malformed text", async () => {
       await mockValidPrisma();
       mockReq.body = {
@@ -179,6 +208,105 @@ describe("Products Validator", () => {
       mockReq.body = { ...validRentBody(), quantity: 5001 };
       await run();
       expectRejected("invalidQuantity");
+    });
+
+    it("should reject a non-integer quantity", async () => {
+      await mockValidPrisma();
+      mockReq.body = { ...validRentBody(), quantity: 3.5 };
+      await run();
+      expectRejected("invalidQuantity");
+    });
+
+    // ── Gallery images ────────────────────────────────────────────────────────────────────────
+
+    it("should reject a non-array images value", async () => {
+      await mockValidPrisma();
+      mockReq.body = { ...validRentBody(), images: "products/x.webp" };
+      await run();
+      expectRejected("invalidImages");
+    });
+
+    it("should reject more images than the gallery cap", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validRentBody(),
+        images: Array.from({ length: 9 }, (_, i) => ({ key: mintedKey(i) })),
+      };
+      await run();
+      expectRejected("tooManyImages");
+    });
+
+    it("should reject a key that our presign flow could not have minted", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validRentBody(),
+        images: [{ key: "products/../users/1.webp" }],
+      };
+      await run();
+      expectRejected("invalidImageKey");
+    });
+
+    it("should reject a key with a non-whitelisted extension", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validRentBody(),
+        images: [{ key: mintedKey(1, "svg") }],
+      };
+      await run();
+      expectRejected("invalidImageKey");
+    });
+
+    it("should reject a duplicated key", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validRentBody(),
+        images: [{ key: mintedKey(1) }, { key: mintedKey(1) }],
+      };
+      await run();
+      expectRejected("duplicateImageKey");
+    });
+
+    it("should reject more than one primary image", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validRentBody(),
+        images: [
+          { key: mintedKey(1), isPrimary: true },
+          { key: mintedKey(2), isPrimary: true },
+        ],
+      };
+      await run();
+      expectRejected("multiplePrimaryImages");
+    });
+
+    it("defaults the FIRST image to primary when none is flagged", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validRentBody(),
+        images: [{ key: mintedKey(1) }, { key: mintedKey(2) }],
+      };
+      await run();
+
+      expect(mockNext).toHaveBeenCalled();
+      expect((mockReq.body as { images: unknown }).images).toEqual([
+        { key: mintedKey(1), isPrimary: true },
+        { key: mintedKey(2), isPrimary: false },
+      ]);
+    });
+
+    it("honours an explicit primary flag on a non-first image", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validRentBody(),
+        images: [{ key: mintedKey(1) }, { key: mintedKey(2), isPrimary: true }],
+      };
+      await run();
+
+      expect(mockNext).toHaveBeenCalled();
+      expect((mockReq.body as { images: unknown }).images).toEqual([
+        { key: mintedKey(1), isPrimary: false },
+        { key: mintedKey(2), isPrimary: true },
+      ]);
     });
 
     it("should reject a non-numeric rentPrice", async () => {
@@ -277,6 +405,7 @@ describe("Products Validator", () => {
         categoryId: 1,
         currencyId: 1,
         description: "Mesa para 8 personas",
+        images: [],
         name: "Mesa redonda blanca",
         productDetails: [{ detailTypeId: 1, detail: "Blanco nieve" }],
         quantity: 40,
@@ -298,6 +427,7 @@ describe("Products Validator", () => {
         categoryId: 1,
         currencyId: 1,
         description: undefined,
+        images: [],
         name: "Vasos plásticos",
         productDetails: [],
         quantity: 100,
@@ -313,6 +443,113 @@ describe("Products Validator", () => {
       (getPrismaClient as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("db down"));
       mockReq.body = validRentBody();
       await run();
+
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.INTERNAL_SERVER_ERROR);
+    });
+  });
+
+  describe("validateCreateProductImageUploads", () => {
+    const runUploads = () =>
+      validateCreateProductImageUploads(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
+
+    const expectUploadsRejected = (key: string) => {
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.BAD_REQUEST);
+      expect(lastErrorKey()).toBe(`products.imageUploads.validators.${key}`);
+    };
+
+    it("should reject a missing files array", () => {
+      mockReq.body = {};
+      runUploads();
+      expectUploadsRejected("invalidFiles");
+    });
+
+    it("should reject an empty files array", () => {
+      mockReq.body = { files: [] };
+      runUploads();
+      expectUploadsRejected("invalidFiles");
+    });
+
+    it("should reject more files than the gallery cap", () => {
+      mockReq.body = {
+        files: Array.from({ length: 9 }, () => ({
+          contentType: "image/webp",
+          contentLength: 1024,
+        })),
+      };
+      runUploads();
+      expectUploadsRejected("tooManyFiles");
+    });
+
+    it("should reject a non-whitelisted content type", () => {
+      mockReq.body = {
+        files: [{ contentType: "image/svg+xml", contentLength: 1024 }],
+      };
+      runUploads();
+      expectUploadsRejected("invalidContentType");
+    });
+
+    it("should reject an oversized file", () => {
+      mockReq.body = {
+        files: [{ contentType: "image/webp", contentLength: 5 * 1024 * 1024 + 1 }],
+      };
+      runUploads();
+      expectUploadsRejected("invalidContentLength");
+    });
+
+    it("should reject a non-integer content length", () => {
+      mockReq.body = {
+        files: [{ contentType: "image/png", contentLength: 10.5 }],
+      };
+      runUploads();
+      expectUploadsRejected("invalidContentLength");
+    });
+
+    it("should reject a zero/negative content length", () => {
+      mockReq.body = {
+        files: [{ contentType: "image/png", contentLength: 0 }],
+      };
+      runUploads();
+      expectUploadsRejected("invalidContentLength");
+    });
+
+    it("passes a valid request and strips unknown fields", () => {
+      mockReq.body = {
+        files: [
+          { contentType: "image/webp", contentLength: 245760, extra: "ignored" },
+          { contentType: "image/jpeg", contentLength: 1024 },
+        ],
+        extraTop: "ignored",
+      };
+      runUploads();
+
+      expect(sendOzariError).not.toHaveBeenCalled();
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.body).toEqual({
+        files: [
+          { contentType: "image/webp", contentLength: 245760 },
+          { contentType: "image/jpeg", contentLength: 1024 },
+        ],
+      });
+    });
+
+    it("sends a 500 when reading the body throws", () => {
+      const throwingReq = {} as Request;
+      Object.defineProperty(throwingReq, "body", {
+        get() {
+          throw new Error("boom");
+        },
+      });
+      validateCreateProductImageUploads(
+        throwingReq,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
 
       expect(mockNext).not.toHaveBeenCalled();
       expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.INTERNAL_SERVER_ERROR);

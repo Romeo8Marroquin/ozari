@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import type { Response } from "express";
 import {
   createProduct,
+  createProductImageUploads,
   getProductCatalog,
   getProducts,
 } from "./products.controller.js";
+import { getStorage, StorageValidationError } from "@helpers/storage.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { logAudit } from "@/config/auditLogger.js";
 import { isDeployedEnvironment } from "@/config/environment.js";
@@ -19,7 +21,7 @@ import {
   type ProductListResponseModel,
 } from "./products.models.js";
 
-vi.mock("@/config/logger.js", () => ({ logger: { info: vi.fn(), error: vi.fn() } }));
+vi.mock("@/config/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("@/config/i18n.js", () => ({ i18next: { t: vi.fn((key: string) => key) } }));
 vi.mock("@/services/prisma.service.js", () => ({ getPrismaClient: vi.fn() }));
 vi.mock("@models/http/ozariSuccessModel.js", () => ({ sendOzariSuccess: vi.fn() }));
@@ -29,6 +31,10 @@ vi.mock("@/config/auditLogger.js", () => ({
   logAudit: vi.fn(),
 }));
 vi.mock("@/config/environment.js", () => ({ isDeployedEnvironment: vi.fn(() => false) }));
+vi.mock("@helpers/storage.js", () => ({
+  getStorage: vi.fn(),
+  StorageValidationError: class StorageValidationError extends Error {},
+}));
 
 const rawProduct = {
   id: 7,
@@ -115,6 +121,7 @@ const createBody = {
   categoryId: 1,
   currencyId: 1,
   description: "Mesa para 8 personas",
+  images: [],
   name: "Mesa redonda",
   productDetails: [{ detailTypeId: 1, detail: "Blanco" }],
   quantity: 40,
@@ -172,6 +179,42 @@ describe("createProduct", () => {
     );
   });
 
+  it("nested-creates gallery images with server-derived URLs (never a client URL)", async () => {
+    (getStorage as Mock).mockReturnValue({
+      getPublicUrl: (key: string) => `https://cdn.test/${key}`,
+    });
+    const { create } = mockCreate();
+    const key1 = "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c01.webp";
+    const key2 = "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c02.jpg";
+    await createProduct(
+      buildCreateReq({
+        ...createBody,
+        images: [
+          { key: key1, isPrimary: false },
+          { key: key2, isPrimary: true },
+        ],
+      }),
+      {} as Response,
+    );
+
+    const data = (create.mock.calls[0]?.[0] as { data: Record<string, unknown> }).data;
+    expect(data["productImages"]).toEqual({
+      create: [
+        { r2Key: key1, url: `https://cdn.test/${key1}`, isPrimary: false, sortOrder: 0 },
+        { r2Key: key2, url: `https://cdn.test/${key2}`, isPrimary: true, sortOrder: 1 },
+      ],
+    });
+  });
+
+  it("never touches storage on an image-less create (works without the R2 env)", async () => {
+    const { create } = mockCreate();
+    await createProduct(buildCreateReq(), {} as Response);
+
+    expect(getStorage).not.toHaveBeenCalled();
+    const data = (create.mock.calls[0]?.[0] as { data: Record<string, unknown> }).data;
+    expect(data).not.toHaveProperty("productImages");
+  });
+
   it("omits the nested details create when the list is empty", async () => {
     const { create } = mockCreate();
     await createProduct(buildCreateReq({ ...createBody, productDetails: [] }), {} as Response);
@@ -214,6 +257,78 @@ describe("createProduct", () => {
     });
     await createProduct(buildCreateReq(), {} as Response);
     expect(sendOzariError).toHaveBeenCalled();
+    expect(sendOzariSuccess).not.toHaveBeenCalled();
+  });
+});
+
+describe("createProductImageUploads", () => {
+  const uploadsBody = {
+    files: [
+      { contentType: "image/webp", contentLength: 245760 },
+      { contentType: "image/jpeg", contentLength: 1024 },
+    ],
+  };
+
+  it("mints one presigned upload per file (kind: product) and responds 200 in order", async () => {
+    const createUpload = vi
+      .fn()
+      .mockImplementation(({ contentType }: { contentType: string }) =>
+        Promise.resolve({
+          uploadUrl: `https://r2.test/put/${contentType}`,
+          key: `products/key-${contentType}`,
+          publicUrl: `https://cdn.test/${contentType}`,
+        }),
+      );
+    (getStorage as Mock).mockReturnValue({ createUpload });
+
+    await createProductImageUploads(buildCreateReq(uploadsBody), {} as Response);
+
+    expect(createUpload).toHaveBeenCalledTimes(2);
+    expect(createUpload).toHaveBeenCalledWith({
+      kind: "product",
+      contentType: "image/webp",
+      contentLength: 245760,
+    });
+    expect(sendOzariSuccess).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.OK,
+      "products.imageUploads.uploadsCreated",
+      {
+        uploads: [
+          expect.objectContaining({ key: "products/key-image/webp" }),
+          expect.objectContaining({ key: "products/key-image/jpeg" }),
+        ],
+      },
+    );
+  });
+
+  it("maps a StorageValidationError to a clean 400 (policy drift, not a crash)", async () => {
+    (getStorage as Mock).mockReturnValue({
+      createUpload: vi.fn().mockRejectedValue(new StorageValidationError("bad type")),
+    });
+
+    await createProductImageUploads(buildCreateReq(uploadsBody), {} as Response);
+
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.BAD_REQUEST,
+      "products.imageUploads.validators.invalidFiles",
+    );
+    expect(sendOzariSuccess).not.toHaveBeenCalled();
+  });
+
+  it("sends a 500 when the storage client fails", async () => {
+    (getStorage as Mock).mockReturnValue({
+      createUpload: vi.fn().mockRejectedValue(new Error("r2 down")),
+    });
+
+    await createProductImageUploads(buildCreateReq(uploadsBody), {} as Response);
+
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      "products.imageUploads.errorCreatingUploads",
+    );
     expect(sendOzariSuccess).not.toHaveBeenCalled();
   });
 });

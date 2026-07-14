@@ -1,7 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
 import { appConfig } from "@/config/app.js";
+import { getStorage } from "@helpers/storage.js";
 import {
+  type CreateProductImageRequestModel,
   type PaginationMeta,
   type ProductListItemResponseModel,
 } from "./products.models.js";
@@ -140,6 +142,31 @@ function clampInt(
     return fallback;
   }
   return Math.min(Math.max(parsed, min), max);
+}
+
+/**
+ * The Prisma nested-create payload for a create's gallery images, or `undefined` when there are
+ * none. Resolves the storage client ONLY when images exist — an image-less create must never depend
+ * on the R2 env being configured. The public `url` is derived **server-side** from the validated
+ * key (a client-sent URL is never persisted); array order = `sortOrder`.
+ */
+export function buildProductImagesCreate(
+  images: CreateProductImageRequestModel[] | undefined,
+): Prisma.ProductImageCreateNestedManyWithoutProductInput | undefined {
+  // `?? []` = the same never-assume stance the controller takes on the role.
+  const list = images ?? [];
+  if (list.length === 0) {
+    return undefined;
+  }
+  const storage = getStorage();
+  return {
+    create: list.map((image, index) => ({
+      r2Key: image.key,
+      url: storage.getPublicUrl(image.key),
+      isPrimary: image.isPrimary === true,
+      sortOrder: index,
+    })),
+  };
 }
 
 /** Builds the pagination envelope returned alongside the products. */

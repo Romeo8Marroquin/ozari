@@ -106,7 +106,7 @@ const ErrorScreen: React.FC<ErrorScreenProps> = ({
     <section
       ref={container}
       className={`relative flex w-full items-center justify-center overflow-hidden px-6 py-16 ${
-        fill === 'screen' ? 'min-h-screen' : 'min-h-full flex-1'
+        fill === 'screen' ? 'min-h-dvh' : 'min-h-full flex-1'
       }`}
       style={{ background: 'radial-gradient(120% 120% at 50% 0%, #faf7fa 0%, #efeaf0 58%, #e7dced 100%)' }}
     >

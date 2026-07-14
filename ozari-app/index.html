@@ -3,17 +3,39 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/assets/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- interactive-widget=resizes-content: the on-screen keyboard SHRINKS the layout viewport
+         (Chrome/Edge Android) instead of overlaying it — so there is no dead over-scroll strip
+         below the app, and submit buttons stay reachable above the keyboard. Our shells are built
+         for it: the panel is h-dvh with internal scrolling and the auth section is min-h-dvh with
+         overflow-auto, so they shrink + scroll instead of squishing. iOS ignores this hint (its
+         keyboard pans/overlays); the html/body canvas tint in index.css covers its overscroll. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
+    />
 
     <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <!-- CSP notes (the tight script-src 'self' is what carries the security weight):
+         · img-src `blob:` = the product-form gallery previews (URL.createObjectURL);
+           `*.partyrentalsgt.com` = the uploaded photos' public hosts (the R2 buckets' custom
+           domains — assets-stg. today, assets. for prod later; our own apex, NOT a blanket https:).
+         · connect-src `*.r2.cloudflarestorage.com` = the browser PUTs gallery photos STRAIGHT to R2
+           via presigned URLs (the bytes never pass through the API); wildcard because the exact
+           account host is deliberately not committed to this public file. NOTE: the BUCKET must
+           also allow the app origins in its own CORS policy (DEPLOYMENT.md §3b.4) — CORS is a
+           browser gate only; the real upload authorization is the presigned signature itself.
+         · worker-src `blob:` = dev tooling (Vite) spawns blob workers; harmless — creating one
+           requires already-executing script, which script-src restricts to 'self'. -->
+
     <meta
       http-equiv="Content-Security-Policy"
       content="
         default-src 'self';
         style-src 'self' 'unsafe-inline';
         script-src 'self';
-        img-src 'self' data:;
-        connect-src 'self' https://ozari-api-694756660984.northamerica-south1.run.app;
+        img-src 'self' data: blob: https://*.partyrentalsgt.com;
+        connect-src 'self' https://ozari-api-694756660984.northamerica-south1.run.app https://*.r2.cloudflarestorage.com;
+        worker-src 'self' blob:;
         font-src 'self';
       "
     />

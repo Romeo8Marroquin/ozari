@@ -1,13 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
 import { appConfig } from "@/config/app.js";
+import { getStorage } from "@helpers/storage.js";
 import {
   buildPaginationMeta,
+  buildProductImagesCreate,
   buildProductListWhere,
   parseProductListQuery,
   projectProductForRole,
   type RichProduct,
 } from "./products.service.js";
+
+vi.mock("@helpers/storage.js", () => ({ getStorage: vi.fn() }));
 
 /** A full product row shaped like `richProductInclude`'s payload (numbers stand in for Decimals). */
 const makeProduct = (overrides: Partial<RichProduct> = {}): RichProduct =>
@@ -132,5 +136,30 @@ describe("buildPaginationMeta", () => {
   it("computes totalPages by ceiling, with a floor of 1", () => {
     expect(buildPaginationMeta(1, 24, 0)).toEqual({ page: 1, pageSize: 24, total: 0, totalPages: 1 });
     expect(buildPaginationMeta(2, 10, 25)).toEqual({ page: 2, pageSize: 10, total: 25, totalPages: 3 });
+  });
+});
+
+describe("buildProductImagesCreate", () => {
+  it("returns undefined (and never touches storage) for absent or empty images", () => {
+    expect(buildProductImagesCreate(undefined)).toBeUndefined();
+    expect(buildProductImagesCreate([])).toBeUndefined();
+    expect(getStorage).not.toHaveBeenCalled();
+  });
+
+  it("maps keys to server-derived URLs with array order as sortOrder", () => {
+    (getStorage as Mock).mockReturnValue({
+      getPublicUrl: (key: string) => `https://cdn.test/${key}`,
+    });
+    const result = buildProductImagesCreate([
+      { key: "products/k1.webp", isPrimary: false },
+      { key: "products/k2.jpg", isPrimary: true },
+    ]);
+
+    expect(result).toEqual({
+      create: [
+        { r2Key: "products/k1.webp", url: "https://cdn.test/products/k1.webp", isPrimary: false, sortOrder: 0 },
+        { r2Key: "products/k2.jpg", url: "https://cdn.test/products/k2.jpg", isPrimary: true, sortOrder: 1 },
+      ],
+    });
   });
 });

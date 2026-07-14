@@ -25,3 +25,5 @@ dist-ssr
 
 # Envs
 .env
+# TanStack Router build artifacts
+.tanstack

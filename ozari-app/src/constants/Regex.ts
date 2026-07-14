@@ -37,3 +37,9 @@ export const PRODUCT_DESCRIPTION_REGEX = /^(?=.{5,500}$)[A-Za-zÀ-ÖØ-öø-ÿ0-
 // Money and quantity ceilings — mirror `appConfig.maxGlobalAmount` / `maxGlobalQuantity`.
 export const PRODUCT_MAX_AMOUNT = 1000000;
 export const PRODUCT_MAX_QUANTITY = 5000;
+
+// Gallery upload policy — mirrors `appConfig.storage` (the backend re-enforces all of it: the
+// content type + exact size are bound INTO each presigned URL, and the create endpoint caps images).
+export const PRODUCT_IMAGE_MAX_COUNT = 8;
+export const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+export const PRODUCT_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];

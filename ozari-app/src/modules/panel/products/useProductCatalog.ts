@@ -10,6 +10,10 @@ import type { ProductCatalog } from './product.types';
  * Reads the product reference lookups (`GET /products/catalog`) the create/edit form renders as
  * selects. Seeded data that effectively never changes mid-session → `staleTime: Infinity` (a page
  * reload refetches). Gated on a stored token like every panel query.
+ *
+ * To PREVIEW the form's catalog-error panel in dev: DevTools → Network → right-click the
+ * `/products/catalog` request → "Block request URL", then reload (unblock + "Reintentar" to
+ * recover) — no code toggle needed.
  */
 export function useProductCatalog() {
   return useQuery({

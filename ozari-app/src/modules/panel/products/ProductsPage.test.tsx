@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+﻿import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,8 +8,9 @@ const { useProducts } = vi.hoisted(() => ({ useProducts: vi.fn() }));
 vi.mock('./useProducts', () => ({ useProducts }));
 
 // RoleGate's visibility is what makes the "add" affordance Admin-only — drive it directly.
+// (`useRole` feeds the card's glass actions; null = no actions, which these tests don't exercise.)
 const { useHasRole } = vi.hoisted(() => ({ useHasRole: vi.fn() }));
-vi.mock('@hooks/useRole', () => ({ useHasRole }));
+vi.mock('@hooks/useRole', () => ({ useHasRole, useRole: () => null }));
 
 import { PanelNavContext, type PanelNav } from '../PanelNavContext';
 import { PanelPageTransitionContext, type PanelPageMotion } from '../PanelPageTransitionContext';
@@ -70,6 +71,7 @@ const renderPage = () => {
 
 const K = 'modules.panel.products';
 const addName = `${K}.add`;
+const cardName = `${K}.card.viewDetails`;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -83,8 +85,11 @@ describe('ProductsPage', () => {
     renderPage();
 
     expect(screen.getByRole('status', { name: `${K}.loading` })).toBeInTheDocument();
+    // The header row is on screen from the FIRST frame (it needs no data), so the grid never
+    // jumps down later to make room for it.
+    expect(screen.getByText(`${K}.lead`)).toBeInTheDocument();
     // No real cards, and no add button for a (default) non-admin.
-    expect(screen.queryByRole('article')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: new RegExp(cardName) })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: addName })).not.toBeInTheDocument();
   });
 
@@ -92,11 +97,12 @@ describe('ProductsPage', () => {
     setProducts(withProducts([product(1, 'Mesa redonda'), product(2, 'Silla Tiffany')]));
     renderPage();
 
-    // The lead/header only appears when there IS a catalog to explore.
+    // The lead/header only appears when there IS a catalog to explore. Each card paints its name
+    // on both the scrim and the glass overlay, hence getAllByText.
     expect(screen.getByText(`${K}.lead`)).toBeInTheDocument();
-    expect(screen.getByText('Mesa redonda')).toBeInTheDocument();
-    expect(screen.getByText('Silla Tiffany')).toBeInTheDocument();
-    expect(screen.getAllByRole('article')).toHaveLength(2);
+    expect(screen.getAllByText('Mesa redonda').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Silla Tiffany').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: new RegExp(cardName) })).toHaveLength(2);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: addName })).not.toBeInTheDocument();
   });
@@ -145,18 +151,62 @@ describe('ProductsPage', () => {
     const { rerender } = renderPage();
     expect(screen.getByRole('status')).toBeInTheDocument();
 
-    // Data arrives → the skeleton sweeps out (instant under reduced motion) and the grid mounts.
+    // Data arrives → the paired slot CROSSFADES into its card in place (instant under reduced
+    // motion) and the orphan skeletons sweep out.
     setProducts(withProducts([product(1, 'Mesa redonda')]));
     rerender(<ProductsPage />);
 
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
-    expect(screen.getByText('Mesa redonda')).toBeInTheDocument();
+    expect(screen.getAllByText('Mesa redonda').length).toBeGreaterThan(0);
+    // The orphan skeleton cells finish their sweep and unmount — only the card slot remains.
+    await waitFor(() =>
+      expect(document.querySelectorAll('.product-skel-orphan')).toHaveLength(0),
+    );
+    expect(screen.getAllByRole('button', { name: new RegExp(cardName) })).toHaveLength(1);
+  });
+
+  it('sweeps in surplus cards when the data outnumbers the skeleton slots', async () => {
+    setProducts({ data: undefined, isLoading: true, isFetching: true });
+    const { rerender } = renderPage();
+
+    // 13 products vs 12 skeleton slots → the 13th card is a late entry (`.grid-enter` sweep-in).
+    const many = Array.from({ length: 13 }, (_, i) => product(i + 1, `Producto ${i + 1}`));
+    setProducts(withProducts(many));
+    rerender(<ProductsPage />);
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: new RegExp(cardName) })).toHaveLength(13));
+  });
+
+  it('sweeps ALL skeletons out before the empty panel when the load resolves to nothing', async () => {
+    setProducts({ data: undefined, isLoading: true, isFetching: true });
+    const { rerender } = renderPage();
+
+    setProducts(withProducts([]));
+    rerender(<ProductsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: `${K}.empty.title` })).toBeInTheDocument(),
+    );
+    expect(document.querySelectorAll('.product-skel')).toHaveLength(0);
+  });
+
+  it('sweeps ALL skeletons out before the error panel when the load fails cold', async () => {
+    setProducts({ data: undefined, isLoading: true, isFetching: true });
+    const { rerender } = renderPage();
+
+    setProducts({ data: undefined, isError: true });
+    rerender(<ProductsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: `${K}.error.title` })).toBeInTheDocument(),
+    );
+    expect(document.querySelectorAll('.product-skel')).toHaveLength(0);
   });
 
   it('brings the skeleton back if the list drops into a cold reload', async () => {
     setProducts(withProducts([product(1, 'Mesa redonda')]));
     const { rerender } = renderPage();
-    expect(screen.getByText('Mesa redonda')).toBeInTheDocument();
+    expect(screen.getAllByText('Mesa redonda').length).toBeGreaterThan(0);
 
     setProducts({ data: undefined, isLoading: true, isFetching: true });
     rerender(<ProductsPage />);

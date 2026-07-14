@@ -1,4 +1,4 @@
-import { useLocation } from '@tanstack/react-router';
+﻿import { useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineBars3, HiOutlineBell } from 'react-icons/hi2';
 import { PANEL_NAV } from '../navConfig';
@@ -30,7 +30,7 @@ const Header: React.FC = () => {
             type="button"
             onClick={openMobile}
             aria-label={t('modules.panel.actions.openMenu')}
-            className={`-ml-1 grid size-10 cursor-pointer place-items-center rounded-xl text-charcoal/70 transition-colors hover:bg-charcoal/[0.05] hover:text-charcoal ${FOCUS_RING}`}
+            className={`-ml-1 grid size-10 cursor-pointer place-items-center rounded-xl text-charcoal/70 transition-[color,background-color,box-shadow] duration-200 hover:bg-charcoal/[0.05] hover:text-charcoal ${FOCUS_RING}`}
           >
             <HiOutlineBars3 aria-hidden className="size-6" />
           </button>
@@ -42,7 +42,7 @@ const Header: React.FC = () => {
         <button
           type="button"
           aria-label={t('modules.panel.actions.notifications')}
-          className={`relative grid size-10 cursor-pointer place-items-center rounded-xl text-charcoal/60 transition-colors hover:bg-charcoal/[0.05] hover:text-charcoal ${FOCUS_RING}`}
+          className={`relative grid size-10 cursor-pointer place-items-center rounded-xl text-charcoal/60 transition-[color,background-color,box-shadow] duration-200 hover:bg-charcoal/[0.05] hover:text-charcoal ${FOCUS_RING}`}
         >
           <HiOutlineBell aria-hidden className="size-5" />
           <span aria-hidden className="absolute right-2.5 top-2.5 size-2 rounded-full bg-magenta ring-2 ring-white" />

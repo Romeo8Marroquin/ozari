@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+﻿import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { Link, useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineChevronLeft, HiOutlineXMark } from 'react-icons/hi2';
@@ -74,7 +74,7 @@ const NavItem: React.FC<NavItemProps> = ({ item, collapsed, active, leaving, onN
       // `data-nav-to` is how it finds this item's element for a given path (route-active or pending).
       data-active={active ? 'true' : undefined}
       data-nav-to={item.to}
-      className={`panel-nav-item group relative flex h-11 items-center rounded-xl px-3.5 transition-colors ${FOCUS_RING} ${
+      className={`panel-nav-item group relative flex h-11 items-center rounded-xl px-3.5 transition-[color,background-color,box-shadow] duration-200 ${FOCUS_RING} ${
         active ? '' : 'hover:bg-charcoal/[0.04]'
       }`}
     >
@@ -91,7 +91,7 @@ const NavItem: React.FC<NavItemProps> = ({ item, collapsed, active, leaving, onN
       />
       <Icon
         aria-hidden
-        className={`relative size-5 shrink-0 transition-colors ${
+        className={`relative size-5 shrink-0 transition-[color,background-color,box-shadow] duration-200 ${
           active ? 'text-magenta' : 'text-charcoal/55 group-hover:text-charcoal/80'
         }`}
       />
@@ -229,7 +229,7 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
             type="button"
             onClick={onClose}
             aria-label={t('modules.panel.actions.closeMenu')}
-            className={`ml-auto grid size-9 cursor-pointer place-items-center rounded-lg text-charcoal/55 transition-colors hover:bg-charcoal/[0.05] hover:text-charcoal ${FOCUS_RING}`}
+            className={`ml-auto grid size-9 cursor-pointer place-items-center rounded-lg text-charcoal/55 transition-[color,background-color,box-shadow] duration-200 hover:bg-charcoal/[0.05] hover:text-charcoal ${FOCUS_RING}`}
           >
             <HiOutlineXMark aria-hidden className="size-5" />
           </button>
@@ -365,7 +365,7 @@ const Sidebar: React.FC = () => {
         type="button"
         onClick={toggleCollapsed}
         aria-label={t(collapsed ? 'modules.panel.actions.expand' : 'modules.panel.actions.collapse')}
-        className={`absolute -right-3.5 top-[calc(var(--spacing-header)-0.875rem)] z-20 grid size-7 cursor-pointer place-items-center rounded-full border border-charcoal/10 bg-white text-charcoal/55 shadow-[0_2px_8px_rgba(38,38,38,0.14)] transition-[color,transform,box-shadow,border-color] duration-[260ms] ${EASE} hover:scale-110 hover:border-charcoal/20 hover:text-charcoal hover:shadow-[0_5px_14px_rgba(38,38,38,0.20)] ${FOCUS_RING}`}
+        className={`absolute -right-3.5 top-[calc(var(--spacing-header)-0.875rem)] z-20 grid size-7 cursor-pointer place-items-center rounded-full border border-charcoal/10 bg-white text-charcoal/55 shadow-[0_2px_8px_rgba(38,38,38,0.14)] transition-[color,scale,box-shadow,border-color] duration-[260ms] ${EASE} hover:scale-110 hover:border-charcoal/20 hover:text-charcoal hover:shadow-[0_5px_14px_rgba(38,38,38,0.20)] ${FOCUS_RING}`}
       >
         <HiOutlineChevronLeft
           aria-hidden

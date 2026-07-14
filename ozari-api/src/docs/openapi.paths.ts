@@ -11,6 +11,7 @@ import {
  */
 
 // Obviously-fake example passwords reused across request-body examples (both meet the policy).
+const STALE_TOKEN_401 = "Missing, invalid, or revoked access token.";
 const EXAMPLE_PASSWORD = "Ex4mple!Secret";
 const EXAMPLE_NEW_PASSWORD = "N3w!Passw0rd";
 const EXAMPLE_EMAIL = "ana.garcia@example.com";
@@ -331,7 +332,7 @@ export const paths: OpenAPIV3.PathsObject = {
           createdAt: "2026-06-01T12:00:00.000Z",
           updatedAt: "2026-06-15T09:30:00.000Z",
         }, "Profile fetched"),
-        "401": unauthorized("Missing, invalid, or revoked access token."),
+        "401": unauthorized(STALE_TOKEN_401),
         "404": userNotFound(),
         "429": rateLimited,
         "500": serverError,
@@ -518,7 +519,7 @@ export const paths: OpenAPIV3.PathsObject = {
           ],
           pagination: { page: 1, pageSize: 15, total: 1, totalPages: 1 },
         }, "Products fetched"),
-        "401": unauthorized("Missing, invalid, or revoked access token."),
+        "401": unauthorized(STALE_TOKEN_401),
         "429": rateLimited,
         "500": serverError,
       },
@@ -528,11 +529,13 @@ export const paths: OpenAPIV3.PathsObject = {
       summary: "Create a product (admin only)",
       operationId: "createProduct",
       description:
-        "Creates a product (+ nested details). Requires the `Admin` role. The **conditional price " +
-        "rule** applies by business type — Alquiler: `rentPrice` + `rentTimeUnitId`, no `sellPrice`; " +
-        "Venta: `sellPrice` only. Any rule violation or unknown lookup id is a `400`. Returns the " +
-        "created product in the SAME role-projected shape the list uses. Images are attached later by " +
-        "the gallery flow. Authenticated limiter (100/min).",
+        "Creates a product (+ nested details + gallery images). Requires the `Admin` role. The " +
+        "**conditional price rule** applies by business type — Alquiler: `rentPrice` + " +
+        "`rentTimeUnitId`, no `sellPrice`; Venta: `sellPrice` only. `images` reference R2 keys " +
+        "minted by `/products/images/upload-url` (files already uploaded; at most one `isPrimary`, " +
+        "defaulting to the first). Any rule violation or unknown lookup id is a `400`. Returns the " +
+        "created product in the SAME role-projected shape the list uses. Authenticated limiter " +
+        "(100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       requestBody: bodyRef("CreateProductRequest", {
         name: "Mesa redonda",
@@ -545,6 +548,9 @@ export const paths: OpenAPIV3.PathsObject = {
         rentTimeUnitId: 2,
         replacementPrice: 900,
         productDetails: [{ detailTypeId: 1, detail: "Blanco" }],
+        images: [
+          { key: "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp", isPrimary: true },
+        ],
       }),
       responses: {
         "201": dataResponse(
@@ -575,7 +581,52 @@ export const paths: OpenAPIV3.PathsObject = {
           400,
           "Los precios enviados no corresponden al tipo de negocio del producto.",
         ),
-        "401": unauthorized("Missing, invalid, or revoked access token."),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": errorResponse("Authenticated but not an admin.", 403, "Forbidden"),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/products/images/upload-url": {
+    post: {
+      tags: ["Products"],
+      summary: "Mint presigned R2 upload URLs for gallery images (admin only)",
+      operationId: "createProductImageUploads",
+      description:
+        "Returns short-lived (5 min) **presigned PUT URLs** so the browser uploads product photos " +
+        "STRAIGHT to R2 — the image bytes never pass through the API. Requires the `Admin` role. " +
+        "1–8 files per call; each file's content type must be a whitelisted image type " +
+        "(`image/jpeg`, `image/png`, `image/webp`, `image/avif`) and its exact size ≤ 5 MB — both " +
+        "are bound into the signature, so a minted URL can't upload anything else. Reference the " +
+        "returned `key`s in `POST /products`. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      requestBody: bodyRef("CreateProductImageUploadsRequest", {
+        files: [{ contentType: "image/webp", contentLength: 245760 }],
+      }),
+      responses: {
+        "200": dataResponse(
+          "The minted uploads, in request order.",
+          "ProductImageUploads",
+          {
+            uploads: [
+              {
+                uploadUrl:
+                  "https://account.r2.cloudflarestorage.com/bucket/products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp?X-Amz-Signature=abc123",
+                key: "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp",
+                publicUrl: "https://cdn.example.com/products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp",
+              },
+            ],
+          },
+          "Upload URLs created",
+        ),
+        "400": errorResponse(
+          "Missing/empty file list, more than 8 files, a non-whitelisted content type, or an invalid size.",
+          400,
+          "El tipo de archivo no está permitido.",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
         "403": errorResponse("Authenticated but not an admin.", 403, "Forbidden"),
         "429": rateLimited,
         "500": serverError,
@@ -613,7 +664,7 @@ export const paths: OpenAPIV3.PathsObject = {
             { id: 2, name: "Día" },
           ],
         }, "Catalog fetched"),
-        "401": unauthorized("Missing, invalid, or revoked access token."),
+        "401": unauthorized(STALE_TOKEN_401),
         "429": rateLimited,
         "500": serverError,
       },

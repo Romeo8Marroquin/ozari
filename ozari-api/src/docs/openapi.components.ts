@@ -428,10 +428,12 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     required: ["businessTypeId", "categoryId", "currencyId", "name", "quantity"],
     description:
-      "Creates a product (+ nested details). The CONDITIONAL price rule applies by business type: " +
-      "**Alquiler** requires `rentPrice` + `rentTimeUnitId` and forbids `sellPrice`; **Venta** " +
-      "requires `sellPrice` and forbids the rent fields. `replacementPrice` (as-new value billed for " +
-      "a lost/damaged rental) is optional for both. Images are attached later by the gallery flow.",
+      "Creates a product (+ nested details + gallery images). The CONDITIONAL price rule applies by " +
+      "business type: **Alquiler** requires `rentPrice` + `rentTimeUnitId` and forbids `sellPrice`; " +
+      "**Venta** requires `sellPrice` and forbids the rent fields. `replacementPrice` (as-new value " +
+      "billed for a lost/damaged rental) is optional for both. `images` reference R2 keys previously " +
+      "minted by `/products/images/upload-url` (the files must already be uploaded); the public URL " +
+      "is derived server-side from each key.",
     properties: {
       name: { type: "string", minLength: 5, maxLength: 255, example: "Mesa redonda" },
       description: { type: "string", nullable: true, minLength: 5, maxLength: 500, example: "Mesa para 8 personas" },
@@ -445,13 +447,101 @@ export const schemas: Record<string, Schema> = {
       sellPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Venta; forbidden for Alquiler.", example: null },
       productDetails: {
         type: "array",
-        description: "Optional specs created with the product.",
+        description:
+          "Optional specs created with the product — at most ONE per detail type (a duplicate " +
+          "`detailTypeId` is a 400), which also caps the list at the number of active types.",
         items: {
           type: "object",
           required: ["detailTypeId", "detail"],
           properties: {
             detailTypeId: { type: "integer", example: 1 },
             detail: { type: "string", minLength: 5, maxLength: 255, example: "Blanco" },
+          },
+        },
+      },
+      images: {
+        type: "array",
+        maxItems: 8,
+        description:
+          "Optional gallery (max 8). Array order = `sortOrder`. At most ONE image may set " +
+          "`isPrimary: true`; when none does, the FIRST image becomes the primary.",
+        items: {
+          type: "object",
+          required: ["key"],
+          properties: {
+            key: {
+              type: "string",
+              description: "R2 object key minted by `/products/images/upload-url`.",
+              example: "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp",
+            },
+            isPrimary: { type: "boolean", example: true },
+          },
+        },
+      },
+    },
+  },
+  CreateProductImageUploadsRequest: {
+    type: "object",
+    required: ["files"],
+    description:
+      "Requests presigned R2 PUT URLs for product gallery uploads (1–8 per call). Each file's " +
+      "content type must be a whitelisted image type and its size within the 5 MB cap — both are " +
+      "bound INTO the signature, so a minted URL only works for exactly that file.",
+    properties: {
+      files: {
+        type: "array",
+        minItems: 1,
+        maxItems: 8,
+        items: {
+          type: "object",
+          required: ["contentType", "contentLength"],
+          properties: {
+            contentType: {
+              type: "string",
+              enum: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+              example: "image/webp",
+            },
+            contentLength: {
+              type: "integer",
+              minimum: 1,
+              maximum: 5242880,
+              description: "Exact file size in bytes (≤ 5 MB).",
+              example: 245760,
+            },
+          },
+        },
+      },
+    },
+  },
+  ProductImageUploads: {
+    type: "object",
+    description:
+      "The minted presigned uploads, in the same order as the requested files. PUT each file to its " +
+      "`uploadUrl` (with the exact content type + length), then reference `key` in `POST /products`.",
+    properties: {
+      uploads: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            uploadUrl: {
+              type: "string",
+              format: "uri",
+              description: "Short-lived (5 min) presigned PUT URL — upload the file bytes here.",
+              example:
+                "https://account.r2.cloudflarestorage.com/bucket/products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp?X-Amz-Signature=abc123",
+            },
+            key: {
+              type: "string",
+              description: "Object key to reference in the product create body.",
+              example: "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp",
+            },
+            publicUrl: {
+              type: "string",
+              format: "uri",
+              description: "Public read URL the image will be served from once uploaded.",
+              example: "https://cdn.example.com/products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp",
+            },
           },
         },
       },

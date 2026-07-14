@@ -423,12 +423,18 @@
         "invalidDescription": "La descripción debe ser válida.",
         "invalidName": "El nombre es requerido y debe ser válido.",
         "invalidDetailTypeId": "El tipo de un detalle del producto no es válido.",
+        "duplicateDetailType": "Cada tipo de detalle solo puede usarse una vez.",
         "invalidDetail": "El nombre de un detalle del producto no es válido.",
         "invalidQuantity": "La cantidad es requerida y debe ser válida.",
         "invalidRentPrice": "El precio de renta debe ser válido.",
         "invalidSellPrice": "El precio de venta debe ser válido.",
         "invalidReplacementPrice": "El precio de reposición debe ser válido.",
         "invalidRentTimeUnitId": "La unidad de tiempo de renta es requerida y debe ser válida.",
+        "invalidImages": "Las imágenes del producto deben ser válidas.",
+        "invalidImageKey": "Una imagen del producto no es válida.",
+        "duplicateImageKey": "Las imágenes del producto no pueden repetirse.",
+        "tooManyImages": "El producto excede el número máximo de imágenes permitidas.",
+        "multiplePrimaryImages": "Solo una imagen puede ser la principal.",
         "rentPricingRequired": "Un producto de alquiler requiere precio de renta.",
         "sellPricingRequired": "Un producto de venta requiere precio de venta.",
         "pricingMismatch": "Los precios enviados no corresponden al tipo de negocio del producto.",
@@ -441,12 +447,18 @@
           "invalidDescription": "La descripción <{{-description}}> no es válida.",
           "invalidName": "El nombre <{{-name}}> no es válido.",
           "invalidDetailTypeId": "El id del tipo de detalle <{{-detailTypeId}}> del producto no es válido.",
+          "duplicateDetailType": "El tipo de detalle <{{-detailTypeId}}> está repetido en el producto.",
           "invalidDetail": "El nombre del detalle <{{-detail}}> del producto no es válido.",
           "invalidQuantity": "La cantidad <{{-quantity}}> no es válida.",
           "invalidRentPrice": "El precio de renta <{{-rentPrice}}> no es válido.",
           "invalidSellPrice": "El precio de venta <{{-sellPrice}}> no es válido.",
           "invalidReplacementPrice": "El precio de reposición <{{-replacementPrice}}> no es válido.",
           "invalidRentTimeUnitId": "El id de la unidad de tiempo de renta <{{-rentTimeUnitId}}> no es válido.",
+          "invalidImages": "Las imágenes recibidas <{{-images}}> no son un arreglo válido.",
+          "invalidImageKey": "La clave de imagen <{{-key}}> no es válida.",
+          "duplicateImageKey": "La clave de imagen <{{-key}}> está repetida.",
+          "tooManyImages": "Se recibieron <{{-count}}> imágenes; el máximo es <{{-max}}>.",
+          "multiplePrimaryImages": "Se marcaron <{{-primaryCount}}> imágenes como principal; solo se permite una.",
           "rentPricingRequired": "Producto de alquiler sin precio de renta <{{-rentPrice}}>.",
           "sellPricingRequired": "Producto de venta sin precio de venta <{{-sellPrice}}>.",
           "pricingMismatch": "Precios inconsistentes con el tipo de negocio <{{-businessTypeId}}>: renta <{{-rentPrice}}>, venta <{{-sellPrice}}>, unidad <{{-rentTimeUnitId}}>.",
@@ -458,6 +470,31 @@
         "productCreated": "Producto id <{{-id}}> <{{-name}}> creado exitosamente.",
 
         "errorCreatingProduct": "Error al crear producto: {{-error}}."
+      }
+    },
+    "imageUploads": {
+      "uploadsCreated": "URLs de carga generadas exitosamente.",
+
+      "errorCreatingUploads": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidFiles": "Los archivos a cargar son requeridos y deben ser válidos.",
+        "tooManyFiles": "Se excede el número máximo de imágenes permitidas.",
+        "invalidContentType": "El tipo de archivo no está permitido.",
+        "invalidContentLength": "El tamaño del archivo no es válido.",
+        "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+        "logs": {
+          "invalidFiles": "Los archivos recibidos <{{-files}}> no son un arreglo válido.",
+          "tooManyFiles": "Se solicitaron <{{-count}}> cargas; el máximo es <{{-max}}>.",
+          "invalidContentType": "El tipo de contenido <{{-contentType}}> no está permitido.",
+          "invalidContentLength": "El tamaño <{{-contentLength}}> no es válido (máximo <{{-max}}> bytes).",
+          "validationError": "Error de validación: {{-error}}."
+        }
+      },
+      "logs": {
+        "uploadsCreated": "Se generaron <{{-count}}> URLs de carga presignadas.",
+        "uploadPolicyViolation": "Solicitud de carga rechazada por la política de almacenamiento: {{-error}}.",
+
+        "errorCreatingUploads": "Error al generar URLs de carga: {{-error}}."
       }
     },
     "catalog": {

@@ -11,6 +11,8 @@ interface CustomTextareaFormProps<T extends FieldValues>
   focusColor?: string;
   instructions?: string;
   optionalLabel?: boolean;
+  /** Forwarded to {@link CustomTextarea}: grow smoothly with the content instead of a resize handle. */
+  autoGrow?: boolean;
   /** Other field names to re-validate whenever THIS field changes (cross-field rules). */
   deps?: Path<T>[];
 }

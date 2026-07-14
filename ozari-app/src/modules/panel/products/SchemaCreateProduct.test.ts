@@ -128,6 +128,44 @@ describe('createProductSchema', () => {
       expect(result.success).toBe(true);
     });
   });
+
+  describe('one detail per type (mirrors the backend rule)', () => {
+    it('rejects two details sharing a detailTypeId, flagging the LATER row', () => {
+      const paths = errorPaths({
+        ...validRent(),
+        details: [
+          { detailTypeId: 1, detail: 'Blanco nieve' },
+          { detailTypeId: 1, detail: 'Negro mate ok' },
+        ],
+      });
+      expect(paths).toContain('details.1.detailTypeId');
+      expect(paths).not.toContain('details.0.detailTypeId');
+    });
+
+    it('accepts distinct types and ignores rows still on the placeholder', () => {
+      expect(
+        errorPaths({
+          ...validRent(),
+          details: [
+            { detailTypeId: 1, detail: 'Blanco nieve' },
+            { detailTypeId: 2, detail: 'Madera clara' },
+          ],
+        }),
+      ).toHaveLength(0);
+      // Two untouched placeholder rows (null sentinel) fail the REQUIRED rule, but are never
+      // flagged as "duplicates" of each other.
+      const result = createProductSchema.safeParse({
+        ...validRent(),
+        details: [
+          { detailTypeId: null as never, detail: 'Blanco nieve' },
+          { detailTypeId: null as never, detail: 'Negro mate ok' },
+        ],
+      });
+      expect(result.success).toBe(false);
+      const messages = result.success ? [] : result.error.issues.map((issue) => issue.message);
+      expect(messages).not.toContain('modules.panel.products.create.errors.duplicateDetailType');
+    });
+  });
 });
 
 describe('toCreateProductBody', () => {

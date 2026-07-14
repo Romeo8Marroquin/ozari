@@ -5,11 +5,46 @@ export interface CreateProductDetailRequestModel {
   detailTypeId: number;
 }
 
+/**
+ * A gallery image attached at create time. The client sends only the R2 object `key` it got from
+ * `POST /products/images/upload-url` (after PUTting the file straight to R2) — the public URL is
+ * derived **server-side** from the key, never trusted from the client. Array order = `sortOrder`.
+ */
+export interface CreateProductImageRequestModel {
+  /** R2 object key minted by the upload-url endpoint (`products/<uuid>.<ext>`). */
+  key: string;
+  /** At most ONE may be true; when none is flagged the FIRST image becomes the primary. */
+  isPrimary?: boolean;
+}
+
+/** One file the client wants a presigned PUT for (`POST /products/images/upload-url`). */
+export interface ProductImageUploadFileModel {
+  contentType: string;
+  contentLength: number;
+}
+
+export interface CreateProductImageUploadsRequestModel {
+  files: ProductImageUploadFileModel[];
+}
+
+/** A minted presigned upload: PUT the file to `uploadUrl`, then reference `key` on create. */
+export interface ProductImageUploadResponseModel {
+  uploadUrl: string;
+  key: string;
+  publicUrl: string;
+}
+
+export interface ProductImageUploadsResponseModel {
+  uploads: ProductImageUploadResponseModel[];
+}
+
 export interface CreateProductRequestModel {
   businessTypeId: number;
   categoryId: number;
   currencyId: number;
   description: string | undefined;
+  /** Sanitized by the validator: every `isPrimary` resolved (exactly one true when non-empty). */
+  images: CreateProductImageRequestModel[];
   name: string;
   productDetails: CreateProductDetailRequestModel[];
   quantity: number;

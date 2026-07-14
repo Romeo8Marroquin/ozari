@@ -87,8 +87,25 @@ const baseCreateProductSchema = z.object({
 
 // The CONDITIONAL price rule (same as the backend): Alquiler → rentPrice + rent unit, no
 // sellPrice; Venta → sellPrice only. The UI clears the irrelevant fields on a type switch, so a
-// violation here means stale state — the message lands on the missing/forbidden field.
+// violation here means stale state — the message lands on the missing/forbidden field. Also the
+// ONE-DETAIL-PER-TYPE rule (a table can't have two "Color"s — mirrored from the backend); the UI
+// already filters used types out of each row's options, so a duplicate here means a stale draft.
 export const createProductSchema = baseCreateProductSchema.superRefine((data, ctx) => {
+  const seenDetailTypes = new Set<number>();
+  data.details.forEach((row, index) => {
+    /* v8 ignore next -- defensive: Zod only runs refinements once the base schema (which already
+       requires a numeric detailTypeId) passed, so a non-number can't reach here */
+    if (typeof row.detailTypeId !== 'number') return;
+    if (seenDetailTypes.has(row.detailTypeId)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['details', index, 'detailTypeId'],
+        message: t(`${KEY}.duplicateDetailType`),
+      });
+      return;
+    }
+    seenDetailTypes.add(row.detailTypeId);
+  });
   const rent = parseMoney(data.rentPrice ?? '');
   const sell = parseMoney(data.sellPrice ?? '');
   if (data.businessTypeId === BUSINESS_TYPE_RENT) {
@@ -131,6 +148,12 @@ export const createProductDefaultValues: CreateProductFormType = {
   details: [],
 };
 
+/** A gallery reference for the create body: an R2 key from the presign flow + the primary flag. */
+export interface CreateProductImageRef {
+  key: string;
+  isPrimary: boolean;
+}
+
 /** The `POST /products` body — numbers where the API wants numbers, absent fields omitted. */
 export interface CreateProductBody {
   name: string;
@@ -144,6 +167,8 @@ export interface CreateProductBody {
   replacementPrice?: number;
   sellPrice?: number;
   productDetails: { detailTypeId: number; detail: string }[];
+  /** Uploaded gallery photos (array order = display order). Omitted when there are none. */
+  images?: CreateProductImageRef[];
 }
 
 /** Maps the validated form values to the API body (money truncated to 2 decimals, like the backend). */

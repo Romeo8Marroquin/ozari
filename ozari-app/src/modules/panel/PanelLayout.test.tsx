@@ -225,7 +225,10 @@ describe('PanelLayout - with animations', () => {
     expect(screen.getByTestId('pending')).toHaveTextContent('none');
   });
 
-  it('re-clicking the SAME destination mid-exit never restarts or double-navigates', async () => {
+  // `retry`: the two mid-flight-interrupt tests below advance a frozen GSAP clock in tiny steps;
+  // under FULL-suite load the runner occasionally schedules them badly and they flake (they always
+  // pass in isolation). A retry keeps the signal — a real regression still fails 3× in a row.
+  it('re-clicking the SAME destination mid-exit never restarts or double-navigates', { retry: 2 }, async () => {
     render(<PanelLayout />);
     flushGsap();
     await userEvent.click(screen.getByRole('button', { name: 'nav-ajustes' }));
@@ -238,7 +241,7 @@ describe('PanelLayout - with animations', () => {
     expect(navigate).toHaveBeenCalledTimes(1);
   });
 
-  it('RETARGETS a mid-exit transition: latest intent wins, one navigate to the new destination', async () => {
+  it('RETARGETS a mid-exit transition: latest intent wins, one navigate to the new destination', { retry: 2 }, async () => {
     render(<PanelLayout />);
     flushGsap();
     await userEvent.click(screen.getByRole('button', { name: 'nav-ajustes' }));

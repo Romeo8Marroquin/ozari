@@ -124,6 +124,16 @@ input:autofill {
   scale: 0.75;
 }
 
+/* The document CANVAS colour. On mobile, an open keyboard shrinks only the VISUAL viewport, so
+   scrolling to the bottom can over-scroll past the app's (100vh/dvh-sized) root and expose the raw
+   html/body behind it — which defaults to WHITE and reads as a broken dead strip. Painting the
+   canvas the app's base tone makes that strip invisible (surfaces with their own background — the
+   auth gradient — additionally repaint the canvas to their own edge colour while mounted). */
+html,
+body {
+  background-color: var(--color-customWhite);
+}
+
 body {
   margin: 0;
   padding: 0;

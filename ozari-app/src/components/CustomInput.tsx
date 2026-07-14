@@ -96,7 +96,10 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
     );
     const passwordIcon = isPasswordVisible ? <HiEyeSlash /> : <HiEye />;
     const iconToShow = type === 'password' ? passwordIcon : icon;
-    const isFilled = isFilledOnChange || Boolean(props.value);
+    // CONTROLLED (every RHF wrapper passes `value`) → the live value is the ONLY truth, so a
+    // programmatic reset/setValue drops the floating label correctly. The onChange-tracked state is
+    // just the uncontrolled fallback — as a `||` it went stale after `reset()` (the label stuck up).
+    const isFilled = props.value !== undefined ? Boolean(props.value) : isFilledOnChange;
     const isInteractive = type === 'password' || enablePointerEvents || Boolean(onIconClick);
 
     return (
@@ -113,7 +116,7 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
           className={twMerge(
             `peer w-full py-2 pr-4 bg-transparent placeholder:opacity-0 placeholder:transition-color placeholder:duration-300 focus:placeholder:opacity-100 text-md placeholder-gray focus:outline-none transition-all duration-300 border-b
             disabled:text-gray-disabled disabled:placeholder-gray-disabled
-            ${error ? 'border-red-600 text-red-600' : 'text-black border-gray'}
+            ${error ? 'border-red-600 text-red-600' : 'text-black border-black disabled:border-gray-disabled'}
             ${!icon && type !== 'password' ? 'pl-2' : 'pl-10'} ${focusTextClass[focusColor]}`,
             className,
           )}
