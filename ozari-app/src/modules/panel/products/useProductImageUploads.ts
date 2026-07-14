@@ -55,6 +55,10 @@ export function useProductImageUploads() {
           const image = images[index];
           return axios.put(upload.uploadUrl, image.file, {
             headers: { 'Content-Type': image.file.type },
+            // The bare instance has NO default timeout (the app's 10s one lives on `api`) — without
+            // this, a stalled PUT would pin `isUploading` forever and freeze the submit button.
+            // Generous because a 5 MB photo on a slow mobile uplink legitimately takes a while.
+            timeout: 120_000,
             onUploadProgress: (event) => {
               const ratio = event.total ? event.loaded / event.total : 0;
               setProgress((current) => ({ ...current, [image.id]: ratio }));

@@ -146,6 +146,19 @@ describe('ProductsPage', () => {
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 
+  it('lands the grid (with its entrance) when a retry succeeds straight from the error panel', () => {
+    setProducts({ data: undefined, isError: true, isFetching: false });
+    const { rerender } = renderPage();
+    expect(screen.getByRole('heading', { name: `${K}.error.title` })).toBeInTheDocument();
+
+    // No skeleton phase in between — the grid arrives directly from the settled panel.
+    setProducts(withProducts([product(1, 'Mesa redonda')]));
+    rerender(<ProductsPage />);
+
+    expect(screen.queryByRole('heading', { name: `${K}.error.title` })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: new RegExp(cardName) })).toHaveLength(1);
+  });
+
   it('hands the skeleton off to the resolved grid when loading completes', async () => {
     setProducts({ data: undefined, isLoading: true, isFetching: true });
     const { rerender } = renderPage();

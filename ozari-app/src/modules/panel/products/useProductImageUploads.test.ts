@@ -58,11 +58,12 @@ describe('useProductImageUploads', () => {
       },
       { skipErrorNotification: true },
     );
-    // Direct-to-R2: bare axios (not the api instance) with the exact Content-Type.
+    // Direct-to-R2: bare axios (not the api instance) with the exact Content-Type and its OWN
+    // stall guard (the bare instance has no default timeout).
     expect(axiosPut).toHaveBeenCalledWith(
       'https://r2.test/put/products/k1.png',
       images[0].file,
-      expect.objectContaining({ headers: { 'Content-Type': 'image/png' } }),
+      expect.objectContaining({ headers: { 'Content-Type': 'image/png' }, timeout: 120_000 }),
     );
   });
 

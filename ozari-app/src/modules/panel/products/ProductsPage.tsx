@@ -85,11 +85,16 @@ const ProductsPage: React.FC = () => {
   // cards already crossfaded in place; re-staggering them would flash the settled grid.
   const empty = products.length === 0;
   const isMounted = useRef(false);
+  const wasPopulated = useRef(false);
   useLayoutEffect(() => {
     const firstRender = !isMounted.current;
     isMounted.current = true;
     const populated = !loading && !hasError && !empty;
-    if (firstRender || loading || (!showSkeleton && !populated)) {
+    // The grid can ALSO appear straight from a settled panel (error → successful retry) with no
+    // skeleton phase in between — that arrival needs its own entrance or the cards would pop.
+    const arrivedFromPanel = populated && !wasPopulated.current && !showSkeleton;
+    wasPopulated.current = populated;
+    if (firstRender || loading || (!showSkeleton && !populated) || arrivedFromPanel) {
       staggerIn(root.current, '.reveal-item');
     }
   }, [loading, showSkeleton, hasError, empty]);

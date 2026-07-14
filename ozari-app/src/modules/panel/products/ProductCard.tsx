@@ -92,12 +92,6 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const price = formatProductPrice(product);
 
   const toggle = (): void => setRevealed((current) => !current);
-  const onKeyDown = (event: React.KeyboardEvent): void => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      toggle();
-    }
-  };
   const onBlur = (event: React.FocusEvent<HTMLElement>): void => {
     // Retract when focus leaves the whole card (tap/click elsewhere on touch, Tab away on keys).
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setRevealed(false);
@@ -138,18 +132,16 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
     : 'pb-3';
 
   return (
+    // ARIA structure: the card is a plain <article>; its primary action is a STRETCHED real
+    // <button> (below) covering the whole tile, and the role actions are SIBLINGS layered above
+    // it — no interactive element is ever nested inside another. `onBlur` lives here because
+    // React's synthetic blur bubbles: focus leaving ANY of the card's controls retracts it.
     <article
-      role="button"
-      tabIndex={0}
-      aria-label={t(`${KEY}.card.viewDetails`, { name: product.name })}
-      aria-expanded={revealed}
-      onClick={toggle}
-      onKeyDown={onKeyDown}
       onBlur={onBlur}
       // `@container`: the card measures ITSELF (not the viewport) — its width decides how much
       // description fits (fixed aspect ratio ⇒ width ≡ height), so the clamp adapts to whatever
       // actually sized the tile: orientation, sidebar collapse, column count, screen size.
-      className="group @container relative aspect-[3/4] cursor-pointer overflow-hidden rounded-card bg-white ring-1 ring-black/[0.04] shadow-sm transition-shadow duration-200 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta motion-reduce:transition-none"
+      className="group @container relative aspect-[3/4] overflow-hidden rounded-card bg-white ring-1 ring-black/[0.04] shadow-sm transition-shadow duration-200 hover:shadow-lg motion-reduce:transition-none"
     >
       {/* The photo layer (or the brand mark), gently zooming while engaged. */}
       {imageUrl ? (
@@ -177,12 +169,25 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
         className={`absolute -inset-px rounded-card bg-white/55 backdrop-blur-sm transition-opacity duration-200 ease-[var(--ease-settle)] motion-reduce:transition-none ${glassOn}`}
       />
 
+      {/* THE primary action: a real button stretched over the whole tile (native Enter/Space,
+          real focus semantics). It sits ABOVE the veils/photo and BELOW the info layer; the info
+          layer is pointer-transparent except the action buttons, so any tap on the card that
+          isn't an action lands here. Becomes the navigation to the detail view when it exists. */}
+      <button
+        type="button"
+        aria-label={t(`${KEY}.card.viewDetails`, { name: product.name })}
+        aria-expanded={revealed}
+        onClick={toggle}
+        className="absolute inset-0 z-[1] cursor-pointer rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
+      />
+
       {/* Floating chips: what it is (top-left) and whether it's available (top-right, role-gated).
-          They stay put in both states — no duplicated stock line on the glass. */}
-      <span className="absolute left-2 top-2 rounded-chip bg-white/85 px-2 py-0.5 text-[11px] font-medium text-charcoal/70 shadow-sm backdrop-blur">
+          They stay put in both states — no duplicated stock line on the glass. Pointer-transparent
+          (non-interactive) so taps on them reach the stretched button. */}
+      <span className="pointer-events-none absolute left-2 top-2 z-[2] rounded-chip bg-white/85 px-2 py-0.5 text-[11px] font-medium text-charcoal/70 shadow-sm backdrop-blur">
         {product.businessType}
       </span>
-      <span className="absolute right-2 top-2 flex">
+      <span className="pointer-events-none absolute right-2 top-2 z-[2] flex">
         <StockBadge product={product} />
       </span>
 
@@ -191,7 +196,7 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
           Compact rhythm (no gaps beyond the type's own leading) so the expanded block stays clear
           of the top chips even on small phone tiles. Bottom padding is the hand-off variable. */}
       <div
-        className={`absolute inset-x-0 bottom-0 flex flex-col px-3 pt-3 transition-[padding] duration-200 ease-[var(--ease-settle)] motion-reduce:transition-none ${blockPadding}`}
+        className={`pointer-events-none absolute inset-x-0 bottom-0 z-[2] flex flex-col px-3 pt-3 transition-[padding] duration-200 ease-[var(--ease-settle)] motion-reduce:transition-none ${blockPadding}`}
       >
         <span
           className={`text-[11px] font-medium uppercase tracking-wide transition-colors duration-200 motion-reduce:transition-none ${
@@ -254,8 +259,10 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
             <div className="overflow-hidden">
               {/* `pb-3` = the block's handed-off bottom spacing, now INSIDE the clip (also the
                   clearance so the hover lift's shadow isn't sheared); `px-1 -mx-1` for lateral
-                  shadow room. The row rises with its opening space — one motion. */}
-              <div className={`flex flex-wrap gap-2 px-1 -mx-1 pb-3 pt-1.5 ${expandContent}`}>
+                  shadow room. The row rises with its opening space — one motion. It re-enables
+                  pointer events (the info layer is otherwise tap-transparent to the stretched
+                  button underneath). */}
+              <div className={`pointer-events-auto flex flex-wrap gap-2 px-1 -mx-1 pb-3 pt-1.5 ${expandContent}`}>
                 {role === Role.Admin && (
                   <>
                     <CardAction

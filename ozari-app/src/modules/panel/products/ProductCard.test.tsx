@@ -53,42 +53,41 @@ describe('ProductCard', () => {
     expect(screen.getByRole('img')).toHaveAttribute('src', 'https://cdn/mesa.webp');
   });
 
-  it('is a focusable view-details control: click/Enter/Space toggle the reveal, blur retracts it', async () => {
+  it('is a REAL stretched button: click/Enter/Space toggle the reveal, blur retracts it', async () => {
     render(<ProductCard product={base} />);
-    const article = card();
-    expect(article).toHaveAttribute('tabindex', '0');
-    expect(article).toHaveAttribute('aria-expanded', 'false');
+    const viewDetails = card();
+    expect(viewDetails.tagName).toBe('BUTTON'); // native semantics — Enter/Space/focus for free
+    expect(viewDetails).toHaveAttribute('aria-expanded', 'false');
 
-    await userEvent.click(article);
-    expect(article).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(viewDetails);
+    expect(viewDetails).toHaveAttribute('aria-expanded', 'true');
 
-    fireEvent.keyDown(article, { key: 'Enter' });
-    expect(article).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.keyDown(article, { key: ' ' });
-    expect(article).toHaveAttribute('aria-expanded', 'true');
-    fireEvent.keyDown(article, { key: 'a' }); // unrelated key changes nothing
-    expect(article).toHaveAttribute('aria-expanded', 'true');
+    viewDetails.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(viewDetails).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.keyboard(' ');
+    expect(viewDetails).toHaveAttribute('aria-expanded', 'true');
 
     // Focus leaving the card entirely retracts the reveal (the touch "tap elsewhere" close).
-    fireEvent.blur(article, { relatedTarget: document.body });
-    expect(article).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.blur(viewDetails, { relatedTarget: document.body });
+    expect(viewDetails).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('keeps the reveal pinned while interacting with an action (clicks never bubble)', async () => {
+  it('keeps the reveal pinned while interacting with an action (siblings, never nested)', async () => {
     useRole.mockReturnValue(Role.Admin);
     render(<ProductCard product={base} />);
-    const article = card();
-    await userEvent.click(article);
-    expect(article).toHaveAttribute('aria-expanded', 'true');
+    const viewDetails = card();
+    await userEvent.click(viewDetails);
+    expect(viewDetails).toHaveAttribute('aria-expanded', 'true');
 
-    // Clicking an action must NOT toggle the card underneath it.
-    await userEvent.click(screen.getByRole('button', { name: new RegExp(ACTIONS.edit) }));
-    expect(article).toHaveAttribute('aria-expanded', 'true');
+    // Clicking an action must NOT toggle the card (it's a SIBLING above the stretched button).
+    const edit = screen.getByRole('button', { name: new RegExp(ACTIONS.edit) });
+    expect(edit.parentElement?.contains(viewDetails)).toBe(false); // no nested interactive
+    await userEvent.click(edit);
+    expect(viewDetails).toHaveAttribute('aria-expanded', 'true');
     // Focus moving WITHIN the card (to the action) doesn't retract either.
-    fireEvent.blur(article, {
-      relatedTarget: screen.getByRole('button', { name: new RegExp(ACTIONS.edit) }),
-    });
-    expect(article).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.blur(viewDetails, { relatedTarget: edit });
+    expect(viewDetails).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('shows the brand mark placeholder and no price when there is no image or price', () => {

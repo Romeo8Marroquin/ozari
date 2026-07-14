@@ -282,7 +282,9 @@ model Product {
 model ProductImage {
   id        Int       @id @default(autoincrement())
   productId Int       @map("product_id")
-  r2Key     String    @map("r2_key")
+  // UNIQUE: one R2 object belongs to exactly one image row — prevents two products from sharing
+  // (and later double-deleting) the same object, even if an admin replays a used key.
+  r2Key     String    @unique @map("r2_key")
   url       String
   sortOrder Int       @default(0) @map("sort_order")
   isPrimary Boolean   @default(false) @map("is_primary")

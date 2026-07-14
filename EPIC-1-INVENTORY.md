@@ -187,3 +187,17 @@ Admin fully manages inventory (CRUD + multi-image gallery + stock + pricing) fro
 employee sees a clean read-only view; a client is gracefully kept out of the panel; **every** endpoint
 is role-gated + documented; both packages green at 100%; the nav shows only built modules with products
 as the default landing.
+
+## 5. Pending — verify before "functionality complete" / production cutover
+- **R2 ↔ DB orphan reconcile script** (accepted residual of the presigned-upload design: files PUT
+  to R2 *before* the create references them, so an abandoned tab / failed create between the two
+  steps leaves objects with no row). Build a dev-run ops script (next to `cleanup:sessions`) that
+  diffs the bucket's `products/` prefix against `product_images.r2_key` and reports BOTH kinds of
+  orphan: object-without-row (candidate to delete from R2) and row-without-object (broken image —
+  fix the product). Run it before the production cutover and periodically after; near-zero
+  likelihood with two trusted admins, but the check is cheap and makes releases auditable.
+- When the **delete/edit flows** land, pair the script with their post-commit R2 deletes (the
+  reconcile design in `products.controller.ts`'s WIP banner) so the diff should always be empty.
+- If staging catalog data is migrated to production at MVP: `pg_dump` the product tables +
+  bucket-to-bucket object copy + remap `R2_PUBLIC_URL` hosts — then run the reconcile script on
+  prod as the post-migration check.

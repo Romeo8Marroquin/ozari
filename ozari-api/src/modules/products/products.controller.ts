@@ -1,4 +1,5 @@
 import type { Response } from "express";
+import { Prisma } from "@prisma/client";
 import { i18next } from "@/config/i18n.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { logger } from "@/config/logger.js";
@@ -47,7 +48,10 @@ export const getProducts = async (
       prismaClient.product.findMany({
         where,
         include: richProductInclude,
-        orderBy: { createdAt: "desc" },
+        // Newest first (oldest land at the bottom of the grid) — the DEFAULT order until admin
+        // filters/custom ordering arrive. `id` tiebreaks same-timestamp rows so pagination pages
+        // never shuffle.
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -138,6 +142,16 @@ export const getProductCatalog = async (
   }
 };
 
+/** Prisma's unique-constraint violation (P2002) — here that's always `product_images.r2_key`. */
+const isUniqueViolation = (
+  error: unknown,
+): error is Prisma.PrismaClientKnownRequestError =>
+  error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+
+/** The violated column(s) for the log line (defensive: meta may be absent). */
+const violationTarget = (error: Prisma.PrismaClientKnownRequestError): string =>
+  ((error.meta?.["target"] as string[] | undefined) ?? []).join(",");
+
 /**
  * `POST /products` — create a product (+ nested details). **Admin only** (`isGrantedRoles` on the
  * route; the validator has already enforced the conditional price rule and sanitized the body).
@@ -211,6 +225,22 @@ export const createProduct = async (
       projectProductForRole(created, role),
     );
   } catch (error) {
+    // The DB's unique guard on `product_images.r2_key`: replaying an R2 key that another image
+    // row already owns is a semantic input error (a shared object would be double-deleted later),
+    // not a server fault — surface it like the validator's own duplicate rule.
+    if (isUniqueViolation(error)) {
+      logger.warn(
+        i18next.t("products.createProduct.validators.logs.duplicateImageKey", {
+          key: violationTarget(error),
+        }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.BAD_REQUEST,
+        i18next.t("products.createProduct.validators.duplicateImageKey"),
+      );
+      return;
+    }
     logger.error(
       i18next.t("products.createProduct.logs.errorCreatingProduct", { error }),
     );

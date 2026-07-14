@@ -577,7 +577,8 @@ export const paths: OpenAPIV3.PathsObject = {
           201,
         ),
         "400": errorResponse(
-          "A field failed validation — bad lookup id, out-of-range value, or a conditional-pricing violation.",
+          "A field failed validation — bad lookup id, out-of-range value, a conditional-pricing " +
+            "violation, or an image key already owned by another product (unique `r2_key`).",
           400,
           "Los precios enviados no corresponden al tipo de negocio del producto.",
         ),

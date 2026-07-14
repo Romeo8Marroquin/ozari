@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import type { Response } from "express";
+import { Prisma } from "@prisma/client";
 import {
   createProduct,
   createProductImageUploads,
@@ -257,6 +258,24 @@ describe("createProduct", () => {
     });
     await createProduct(buildCreateReq(), {} as Response);
     expect(sendOzariError).toHaveBeenCalled();
+    expect(sendOzariSuccess).not.toHaveBeenCalled();
+  });
+
+  it("maps the r2_key unique violation (P2002) to a clean 400, not a 500", async () => {
+    const uniqueViolation = new Prisma.PrismaClientKnownRequestError(
+      "Unique constraint failed",
+      { code: "P2002", clientVersion: "test", meta: { target: ["r2_key"] } },
+    );
+    (getPrismaClient as Mock).mockResolvedValue({
+      product: { create: vi.fn().mockRejectedValue(uniqueViolation) },
+    });
+    await createProduct(buildCreateReq(), {} as Response);
+
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.BAD_REQUEST,
+      "products.createProduct.validators.duplicateImageKey",
+    );
     expect(sendOzariSuccess).not.toHaveBeenCalled();
   });
 });
