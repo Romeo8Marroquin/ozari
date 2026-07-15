@@ -4,6 +4,7 @@ import gsap from 'gsap';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { prefersReducedMotion } from '@utils/motion';
 import Header from './components/Header';
+import PanelScrollbar from './components/PanelScrollbar';
 import Sidebar from './components/Sidebar';
 import ForcedLogoutListener from './ForcedLogoutListener';
 import type { PanelPath } from './navConfig';
@@ -25,6 +26,9 @@ const PanelShell: React.FC = () => {
   const container = useRef<HTMLDivElement>(null);
   // The content body (wraps the <Outlet>) — the element the DEFAULT transition animates.
   const screen = useRef<HTMLDivElement>(null);
+  // The scroll container — its NATIVE bar is hidden (it occupies layout space, so pages jumped
+  // sideways whenever overflow appeared/disappeared); PanelScrollbar overlays it instead.
+  const main = useRef<HTMLElement>(null);
   const navigate = useNavigate();
   const router = useRouter();
   const pathname = useLocation({ select: (location) => location.pathname });
@@ -34,7 +38,9 @@ const PanelShell: React.FC = () => {
   // enter. The exit (~0.3s) is a free download window. Best-effort — a failed preload just means
   // the navigation itself loads the chunk, as before.
   const preload = useCallback(
-    (to: PanelPath) => void router.preloadRoute({ to }).catch(() => {}),
+    // The cast: PanelPath includes RESOLVED param paths (`/panel/productos/7`), which the router
+    // handles at runtime but TanStack's typed `to` can't express (it only knows `$productId`).
+    (to: PanelPath) => void router.preloadRoute({ to: to as never }).catch(() => {}),
     [router],
   );
   // The controller compares intents against the CURRENT pathname when a click lands or an exit
@@ -143,7 +149,8 @@ const PanelShell: React.FC = () => {
   const navigateBody = useCallback(
     (to: PanelPath) => {
       if (prefersReducedMotion()) {
-        if (to !== pathnameRef.current) void navigate({ to, viewTransition: false });
+        // Same resolved-param-path cast as `preload`.
+        if (to !== pathnameRef.current) void navigate({ to: to as never, viewTransition: false });
         return;
       }
       const run = exitRef.current;
@@ -173,7 +180,8 @@ const PanelShell: React.FC = () => {
         if (exitRef.current !== newRun) return; // cancelled or superseded (logout) — abandon
         exitRef.current = null;
         setPending(null);
-        void navigate({ to: newRun.pending, viewTransition: false });
+        // Same resolved-param-path cast as `preload`.
+        void navigate({ to: newRun.pending as never, viewTransition: false });
       });
     },
     [navigate, runContentExit, enterCurrent, preload],
@@ -205,18 +213,26 @@ const PanelShell: React.FC = () => {
             <Sidebar />
             <div className="flex min-w-0 flex-1 flex-col">
               <Header />
-              <main className="panel-main flex-1 overflow-y-auto bg-gradient-to-b from-[#f8f5f8] to-[#f0ecf1]">
-                {/* The gradient fills the full viewport width, but the content itself is clamped and
-                    centered so it stays readable on ultrawide monitors (chrome edge-to-edge, content
-                    capped). Padding lives on this inner wrapper so it doubles as the side gutter. The
-                    `panel-screen` wrapper is the element the default transition animates. */}
-                <div
-                  ref={screen}
-                  className="panel-screen mx-auto flex min-h-full w-full max-w-[var(--spacing-panel-content)] flex-col p-4 md:p-6 lg:p-8"
+              {/* The relative box scopes the overlay scrollbar to the CONTENT area only (never the
+                  header); `min-h-0` lets the flex child actually shrink so `main` scrolls. */}
+              <div className="relative min-h-0 flex-1">
+                <main
+                  ref={main}
+                  className="panel-main h-full overflow-y-auto bg-gradient-to-b from-[#f8f5f8] to-[#f0ecf1] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 >
-                  <Outlet />
-                </div>
-              </main>
+                  {/* The gradient fills the full viewport width, but the content itself is clamped and
+                      centered so it stays readable on ultrawide monitors (chrome edge-to-edge, content
+                      capped). Padding lives on this inner wrapper so it doubles as the side gutter. The
+                      `panel-screen` wrapper is the element the default transition animates. */}
+                  <div
+                    ref={screen}
+                    className="panel-screen mx-auto flex min-h-full w-full max-w-[var(--spacing-panel-content)] flex-col p-4 md:p-6 lg:p-8"
+                  >
+                    <Outlet />
+                  </div>
+                </main>
+                <PanelScrollbar target={main} />
+              </div>
             </div>
           </div>
         </PanelPageTransitionContext.Provider>

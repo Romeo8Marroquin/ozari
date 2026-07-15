@@ -3,10 +3,6 @@ import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// RoleGate reads the current role through this hook — drive it directly.
-const { useHasRole } = vi.hoisted(() => ({ useHasRole: vi.fn() }));
-vi.mock('@hooks/useRole', () => ({ useHasRole }));
-
 // The form is a heavy component with its own suite — a stub isolates the page shell.
 vi.mock('./ProductForm', () => ({
   default: () => <div data-testid="product-form" />,
@@ -36,9 +32,11 @@ const renderPage = () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useHasRole.mockReturnValue(true); // default: admin
 });
 
+// Access control is NOT this page's job anymore: the route's `beforeLoad` redirects non-admins
+// before it ever mounts (routes are exercised e2e, not unit-tested) — so the page renders
+// unconditionally here, and there is no in-page "no permission" state to cover.
 describe('ProductCreatePage', () => {
   it('renders the heading, lead, and the form for an admin', () => {
     renderPage();
@@ -50,17 +48,6 @@ describe('ProductCreatePage', () => {
   it('navigates back to the catalog through the panel transition', async () => {
     const { navigate } = renderPage();
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.back` }));
-    expect(navigate).toHaveBeenCalledWith('/panel/productos');
-  });
-
-  it('shows the friendly no-permission panel (with a way back) to a non-admin deep-link', async () => {
-    useHasRole.mockReturnValue(false);
-    const { navigate } = renderPage();
-
-    expect(screen.queryByTestId('product-form')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: `${KEY}.noAccess.title` })).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: `${KEY}.noAccess.back` }));
     expect(navigate).toHaveBeenCalledWith('/panel/productos');
   });
 

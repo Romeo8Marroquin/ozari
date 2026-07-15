@@ -100,7 +100,7 @@ export interface ProductListItemResponseModel {
   details: BaseProductDetailsResponseModel[];
   /** Availability signal (Employee + Admin). */
   inStock?: boolean;
-  /** Exact total stock (Admin only). */
+  /** Available stock count (Employee + Admin) — today = on-hand; minus reservations once orders land. */
   quantity?: number;
   /** "As-new" replacement value (Admin only; may itself be absent on a product). */
   replacementPrice?: number | undefined;
@@ -139,6 +139,11 @@ export interface PaginationMeta {
 export interface ProductListResponseModel {
   products: ProductListItemResponseModel[];
   pagination: PaginationMeta;
+}
+
+/** `GET /products/:id` — the same role-projected shape as a list item, single row. */
+export interface ProductDetailResponseModel {
+  product: ProductListItemResponseModel;
 }
 
 /** A seeded lookup row as the create/edit form consumes it — just enough to render a select. */

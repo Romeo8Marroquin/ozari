@@ -21,6 +21,7 @@ import { Route as SesionSplatRouteImport } from './routes/sesion/$'
 import { Route as PanelProductosRouteImport } from './routes/panel/productos'
 import { Route as PanelAjustesRouteImport } from './routes/panel/ajustes'
 import { Route as PanelProductosNuevoRouteImport } from './routes/panel/productos_.nuevo'
+import { Route as PanelProductosProductIdRouteImport } from './routes/panel/productos_.$productId'
 
 const SesionRoute = SesionRouteImport.update({
   id: '/sesion',
@@ -82,6 +83,11 @@ const PanelProductosNuevoRoute = PanelProductosNuevoRouteImport.update({
   path: '/productos/nuevo',
   getParentRoute: () => PanelRoute,
 } as any)
+const PanelProductosProductIdRoute = PanelProductosProductIdRouteImport.update({
+  id: '/productos_/$productId',
+  path: '/productos/$productId',
+  getParentRoute: () => PanelRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -95,6 +101,7 @@ export interface FileRoutesByFullPath {
   '/sesion/registro': typeof SesionRegistroRoute
   '/sesion/restablecer': typeof SesionRestablecerRoute
   '/panel/': typeof PanelIndexRoute
+  '/panel/productos/$productId': typeof PanelProductosProductIdRoute
   '/panel/productos/nuevo': typeof PanelProductosNuevoRoute
 }
 export interface FileRoutesByTo {
@@ -108,6 +115,7 @@ export interface FileRoutesByTo {
   '/sesion/registro': typeof SesionRegistroRoute
   '/sesion/restablecer': typeof SesionRestablecerRoute
   '/panel': typeof PanelIndexRoute
+  '/panel/productos/$productId': typeof PanelProductosProductIdRoute
   '/panel/productos/nuevo': typeof PanelProductosNuevoRoute
 }
 export interface FileRoutesById {
@@ -123,6 +131,7 @@ export interface FileRoutesById {
   '/sesion/registro': typeof SesionRegistroRoute
   '/sesion/restablecer': typeof SesionRestablecerRoute
   '/panel/': typeof PanelIndexRoute
+  '/panel/productos_/$productId': typeof PanelProductosProductIdRoute
   '/panel/productos_/nuevo': typeof PanelProductosNuevoRoute
 }
 export interface FileRouteTypes {
@@ -139,6 +148,7 @@ export interface FileRouteTypes {
     | '/sesion/registro'
     | '/sesion/restablecer'
     | '/panel/'
+    | '/panel/productos/$productId'
     | '/panel/productos/nuevo'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -152,6 +162,7 @@ export interface FileRouteTypes {
     | '/sesion/registro'
     | '/sesion/restablecer'
     | '/panel'
+    | '/panel/productos/$productId'
     | '/panel/productos/nuevo'
   id:
     | '__root__'
@@ -166,6 +177,7 @@ export interface FileRouteTypes {
     | '/sesion/registro'
     | '/sesion/restablecer'
     | '/panel/'
+    | '/panel/productos_/$productId'
     | '/panel/productos_/nuevo'
   fileRoutesById: FileRoutesById
 }
@@ -262,6 +274,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PanelProductosNuevoRouteImport
       parentRoute: typeof PanelRoute
     }
+    '/panel/productos_/$productId': {
+      id: '/panel/productos_/$productId'
+      path: '/productos/$productId'
+      fullPath: '/panel/productos/$productId'
+      preLoaderRoute: typeof PanelProductosProductIdRouteImport
+      parentRoute: typeof PanelRoute
+    }
   }
 }
 
@@ -269,6 +288,7 @@ interface PanelRouteChildren {
   PanelAjustesRoute: typeof PanelAjustesRoute
   PanelProductosRoute: typeof PanelProductosRoute
   PanelIndexRoute: typeof PanelIndexRoute
+  PanelProductosProductIdRoute: typeof PanelProductosProductIdRoute
   PanelProductosNuevoRoute: typeof PanelProductosNuevoRoute
 }
 
@@ -276,6 +296,7 @@ const PanelRouteChildren: PanelRouteChildren = {
   PanelAjustesRoute: PanelAjustesRoute,
   PanelProductosRoute: PanelProductosRoute,
   PanelIndexRoute: PanelIndexRoute,
+  PanelProductosProductIdRoute: PanelProductosProductIdRoute,
   PanelProductosNuevoRoute: PanelProductosNuevoRoute,
 }
 

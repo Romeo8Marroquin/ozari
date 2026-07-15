@@ -58,3 +58,12 @@ class InertIntersectionObserver implements IntersectionObserver {
   }
 }
 window.IntersectionObserver = InertIntersectionObserver;
+
+// jsdom doesn't implement ResizeObserver either (the overlay scrollbar resyncs on it). Same deal:
+// an inert stand-in keeps components mountable; suites that assert resize behaviour stub their own.
+class InertResizeObserver implements ResizeObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+window.ResizeObserver = InertResizeObserver;

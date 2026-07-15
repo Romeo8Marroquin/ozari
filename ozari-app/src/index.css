@@ -263,6 +263,19 @@ body {
   }
 }
 
+/* ── Panel history-back view-transition opt-out ──────────────────────────────────────────
+   Tagged by the popstate listener in main.tsx for panel→panel BROWSER/DEVICE back navigations:
+   in-app panel moves already disable the router's view transition (`viewTransition: false` — the
+   GSAP timelines own the motion), and the browser cross-fade must not run on history moves either.
+   Its ghost of the old page reads as a glitch over the panel's own choreography, and the
+   view-transition overlay paints in the TOP LAYER — above the shared-element image clone — hiding
+   the photo's return flight. `animation: none` makes the transition resolve immediately: an
+   instant swap, exactly like the in-app opt-out. Auth flows keep their view transitions. */
+html.vt-panel-skip::view-transition-old(root),
+html.vt-panel-skip::view-transition-new(root) {
+  animation: none;
+}
+
 /* Cross-browser thin, on-brand scrollbar for the panel nav (and any panel scroll area). Firefox
    uses the standard `scrollbar-width`/`scrollbar-color` properties; WebKit & Blink (Safari, Chrome,
    Edge) use the `::-webkit-scrollbar` pseudo-elements. Declaring both means the sidebar scroll looks

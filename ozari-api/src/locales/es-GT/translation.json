@@ -412,6 +412,16 @@
         "errorFetchingProducts": "Error al obtener productos: {{-error}}."
       }
     },
+    "getProductById": {
+      "productFetched": "Producto obtenido exitosamente.",
+      "productNotFound": "El producto no existe o ya no está disponible.",
+      "errorFetchingProduct": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "productFetched": "Producto <{{-id}}> obtenido exitosamente.",
+        "productNotFound": "Producto no encontrado para el id <{{-id}}>.",
+        "errorFetchingProduct": "Error al obtener el producto: {{-error}}."
+      }
+    },
     "createProduct": {
       "productCreated": "Producto creado exitosamente.",
 

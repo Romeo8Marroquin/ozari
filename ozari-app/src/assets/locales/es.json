@@ -244,9 +244,9 @@
           "viewDetails": "Ver detalles de {{name}}",
           "noDescription": "Sin descripción todavía.",
           "actions": {
-            "edit": "Editar",
-            "delete": "Eliminar",
-            "order": "Ordenar"
+            "order": "Ordenar",
+            "rent": "Rentar",
+            "buy": "Comprar"
           }
         },
         "filters": {
@@ -277,6 +277,28 @@
           "error": "No pudimos cargar más productos.",
           "retry": "Reintentar"
         },
+        "detail": {
+          "back": "Volver a productos",
+          "loading": "Cargando producto",
+          "thumbAlt": "Foto {{index}} de {{name}}",
+          "descriptionTitle": "Descripción",
+          "detailsTitle": "Detalles",
+          "replacementPrice": "Precio de reposición",
+          "actions": {
+            "edit": "Editar",
+            "delete": "Eliminar"
+          },
+          "notFound": {
+            "title": "Producto no encontrado",
+            "description": "El producto no existe o ya no está disponible.",
+            "back": "Volver a productos"
+          },
+          "error": {
+            "title": "No pudimos cargar el producto",
+            "description": "Ocurrió un problema al cargar el producto. Vuelve a intentarlo.",
+            "retry": "Reintentar"
+          }
+        },
         "empty": {
           "title": "Aún no hay productos",
           "description": "Cuando haya productos disponibles, aparecerán aquí.",
@@ -295,11 +317,6 @@
           "loading": "Cargando formulario",
           "successTitle": "Producto creado",
           "successToast": "El producto se agregó al catálogo.",
-          "noAccess": {
-            "title": "Sin permiso",
-            "description": "No tienes permiso para crear productos.",
-            "back": "Volver a productos"
-          },
           "catalogError": {
             "title": "No pudimos cargar el formulario",
             "description": "Ocurrió un problema al cargar los datos de referencia. Vuelve a intentarlo.",

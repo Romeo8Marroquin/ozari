@@ -75,9 +75,11 @@ export function buildProductListWhere(
  * Projects a full product to the shape a given role is allowed to see — **the single source of truth
  * for role→field visibility** (minimum privilege). Escalates: everyone gets the shared "catalog"
  * fields (name/description/category/type/images/details/price + rent unit); **Employee** additionally
- * gets an `inStock` availability *signal* (not the count); **Admin** gets the full internal detail
- * (the exact `quantity`, `replacementPrice`, `isActive`). Anything that isn't Admin/Employee (Client,
- * or any unexpected role) gets the MINIMUM — fail-closed. Change the policy here and nowhere else.
+ * gets the availability — the `inStock` signal AND the available `quantity` (owner decision,
+ * 2026-07-14: a bare flag can't answer "can I take an order for 10?"; today available = on-hand,
+ * and it becomes on-hand minus reserved once orders exist); **Admin** gets the full internal detail
+ * (`replacementPrice`, `isActive`). Anything that isn't Admin/Employee (Client, or any unexpected
+ * role) gets the MINIMUM — fail-closed. Change the policy here and nowhere else.
  */
 export function projectProductForRole(
   product: RichProduct,
@@ -122,7 +124,7 @@ export function projectProductForRole(
   }
 
   if (role === RolesEnum.Employee) {
-    return { ...base, inStock: product.quantity > 0 };
+    return { ...base, inStock: product.quantity > 0, quantity: product.quantity };
   }
 
   // Client (and any unexpected role) → the minimum, no stock information at all.

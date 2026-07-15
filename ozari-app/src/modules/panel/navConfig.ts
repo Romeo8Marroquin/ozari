@@ -4,11 +4,17 @@ import type { Role } from '@constants/Roles';
 
 /**
  * The panel routes the transition controller can navigate to (a literal union so TanStack Link
- * stays typed). Superset of the sidebar tabs: nested pages (e.g. the product create form) are
- * navigable through the same animated transition without being tabs — the sidebar's `startsWith`
- * matching keeps the parent tab lit for them.
+ * stays typed). Superset of the sidebar tabs: nested pages (e.g. the product create form, a
+ * product's detail) are navigable through the same animated transition without being tabs — the
+ * sidebar's `startsWith` matching keeps the parent tab lit for them. The template member is the
+ * RESOLVED product-detail path (`/panel/productos/7`): TanStack's typed `to` doesn't know resolved
+ * param paths, so `PanelLayout`'s two router calls carry a localized cast for it.
  */
-export type PanelPath = '/panel/productos' | '/panel/productos/nuevo' | '/panel/ajustes';
+export type PanelPath =
+  | '/panel/productos'
+  | '/panel/productos/nuevo'
+  | `/panel/productos/${number}`
+  | '/panel/ajustes';
 
 export interface PanelNavItem {
   to: PanelPath;

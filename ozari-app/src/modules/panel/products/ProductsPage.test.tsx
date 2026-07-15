@@ -29,6 +29,28 @@ vi.mock('./ProductsFilterBar', () => ({
   ),
 }));
 
+// The shared-element morph + per-page scroll: the page's ARRIVAL decisions are what these tests pin
+// (a cold grid dismisses the clone and forgets the scroll; a warm one restores THEN claims).
+const { releaseProductImageMorph, claimProductImageMorphWithin } = vi.hoisted(() => ({
+  releaseProductImageMorph: vi.fn(),
+  claimProductImageMorphWithin: vi.fn(),
+}));
+vi.mock('./productImageMorph', () => ({
+  releaseProductImageMorph,
+  claimProductImageMorphWithin,
+  beginProductImageMorph: vi.fn(),
+  estimateDetailHeroRect: vi.fn(() => null),
+}));
+const { restoreProductsScroll, clearProductsScroll } = vi.hoisted(() => ({
+  restoreProductsScroll: vi.fn(),
+  clearProductsScroll: vi.fn(),
+}));
+vi.mock('./productsScroll', () => ({
+  restoreProductsScroll,
+  clearProductsScroll,
+  saveProductsScroll: vi.fn(),
+}));
+
 // The page reads filters from the URL and writes them back via navigate.
 const routerState = vi.hoisted(() => ({ search: {} as Record<string, unknown> }));
 const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }));
@@ -123,6 +145,11 @@ describe('ProductsPage', () => {
     renderPage();
 
     expect(screen.getByRole('status', { name: `${K}.loading` })).toBeInTheDocument();
+    // A returning morph clone has nothing to land on over skeletons — dismissed immediately, and
+    // the saved grid position belongs to a list we no longer have — forgotten.
+    expect(releaseProductImageMorph).toHaveBeenCalled();
+    expect(clearProductsScroll).toHaveBeenCalled();
+    expect(claimProductImageMorphWithin).not.toHaveBeenCalled();
     // The header row + filter bar are on screen from the FIRST frame (they need no data), so the
     // grid never jumps down to make room for them later.
     expect(screen.getByText(`${K}.lead`)).toBeInTheDocument();
@@ -136,6 +163,13 @@ describe('ProductsPage', () => {
     setProducts(withProducts([product(1, 'Mesa redonda'), product(2, 'Silla Tiffany')]));
     renderPage();
 
+    // A WARM arrival restores the saved scroll BEFORE the returning clone measures its card.
+    expect(restoreProductsScroll).toHaveBeenCalled();
+    expect(claimProductImageMorphWithin).toHaveBeenCalled();
+    expect(
+      restoreProductsScroll.mock.invocationCallOrder[0]! <
+        claimProductImageMorphWithin.mock.invocationCallOrder[0]!,
+    ).toBe(true);
     // The lead/header only appears when there IS a catalog to explore. Each card paints its name
     // on both the scrim and the glass overlay, hence getAllByText.
     expect(screen.getByText(`${K}.lead`)).toBeInTheDocument();

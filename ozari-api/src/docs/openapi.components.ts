@@ -347,9 +347,9 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     description:
       "A catalog product. The base fields are visible to **every** role; the remaining fields are " +
-      "**role-projected** (minimum privilege): `inStock` is added for Employee + Admin, and " +
-      "`quantity`, `replacementPrice`, `isActive` are **Admin only** (a Client/Employee never receives " +
-      "the exact stock count).",
+      "**role-projected** (minimum privilege): `inStock` + the available `quantity` are added for " +
+      "Employee + Admin, and `replacementPrice`, `isActive` are **Admin only** (a Client never receives " +
+      "any stock information).",
     properties: {
       id: { type: "integer", example: 7 },
       name: { type: "string", example: "Mesa redonda" },
@@ -371,7 +371,12 @@ export const schemas: Record<string, Schema> = {
       images: { type: "array", items: schemaRef("ProductImage") },
       details: { type: "array", items: schemaRef("ProductDetailItem") },
       inStock: { type: "boolean", description: "Availability signal — **Employee + Admin only**.", example: true },
-      quantity: { type: "integer", description: "Exact total stock — **Admin only**.", example: 40 },
+      quantity: {
+        type: "integer",
+        description:
+          "Available stock count — **Employee + Admin only** (today = on-hand; minus reservations once orders exist).",
+        example: 40,
+      },
       replacementPrice: { type: "number", description: "As-new replacement value — **Admin only**.", example: 900 },
       isActive: { type: "boolean", description: "Soft-delete flag — **Admin only**.", example: true },
     },
@@ -390,6 +395,12 @@ export const schemas: Record<string, Schema> = {
     properties: {
       products: { type: "array", items: schemaRef("ProductListItem") },
       pagination: schemaRef("Pagination"),
+    },
+  },
+  ProductDetailResponse: {
+    type: "object",
+    properties: {
+      product: schemaRef("ProductListItem"),
     },
   },
   CatalogOption: {

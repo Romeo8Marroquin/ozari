@@ -476,7 +476,7 @@ export const paths: OpenAPIV3.PathsObject = {
       description:
         "Returns the paginated **active** catalog. Available to **any authenticated role**; the " +
         "response fields are **role-projected** (minimum privilege): Admin sees the exact `quantity` " +
-        "plus internal fields, Employee gets an `inStock` signal, and a Client sees only the shared " +
+        "plus internal fields, Employee gets `inStock` + the available `quantity`, and a Client sees only the shared " +
         "catalog fields. Pagination and the optional filters are clamped or dropped (never " +
         "rejected), so there is no 400. Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
@@ -629,6 +629,54 @@ export const paths: OpenAPIV3.PathsObject = {
         ),
         "401": unauthorized(STALE_TOKEN_401),
         "403": errorResponse("Authenticated but not an admin.", 403, "Forbidden"),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/products/{id}": {
+    get: {
+      tags: ["Products"],
+      summary: "Get one product (role-projected)",
+      operationId: "getProductById",
+      description:
+        "Returns a single **active** product in the exact role-projected shape of a list item " +
+        "(Admin sees internal fields, Employee gets `inStock` + the available `quantity`, a Client " +
+        "sees only the shared catalog fields). A malformed id and an unknown/soft-deleted product " +
+        "are both a plain `404`. Available to any authenticated role. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          description: "The product id.",
+          schema: { type: "integer", minimum: 1 },
+        },
+      ],
+      responses: {
+        "200": dataResponse("The role-projected product (example shows the Admin view).", "ProductDetailResponse", {
+          product: {
+            id: 7,
+            name: "Mesa redonda",
+            description: "Mesa para 8 personas",
+            businessType: "Alquiler",
+            category: "Mesas",
+            currency: { id: 1, iso4217Code: "GTQ", name: "Quetzal Guatemalteco", symbol: "Q" },
+            rentPrice: 75,
+            sellPrice: null,
+            rentTimeUnit: "Día",
+            images: [{ id: 1, url: "https://cdn.example.com/products/7/hero.webp", isPrimary: true, sortOrder: 0 }],
+            details: [{ id: 12, detail: "Blanco", detailType: "Color" }],
+            inStock: true,
+            quantity: 40,
+            replacementPrice: 900,
+            isActive: true,
+          },
+        }, "Product fetched"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "404": errorResponse("Unknown, malformed, or soft-deleted product id.", 404, "Product not found"),
         "429": rateLimited,
         "500": serverError,
       },

@@ -5,6 +5,7 @@ import { RolesEnum } from "@models/enums/rolesEnum.js";
 import {
   createProduct,
   createProductImageUploads,
+  getProductById,
   getProductCatalog,
   getProducts,
 } from "./products.controller.js";
@@ -16,9 +17,10 @@ import {
 const router: RouterType = Router();
 
 // Region: Protected reads — any authenticated role (the response is role-projected in the controller).
-// `/catalog` must be declared before any future `/:id` route so it never matches as a param.
+// `/catalog` is declared before `/:id` so it never matches as a param.
 router.get("/", verifyJwt, getProducts);
 router.get("/catalog", verifyJwt, getProductCatalog);
+router.get("/:id", verifyJwt, getProductById);
 
 // Region: Role-protected writes (Admin only). The cheap DB-free role check runs BEFORE the
 // validator (which hits the DB for lookups) — a non-admin is denied without a single query.

@@ -5,8 +5,9 @@
  * fields below are **optional** — their mere presence IS the contract:
  *
  * - everyone (incl. Client) gets the shared catalog fields (name, price, images, …);
- * - **Employee** additionally gets `inStock` (an availability *signal*, never the count);
- * - **Admin** additionally gets the internal detail (`quantity`, `replacementPrice`, `isActive`).
+ * - **Employee** additionally gets the availability: `inStock` AND the available `quantity`
+ *   (a bare flag can't answer "can I take an order for 10?" — owner decision, 2026-07-14);
+ * - **Admin** additionally gets the internal detail (`replacementPrice`, `isActive`).
  *
  * The UI reacts to which fields exist rather than re-deriving the role, so if the projection changes it
  * changes in exactly two mirrored places (this file + the backend model). Do not read a gated field
@@ -50,7 +51,7 @@ export interface Product {
   details: ProductDetail[];
   /** Availability signal — Employee + Admin only (never sent to Client). */
   inStock?: boolean;
-  /** Exact stock on hand — Admin only. */
+  /** Available stock count — Employee + Admin only (today = on-hand; minus reservations later). */
   quantity?: number;
   /** Internal replacement cost — Admin only. */
   replacementPrice?: number;
@@ -68,6 +69,11 @@ export interface Pagination {
 export interface ProductListResponse {
   products: Product[];
   pagination: Pagination;
+}
+
+/** `GET /products/:id` — the same role-projected shape as a list item, single row. */
+export interface ProductDetailResponse {
+  product: Product;
 }
 
 /** A seeded lookup row (`GET /products/catalog`) — just enough to render a select option. */

@@ -13,6 +13,8 @@ import { usePanelPageMotion } from '../PanelPageTransitionContext';
 import ProductCard from './ProductCard';
 import ProductCardSkeleton from './ProductCardSkeleton';
 import ProductsFilterBar from './ProductsFilterBar';
+import { claimProductImageMorphWithin, releaseProductImageMorph } from './productImageMorph';
+import { clearProductsScroll, restoreProductsScroll } from './productsScroll';
 import ProductsStatus from './ProductsStatus';
 import { hasActiveFilters, type ProductListSearch } from './productListSearch';
 import { PRODUCTS_PAGE_SIZE, useProducts } from './useProducts';
@@ -86,6 +88,26 @@ const ProductsPage: React.FC = () => {
     },
     [navigate],
   );
+
+  // ARRIVAL orchestration (once, before first paint — declared before the entrance effects so a
+  // held cell is already out of the `.reveal-item` sweep when they query):
+  //  - WARM (returning from a detail): restore the grid's saved scroll FIRST, then let the
+  //    returning shared-element clone claim its card — the landing rect must be measured where the
+  //    card actually is after the restore.
+  //  - COLD (skeletons): there is no card to land on and the position belongs to a list we no
+  //    longer have — dismiss the clone and forget the scroll; this arrival is a fresh list.
+  const arrivalHandled = useRef(false);
+  useLayoutEffect(() => {
+    if (arrivalHandled.current) return;
+    arrivalHandled.current = true;
+    if (loading) {
+      releaseProductImageMorph();
+      clearProductsScroll();
+      return;
+    }
+    restoreProductsScroll();
+    claimProductImageMorphWithin(root.current);
+  }, [loading]);
 
   // The skeleton stays mounted while loading AND through its exit sweep after loading ends, so the
   // real content mounts into its place rather than popping. Re-arming when we RE-ENTER loading (a cold

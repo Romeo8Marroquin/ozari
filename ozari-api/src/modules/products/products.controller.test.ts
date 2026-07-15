@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import {
   createProduct,
   createProductImageUploads,
+  getProductById,
   getProductCatalog,
   getProducts,
 } from "./products.controller.js";
@@ -152,6 +153,65 @@ describe("getProducts", () => {
   it("sends a 500 when the query fails", async () => {
     (getPrismaClient as Mock).mockRejectedValue(new Error("db down"));
     await getProducts(buildReq(RolesEnum.Admin), {} as Response);
+    expect(sendOzariError).toHaveBeenCalled();
+    expect(sendOzariSuccess).not.toHaveBeenCalled();
+  });
+});
+
+describe("getProductById", () => {
+  const buildDetailReq = (
+    role: RolesEnum | undefined,
+    id: unknown,
+  ): CustomRequest =>
+    ({
+      params: { id },
+      user: role === undefined ? undefined : { userRole: role, userId: 1 },
+    }) as unknown as CustomRequest;
+
+  function mockDetailPrisma(product: unknown) {
+    const findFirst = vi.fn().mockResolvedValue(product);
+    (getPrismaClient as Mock).mockResolvedValue({ product: { findFirst } });
+    return { findFirst };
+  }
+
+  it("returns the role-projected product (Admin view) for a valid id", async () => {
+    const { findFirst } = mockDetailPrisma(rawProduct);
+    await getProductById(buildDetailReq(RolesEnum.Admin, "7"), {} as Response);
+
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 7, isActive: true }),
+      }),
+    );
+    const data = (sendOzariSuccess as Mock).mock.calls[0]?.[3] as { product: Record<string, unknown> };
+    expect(data.product).toMatchObject({ id: 7, quantity: 40, replacementPrice: 900, isActive: true });
+  });
+
+  it("projects minimally for a Client (and when the role is somehow absent)", async () => {
+    mockDetailPrisma(rawProduct);
+    await getProductById(buildDetailReq(undefined, "7"), {} as Response);
+    const data = (sendOzariSuccess as Mock).mock.calls[0]?.[3] as { product: Record<string, unknown> };
+    expect(data.product["quantity"]).toBeUndefined();
+    expect(data.product["inStock"]).toBeUndefined();
+  });
+
+  it("404s an unknown id", async () => {
+    mockDetailPrisma(null);
+    await getProductById(buildDetailReq(RolesEnum.Client, "999"), {} as Response);
+    expect(sendOzariError).toHaveBeenCalledWith({} as Response, HttpEnum.NOT_FOUND, expect.any(String));
+    expect(sendOzariSuccess).not.toHaveBeenCalled();
+  });
+
+  it("404s a malformed id WITHOUT touching the database", async () => {
+    const { findFirst } = mockDetailPrisma(rawProduct);
+    await getProductById(buildDetailReq(RolesEnum.Client, "abc"), {} as Response);
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith({} as Response, HttpEnum.NOT_FOUND, expect.any(String));
+  });
+
+  it("sends a 500 when the query fails", async () => {
+    (getPrismaClient as Mock).mockRejectedValue(new Error("db down"));
+    await getProductById(buildDetailReq(RolesEnum.Admin, "7"), {} as Response);
     expect(sendOzariError).toHaveBeenCalled();
     expect(sendOzariSuccess).not.toHaveBeenCalled();
   });

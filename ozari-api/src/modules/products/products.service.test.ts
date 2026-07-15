@@ -62,10 +62,11 @@ describe("projectProductForRole", () => {
     expect(result.isActive).toBeUndefined();
   });
 
-  it("adds an in-stock signal for Employee, but never the exact count", () => {
+  it("adds the availability (signal + available count) for Employee — internals stay Admin-only", () => {
     const result = projectProductForRole(makeProduct({ quantity: 40 }), RolesEnum.Employee);
     expect(result.inStock).toBe(true);
-    expect(result.quantity).toBeUndefined();
+    // The COUNT is what lets an employee answer "can I take an order for 10?" — a bare flag can't.
+    expect(result.quantity).toBe(40);
     expect(result.replacementPrice).toBeUndefined();
     expect(result.isActive).toBeUndefined();
   });
@@ -73,6 +74,7 @@ describe("projectProductForRole", () => {
   it("reflects an out-of-stock product for Employee", () => {
     const result = projectProductForRole(makeProduct({ quantity: 0 }), RolesEnum.Employee);
     expect(result.inStock).toBe(false);
+    expect(result.quantity).toBe(0);
   });
 
   it("gives Admin the full internal detail", () => {

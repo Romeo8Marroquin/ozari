@@ -15,6 +15,7 @@ import {
   type CreateProductImageUploadsRequestModel,
   type CreateProductRequestModel,
   type ProductCatalogResponseModel,
+  type ProductDetailResponseModel,
   type ProductImageUploadsResponseModel,
   type ProductListResponseModel,
 } from "./products.models.js";
@@ -90,6 +91,76 @@ export const getProducts = async (
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
       i18next.t("products.getAllProducts.errorFetchingProducts"),
+    );
+  }
+};
+
+/**
+ * `GET /products/:id` — one product, the exact role-projected shape of a list item (same
+ * `projectProductForRole`, so the field policy lives in ONE place). Row visibility matches the
+ * list: the active catalog only (a soft-deleted product 404s for everyone until the 3b admin
+ * tooling needs otherwise). A malformed id and an unknown id are both a plain **404** — a detail
+ * lookup either finds the row or it doesn't; there is nothing for the client to "fix".
+ */
+export const getProductById = async (
+  req: CustomRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const role = req.user?.userRole ?? RolesEnum.Client;
+    const id = Number(req.params["id"]);
+    const validId = Number.isInteger(id) && id >= 1;
+
+    const prismaClient = await getPrismaClient();
+    const rawProduct = validId
+      ? await prismaClient.product.findFirst({
+          where: {
+            id,
+            isActive: true,
+            businessType: { isActive: true },
+            category: { isActive: true },
+            currency: { isActive: true },
+          },
+          include: richProductInclude,
+        })
+      : null;
+
+    if (!rawProduct) {
+      logger.warn(
+        i18next.t("products.getProductById.logs.productNotFound", {
+          id: req.params["id"],
+        }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.NOT_FOUND,
+        i18next.t("products.getProductById.productNotFound"),
+      );
+      return;
+    }
+
+    const response: ProductDetailResponseModel = {
+      product: projectProductForRole(rawProduct, role),
+    };
+    logger.info(
+      i18next.t("products.getProductById.logs.productFetched", { id }),
+    );
+    sendOzariSuccess(
+      res,
+      HttpEnum.OK,
+      i18next.t("products.getProductById.productFetched"),
+      response,
+    );
+  } catch (error) {
+    logger.error(
+      i18next.t("products.getProductById.logs.errorFetchingProduct", {
+        error,
+      }),
+    );
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("products.getProductById.errorFetchingProduct"),
     );
   }
 };

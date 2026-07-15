@@ -1,10 +1,21 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The role drives which ACTIONS the glass overlay offers — drive it directly.
 const { useRole } = vi.hoisted(() => ({ useRole: vi.fn() }));
 vi.mock('@hooks/useRole', () => ({ useRole }));
+
+// The card navigates through the panel transition, saves the grid scroll, and lifts the morph off.
+const { panelNavigate } = vi.hoisted(() => ({ panelNavigate: vi.fn() }));
+vi.mock('../PanelNavContext', () => ({ usePanelNavigate: () => panelNavigate }));
+const { beginProductImageMorph, estimateDetailHeroRect } = vi.hoisted(() => ({
+  beginProductImageMorph: vi.fn(),
+  estimateDetailHeroRect: vi.fn(),
+}));
+vi.mock('./productImageMorph', () => ({ beginProductImageMorph, estimateDetailHeroRect }));
+const { saveProductsScroll } = vi.hoisted(() => ({ saveProductsScroll: vi.fn() }));
+vi.mock('./productsScroll', () => ({ saveProductsScroll }));
 
 import { Role } from '@constants/Roles';
 import ProductCard from './ProductCard';
@@ -29,14 +40,15 @@ const STOCK = {
   out: `${K}.stock.out`,
 };
 const ACTIONS = {
-  edit: `${K}.card.actions.edit`,
-  delete: `${K}.card.actions.delete`,
   order: `${K}.card.actions.order`,
+  rent: `${K}.card.actions.rent`,
+  buy: `${K}.card.actions.buy`,
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
   useRole.mockReturnValue(null);
+  estimateDetailHeroRect.mockReturnValue(null);
 });
 
 const card = (): HTMLElement =>
@@ -53,41 +65,44 @@ describe('ProductCard', () => {
     expect(screen.getByRole('img')).toHaveAttribute('src', 'https://cdn/mesa.webp');
   });
 
-  it('is a REAL stretched button: click/Enter/Space toggle the reveal, blur retracts it', async () => {
+  it('is a REAL stretched button that NAVIGATES to the detail and lifts off the morph', async () => {
     render(<ProductCard product={base} />);
     const viewDetails = card();
     expect(viewDetails.tagName).toBe('BUTTON'); // native semantics — Enter/Space/focus for free
-    expect(viewDetails).toHaveAttribute('aria-expanded', 'false');
 
     await userEvent.click(viewDetails);
-    expect(viewDetails).toHaveAttribute('aria-expanded', 'true');
-
-    viewDetails.focus();
-    await userEvent.keyboard('{Enter}');
-    expect(viewDetails).toHaveAttribute('aria-expanded', 'false');
-    await userEvent.keyboard(' ');
-    expect(viewDetails).toHaveAttribute('aria-expanded', 'true');
-
-    // Focus leaving the card entirely retracts the reveal (the touch "tap elsewhere" close).
-    fireEvent.blur(viewDetails, { relatedTarget: document.body });
-    expect(viewDetails).toHaveAttribute('aria-expanded', 'false');
+    expect(panelNavigate).toHaveBeenCalledWith('/panel/productos/1');
+    // The grid's scroll is remembered for the return trip.
+    expect(saveProductsScroll).toHaveBeenCalled();
+    // The morph begins with the SHARED "animation id" (the product id) + the tagged photo, and
+    // starts travelling toward the PREDICTED hero rect right on the click.
+    estimateDetailHeroRect.mockReturnValue({ left: 1, top: 2, width: 3, height: 4 });
+    await userEvent.click(viewDetails);
+    expect(beginProductImageMorph).toHaveBeenLastCalledWith(
+      1,
+      screen.getByRole('img'),
+      { left: 1, top: 2, width: 3, height: 4 },
+    );
+    expect(screen.getByRole('img')).toHaveAttribute('data-morph-id', '1');
   });
 
-  it('keeps the reveal pinned while interacting with an action (siblings, never nested)', async () => {
+  it('still begins the (no-op) morph without a photo — the module handles the null', async () => {
+    render(<ProductCard product={{ ...base, images: [] }} />);
+    await userEvent.click(card());
+    expect(beginProductImageMorph).toHaveBeenCalledWith(1, null, null);
+    expect(panelNavigate).toHaveBeenCalledWith('/panel/productos/1');
+  });
+
+
+  it('never navigates from an action press (siblings, never nested; propagation stopped)', async () => {
     useRole.mockReturnValue(Role.Admin);
     render(<ProductCard product={base} />);
     const viewDetails = card();
-    await userEvent.click(viewDetails);
-    expect(viewDetails).toHaveAttribute('aria-expanded', 'true');
 
-    // Clicking an action must NOT toggle the card (it's a SIBLING above the stretched button).
-    const edit = screen.getByRole('button', { name: new RegExp(ACTIONS.edit) });
-    expect(edit.parentElement?.contains(viewDetails)).toBe(false); // no nested interactive
-    await userEvent.click(edit);
-    expect(viewDetails).toHaveAttribute('aria-expanded', 'true');
-    // Focus moving WITHIN the card (to the action) doesn't retract either.
-    fireEvent.blur(viewDetails, { relatedTarget: edit });
-    expect(viewDetails).toHaveAttribute('aria-expanded', 'true');
+    const order = screen.getByRole('button', { name: new RegExp(ACTIONS.order) });
+    expect(order.parentElement?.contains(viewDetails)).toBe(false); // no nested interactive
+    await userEvent.click(order);
+    expect(panelNavigate).not.toHaveBeenCalled();
   });
 
   it('shows the brand mark placeholder and no price when there is no image or price', () => {
@@ -126,27 +141,42 @@ describe('ProductCard', () => {
     expect(screen.queryByText(STOCK.out)).not.toBeInTheDocument();
   });
 
-  it('offers edit + delete on the glass for an Admin', () => {
+  it('offers "Ordenar" to an Admin (an employee with more privileges — they order FOR a client)', () => {
     useRole.mockReturnValue(Role.Admin);
     render(<ProductCard product={base} />);
-    expect(screen.getByRole('button', { name: new RegExp(ACTIONS.edit) })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: new RegExp(ACTIONS.delete) })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.order) })).not.toBeInTheDocument();
-  });
-
-  it('offers order on the glass for a Client', () => {
-    useRole.mockReturnValue(Role.Client);
-    render(<ProductCard product={base} />);
     expect(screen.getByRole('button', { name: new RegExp(ACTIONS.order) })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.edit) })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.rent) })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.buy) })).not.toBeInTheDocument();
   });
 
-  it('offers no actions for an Employee — information only (the card itself stays focusable)', () => {
+  it('offers "Ordenar" to an Employee', () => {
     useRole.mockReturnValue(Role.Employee);
     render(<ProductCard product={base} />);
-    // The ONLY button is the card's own view-details control — no edit/delete/order.
-    expect(screen.getAllByRole('button')).toHaveLength(1);
-    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.edit) })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: new RegExp(ACTIONS.order) })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.rent) })).not.toBeInTheDocument();
+  });
+
+  it('offers the business-type CTA to a Client: "Rentar" for Alquiler, "Comprar" for Venta', () => {
+    useRole.mockReturnValue(Role.Client);
+    const { unmount } = render(<ProductCard product={base} />); // base = Alquiler
+    expect(screen.getByRole('button', { name: new RegExp(ACTIONS.rent) })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.order) })).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <ProductCard
+        product={{ ...base, businessType: 'Venta', rentPrice: undefined, rentTimeUnit: undefined, sellPrice: 900 }}
+      />,
+    );
+    expect(screen.getByRole('button', { name: new RegExp(ACTIONS.buy) })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.rent) })).not.toBeInTheDocument();
+  });
+
+  it('offers no actions while signed-out/unreadable (role null) — the card itself stays focusable', () => {
+    render(<ProductCard product={base} />);
+    // The ONLY button is the card's own view-details control.
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.order) })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.rent) })).not.toBeInTheDocument();
   });
 });
