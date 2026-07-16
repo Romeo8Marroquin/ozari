@@ -97,7 +97,7 @@ interface PrismaOpts {
   userFindUnique?: Record<string, unknown> | null;
   userFindMany?: Record<string, unknown>[];
   currentRefresh?: Record<string, unknown> | null;
-  lockedRows?: Array<{ jti: string }>;
+  lockedRows?: Array<{ jti: string; previous_jti?: string | null; rotated_at?: Date | null }>;
 }
 
 function mockPrisma(opts: PrismaOpts = {}) {
@@ -387,6 +387,76 @@ describe("refreshToken", () => {
     );
   });
 
+  it("accepts a GRACE replay of the immediately-previous jti (lost rotation response) and re-rotates", async () => {
+    const rotatedJustNow = new Date(Date.now() - 5_000);
+    const { client, tx } = mockPrisma({
+      // The device's current row was minted by a rotation whose response never reached the
+      // client — its lineage remembers the replaced jti and when.
+      currentRefresh: {
+        jti: "jti-never-delivered",
+        previousJti: "jti-old",
+        rotatedAt: rotatedJustNow,
+        expiresAt: FUTURE,
+        deviceUuid: "device-1",
+        userId: 1,
+      },
+      lockedRows: [
+        { jti: "jti-never-delivered", previous_jti: "jti-old", rotated_at: rotatedJustNow },
+      ],
+    });
+    const res = buildRes();
+    await refreshToken(refreshReq(makeRefreshToken({ jti: "jti-old" })), res);
+
+    // NOT theft: no user-wide nuke; a fresh pair is minted for the lost-response client.
+    expect(client.jwtSession.deleteMany).not.toHaveBeenCalled();
+    const created = (tx.jwtSession.createMany as Mock).mock.calls[0]?.[0]
+      .data as Array<Record<string, unknown>>;
+    expect(created).toHaveLength(2);
+    // Lineage chains to the REPLACED (locked) jti — never the presented one, so the same old
+    // token can't ride the grace twice.
+    const refreshRow = created.find((row) => row["tokenTypeId"] === TokenEnum.REFRESH_TOKEN)!;
+    expect(refreshRow["previousJti"]).toBe("jti-never-delivered");
+    expect(refreshRow["rotatedAt"]).toBeInstanceOf(Date);
+    expect(sendOzariSuccess).toHaveBeenCalledWith(res, HttpEnum.OK, expect.any(String));
+  });
+
+  it("still nukes ALL sessions when the previous jti is replayed OUTSIDE the grace window", async () => {
+    const { client, tx } = mockPrisma({
+      currentRefresh: {
+        jti: "jti-never-delivered",
+        previousJti: "jti-old",
+        rotatedAt: new Date(Date.now() - 10 * 60_000), // rotated 10 minutes ago — way past grace
+        expiresAt: FUTURE,
+        deviceUuid: "device-1",
+        userId: 1,
+      },
+    });
+    await refreshToken(refreshReq(makeRefreshToken({ jti: "jti-old" })), buildRes());
+
+    expect(client.jwtSession.deleteMany).toHaveBeenCalledWith({ where: { userId: 1 } });
+    expect(tx.jwtSession.createMany).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.UNAUTHORIZED,
+      expect.any(String),
+    );
+  });
+
+  it("nukes when the previous jti matches but the row has no rotation timestamp (no lineage, no grace)", async () => {
+    const { client } = mockPrisma({
+      currentRefresh: {
+        jti: "jti-never-delivered",
+        previousJti: "jti-old",
+        rotatedAt: null,
+        expiresAt: FUTURE,
+        deviceUuid: "device-1",
+        userId: 1,
+      },
+    });
+    await refreshToken(refreshReq(makeRefreshToken({ jti: "jti-old" })), buildRes());
+    expect(client.jwtSession.deleteMany).toHaveBeenCalledWith({ where: { userId: 1 } });
+  });
+
   it("returns 401 when the session row is expired", async () => {
     const { client } = mockPrisma({
       currentRefresh: {
@@ -420,8 +490,15 @@ describe("refreshToken", () => {
 
     expect(tx.jwtSession.deleteMany).toHaveBeenCalled();
     const created = (tx.jwtSession.createMany as Mock).mock.calls[0]?.[0]
-      .data as Array<{ tokenTypeId: number }>;
+      .data as Array<Record<string, unknown>>;
     expect(created).toHaveLength(2);
+    // The new refresh row records its rotation lineage (grace-window bookkeeping); the
+    // access row carries none.
+    const refreshRow = created.find((row) => row["tokenTypeId"] === TokenEnum.REFRESH_TOKEN)!;
+    expect(refreshRow["previousJti"]).toBe("jti-current");
+    expect(refreshRow["rotatedAt"]).toBeInstanceOf(Date);
+    const accessRow = created.find((row) => row["tokenTypeId"] === TokenEnum.ACCESS_TOKEN)!;
+    expect(accessRow["previousJti"]).toBeUndefined();
     expect(res.header).toHaveBeenCalledWith(
       "authorization",
       expect.stringMatching(/^Bearer .+/),

@@ -329,7 +329,7 @@ describe('ProductDetailPage', () => {
     expect(container.querySelector('[data-morph-id="7"] svg')).toBeInTheDocument();
   });
 
-  it('maps the role CTA: Client sees Rentar (Alquiler) / Comprar (Venta), staff sees Ordenar', () => {
+  it('maps the role CTA: Client sees Rentar (Alquiler) / Comprar (Venta); an Admin sees NO consumer CTA', () => {
     setProduct({ data: base });
     const { rerender } = renderPage();
     expect(screen.getByRole('button', { name: new RegExp(`${K}.card.actions.rent`) })).toBeInTheDocument();
@@ -338,9 +338,12 @@ describe('ProductDetailPage', () => {
     rerender(<ProductDetailPage />);
     expect(screen.getByRole('button', { name: new RegExp(`${K}.card.actions.buy`) })).toBeInTheDocument();
 
-    useRole.mockReturnValue(Role.Employee);
+    // "Ordenar" is gone (Epic-2A): the admin's order-on-behalf flow is a dedicated form in the
+    // orders epic, so a non-Client role gets no consumer CTA here at all.
+    useRole.mockReturnValue(Role.Admin);
     rerender(<ProductDetailPage />);
-    expect(screen.getByRole('button', { name: new RegExp(`${K}.card.actions.order`) })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: new RegExp(`${K}.card.actions.buy`) })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: new RegExp(`${K}.card.actions.rent`) })).not.toBeInTheDocument();
   });
 
   it('offers Editar + Eliminar to an Admin (management verbs live HERE, not on the card)', () => {
@@ -412,7 +415,7 @@ describe('ProductDetailPage', () => {
     expect(screen.getByText(`${D}.replacementPrice`, { exact: false })).toBeInTheDocument();
     expect(screen.getByText('Q900')).toBeInTheDocument();
 
-    setProduct({ data: base }); // Client/Employee projection — the field never arrives
+    setProduct({ data: base }); // Client projection — the field never arrives
     rerender(<ProductDetailPage />);
     expect(screen.queryByText(`${D}.replacementPrice`, { exact: false })).not.toBeInTheDocument();
   });
@@ -498,7 +501,10 @@ describe('ProductDetailPage', () => {
     expect(beginProductImageMorph).not.toHaveBeenCalled();
   });
 
-  it("declines the interceptor's re-dispatched event (the morph is already in flight)", () => {
+  it('declines when a morph is already in flight (a back racing the in-app lift-off)', () => {
+    // NOTE: this guard is a race-condition nicety only. The interceptor's own re-dispatched event
+    // never reaches the hold anymore (utils/historyDeparture marks and skips it) — relying on this
+    // check for that was the blank-page-after-chained-backs bug.
     setProduct({ data: base });
     renderPage();
     hasProductImageMorphInFlight.mockReturnValue(true);

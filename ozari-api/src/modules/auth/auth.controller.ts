@@ -305,6 +305,54 @@ export const signInUser = async (
   }
 };
 
+/**
+ * Whether `presentedJti` is a GRACE replay against `session`'s rotation lineage: exactly the jti
+ * this row's rotation replaced, presented within `appConfig.session.refreshReuseGraceSeconds` of
+ * that rotation. This is the lost-response race — the client never received the rotation response
+ * (reload / tab close / network drop after the server committed) and still holds the old cookie —
+ * the ONLY replay that re-rotates instead of nuking the user's sessions. A first-login row has no
+ * lineage (`previousJti`/`rotatedAt` null) and can never match.
+ */
+const isGraceReplay = (
+  session: { previousJti: string | null; rotatedAt: Date | null },
+  presentedJti: string,
+): boolean =>
+  session.previousJti === presentedJti &&
+  session.rotatedAt !== null &&
+  Date.now() - session.rotatedAt.getTime() <=
+    appConfig.session.refreshReuseGraceSeconds * 1000;
+
+/**
+ * The fail-secure answer to genuine token reuse (a replayed rotated token that is NOT a grace
+ * replay — likely theft): hard-delete EVERY session of the user (no tombstone garbage, so we never
+ * depend on a cleanup job running under scale-to-zero) and audit it in deployed environments.
+ */
+async function punishTokenReuse(
+  prismaClient: Awaited<ReturnType<typeof getPrismaClient>>,
+  req: Request,
+  payload: UserJwtPayloadModel,
+): Promise<void> {
+  logger.error(
+    i18next.t("user.refreshToken.logs.tokenReuseDetected", {
+      jti: payload.jti,
+      userId: payload.userId,
+    }),
+  );
+  await prismaClient.jwtSession.deleteMany({
+    where: { userId: payload.userId },
+  });
+  if (isDeployedEnvironment()) {
+    logSecurityAudit({
+      action: AuditAction.UNAUTHORIZED_ACCESS_ATTEMPT,
+      userId: payload.userId,
+      ipAddress: req.ip,
+      success: false,
+      reason: "Refresh token reuse detected - all sessions invalidated",
+      metadata: { deviceUuid: payload.deviceUuid },
+    });
+  }
+}
+
 export const refreshToken = async (
   req: Request,
   res: Response,
@@ -366,31 +414,26 @@ export const refreshToken = async (
     }
 
     // Reuse detection: the token is validly signed but is NOT the device's current
-    // refresh token -> a previously-rotated token is being replayed (likely theft).
-    // Hard-delete every session for the user (fail secure, leaves no tombstone
-    // garbage so we never depend on a cleanup job running under scale-to-zero).
+    // refresh token -> a previously-rotated token is being replayed. ONE benign case is
+    // carved out first — the GRACE replay (`isGraceReplay`): the presented jti is exactly
+    // the one this row's rotation replaced, within the grace window. That is the
+    // lost-response race (a reload/tab-close/network drop killed the rotation response
+    // after the server committed, so the client still holds the old cookie) — re-rotate
+    // for it instead of punishing it. Anything else is treated as theft: hard-delete
+    // every session for the user (fail secure, leaves no tombstone garbage so we never
+    // depend on a cleanup job running under scale-to-zero).
     if (currentRefresh.jti !== payload.jti) {
-      logger.error(
-        i18next.t("user.refreshToken.logs.tokenReuseDetected", {
+      if (!isGraceReplay(currentRefresh, payload.jti)) {
+        await punishTokenReuse(prismaClient, req, payload);
+        sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
+        return;
+      }
+      logger.warn(
+        i18next.t("user.refreshToken.logs.reuseGraceAccepted", {
           jti: payload.jti,
           userId: payload.userId,
         }),
       );
-      await prismaClient.jwtSession.deleteMany({
-        where: { userId: payload.userId },
-      });
-      if (isDeployedEnvironment()) {
-        logSecurityAudit({
-          action: AuditAction.UNAUTHORIZED_ACCESS_ATTEMPT,
-          userId: payload.userId,
-          ipAddress: req.ip,
-          success: false,
-          reason: "Refresh token reuse detected - all sessions invalidated",
-          metadata: { deviceUuid: payload.deviceUuid },
-        });
-      }
-      sendOzariError(res, HttpEnum.UNAUTHORIZED, i18next.t(genericErrorKey));
-      return;
     }
 
     // Defensive: jwt.verify already enforced the token's exp claim, but the DB row
@@ -438,11 +481,15 @@ export const refreshToken = async (
 
     // Rotate atomically. Lock the device's active refresh row; if it changed out
     // from under us (a concurrent refresh of the SAME token won the race), treat it
-    // as a harmless retry (401) rather than theft.
+    // as a harmless retry (401) rather than theft — unless the locked row still
+    // accepts the presented jti (current, or a grace replay re-evaluated UNDER the
+    // lock: the pre-check read is not authoritative).
     let rotatedConcurrently = false;
     await prismaClient.$transaction(async (transaction) => {
-      const lockedSession = await transaction.$queryRaw<Array<{ jti: string }>>`
-        SELECT jti
+      const lockedSession = await transaction.$queryRaw<
+        Array<{ jti: string; previous_jti: string | null; rotated_at: Date | null }>
+      >`
+        SELECT jti, previous_jti, rotated_at
         FROM jwt_sessions
         WHERE device_uuid = ${payload.deviceUuid}
           AND user_id = ${payload.userId}
@@ -451,7 +498,15 @@ export const refreshToken = async (
         FOR UPDATE
       `;
 
-      if (lockedSession[0]?.jti !== payload.jti) {
+      const locked = lockedSession[0];
+      const acceptedUnderLock =
+        locked !== undefined &&
+        (locked.jti === payload.jti ||
+          isGraceReplay(
+            { previousJti: locked.previous_jti, rotatedAt: locked.rotated_at },
+            payload.jti,
+          ));
+      if (!acceptedUnderLock) {
         rotatedConcurrently = true;
         return;
       }
@@ -480,6 +535,12 @@ export const refreshToken = async (
             jti: refreshJti,
             tokenTypeId: TokenEnum.REFRESH_TOKEN,
             userId: payload.userId,
+            // Rotation lineage: this rotation replaced the LOCKED row's jti (on a grace
+            // replay that is the never-delivered pair's jti, NOT the presented one — so
+            // the same old token can never ride the grace twice; a second replay of it
+            // mismatches both `jti` and `previousJti` and fires the nuke).
+            previousJti: locked.jti,
+            rotatedAt: new Date(now * 1000),
           },
         ],
       });

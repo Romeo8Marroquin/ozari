@@ -1,6 +1,6 @@
 import type { IconType } from 'react-icons';
 import { HiOutlineCube, HiOutlineCog6Tooth } from 'react-icons/hi2';
-import type { Role } from '@constants/Roles';
+import { Role } from '@constants/Roles';
 
 /**
  * The panel routes the transition controller can navigate to (a literal union so TanStack Link
@@ -30,13 +30,33 @@ export interface PanelNavItem {
   roles?: readonly Role[];
 }
 
+/**
+ * The roles allowed into the products section (Epic-2A, owner decision 2026-07-15): a Driver's job
+ * is deliveries, not the catalog — they get "Mis entregas" when the orders epic lands. Single
+ * source for the nav item AND the `/panel/productos*` route guards (the backend 403 is the real
+ * boundary; this is the matching UX layer).
+ */
+export const PRODUCTS_ROLES: readonly Role[] = [Role.Admin, Role.Client];
+
 // The nav shows ONLY built modules. Now that Settings is real we start "seriously": Products +
 // Settings (the placeholder Inicio/Pedidos/Clientes tabs were removed). A dashboard lands later;
-// until then `/panel` defaults to `/panel/productos`.
+// until then `/panel` defaults to `/panel/productos` (a Driver, who can't see products, lands on
+// `/panel/ajustes` — see `panelHomeFor`).
 export const PANEL_NAV: PanelNavItem[] = [
-  { to: '/panel/productos', icon: HiOutlineCube, labelKey: 'products' },
+  { to: '/panel/productos', icon: HiOutlineCube, labelKey: 'products', roles: PRODUCTS_ROLES },
   { to: '/panel/ajustes', icon: HiOutlineCog6Tooth, labelKey: 'settings' },
 ];
+
+/**
+ * Where bare `/panel` lands for `role`: the first nav tab the role is allowed to see (products for
+ * Admin/Client, settings for a Driver), falling back to settings if the role somehow matches
+ * nothing. Keeps the default-landing rule derived from the SAME role-visibility source as the
+ * sidebar, so the two can never disagree.
+ */
+export function panelHomeFor(role: Role | null): PanelPath {
+  /* v8 ignore next -- defensive `??`: the settings tab is unrestricted, so the list is never empty */
+  return filterNavByRole(PANEL_NAV, role)[0]?.to ?? '/panel/ajustes';
+}
 
 /**
  * The nav items visible to `role`, dropping any whose `roles` restriction the current role doesn't

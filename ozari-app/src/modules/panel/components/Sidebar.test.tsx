@@ -7,6 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // as a plain <a> (dropping the router-only `viewTransition` prop so React doesn't warn), and drive
 // the pathname through a hoisted holder.
 const { currentPath } = vi.hoisted(() => ({ currentPath: { value: '/panel/productos' } }));
+
+// The sidebar derives its visible tabs from the current role (`filterNavByRole`) — drive it
+// directly. Admin is the default staff view (sees every tab); the Driver test overrides it.
+const { useRole } = vi.hoisted(() => ({ useRole: vi.fn() }));
+vi.mock('@hooks/useRole', () => ({ useRole }));
 vi.mock('@tanstack/react-router', () => ({
   useLocation: (opts: { select: (l: { pathname: string }) => unknown }) => opts.select({ pathname: currentPath.value }),
   Link: ({
@@ -29,6 +34,7 @@ vi.mock('@tanstack/react-router', () => ({
   },
 }));
 
+import { Role } from '@constants/Roles';
 import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from '@utils/storage';
 import { PanelChromeProvider, usePanelChrome } from '../hooks/usePanelChrome';
@@ -90,6 +96,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   vi.clearAllMocks();
+  useRole.mockReturnValue(Role.Admin);
 });
 
 afterEach(() => {
@@ -111,6 +118,16 @@ describe('Sidebar (inline, desktop/tablet)', () => {
     expect(inactive).not.toHaveAttribute('aria-current');
 
     expect(screen.getByRole('button', { name: 'modules.panel.actions.collapse' })).toBeInTheDocument();
+  });
+
+  it('hides the products tab from a Driver — their nav is settings only (Epic-2A)', () => {
+    setViewport('desktop');
+    useRole.mockReturnValue(Role.Driver);
+    renderSidebar();
+
+    expect(screen.getAllByRole('link')).toHaveLength(2); // brand + settings
+    expect(screen.queryByRole('link', { name: 'modules.panel.nav.products' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'modules.panel.nav.settings' })).toBeInTheDocument();
   });
 
   it('navigates through the panel nav context when an inactive tab is clicked', async () => {

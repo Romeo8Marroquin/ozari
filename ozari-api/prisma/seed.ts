@@ -13,7 +13,7 @@ import {
  * Every row is upserted by its explicit primary key, so:
  *   - re-running this NEVER duplicates (safe against the already-seeded staging DB);
  *   - the exact ids the app depends on are preserved — RolesEnum (Client=1, Admin=2,
- *     Employee=3), the token-type ids (Access=1, Refresh=2), and the
+ *     Driver=3), the token-type ids (Access=1, Refresh=2), and the
  *     Guatemala -> department -> municipality -> zone foreign-key chain.
  *
  * This runs ONLY via `pnpm prisma db seed` / `pnpm db:seed`. It is NOT part of
@@ -24,11 +24,17 @@ import {
 async function main(): Promise<void> {
   const prisma = await getPrismaClient();
 
-  // user_roles — RolesEnum: Client=1, Admin=2, Employee=3
+  // user_roles — RolesEnum: Client=1, Admin=2, Driver=3. Role 3 was renamed
+  // "Empleado" → "Repartidor" (Epic-2A, 2026-07-16): employees are exclusively
+  // drivers for now; re-running the seed updates the existing row in place.
   const userRoles = [
     { id: 1, name: "Cliente", description: "Cliente que solicita el servicio" },
     { id: 2, name: "Administrador", description: "Administrador del sistema" },
-    { id: 3, name: "Empleado", description: "Empleado del proveedor" },
+    {
+      id: 3,
+      name: "Repartidor",
+      description: "Repartidor encargado de entregas y recolecciones",
+    },
   ];
   for (const row of userRoles) {
     await prisma.userRole.upsert({

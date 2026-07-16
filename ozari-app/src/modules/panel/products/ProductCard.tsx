@@ -1,10 +1,6 @@
 import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  HiOutlineCalendarDays,
-  HiOutlineClipboardDocumentList,
-  HiOutlineShoppingBag,
-} from 'react-icons/hi2';
+import { HiOutlineCalendarDays, HiOutlineShoppingBag } from 'react-icons/hi2';
 import LogoMark from '@components/LogoMark';
 import { Role } from '@constants/Roles';
 import { useRole } from '@hooks/useRole';
@@ -30,7 +26,7 @@ export const SELL_BUSINESS_TYPE = 'Venta';
  *    10" — the tile is space-constrained; the detail page spells out "disponibles"); "0 de 10"
  *    stays visible in amber — a fully-rented fleet is NOT gone, and the admin must see both
  *    numbers at a glance;
- *  - `available` alone (Employee, or Admin on Venta) → the takeable count, or the zero wording;
+ *  - `available` alone (Admin on Venta) → the takeable count, or the zero wording;
  *  - else `inStock` present → a plain available / zero signal (defensive fallback — the current
  *    projection always pairs the flag with the count);
  *  - else (Client) → nothing (clients never see stock — deliberate for a rentals catalog).
@@ -129,10 +125,11 @@ const EXPAND_CONTENT =
  * transition and glides onto the detail hero — pure decoration, the navigation never waits on it.
  *
  * Role decides THE one action (a UX layer — the backend 403 is the guard): a **Client** gets the
- * consumer CTA for the product's business type — "Rentar" (Alquiler) / "Comprar" (Venta) — while
- * **Employee and Admin** get "Ordenar" (they place the order FOR a client who contacted them; an
- * admin is an employee with more privileges). A card carries only the role's PRIMARY action —
- * management verbs (edit/delete) belong to the product DETAIL page, not the browse tile.
+ * consumer CTA for the product's business type — "Rentar" (Alquiler) / "Comprar" (Venta). The old
+ * Employee/Admin "Ordenar" is GONE (Epic-2A): drivers can't see products at all, and the admin's
+ * order-on-behalf flow is a dedicated order form in the orders epic, not a card button. A card
+ * carries only the role's PRIMARY action — management verbs (edit/delete) belong to the product
+ * DETAIL page, not the browse tile.
  */
 const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const { t } = useTranslation();
@@ -153,8 +150,9 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
     panelNavigate(`/panel/productos/${product.id}`);
   };
 
-  // Every authenticated role has exactly ONE primary action (see the docstring's role mapping).
-  const hasActions = role !== null;
+  // Only the Client has a card action (see the docstring's role mapping) — an Admin browses and
+  // manages from the detail page.
+  const hasActions = role === Role.Client;
   const isSell = product.businessType === SELL_BUSINESS_TYPE;
   // The padding hand-off: at rest the block owns the bottom spacing; engaged, it eases to zero (in
   // step with the expansion) while the actions row carries the same spacing INSIDE the clip.
@@ -285,22 +283,15 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
                   pointer events (the info layer is otherwise tap-transparent to the stretched
                   button underneath). */}
               <div className={`pointer-events-auto flex flex-wrap gap-2 px-1 -mx-1 pb-3 pt-1.5 ${EXPAND_CONTENT}`}>
-                {role === Role.Client ? (
-                  isSell ? (
-                    <CardAction
-                      label={t(`${KEY}.card.actions.buy`)}
-                      icon={<HiOutlineShoppingBag aria-hidden className="size-3.5" />}
-                    />
-                  ) : (
-                    <CardAction
-                      label={t(`${KEY}.card.actions.rent`)}
-                      icon={<HiOutlineCalendarDays aria-hidden className="size-3.5" />}
-                    />
-                  )
+                {isSell ? (
+                  <CardAction
+                    label={t(`${KEY}.card.actions.buy`)}
+                    icon={<HiOutlineShoppingBag aria-hidden className="size-3.5" />}
+                  />
                 ) : (
                   <CardAction
-                    label={t(`${KEY}.card.actions.order`)}
-                    icon={<HiOutlineClipboardDocumentList aria-hidden className="size-3.5" />}
+                    label={t(`${KEY}.card.actions.rent`)}
+                    icon={<HiOutlineCalendarDays aria-hidden className="size-3.5" />}
                   />
                 )}
               </div>

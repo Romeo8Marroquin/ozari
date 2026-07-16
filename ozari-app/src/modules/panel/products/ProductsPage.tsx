@@ -7,7 +7,7 @@ import RoleGate from '@components/RoleGate';
 import SkeletonFade from '@components/SkeletonFade';
 import { Role } from '@constants/Roles';
 import { useInfiniteScrollSentinel } from '@hooks/useInfiniteScrollSentinel';
-import { staggerIn, staggerOut } from '../pageMotion';
+import { gridCellRevealDelay, staggerIn, staggerOut } from '../pageMotion';
 import { usePanelNavigate } from '../PanelNavContext';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
 import ProductCard from './ProductCard';
@@ -35,14 +35,14 @@ const SKELETON_COUNT = 12;
 const SECONDARY_COLOR = '#262626';
 
 /**
- * The catalog screen (`/panel/productos`) — EPIC-1's first real product view. Open to **every**
- * authenticated role; the backend role-projects the fields (see {@link useProducts}), so the same grid
- * serves Client, Employee, and Admin, and only Admin sees the "add" affordance (a UX layer — the `403`
- * is the real guard).
+ * The catalog screen (`/panel/productos`) — EPIC-1's first real product view. Open to **Admin +
+ * Client** (the route guard bounces a Driver to Settings, mirroring the backend `403` — Epic-2A);
+ * the backend role-projects the fields (see {@link useProducts}), so the same grid serves both, and
+ * only Admin sees the "add" affordance (a UX layer — the `403` is the real guard).
  *
  * The list is an **infinite scroll**: a sentinel under the grid appends the next page as the user
- * approaches the bottom, and **filters live in the URL** (`useSearch`) — search / category / type /
- * (Employee+) availability — so a filtered view survives refresh and can be shared.
+ * approaches the bottom, and **filters live in the URL** (`useSearch`) — search / category / type —
+ * so a filtered view survives refresh and can be shared.
  *
  * The whole screen is choreographed so no state ever "pops". Three skeleton moments share the same
  * language: the COLD load is a **pairwise hand-off** over stable grid SLOTS (the SkeletonFade
@@ -344,6 +344,10 @@ const ProductsPage: React.FC = () => {
                             skeleton={<ProductCardSkeleton />}
                             className="block"
                             contentClassName="block"
+                            // Every slot resolves in the SAME commit, so each cell derives its own
+                            // slot in the row/column wave from the rendered grid — the crossfades
+                            // cascade like the page entrance instead of flipping as one wall.
+                            revealDelaySeconds={gridCellRevealDelay}
                           >
                             {/* The FLIP wrapper: slots are keyed by INDEX (load-bearing for the
                                 skeleton crossfade), so the diff choreography matches a product

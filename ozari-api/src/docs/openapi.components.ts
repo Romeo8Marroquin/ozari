@@ -54,7 +54,7 @@ const fullNameField: Schema = {
 
 const roleField: Schema = {
   type: "string",
-  enum: ["Client", "Admin", "Employee"],
+  enum: ["Client", "Admin", "Driver"],
   description: "Human-readable role name derived from the user's role id.",
   example: "Client",
 };
@@ -353,11 +353,11 @@ export const schemas: Record<string, Schema> = {
   ProductListItem: {
     type: "object",
     description:
-      "A catalog product. The base fields are visible to **every** role; the remaining fields are " +
-      "**role-projected** (minimum privilege): `inStock` + the `available` count are added for " +
-      "Employee + Admin, and `total`, `replacementPrice`, `isActive` are **Admin only** (a Client " +
-      "never receives any stock information). `available` is DERIVED for Alquiler: the fleet minus " +
-      "units out on active rentals (delivered, or pending inside their event window).",
+      "A catalog product. The base fields are visible to every allowed role; the remaining fields " +
+      "are **role-projected** (minimum privilege): `inStock`, `available`, `total`, " +
+      "`replacementPrice` and `isActive` are **Admin only** (a Client never receives any stock " +
+      "information; a Driver cannot read products at all). `available` is DERIVED for Alquiler: " +
+      "the fleet minus units out on active rentals (delivered, or pending inside their event window).",
     properties: {
       id: { type: "integer", example: 7 },
       name: { type: "string", example: "Mesa redonda" },
@@ -385,11 +385,11 @@ export const schemas: Record<string, Schema> = {
       rentTimeUnitId: { type: "integer", nullable: true, description: "Its lookup id (Alquiler only).", example: 2 },
       images: { type: "array", items: schemaRef("ProductImage") },
       details: { type: "array", items: schemaRef("ProductDetailItem") },
-      inStock: { type: "boolean", description: "Availability signal (`available > 0`) — **Employee + Admin only**.", example: true },
+      inStock: { type: "boolean", description: "Availability signal (`available > 0`) — **Admin only**.", example: true },
       available: {
         type: "integer",
         description:
-          "Units takeable right now — **Employee + Admin only**. Venta: the recorded stock. " +
+          "Units takeable right now — **Admin only**. Venta: the recorded stock. " +
           "Alquiler: fleet minus units out on active rentals.",
         example: 35,
       },

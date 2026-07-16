@@ -78,31 +78,14 @@ describe("projectProductForRole", () => {
     expect(result.isActive).toBeUndefined();
   });
 
-  it("adds the availability (signal + available count) for Employee — internals stay Admin-only", () => {
-    const result = projectProductForRole(makeProduct({ quantity: 40 }), RolesEnum.Employee);
-    expect(result.inStock).toBe(true);
-    // The COUNT is what lets an employee answer "can I take an order for 10?" — a bare flag can't.
-    expect(result.available).toBe(40);
-    // The fleet total is the ADMIN's number — an employee sees only what can be taken.
+  it("gives a Driver the minimum too — the Employee availability tier is gone (Epic-2A)", () => {
+    // Drivers are route-blocked from products anyway; the projection stays fail-closed regardless.
+    const result = projectProductForRole(makeProduct({ quantity: 40 }), RolesEnum.Driver);
+    expect(result.inStock).toBeUndefined();
+    expect(result.available).toBeUndefined();
     expect(result.total).toBeUndefined();
     expect(result.replacementPrice).toBeUndefined();
     expect(result.isActive).toBeUndefined();
-  });
-
-  it("subtracts the units out on rentals for Employee (a fully-rented fleet reads as out)", () => {
-    const partly = projectProductForRole(makeProduct({ quantity: 40 }), RolesEnum.Employee, 15);
-    expect(partly.available).toBe(25);
-    expect(partly.inStock).toBe(true);
-
-    const fully = projectProductForRole(makeProduct({ quantity: 40 }), RolesEnum.Employee, 40);
-    expect(fully.available).toBe(0);
-    expect(fully.inStock).toBe(false);
-  });
-
-  it("reflects an out-of-stock product for Employee", () => {
-    const result = projectProductForRole(makeProduct({ quantity: 0 }), RolesEnum.Employee);
-    expect(result.inStock).toBe(false);
-    expect(result.available).toBe(0);
   });
 
   it("gives Admin the full internal detail — available AND the Alquiler fleet total", () => {
@@ -112,6 +95,16 @@ describe("projectProductForRole", () => {
     expect(result.total).toBe(40);
     expect(result.replacementPrice).toBe(900);
     expect(result.isActive).toBe(true);
+  });
+
+  it("subtracts the units out on rentals for Admin (a fully-rented fleet reads as out)", () => {
+    const partly = projectProductForRole(makeProduct({ quantity: 40 }), RolesEnum.Admin, 15);
+    expect(partly.available).toBe(25);
+    expect(partly.inStock).toBe(true);
+
+    const fully = projectProductForRole(makeProduct({ quantity: 40 }), RolesEnum.Admin, 40);
+    expect(fully.available).toBe(0);
+    expect(fully.inStock).toBe(false);
   });
 
   it("omits the fleet total for a Venta product (it would just duplicate available)", () => {
@@ -361,7 +354,7 @@ describe("parseProductListQuery", () => {
 
   it("accepts every allowlisted sort for ANY role and clamps anything else to recent", () => {
     expect(parseProductListQuery({ sort: "priceDesc" }, RolesEnum.Client).sort).toBe("priceDesc");
-    expect(parseProductListQuery({ sort: "nameAsc" }, RolesEnum.Employee).sort).toBe("nameAsc");
+    expect(parseProductListQuery({ sort: "nameAsc" }, RolesEnum.Driver).sort).toBe("nameAsc");
     expect(parseProductListQuery({ sort: "nameDesc" }, RolesEnum.Admin).sort).toBe("nameDesc");
     expect(parseProductListQuery({ sort: "priceAsc" }, RolesEnum.Client).sort).toBe("priceAsc");
     expect(parseProductListQuery({ sort: "cheapest" }, RolesEnum.Admin).sort).toBe("recent");
@@ -374,7 +367,7 @@ describe("parseProductListQuery", () => {
       parseProductListQuery({ includeInactive: "true" }, RolesEnum.Admin).includeInactive,
     ).toBe(true);
     expect(
-      parseProductListQuery({ includeInactive: "true" }, RolesEnum.Employee).includeInactive,
+      parseProductListQuery({ includeInactive: "true" }, RolesEnum.Driver).includeInactive,
     ).toBe(false);
     expect(
       parseProductListQuery({ includeInactive: "1" }, RolesEnum.Admin).includeInactive,

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+﻿import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Response, NextFunction } from "express";
 import { isGrantedRoles } from "./role.middleware.js";
 import { type CustomRequest } from "@models/common/customRequestModel.js";
@@ -104,7 +104,7 @@ describe("Role Middleware", () => {
   it("should allow multiple roles", () => {
     mockReq.user = {
       userId: 1,
-      userRole: RolesEnum.Employee,
+      userRole: RolesEnum.Driver,
       tokenType: 0,
       deviceUuid: "test-device",
       jti: "test-jti",
@@ -112,7 +112,7 @@ describe("Role Middleware", () => {
       exp: Date.now() + 100000,
     };
 
-    const middleware = isGrantedRoles([RolesEnum.Admin, RolesEnum.Employee]);
+    const middleware = isGrantedRoles([RolesEnum.Admin, RolesEnum.Driver]);
 
     middleware(
       mockReq as CustomRequest,
@@ -135,7 +135,7 @@ describe("Role Middleware", () => {
       exp: Date.now() + 100000,
     };
 
-    const middleware = isGrantedRoles([RolesEnum.Admin, RolesEnum.Employee]);
+    const middleware = isGrantedRoles([RolesEnum.Admin, RolesEnum.Driver]);
 
     middleware(
       mockReq as CustomRequest,
@@ -173,7 +173,7 @@ describe("Role Middleware", () => {
   it("should work with all three roles", () => {
     mockReq.user = {
       userId: 1,
-      userRole: RolesEnum.Employee,
+      userRole: RolesEnum.Driver,
       tokenType: 0,
       deviceUuid: "test-device",
       jti: "test-jti",
@@ -183,7 +183,7 @@ describe("Role Middleware", () => {
 
     const middleware = isGrantedRoles([
       RolesEnum.Admin,
-      RolesEnum.Employee,
+      RolesEnum.Driver,
       RolesEnum.Client,
     ]);
 

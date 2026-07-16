@@ -15,7 +15,7 @@ export interface MeData {
   id: number;
   email: string;
   fullName: string;
-  role: 'Client' | 'Admin' | 'Employee';
+  role: 'Client' | 'Admin' | 'Driver';
   mfaEnabled: boolean;
   createdAt: string;
   updatedAt?: string;

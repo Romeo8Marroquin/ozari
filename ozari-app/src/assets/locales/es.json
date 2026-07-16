@@ -220,7 +220,7 @@
         "roles": {
           "Client": "Cliente",
           "Admin": "Administrador",
-          "Employee": "Empleado",
+          "Driver": "Repartidor",
           "unknown": "Cuenta"
         },
         "menu": {
@@ -252,7 +252,6 @@
           "viewDetails": "Ver detalles de {{name}}",
           "noDescription": "Sin descripción todavía.",
           "actions": {
-            "order": "Ordenar",
             "rent": "Rentar",
             "buy": "Comprar"
           }

@@ -12,25 +12,39 @@
  * Ordering contract: `installHistoryDepartureInterceptor()` MUST run before the router is created
  * (listener registration order = firing order — ours has to fire first to stop propagation), and
  * before any other popstate listener that should apply to the eventual commit (main.tsx keeps
- * this order). The re-dispatched event flows through every listener again; the hold naturally
- * declines the second pass (its work — e.g. the shared-element lift-off — is already in flight).
+ * this order). The re-dispatched event is marked by the interceptor itself and flows straight
+ * through to the router — the hold is NOT consulted again for it (see `redispatching` below).
  */
 
 type DepartureHold = (nextPathname: string) => Promise<void> | null;
 
 let activeHold: DepartureHold | null = null;
 let installed = false;
+// True exactly while our own re-dispatched event (below) is being delivered. The interceptor —
+// not the hold — owns the one-commit guarantee: an earlier design let the second pass reach the
+// hold and trusted it to decline "because its lift-off is already in flight", but any hold whose
+// lift-off silently no-ops (a hero with no photo, a stale shared-element return rect after
+// chained history backs) would ACCEPT its own re-dispatch, stopping it again and re-playing the
+// exit forever — the router never committed and the faded-out page just sat there blank.
+let redispatching = false;
 
 /** Install the interceptor (idempotent). Call BEFORE `createRouter` — order is the contract. */
 export function installHistoryDepartureInterceptor(): void {
   if (installed) return;
   installed = true;
   window.addEventListener('popstate', (event) => {
+    if (redispatching) {
+      // Our own re-dispatch — let it flow to the router untouched. `dispatchEvent` is
+      // synchronous, so the flag cannot leak onto an unrelated (real) popstate.
+      redispatching = false;
+      return;
+    }
     const pending = activeHold?.(window.location.pathname) ?? null;
     if (!pending) return; // no hold, or the hold declined — the router handles it normally
     event.stopImmediatePropagation();
     void pending.finally(() => {
       // Same state, same URL — the router now processes the navigation exactly once.
+      redispatching = true;
       window.dispatchEvent(new PopStateEvent('popstate', { state: event.state }));
     });
   });

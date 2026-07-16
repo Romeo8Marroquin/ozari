@@ -122,7 +122,7 @@ describe("getProducts", () => {
 
   it("defaults a null grouped sum to 0 rented (nothing subtracted)", async () => {
     mockPrisma([rawProduct], 1, [rentedRow(7, null)]);
-    await getProducts(buildReq(RolesEnum.Employee), {} as Response);
+    await getProducts(buildReq(RolesEnum.Admin), {} as Response);
     expect(successData().products[0]).toMatchObject({ available: 40 });
   });
 
@@ -157,7 +157,7 @@ describe("getProducts", () => {
 
   it("applies clamped pagination to the query (skip/take)", async () => {
     const { findMany } = mockPrisma([], 0);
-    await getProducts(buildReq(RolesEnum.Employee, { page: "2", pageSize: "10" }), {} as Response);
+    await getProducts(buildReq(RolesEnum.Client, { page: "2", pageSize: "10" }), {} as Response);
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 10, take: 10 }));
     expect(successData().pagination).toEqual({ page: 2, pageSize: 10, total: 0, totalPages: 1 });
   });
@@ -165,7 +165,7 @@ describe("getProducts", () => {
   it("passes the parsed filters through to the where clause (findMany AND count)", async () => {
     const { findMany, count } = mockPrisma([], 0);
     await getProducts(
-      buildReq(RolesEnum.Employee, {
+      buildReq(RolesEnum.Client, {
         search: " mesa ",
         categoryId: "3",
         businessTypeId: "1",
@@ -293,10 +293,9 @@ describe("getProductById", () => {
 
   it("derives the detail's availability from active rentals too", async () => {
     mockDetailPrisma(rawProduct, [rentedRow(7, 38)]);
-    await getProductById(buildDetailReq(RolesEnum.Employee, "7"), {} as Response);
+    await getProductById(buildDetailReq(RolesEnum.Admin, "7"), {} as Response);
     const data = (sendOzariSuccess as Mock).mock.calls[0]?.[3] as { product: Record<string, unknown> };
-    expect(data.product).toMatchObject({ available: 2, inStock: true });
-    expect(data.product["total"]).toBeUndefined(); // Employee never sees the fleet
+    expect(data.product).toMatchObject({ available: 2, inStock: true, total: 40 });
   });
 
   it("projects minimally for a Client (and when the role is somehow absent)", async () => {

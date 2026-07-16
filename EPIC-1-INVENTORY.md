@@ -1,8 +1,15 @@
 # Epic 1 — Inventory (Products)
 
-> **Living plan.** Check off steps as they ship; revise as we learn. The high-level, cross-epic
-> compass is `ROADMAP.md`; this file is the deep plan for Epic 1. Decisions here were made with the
-> product owner (2026-07) and set patterns every later module inherits.
+> **STATUS: COMPLETED (2026-07-15, PR'd from `feat/rems`).** Every step (0–5) shipped, including
+> the update/delete rebuild (RECONCILE + the no-trash policy), the gallery with drag-reorder, and
+> the §5 reconcile script. This file is retained as the **decision record** — the owner decisions
+> and patterns here are inherited by later modules and cross-referenced from `CLAUDE.md`.
+> ONE known supersession: the "Employee sees products read-only" role model below is OUTDATED —
+> the owner redefined employees as DRIVERS with no product access (see `EPIC-2-ORDERS.md` §3,
+> the EPIC-2A refactor, which is the next epic's mandatory first step).
+>
+> The high-level, cross-epic compass is `ROADMAP.md`. Decisions here were made with the
+> product owner (2026-07).
 
 ---
 
@@ -203,6 +210,29 @@ as the default landing.
 - If staging catalog data is migrated to production at MVP: `pg_dump` the product tables +
   bucket-to-bucket object copy + remap `R2_PUBLIC_URL` hosts — then run the reconcile script on
   prod as the post-migration check.
+- **Custom domain BEFORE real mobile users (session-critical — a production-cutover GATE, not a
+  nice-to-have).** Deployed FE (`ozari-c28.pages.dev`) and API (Cloud Run `run.app`) are different
+  registrable domains, so the 30-day refresh cookie is a **third-party cookie** there — Safari/iOS
+  (all WebKit) and Firefox/Brave strict modes block it: sessions on those browsers die when the
+  15-min access token expires and can never silently rehydrate. Desktop Chrome currently tolerates
+  it — do NOT ship mobile-facing MVP without this. (The 2026-07-16 refresh-reuse GRACE window fixed
+  the other session killer — the lost-rotation-response nuke.) **Cutover checklist** — serve both
+  under `partyrentalsgt.com` subdomains (first-party, same-site everywhere):
+  1. FE: add `app.partyrentalsgt.com` as the Cloudflare Pages custom domain.
+  2. API: put `api.partyrentalsgt.com` in front of Cloud Run. Check first whether Cloud Run
+     **domain mapping** is available in `northamerica-south1` (it's region-limited); if not, the
+     fallbacks are a global external HTTPS LB (~$18/mo) or a Cloudflare-proxied Worker/origin-rule
+     — decide by cost at cutover.
+  3. Config sweep, all in the same change: `APP_HOST` (Terraform `_APP_HOST` substitution +
+     `cloud-run.tf`, no trailing slash — CORS + API-key origin check compare it to `Origin`),
+     Cloudflare Pages `VITE_API_URL`, and `appConfig.email.logoUrl` (the welcome/security emails
+     point at the FE origin for the logo PNG).
+  4. Optional hardening once same-site: the refresh cookie no longer needs `SameSite=None` —
+     tighten to `Lax`.
+  5. **Acceptance test (the actual gate): a real iPhone/Safari.** Log in → background or close the
+     tab for >15 min (access token expired) → reopen: the panel must silently rehydrate with NO
+     login screen. Repeat once in Firefox with Enhanced Tracking Protection strict. If either
+     bounces to login, the cookie is still being treated as third-party — do not cut over.
 - **Orders epic — availability follow-ups.** The projection derives `available` (fleet minus units
   on active rentals — `buildRentedNowWhere` in `products.service.ts` is the business rule: DELIVERED
   holds unconditionally, PENDING holds inside its event window, CANCELLED/COLLECTED free). The old
