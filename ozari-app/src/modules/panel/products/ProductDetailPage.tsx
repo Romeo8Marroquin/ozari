@@ -8,7 +8,6 @@ import {
   HiOutlineArrowPath,
   HiOutlineArrowsPointingOut,
   HiOutlineCalendarDays,
-  HiOutlineClipboardDocumentList,
   HiOutlinePencilSquare,
   HiOutlineShoppingBag,
   HiOutlineTrash,
@@ -50,7 +49,7 @@ const DANGER_COLOR = '#dc2626';
  * The stock line — same field-presence contract as the card's badge: `available` + `total`
  * (Admin, Alquiler) → the fleet view "5 de 10 disponibles", spelled out here where space allows
  * (the tile keeps the short "5 de 10") and kept visible at 0 — a fully-rented fleet is not gone;
- * `available` alone (Employee / Admin-Venta) → the takeable count; bare `inStock` → the signal;
+ * `available` alone (Admin-Venta) → the takeable count; bare `inStock` → the signal;
  * neither (Client) → nothing. Zero wording is business-type-aware like the card's: Venta =
  * "Agotado" (gone until restocked), anything else = "No disponible" (rented units come back).
  */
@@ -102,8 +101,9 @@ const DetailSkeleton: React.FC = () => (
 );
 
 /**
- * The product detail (`/panel/productos/:id`) — the card's destination, open to every role with the
- * same role-projected data (the backend narrows the fields; the UI reacts to what arrives).
+ * The product detail (`/panel/productos/:id`) — the card's destination, open to Admin + Client
+ * (the route guard bounces a Driver, mirroring the backend 403) with the same role-projected data
+ * (the backend narrows the fields; the UI reacts to what arrives).
  *
  * **Arrival is designed around the shared-element morph** (see `productImageMorph.ts`): the query
  * is seeded from the cached list pages, so coming from the grid renders the full page instantly and
@@ -113,9 +113,9 @@ const DetailSkeleton: React.FC = () => (
  * blank-out + re-entrance); any in-flight clone is released. Errors split not-found (404, gone)
  * from transient (retry).
  *
- * Role actions mirror the card's mapping — Client → Rentar/Comprar, Employee/Admin → Ordenar — plus
- * Admin's management verbs: **Editar** navigates to `/panel/productos/:id/editar` (the edit form);
- * **Eliminar** is still a design-complete placeholder (Step 3b wires it).
+ * Role actions mirror the card's mapping — Client → Rentar/Comprar (the old Employee/Admin
+ * "Ordenar" is gone; Epic-2A) — plus Admin's management verbs: **Editar** navigates to
+ * `/panel/productos/:id/editar` (the edit form); **Eliminar** opens the delete confirmation.
  */
 const ProductDetailPage: React.FC = () => {
   const { t } = useTranslation();
@@ -244,8 +244,13 @@ const ProductDetailPage: React.FC = () => {
   // `panelNavigate` produces, so both backs pace identically. Implemented on the popstate
   // interceptor (`utils/historyDeparture`) — a router blocker was tried and REVERTED: it can't
   // hold a popstate, so it rolls back and re-applies the navigation, committing the grid twice
-  // (a visible blink of its entrance). The hold declines anything not headed to the grid, and
-  // declines the interceptor's own re-dispatched event (the morph is in flight by then).
+  // (a visible blink of its entrance). The hold declines anything not headed to the grid, and an
+  // already-in-flight morph (e.g. a back racing the in-app affordance's lift-off). The
+  // interceptor's own re-dispatched event never reaches the hold — the interceptor marks and
+  // skips it itself. It MUST NOT be this guard: `beginProductImageMorph` silently no-ops for a
+  // hero with no photo or a stale return rect (chained backs), so "the morph is in flight by
+  // then" was false in exactly those cases and the old hold-declines-the-second-pass contract
+  // looped the re-dispatch forever — the blank-page-after-chained-backs bug.
   useEffect(() => {
     const hold = (nextPathname: string): Promise<void> | null => {
       if (nextPathname !== '/panel/productos') return null;
@@ -473,11 +478,11 @@ const ProductDetailPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* Role actions — the card's mapping, full-size. Ordering/renting/buying land with
-                    the orders epic; Editar opens the edit form; Eliminar stays a placeholder. */}
+                {/* Role actions — the card's mapping, full-size. Renting/buying land with the
+                    orders epic; Editar opens the edit form; Eliminar opens the delete dialog. */}
                 <div className="reveal-item mt-2 flex flex-wrap gap-3">
-                  {role === Role.Client ? (
-                    isSell ? (
+                  {role === Role.Client &&
+                    (isSell ? (
                       <Button size="sm" startIcon={<HiOutlineShoppingBag className="size-4" />}>
                         {t(`${KEY}.card.actions.buy`)}
                       </Button>
@@ -485,12 +490,7 @@ const ProductDetailPage: React.FC = () => {
                       <Button size="sm" startIcon={<HiOutlineCalendarDays className="size-4" />}>
                         {t(`${KEY}.card.actions.rent`)}
                       </Button>
-                    )
-                  ) : (
-                    <Button size="sm" startIcon={<HiOutlineClipboardDocumentList className="size-4" />}>
-                      {t(`${KEY}.card.actions.order`)}
-                    </Button>
-                  )}
+                    ))}
                   <RoleGate roles={[Role.Admin]}>
                     <Button
                       variant="soft"

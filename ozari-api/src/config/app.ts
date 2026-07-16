@@ -22,6 +22,20 @@ export const appConfig = {
     issuer: "ozari",
   },
 
+  // Session-lifecycle knobs that are NOT jwt.sign options (accessToken/refreshToken above are
+  // passed raw into jwt.sign, which rejects unknown keys — never fold extras into them).
+  session: {
+    // Rotation-reuse GRACE: a replay of the device's IMMEDIATELY-PREVIOUS refresh jti within this
+    // window is treated as a lost rotation response (a reload/tab-close/network drop killed the
+    // response after the server committed the rotation — the client still holds the old cookie),
+    // and re-rotates instead of nuking every session. Anything older, or outside the window, still
+    // triggers the fail-secure all-sessions delete. 60s covers the real-world race; the residual
+    // exposure (a stolen already-rotated token usable once, within a minute of its rotation) is
+    // negligible — and an attacker/victim alternation collapses at the victim's next proactive
+    // refresh (~14 min), which lands outside the grace and fires the nuke.
+    refreshReuseGraceSeconds: 60,
+  },
+
   passwordReset: {
     // Raw token bytes (sent in the email link); only its SHA-256 hash is stored. Single-use, and
     // short-lived so a leaked/forgotten link can't be replayed long after.

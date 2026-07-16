@@ -172,6 +172,10 @@ const PanelShell: React.FC = () => {
       }
       if (to === pathnameRef.current) return;
       const newRun: ExitRun = { pending: to };
+      // The route this run is leaving FROM. Only an EXTERNAL commit (browser back/forward — our
+      // own navigate hasn't fired yet) can change the pathname while the exit plays; if one does,
+      // the pop is the NEWER intent and must win (see the completion guard below).
+      const fromPath = pathnameRef.current;
       exitRef.current = newRun;
       setPending(to);
       preload(to);
@@ -181,6 +185,11 @@ const PanelShell: React.FC = () => {
         if (exitRef.current !== newRun) return; // cancelled or superseded (logout) — abandon
         exitRef.current = null;
         setPending(null);
+        // A history commit landed mid-exit: the popped page has already entered (the commit
+        // effect played its entrance + title-in), so navigating now would stomp the user's back/
+        // forward press with an abrupt swap — or push a duplicate entry when the pop landed on
+        // this very destination. Abandon; the pop is the latest intent.
+        if (pathnameRef.current !== fromPath) return;
         // Same resolved-param-path cast as `preload`.
         void navigate({ to: newRun.pending as never, viewTransition: false });
       });
@@ -245,10 +254,11 @@ const PanelShell: React.FC = () => {
   );
 };
 
-// The panel is open to EVERY authenticated role (Client, Employee, Admin). Role does not gate access
-// — it restricts capabilities WITHIN the shared views (e.g. only Admin sees "add product"), handled
-// per-screen with `RoleGate`/`useHasRole`. The route guard (`routes/panel.tsx`) only requires a valid
-// session; the backend re-checks roles on write endpoints (the real boundary).
+// The panel is open to EVERY authenticated role (Client, Driver, Admin). The shell doesn't gate by
+// role — sections do: the products routes bounce a Driver (Epic-2A) and the sidebar derives its
+// tabs from `filterNavByRole`, while capabilities WITHIN shared views use `RoleGate`/`useHasRole`
+// (e.g. only Admin sees "add product"). The route guard (`routes/panel.tsx`) only requires a valid
+// session; the backend re-checks roles on every endpoint (the real boundary).
 const PanelLayout: React.FC = () => (
   <PanelChromeProvider>
     <PanelShell />

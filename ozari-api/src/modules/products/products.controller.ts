@@ -60,9 +60,9 @@ const loadRentedNowByProductId = async (
 };
 
 /**
- * `GET /products` — the paginated product catalog. Available to **every authenticated role**; the
- * response is **role-projected** so each role sees only the fields it should (minimum privilege — the
- * exact stock count is Admin-only, an in-stock signal is Employee+, everything else is shared). Row
+ * `GET /products` — the paginated product catalog. **Admin + Client only** (route guard — a Driver
+ * gets 403, Epic-2A); the response is **role-projected** so each role sees only the fields it
+ * should (minimum privilege — the availability fields are Admin-only, everything else is shared). Row
  * visibility is uniform (the active catalog); the role axis is the *fields* (`projectProductForRole`).
  * Optional filters (`search`/`categoryId`/`businessTypeId`, Admin-only `includeInactive`) narrow the
  * rows and `sort` orders them; like the pagination params they clamp or drop, never 400.
@@ -234,8 +234,8 @@ export const getProductById = async (
 /**
  * `GET /products/catalog` — the seeded reference lists the create/edit form renders as selects
  * (business types, categories, currencies, rent time units, detail types), id + name only, active
- * rows, id order. Available to any authenticated role: it's public reference data (the names already
- * appear on every projected product) and employee-facing filters will consume it later.
+ * rows, id order. Admin + Client (the products-read guard): it's public reference data (the names
+ * already appear on every projected product) and the client-facing filters consume it too.
  */
 export const getProductCatalog = async (
   _req: CustomRequest,

@@ -20,11 +20,14 @@ import {
 
 const router: RouterType = Router();
 
-// Region: Protected reads — any authenticated role (the response is role-projected in the controller).
+// Region: Role-protected reads — Admin + Client only (the response is still role-projected in the
+// controller). Drivers get a 403: a driver's job is deliveries, not the catalog (Epic-2A, owner
+// decision 2026-07-15) — and any future role is denied until explicitly granted (fail-closed).
 // `/catalog` is declared before `/:id` so it never matches as a param.
-router.get("/", verifyJwt, getProducts);
-router.get("/catalog", verifyJwt, getProductCatalog);
-router.get("/:id", verifyJwt, getProductById);
+const canReadProducts = isGrantedRoles([RolesEnum.Admin, RolesEnum.Client]);
+router.get("/", verifyJwt, canReadProducts, getProducts);
+router.get("/catalog", verifyJwt, canReadProducts, getProductCatalog);
+router.get("/:id", verifyJwt, canReadProducts, getProductById);
 
 // Region: Role-protected writes (Admin only). The cheap DB-free role check runs BEFORE the
 // validator (which hits the DB for lookups) — a non-admin is denied without a single query.

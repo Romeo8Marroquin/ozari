@@ -208,15 +208,15 @@ export function computeAvailableQuantity(
 
 /**
  * Projects a full product to the shape a given role is allowed to see — **the single source of truth
- * for role→field visibility** (minimum privilege). Escalates: everyone gets the shared "catalog"
- * fields (name/description/category/type/images/details/price + rent unit); **Employee** additionally
- * gets the availability — the `inStock` signal AND the `available` count (owner decision,
- * 2026-07-14: a bare flag can't answer "can I take an order for 10?"); **Admin** gets the full
- * internal detail: for Alquiler the `total` fleet in circulation alongside the available slice
- * (owner decision, 2026-07-15: "5 de 10 disponibles" — an employee sees what can be taken, only the
- * admin sees what the business OWNS), plus `replacementPrice` and `isActive`. Anything that isn't
- * Admin/Employee (Client, or any unexpected role) gets the MINIMUM — fail-closed. Change the policy
- * here and nowhere else.
+ * for role→field visibility** (minimum privilege). Two tiers: everyone gets the shared "catalog"
+ * fields (name/description/category/type/images/details/price + rent unit); **Admin** additionally
+ * gets the availability and the internal detail — the `inStock` signal, the `available` count, for
+ * Alquiler the `total` fleet in circulation ("5 de 10 disponibles", owner decision 2026-07-15),
+ * plus `replacementPrice` and `isActive`. Anything that isn't Admin (Client, or any unexpected
+ * role) gets the MINIMUM — fail-closed. The former Employee tier (`inStock` + `available`) was
+ * REMOVED by Epic-2A (2026-07-16): role 3 is a Driver, blocked from products entirely at the
+ * route; the availability tier returns only if a future office-employee type needs it. Change the
+ * policy here and nowhere else.
  *
  * `rentedNow` is the product's currently-rented unit count (callers load it via
  * `buildRentedNowWhere`; defaults to 0 — correct for a just-created product and for Venta rows,
@@ -276,11 +276,8 @@ export function projectProductForRole(
     };
   }
 
-  if (role === RolesEnum.Employee) {
-    return { ...base, inStock: available > 0, available };
-  }
-
-  // Client (and any unexpected role) → the minimum, no stock information at all.
+  // Client (and any unexpected role, incl. Driver — route-blocked anyway) → the minimum,
+  // no stock information at all.
   return base;
 }
 

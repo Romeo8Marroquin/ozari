@@ -62,22 +62,38 @@ describe('refreshAccessToken', () => {
     expect(resetForcedLogout).toHaveBeenCalled();
   });
 
-  it('auth-dead (401): triggers the forced logout, no toast, returns null', async () => {
+  it('auth-dead (double 401): retries once, then triggers the forced logout, no toast', async () => {
     post.mockRejectedValue(axiosError(401));
 
     const result = await refreshAccessToken();
 
     expect(result).toBeNull();
+    expect(post).toHaveBeenCalledTimes(2); // one retry — a dead session 401s twice
     expect(requestForcedLogout).toHaveBeenCalledWith('expired');
     expect(warning).not.toHaveBeenCalled();
   });
 
-  it('transient (500): warns, keeps the session (no logout), returns null', async () => {
+  it('recovers when the retry succeeds (the concurrent-tab loser: cookie already rotated)', async () => {
+    const token = futureToken();
+    post
+      .mockRejectedValueOnce(axiosError(401))
+      .mockResolvedValueOnce({ headers: { authorization: `Bearer ${token}` } });
+
+    const result = await refreshAccessToken();
+
+    expect(result).toBe(token);
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(requestForcedLogout).not.toHaveBeenCalled();
+    expect(Storage.get(StorageKeys.TOKEN)).toBe(token);
+  });
+
+  it('transient (500): warns, keeps the session (no logout, NO retry), returns null', async () => {
     post.mockRejectedValue(axiosError(500));
 
     const result = await refreshAccessToken();
 
     expect(result).toBeNull();
+    expect(post).toHaveBeenCalledTimes(1); // the retry is 401-only
     expect(warning).toHaveBeenCalledTimes(1);
     expect(requestForcedLogout).not.toHaveBeenCalled();
   });

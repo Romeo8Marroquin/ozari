@@ -44,7 +44,6 @@ const STOCK = {
   unavailable: `${K}.stock.unavailable`,
 };
 const ACTIONS = {
-  order: `${K}.card.actions.order`,
   rent: `${K}.card.actions.rent`,
   buy: `${K}.card.actions.buy`,
 };
@@ -99,13 +98,13 @@ describe('ProductCard', () => {
 
 
   it('never navigates from an action press (siblings, never nested; propagation stopped)', async () => {
-    useRole.mockReturnValue(Role.Admin);
+    useRole.mockReturnValue(Role.Client);
     render(<ProductCard product={base} />);
     const viewDetails = card();
 
-    const order = screen.getByRole('button', { name: new RegExp(ACTIONS.order) });
-    expect(order.parentElement?.contains(viewDetails)).toBe(false); // no nested interactive
-    await userEvent.click(order);
+    const rent = screen.getByRole('button', { name: new RegExp(ACTIONS.rent) });
+    expect(rent.parentElement?.contains(viewDetails)).toBe(false); // no nested interactive
+    await userEvent.click(rent);
     expect(panelNavigate).not.toHaveBeenCalled();
   });
 
@@ -122,7 +121,7 @@ describe('ProductCard', () => {
     expect(screen.getByText(`${K}.card.noDescription`)).toBeInTheDocument();
   });
 
-  it('shows the takeable count when `available` is present (Employee view)', () => {
+  it('shows the takeable count when `available` arrives without `total` (Admin on Venta)', () => {
     render(<ProductCard product={{ ...base, available: 40, inStock: true }} />);
     expect(screen.getAllByText(STOCK.count).length).toBeGreaterThan(0);
   });
@@ -170,26 +169,20 @@ describe('ProductCard', () => {
     expect(screen.queryByText(STOCK.out)).not.toBeInTheDocument();
   });
 
-  it('offers "Ordenar" to an Admin (an employee with more privileges — they order FOR a client)', () => {
+  it('offers NO actions to an Admin — "Ordenar" is gone (Epic-2A); management lives on the detail page', () => {
     useRole.mockReturnValue(Role.Admin);
     render(<ProductCard product={base} />);
-    expect(screen.getByRole('button', { name: new RegExp(ACTIONS.order) })).toBeInTheDocument();
+    // The ONLY button is the card's own view-details control.
+    expect(screen.getAllByRole('button')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.rent) })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.buy) })).not.toBeInTheDocument();
-  });
-
-  it('offers "Ordenar" to an Employee', () => {
-    useRole.mockReturnValue(Role.Employee);
-    render(<ProductCard product={base} />);
-    expect(screen.getByRole('button', { name: new RegExp(ACTIONS.order) })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.rent) })).not.toBeInTheDocument();
   });
 
   it('offers the business-type CTA to a Client: "Rentar" for Alquiler, "Comprar" for Venta', () => {
     useRole.mockReturnValue(Role.Client);
     const { unmount } = render(<ProductCard product={base} />); // base = Alquiler
     expect(screen.getByRole('button', { name: new RegExp(ACTIONS.rent) })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.order) })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.buy) })).not.toBeInTheDocument();
     unmount();
 
     render(
@@ -205,7 +198,7 @@ describe('ProductCard', () => {
     render(<ProductCard product={base} />);
     // The ONLY button is the card's own view-details control.
     expect(screen.getAllByRole('button')).toHaveLength(1);
-    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.order) })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.rent) })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.buy) })).not.toBeInTheDocument();
   });
 });

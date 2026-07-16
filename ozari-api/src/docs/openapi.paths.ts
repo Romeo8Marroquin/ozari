@@ -46,6 +46,13 @@ const unauthorized = (description: string): OpenAPIV3.ResponseObject =>
   errorResponse(description, 401, "Unauthorized");
 const adminOnly = (): OpenAPIV3.ResponseObject =>
   errorResponse("Authenticated but not an admin.", 403, "Forbidden");
+const productsReadForbidden = (): OpenAPIV3.ResponseObject =>
+  errorResponse(
+    "Authenticated but the role cannot read products — product reads are Admin + Client only " +
+      "(a Driver's job is deliveries, not the catalog).",
+    403,
+    "Forbidden",
+  );
 
 // Response headers set by the two session-issuing paths (login success + refresh).
 const sessionHeaders: Record<string, OpenAPIV3.HeaderObject> = {
@@ -220,7 +227,10 @@ export const paths: OpenAPIV3.PathsObject = {
       description:
         "Rotates the device's token pair using the HttpOnly `refresh-token` cookie (single active " +
         "refresh per device). Replaying a rotated token is treated as theft and **hard-deletes all " +
-        "of the user's sessions** (fail-secure). Requires the CSRF header. Own 5/min limiter.",
+        "of the user's sessions** (fail-secure) — with ONE carve-out: replaying the device's " +
+        "**immediately-previous** token within a short grace window (60s) is recognized as a lost " +
+        "rotation response (reload/tab-close/network drop killed the response after the server " +
+        "committed) and simply re-rotates. Requires the CSRF header. Own 5/min limiter.",
       security: [{ ApiKeyAuth: [], RefreshCookie: [], CsrfToken: [] }],
       responses: {
         "200": {
@@ -480,12 +490,12 @@ export const paths: OpenAPIV3.PathsObject = {
       summary: "List the product catalog (role-projected)",
       operationId: "getProducts",
       description:
-        "Returns the paginated **active** catalog. Available to **any authenticated role**; the " +
-        "response fields are **role-projected** (minimum privilege): Admin sees the `available` " +
-        "count plus internal fields (incl. the Alquiler fleet `total`), Employee gets `inStock` + " +
-        "`available`, and a Client sees only the shared catalog fields. For Alquiler, `available` " +
-        "is derived: fleet minus units out on active rentals. Pagination, the optional filters and " +
-        "`sort` are clamped or dropped (never rejected), so there is no 400. Authenticated limiter (100/min).",
+        "Returns the paginated **active** catalog. **Admin + Client only** (any other role — e.g. " +
+        "Driver — gets a `403`); the response fields are **role-projected** (minimum privilege): " +
+        "Admin sees the `available` count plus internal fields (incl. the Alquiler fleet `total`), " +
+        "and a Client sees only the shared catalog fields. For Alquiler, `available` is derived: " +
+        "fleet minus units out on active rentals. Pagination, the optional filters and `sort` are " +
+        "clamped or dropped (never rejected), so there is no 400. Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         {
@@ -583,6 +593,7 @@ export const paths: OpenAPIV3.PathsObject = {
           pagination: { page: 1, pageSize: 15, total: 1, totalPages: 1 },
         }, "Products fetched"),
         "401": unauthorized(STALE_TOKEN_401),
+        "403": productsReadForbidden(),
         "429": rateLimited,
         "500": serverError,
       },
@@ -664,9 +675,9 @@ export const paths: OpenAPIV3.PathsObject = {
       operationId: "getProductById",
       description:
         "Returns a single **active** product in the exact role-projected shape of a list item " +
-        "(Admin sees internal fields incl. the Alquiler fleet `total`, Employee gets `inStock` + " +
-        "`available`, a Client sees only the shared catalog fields). A malformed id and an " +
-        "unknown/soft-deleted product are both a plain `404`. Available to any authenticated role. " +
+        "(Admin sees the availability + internal fields incl. the Alquiler fleet `total`, a Client " +
+        "sees only the shared catalog fields). A malformed id and an unknown/soft-deleted product " +
+        "are both a plain `404`. **Admin + Client only** (any other role gets a `403`). " +
         "Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
@@ -703,6 +714,7 @@ export const paths: OpenAPIV3.PathsObject = {
           },
         }, "Product fetched"),
         "401": unauthorized(STALE_TOKEN_401),
+        "403": productsReadForbidden(),
         "404": errorResponse("Unknown, malformed, or soft-deleted product id.", 404, "Product not found"),
         "429": rateLimited,
         "500": serverError,
@@ -879,8 +891,9 @@ export const paths: OpenAPIV3.PathsObject = {
       operationId: "getProductCatalog",
       description:
         "The seeded reference lists the product create/edit form renders as selects — business types, " +
-        "categories, currencies, rent time units, and detail types (active rows, id order). Available " +
-        "to **any authenticated role**. Authenticated limiter (100/min).",
+        "categories, currencies, rent time units, and detail types (active rows, id order). " +
+        "**Admin + Client only**, like every products read (any other role gets a `403`). " +
+        "Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       responses: {
         "200": dataResponse("The five reference lists.", "ProductCatalog", {
@@ -903,6 +916,7 @@ export const paths: OpenAPIV3.PathsObject = {
           ],
         }, "Catalog fetched"),
         "401": unauthorized(STALE_TOKEN_401),
+        "403": productsReadForbidden(),
         "429": rateLimited,
         "500": serverError,
       },

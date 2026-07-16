@@ -131,10 +131,10 @@ export interface ProductListItemResponseModel {
   rentTimeUnitId: number | undefined;
   images: ProductImageResponseModel[];
   details: BaseProductDetailsResponseModel[];
-  /** Availability signal (Employee + Admin) — derived: `available > 0`. */
+  /** Availability signal (Admin only) — derived: `available > 0`. */
   inStock?: boolean;
   /**
-   * Units takeable RIGHT NOW (Employee + Admin). Venta: the recorded stock (sales decrement it).
+   * Units takeable RIGHT NOW (Admin only). Venta: the recorded stock (sales decrement it).
    * Alquiler: fleet minus units out on active rentals (see `buildRentedNowWhere`).
    */
   available?: number;
@@ -213,9 +213,9 @@ export interface CurrencyCatalogOptionModel extends CatalogOptionModel {
 
 /**
  * The reference data the product create/edit form needs (`GET /products/catalog`): every ACTIVE row
- * of the five seeded lookups, id + display name only. Available to any authenticated role — it's
- * public reference data (names already appear on every projected product), and employee-facing
- * filters will want it later.
+ * of the five seeded lookups, id + display name only. Admin + Client (like every products read —
+ * Epic-2A): it's public reference data (names already appear on every projected product), and the
+ * client-facing filters consume it too.
  */
 export interface ProductCatalogResponseModel {
   businessTypes: CatalogOptionModel[];

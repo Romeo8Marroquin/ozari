@@ -119,6 +119,12 @@ model JwtSession {
   issuedAt    DateTime @map("issued_at")
   expiresAt   DateTime @map("expires_at")
   isActive    Boolean  @default(true) @map("is_active")
+  // Rotation lineage (REFRESH rows only; null on access rows and fresh logins): the jti this
+  // row's rotation replaced + when. Lets the refresh endpoint tell a LOST-RESPONSE replay of the
+  // immediately-previous token (grace → re-rotate) from a genuinely old/stolen token (→ the
+  // fail-secure all-sessions nuke). See `appConfig.session.refreshReuseGraceSeconds`.
+  previousJti String?   @map("previous_jti")
+  rotatedAt   DateTime? @map("rotated_at")
 
   user      User      @relation(fields: [userId], references: [id])
   tokenType TokenType @relation(fields: [tokenTypeId], references: [id])

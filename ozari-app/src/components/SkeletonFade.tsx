@@ -29,6 +29,16 @@ export interface SkeletonFadeProps {
   animateSize?: boolean | 'width' | 'height' | 'both';
   /** Crossfade duration (ms). Also the size-morph duration when `animateSize`. */
   durationMs?: number;
+  /**
+   * Delay (seconds) before the REVEAL crossfade starts — a number, or a function of the wrapper
+   * element resolved at reveal time so a grid consumer can derive a per-cell stagger from the
+   * RENDERED layout (see `pageMotion.gridCellRevealDelay`). Every slot of a resolving grid flips
+   * `loading` in the SAME React commit, so without this the whole grid's content crossfades at
+   * once — a wall of information instead of the app's row/column wave. The size morph rides the
+   * same delay (they stay in lock-step). Ignored under reduced motion. Default 0 — single loaders
+   * (the header pill, settings, modals) reveal immediately, exactly as before.
+   */
+  revealDelaySeconds?: number | ((wrapper: HTMLElement) => number);
 }
 
 /**
@@ -57,6 +67,7 @@ const SkeletonFade: React.FC<SkeletonFadeProps> = ({
   contentClassName,
   animateSize = false,
   durationMs = 400,
+  revealDelaySeconds = 0,
 }) => {
   // Is the skeleton overlay in the DOM? True while loading and while it fades out afterwards; the
   // fade's onComplete drops it. Starts true only if we opened in the loading state.
@@ -114,13 +125,21 @@ const SkeletonFade: React.FC<SkeletonFadeProps> = ({
     if (!content || !overlay || !wrapper) return;
 
     const seconds = prefersReducedMotion() ? 0 : durationMs / 1000;
+    // `fromTo`'s default immediateRender pins the from-states during the delay, so a delayed cell
+    // shows its skeleton (not a flash of finished content) until its turn in the wave arrives.
+    const delay =
+      seconds === 0
+        ? 0
+        : typeof revealDelaySeconds === 'function'
+          ? revealDelaySeconds(wrapper)
+          : revealDelaySeconds;
     const ease = 'power2.inOut';
     const tweens = [
-      gsap.fromTo(content, { opacity: 0 }, { opacity: 1, duration: seconds, ease }),
+      gsap.fromTo(content, { opacity: 0 }, { opacity: 1, delay, duration: seconds, ease }),
       gsap.fromTo(
         overlay,
         { opacity: 1 },
-        { opacity: 0, duration: seconds, ease, onComplete: () => setSkeletonMounted(false) },
+        { opacity: 0, delay, duration: seconds, ease, onComplete: () => setSkeletonMounted(false) },
       ),
     ];
 
@@ -135,6 +154,7 @@ const SkeletonFade: React.FC<SkeletonFadeProps> = ({
             { [property]: from },
             {
               [property]: to,
+              delay,
               duration: seconds,
               ease,
               onStart: () => {
@@ -153,7 +173,7 @@ const SkeletonFade: React.FC<SkeletonFadeProps> = ({
     }
 
     return () => tweens.forEach((tween) => tween.kill());
-  }, [loading, skeletonMounted, morphWidth, morphHeight, durationMs]);
+  }, [loading, skeletonMounted, morphWidth, morphHeight, durationMs, revealDelaySeconds]);
 
   // The CONCEAL — the reveal's mirror: the skeleton is back in flow and the previous content
   // fades out as an absolute ghost on top of it, then unmounts. Instant under reduced motion.

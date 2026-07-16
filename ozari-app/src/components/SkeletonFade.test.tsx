@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import gsap from 'gsap';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import SkeletonFade from './SkeletonFade';
+import SkeletonFade, { type SkeletonFadeProps } from './SkeletonFade';
 
 const skeleton = <span data-testid="skel">loading</span>;
 
@@ -147,6 +147,72 @@ describe('SkeletonFade', () => {
     } finally {
       window.matchMedia = realMatchMedia;
     }
+  });
+
+  describe('revealDelaySeconds (the grid wave)', () => {
+    let realMatchMedia: typeof window.matchMedia;
+    beforeEach(() => {
+      realMatchMedia = window.matchMedia;
+    });
+    afterEach(() => {
+      window.matchMedia = realMatchMedia;
+      vi.restoreAllMocks();
+    });
+
+    // Same inspectable-fromTo stub as the size-morph suite below.
+    const spyFromTo = (): ReturnType<typeof vi.spyOn> =>
+      vi.spyOn(gsap, 'fromTo').mockImplementation((_targets, _from, vars) => {
+        (vars as gsap.TweenVars).onComplete?.call(null);
+        return { kill: vi.fn() } as unknown as gsap.core.Tween;
+      });
+
+    const reveal = (delay: SkeletonFadeProps['revealDelaySeconds']): void => {
+      const { rerender } = render(
+        <SkeletonFade loading skeleton={skeleton} durationMs={200} revealDelaySeconds={delay}>
+          <span>Real</span>
+        </SkeletonFade>,
+      );
+      rerender(
+        <SkeletonFade loading={false} skeleton={skeleton} durationMs={200} revealDelaySeconds={delay}>
+          <span>Real</span>
+        </SkeletonFade>,
+      );
+    };
+
+    it('delays BOTH crossfade tweens by a numeric delay', () => {
+      setMatchMedia(false);
+      const fromTo = spyFromTo();
+      reveal(0.25);
+      const delays = (fromTo.mock.calls as unknown[][]).map(
+        (call) => (call[2] as Record<string, unknown>)['delay'],
+      );
+      expect(delays).toEqual([0.25, 0.25]); // content in + overlay out, in lock-step
+    });
+
+    it('resolves a FUNCTION delay against the wrapper element at reveal time', () => {
+      setMatchMedia(false);
+      const fromTo = spyFromTo();
+      const delayFor = vi.fn().mockReturnValue(0.1);
+      reveal(delayFor);
+      expect(delayFor).toHaveBeenCalledTimes(1);
+      expect(delayFor).toHaveBeenCalledWith(expect.any(HTMLElement));
+      const delays = (fromTo.mock.calls as unknown[][]).map(
+        (call) => (call[2] as Record<string, unknown>)['delay'],
+      );
+      expect(delays).toEqual([0.1, 0.1]);
+    });
+
+    it('ignores the delay under reduced motion (the reveal must stay instant)', () => {
+      // The global setup reports prefers-reduced-motion: reduce.
+      const fromTo = spyFromTo();
+      const delayFor = vi.fn().mockReturnValue(5);
+      reveal(delayFor);
+      expect(delayFor).not.toHaveBeenCalled(); // never even consulted
+      const delays = (fromTo.mock.calls as unknown[][]).map(
+        (call) => (call[2] as Record<string, unknown>)['delay'],
+      );
+      expect(delays).toEqual([0, 0]);
+    });
   });
 
   describe('animateSize (size morph)', () => {

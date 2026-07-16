@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { StorageKeys } from '@constants/StorageKeys';
 import { Role } from '@constants/Roles';
@@ -45,17 +45,17 @@ describe('getStoredRole', () => {
 
 describe('useRole', () => {
   it('exposes the current role', () => {
-    setRole(Role.Employee);
+    setRole(Role.Driver);
     const { result } = renderHook(() => useRole());
-    expect(result.current).toBe(Role.Employee);
+    expect(result.current).toBe(Role.Driver);
   });
 });
 
 describe('useHasRole', () => {
   it('is true only when the current role is in the allowed set', () => {
-    setRole(Role.Employee);
+    setRole(Role.Driver);
     expect(renderHook(() => useHasRole([Role.Admin])).result.current).toBe(false);
-    expect(renderHook(() => useHasRole([Role.Admin, Role.Employee])).result.current).toBe(true);
+    expect(renderHook(() => useHasRole([Role.Admin, Role.Driver])).result.current).toBe(true);
   });
 
   it('is false when signed out', () => {

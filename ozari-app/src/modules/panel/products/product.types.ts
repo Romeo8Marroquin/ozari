@@ -4,12 +4,11 @@
  * **role-projected**: the backend narrows the fields per role (minimum privilege), so the stock-related
  * fields below are **optional** — their mere presence IS the contract:
  *
- * - everyone (incl. Client) gets the shared catalog fields (name, price, images, …);
- * - **Employee** additionally gets the availability: `inStock` AND the `available` count
- *   (a bare flag can't answer "can I take an order for 10?" — owner decision, 2026-07-14);
- * - **Admin** additionally gets the internal detail (`replacementPrice`, `isActive`) and — for
- *   Alquiler only — the fleet `total` alongside the available slice ("5 de 10 disponibles":
- *   an employee sees what can be taken, only the admin sees what the business OWNS).
+ * - everyone allowed in (Admin + Client — a Driver can't read products at all, Epic-2A) gets the
+ *   shared catalog fields (name, price, images, …);
+ * - **Admin** additionally gets the availability (`inStock` + the `available` count), the internal
+ *   detail (`replacementPrice`, `isActive`) and — for Alquiler only — the fleet `total` alongside
+ *   the available slice ("5 de 10 disponibles").
  *
  * The UI reacts to which fields exist rather than re-deriving the role, so if the projection changes it
  * changes in exactly two mirrored places (this file + the backend model). Do not read a gated field
@@ -59,10 +58,10 @@ export interface Product {
   rentTimeUnitId?: number;
   images: ProductImage[];
   details: ProductDetail[];
-  /** Availability signal (`available > 0`) — Employee + Admin only (never sent to Client). */
+  /** Availability signal (`available > 0`) — Admin only (never sent to Client). */
   inStock?: boolean;
   /**
-   * Units takeable RIGHT NOW — Employee + Admin only. Venta: the recorded stock (sales decrement
+   * Units takeable RIGHT NOW — Admin only. Venta: the recorded stock (sales decrement
    * it). Alquiler: the fleet minus units out on active rentals (derived server-side).
    */
   available?: number;

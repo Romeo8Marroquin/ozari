@@ -1,9 +1,12 @@
 # EPIC 2 — Orders, Availability & Logistics
 
-> **Status: PLANNED (owner interviewed 2026-07-15).** Epic 1 (products CRUD) is COMPLETE. This
-> file is the single source of truth for what comes next: owner decisions are marked ✅, still-open
-> questions live in §9. Future sessions: read this FIRST; do NOT start coding orders before
-> EPIC-2A (§3) is done. Update this file as things land.
+> **Status: EPIC-2A DONE (2026-07-16); orders themselves not started.** Epic 1 (products CRUD) is
+> COMPLETE. This file is the single source of truth for what comes next: owner decisions are marked
+> ✅, still-open questions live in §9. Future sessions: read this FIRST. The §3 driver refactor is
+> implemented (branch `feat/rems`); **all schema-blocking questions (Q-D/Q-A/Q-E) were resolved
+> 2026-07-16 (§9)** — only Q-B (comms) and Q-C (dashboard window) remain, neither blocks the
+> schema. Next session: set up migration tooling (shadow DB) + author the orders schema per §4.
+> Update this file as things land.
 
 ## 1. The business, in one paragraph
 
@@ -104,10 +107,19 @@ than one place. New "requestables" (beyond photos) attach here too.
   (per-day digest / per-week / per-delivery 1h-before) — parameters managed in an admin settings
   area.
 
-## 3. EPIC-2A — the Driver refactor (PREREQUISITE, plan only — NOT yet implemented)
+## 3. EPIC-2A — the Driver refactor (✅ DONE, 2026-07-16)
 
-**Do this as its own first step of Epic 2, in one focused session.** It corrects Epic-1 surface
-that assumed "Employee sees products":
+**Implemented in one focused session, exactly as planned below.** It corrects Epic-1 surface that
+assumed "Employee sees products". Implementation notes beyond the plan: the seed renames role 3 to
+"Repartidor" in place (idempotent upsert — re-run `pnpm db:seed` per environment; staging gets it
+on the next seed run); `/auth/me` now returns `role: "Driver"` (the enum NAME follows the rename);
+frontend guards live in the route files (`productos.tsx` bounces non-[Admin,Client] to
+`/panel/ajustes`; bare `/panel` lands via `panelHomeFor(role)` — both derived from
+`PRODUCTS_ROLES`/`PANEL_NAV` in `navConfig.ts` so guards and sidebar can never disagree); the
+"Ordenar" action was removed for ADMIN too (per §2 — the admin's order-on-behalf flow will be a
+dedicated order form, so product cards are Client-CTA-only and the card of an Admin has no action);
+the `available`-without-`total` stock-chip render path was KEPT (it serves Admin-on-Venta), only
+its Employee framing died. The original plan, for the record:
 
 1. **Naming/semantics**: role id 3 stops being generic "Employee" and becomes **Driver**
    (seed name e.g. "Repartidor"). Update `RolesEnum` (backend), `Role`/`Roles` constants +
@@ -135,10 +147,18 @@ New/changed (author with `prisma migrate diff`, per CLAUDE.md rules):
 
 - `event_types` lookup: name, description, `minLeadHours Int @default(24)`, isActive (publication
   flag). FK from `services`.
-- `services` additions: `eventTypeId`, `deliveryAt DateTime`, `pickupAt DateTime` (planned, hour
-  precision), `deliveredAt/collectedAt DateTime?` (actuals), `readyAt DateTime?` (stock released),
-  `assignedUserId Int?` (the driver), `depositAmount Decimal?` (anticipo), `paidAt DateTime?`,
-  `cancelledAt/cancelReason?`. `serviceStart/serviceEnd` become the BILLED period (days).
+- `client_registries` + `client_registry_contacts` + `client_registry_addresses` (Q-D, resolved —
+  full shape + deletion rule in §9): guest clients for admin-created orders. Attribute rows
+  (contacts/addresses) always hard-delete; the registry row itself follows the conditional
+  NO-TRASH rule (soft only when orders reference it).
+- `services` additions: `eventTypeId`, `deliveryAt DateTime`, `pickupAt DateTime?` (planned, hour
+  precision; **NULL = purchase-only order**, Q-A), `deliveredAt/collectedAt DateTime?` (actuals),
+  `readyAt DateTime?` (stock released), `assignedUserId Int?` (the driver),
+  `depositAmount Decimal?` (anticipo), `paidAt DateTime?`, `cancelledAt/cancelReason?`. Identity:
+  `userId` becomes nullable + `clientRegistryId Int?` (exactly one of the two set). Snapshot
+  columns (Q-D): contact name, contact detail(s) used, delivery address — plain text captured at
+  order time, NEVER an FK to a mutable address row. `serviceStart/serviceEnd` become the BILLED
+  period (days).
 - `service_status` seed: add `EN_RUTA` (and keep PENDING? — the confirmed-on-create model may
   make PENDING unnecessary for admin-created orders but the client-request flow may still want
   it; decide with Q-1). Status transitions AUDITED: `service_status_history` (serviceId, from,
@@ -160,7 +180,7 @@ New/changed (author with `prisma migrate diff`, per CLAUDE.md rules):
 
 ## 5. MVP cut (smallest thing that WORKS end-to-end)
 
-1. EPIC-2A driver refactor.
+1. ✅ EPIC-2A driver refactor (done 2026-07-16).
 2. Event types lookup + admin CRUD-lite (or seed-only first).
 3. Admin creates/edits/cancels orders (client picker; lines with per-day pricing; delivery/pickup
    times; atomic stock + 1h-spacing validation; RECONCILE pattern for lines).
@@ -211,15 +231,49 @@ conflict pattern from product updates applies (someone else confirmed first → 
 - **Refunds (was Q-2b)**: never happened in 2+ years — zero MVP work; the door is a future
   negative-payment record, nothing more.
 
+### Resolved (✅ 2026-07-16, third interview) — the last schema blockers
+
+- **Q-D Walk-in identity → a reusable CLIENT REGISTRY (guest client), never a forced account.**
+  The admin's order-on-behalf flow is a "quick order": pick (or create inline) a **client
+  registry** — a lightweight non-platform client record. Shape:
+  - `client_registries`: the **responsible person's name** (who receives updates, takes the
+    delivery, hands back at pickup).
+  - `client_registry_contacts`: one or MANY typed contact methods (phone / email / WhatsApp / …)
+    — at least one required, never all forced.
+  - `client_registry_addresses`: one or MANY delivery addresses, exactly one marked
+    default/favorite (mirrors what platform-user addresses will look like).
+  - **Reusable**: repeat WhatsApp/phone clients are picked from the registry list on later orders.
+  - **Deletion (conditional NO-TRASH, same rule as products)**: when such a person registers a
+    real account (or is just obsolete), the admin can delete the registry — the row soft-deletes
+    ONLY if orders reference it; its contacts/addresses rows **hard-delete either way** (safe
+    because of the snapshot rule below). No automatic registry→user linking/merge at MVP (a door).
+  - **Normalized vs snapshot — DECIDED: snapshot the operational fields onto the order, keep a
+    nullable reference for grouping.** `services` carries `userId?` XOR `clientRegistryId?` (who
+    the order belongs to — grouping, history, "this client's past orders") **plus denormalized
+    snapshot columns** of what logistics actually used: contact name, the contact detail(s) used,
+    and the delivery address as plain text. Rationale: an order is an immutable historical record
+    — editing an address later must never rewrite past orders; snapshotting makes address/contact
+    rows **pure attribute rows** (always hard-deletable — the economy answer: one line of text per
+    order costs ~nothing, while FK-referenced address rows could never be deleted and accumulate
+    forever); and it's the standard e-commerce order-address-snapshot practice. The SAME rule
+    applies to platform-user orders when user addresses land — snapshot at order time, always.
+
+- **Q-A Consumables-only purchases → the order form FORKS FIRST.** Step zero of every order is the
+  mode: **"¿Rentar, comprar o ambos?"** — before the dates. Purchase-only asks a **delivery time
+  only** (no pickup event, no billed-days math — sell prices only; `pickupAt` is NULL); rent and
+  mixed ask both (purchases inside a mixed order just skip the pickup half). Every downstream rule
+  keys off which logistics events the order actually HAS: the 1h spacing applies per existing
+  event; the availability window is delivery→pickup for rentals; a sale decrements sellable stock.
+
+- **Q-E Client product-card CTAs → REMOVE the per-product buttons.** The catalog is exactly that —
+  a menu/showcase (browse, see details); every order starts at the mode+window definition, so
+  per-product "Rentar"/"Comprar" buttons would teach a product-first flow that doesn't exist and
+  confuse the user. At most ONE **generic** entry point may be added later ("Iniciar pedido" on the
+  grid/detail — generic, never per-product). The currently-disabled buttons stay inert until the
+  order form lands, then get deleted (with their tests) in that same slice.
+
 ### Still OPEN (ask before building the affected slice)
-- **Q-A Consumables-only purchases**: the flow starts with dates, but a pure-purchase order
-  (consumables: delivered, never picked up) doesn't need a pickup. A "solo compra" toggle? A
-  delivery-date-only mode? Owner explicitly unsure — propose the best practice at order-form
-  design time. Mixed rent+purchase orders exist (purchases just skip the pickup half).
 - **Q-B Comms**: email content & cadence to clients (cheapest channel wins; WhatsApp is a future
   door); which events notify whom.
 - **Q-C Dashboard week window**: exact shape (current week vs ±3 days vs 6 ahead) — decide by
   design feel, owner has no strong preference.
-- **Q-D Walk-in identity**: minimal guest record (name+phone) vs forced account for admin-created
-  orders (owner handles WhatsApp people today; schema needs `services.userId` nullable OR a guest
-  users row — decide at order-create design time).

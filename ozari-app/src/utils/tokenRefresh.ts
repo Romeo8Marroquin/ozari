@@ -79,11 +79,27 @@ export async function refreshAccessToken(options: RefreshOptions = {}): Promise<
   isRefreshing = true;
 
   try {
-    const response = await api.post<OzariSuccessResponse>(
-      '/auth/refresh',
-      {},
-      { _isRefreshRequest: true },
-    );
+    let response;
+    try {
+      response = await api.post<OzariSuccessResponse>(
+        '/auth/refresh',
+        {},
+        { _isRefreshRequest: true },
+      );
+    } catch (firstError) {
+      // ONE retry on a 401 before declaring the session dead. A 401 here is not always fatal:
+      // two tabs share the refresh cookie but not the single-flight guard (it's per-tab), so the
+      // LOSER of a concurrent rotation gets the backend's designed "harmless retry" 401 — and by
+      // retry time the browser already holds the winner's rotated cookie (or the backend's reuse
+      // grace window accepts the previous one), so the retry succeeds and the tab stays logged
+      // in. A genuinely dead session just 401s again and takes the normal failure path below.
+      if (!axios.isAxiosError(firstError) || getStatus(firstError) !== 401) throw firstError;
+      response = await api.post<OzariSuccessResponse>(
+        '/auth/refresh',
+        {},
+        { _isRefreshRequest: true },
+      );
+    }
 
     const authHeader = response.headers['authorization'];
     if (!authHeader) throw new Error('No authorization header in refresh response');

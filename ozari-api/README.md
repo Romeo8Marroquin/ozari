@@ -10,7 +10,7 @@ Modern Express TypeScript API for the Ozari platform.
 - **TypeScript** - Type-safe development with strict mode
 - **Prisma** - Modern ORM with PostgreSQL
 - **JWT Authentication** - Secure token-based auth with refresh tokens
-- **Role-Based Access Control** - Admin, Employee, Client roles
+- **Role-Based Access Control** - Admin, Driver, Client roles
 - **AES-256-GCM Encryption** - Encrypted sensitive data (KMS fields)
 - **Winston Logger** - Structured logging with request context
 - **i18n Support** - Spanish (Guatemala) translations
@@ -313,7 +313,7 @@ curl http://localhost:8080/api/health/check
 ### Database seeding
 
 `pnpm run db:seed` (`prisma db seed` → `prisma/seed.ts`) loads the **reference data**
-the app depends on: `user_roles` (Client/Admin/Employee), `token_types`
+the app depends on: `user_roles` (Client/Admin/Driver), `token_types`
 (Access/Refresh), currencies, geography (Guatemala → department → municipality →
 zones), product categories, statuses, etc. Without it, **register and login fail** on
 foreign-key constraints (`roleId` → `user_roles`, `tokenTypeId` → `token_types`).

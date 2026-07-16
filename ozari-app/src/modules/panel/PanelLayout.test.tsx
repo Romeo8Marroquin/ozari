@@ -256,6 +256,21 @@ describe('PanelLayout - with animations', () => {
     expect(preloadRoute).toHaveBeenCalledWith({ to: OTHER });
   });
 
+  it('abandons the pending tab when a HISTORY commit lands mid-exit (browser back wins)', { retry: 2 }, async () => {
+    const { rerender } = render(<PanelLayout />);
+    flushGsap();
+    await userEvent.click(screen.getByRole('button', { name: 'nav-ajustes' }));
+    flushGsap(0.1); // mid-exit
+    // A popstate commits a different route while the exit plays (the ROUTER changed the pathname —
+    // not our controller, whose navigate hasn't fired yet): the pop is the newer intent.
+    currentPath.value = '/panel/productos/7';
+    rerender(<PanelLayout />);
+    flushGsap(); // let the exit finish — its completion must now abandon, not stomp the pop
+    await act(async () => {});
+    expect(navigate).not.toHaveBeenCalled();
+    expect(screen.getByTestId('pending')).toHaveTextContent('none');
+  });
+
   it('a failed route preload never blocks the transition (best-effort)', async () => {
     preloadRoute.mockRejectedValue(new Error('offline chunk'));
     render(<PanelLayout />);

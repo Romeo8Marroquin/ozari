@@ -67,6 +67,31 @@ function waveDelays(items: HTMLElement[], budget: number): number[] {
   return distances.map((d) => (max > 0 ? (d / max) * budget : 0));
 }
 
+/**
+ * Per-cell reveal delay for a RESOLVING grid's skeleton→content crossfades (`SkeletonFade`'s
+ * `revealDelaySeconds`). Every slot flips in the same React commit, so each cell must derive its
+ * own slot in the wave from the rendered layout: climb from `el` (the SkeletonFade wrapper) to the
+ * direct grid item, then apply the same row-dominant/column-ripple geometry as {@link waveDelays},
+ * normalized over the WHOLE grid so the full cascade spends exactly the page-entrance budget —
+ * rows first, each row rippling across its columns, regardless of how many cells resolved.
+ */
+export function gridCellRevealDelay(el: HTMLElement): number {
+  const COLUMN_RIPPLE = 0.35;
+  let cell: HTMLElement | null = el;
+  while (cell && !(cell.parentElement && getComputedStyle(cell.parentElement).display === 'grid')) {
+    cell = cell.parentElement;
+  }
+  const parent = cell?.parentElement;
+  if (!cell || !parent) return 0; // not inside a grid (defensive) — reveal immediately
+  const cols = getComputedStyle(parent).gridTemplateColumns.split(' ').filter(Boolean).length || 1;
+  const children = Array.from(parent.children);
+  const index = children.indexOf(cell);
+  const distance = Math.floor(index / cols) + (index % cols) * COLUMN_RIPPLE;
+  const rows = Math.ceil(children.length / cols);
+  const max = rows - 1 + Math.min(cols - 1, children.length - 1) * COLUMN_RIPPLE;
+  return max > 0 ? (distance / max) * PAGE_ENTER_STAGGER : 0;
+}
+
 /** Staggered entrance for a page's marked items — a gentle fade + rise + faint settle, cascading
  *  as a row/column wave (see {@link waveDelays}). */
 export function staggerIn(scope: HTMLElement | null, selector: string, options?: EnterOptions): void {

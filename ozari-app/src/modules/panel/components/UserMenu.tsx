@@ -22,9 +22,9 @@ import LogoutConfirmModal from './LogoutConfirmModal';
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta focus-visible:ring-offset-2 focus-visible:ring-offset-white';
 
-// Backend RolesEnum (Client=1, Admin=2, Employee=3). The access token carries the role id, so we
+// Backend RolesEnum (Client=1, Admin=2, Driver=3). The access token carries the role id, so we
 // can label the pill instantly from the token while `/auth/me` (the name) is still in flight.
-const ROLE_BY_ID: Record<number, MeData['role']> = { 1: 'Client', 2: 'Admin', 3: 'Employee' };
+const ROLE_BY_ID: Record<number, MeData['role']> = { 1: 'Client', 2: 'Admin', 3: 'Driver' };
 
 // The on-brand avatar shown when the profile couldn't load: a neutral user glyph (never fabricated
 // initials) on the same gradient, so it reads as an intentional "unknown user", not a broken tile.
