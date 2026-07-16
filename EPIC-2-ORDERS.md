@@ -69,7 +69,12 @@ exclusively **drivers**.
 - ✅ **Custom discounts are admin-only and occasional** (recurrent clients, birthdays — relationship
   management; maybe coupons someday). NOT MVP, but the DB must not make them painful later: plan a
   nullable order-level `discountAmount`+`discountReason` (or an adjustments row) when orders land —
-  decide the cheapest shape at migration time, never a redesign.
+  decide the cheapest shape at migration time, never a redesign. (Taken as the two nullable columns
+  in the 2026-07-16 schema.)
+- ✅ **Delivery fee (envío) is charged separately, per order** (owner, 2026-07-16): distance-based,
+  **admin-determined for now** — free inside Hacienda Real (the owner's village), the rest by how
+  far it is. `services.deliveryAmount` snapshots what was actually charged; registry addresses
+  carry a suggested `domicilePrice`; per-zone/distance automation is a future door, not MVP.
 
 ### Preferences — the parametrization architecture (✅ owner direction)
 Everything currently "a constant" is really an **admin preference**: the 1h spacing, the 2h
@@ -143,7 +148,26 @@ its Employee framing died. The original plan, for the record:
 
 ## 4. Schema plan (migrations for Epic 2)
 
-New/changed (author with `prisma migrate diff`, per CLAUDE.md rules):
+> **✅ AUTHORED (2026-07-16): migration `20260716120000_epic2_orders_schema`** (engine-written via
+> `prisma migrate diff`; apply with `pnpm prisma:migrate:deploy` + re-run `pnpm db:seed` per
+> environment — safe because `services` is empty everywhere, the feature never existed).
+> Implementation deltas vs the plan below: a **`contact_types`** lookup was added (WhatsApp /
+> Teléfono / Correo / Otro — registry contacts include email, so `user_phone_types` didn't fit);
+> registry addresses have **optional `zoneId`** (walk-ins are often outside the seeded city zones)
+> plus a suggested `domicilePrice`; `services` **dropped `addressId`/`userPhoneId`** for encrypted
+> snapshot columns (`delivery_contact_kms`, `delivery_address_kms`, alongside the existing
+> `delivery_name_kms`) and gained `deliveryAmount` (fee charged — §2 delivery-fee decision),
+> `discountAmount`/`discountReason` (the §2 door, taken now), and indexes on
+> deliveryAt/pickupAt/userId/clientRegistryId/assignedUserId; `service_details` gained the
+> **`isRental` per-line snapshot** (a product's business type is editable later; mixed orders need
+> the line to know its own math); the userId XOR clientRegistryId rule is **app-layer-enforced**
+> (a CHECK constraint would require hand-editing the engine-written SQL); `app_preferences` seeds
+> **create-only** (`update: {}` — re-seeding never clobbers admin-edited values). `EN_ROUTE = 5`
+> was added to `ServiceStatusEnum` + seed. ⚠️ **Step-2 obligation:** `buildRentedNowWhere`
+> (products.service.ts) must count EN_ROUTE as holding (like DELIVERED) in the same slice that
+> starts writing it — the units are on the truck.
+
+Original plan, for the record (author with `prisma migrate diff`, per CLAUDE.md rules):
 
 - `event_types` lookup: name, description, `minLeadHours Int @default(24)`, isActive (publication
   flag). FK from `services`.

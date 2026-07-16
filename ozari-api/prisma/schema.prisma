@@ -34,15 +34,17 @@ model User {
   updatedAt     DateTime? @updatedAt @map("updated_at")
   createdAt     DateTime  @default(now()) @map("created_at")
 
-  role                UserRole             @relation(fields: [roleId], references: [id])
-  jwtSessions         JwtSession[]
-  blacklists          Blacklist[]
-  userPhones          UserPhone[]
-  addresses           Address[]
-  services            Service[]
-  userAuthProviders   UserAuthProvider[]
-  mfaRecoveryCodes    MfaRecoveryCode[]
-  passwordResetTokens PasswordResetToken[]
+  role                 UserRole               @relation(fields: [roleId], references: [id])
+  jwtSessions          JwtSession[]
+  blacklists           Blacklist[]
+  userPhones           UserPhone[]
+  addresses            Address[]
+  services             Service[]              @relation("ServiceOwner")
+  assignedServices     Service[]              @relation("ServiceAssignee")
+  serviceStatusChanges ServiceStatusHistory[]
+  userAuthProviders    UserAuthProvider[]
+  mfaRecoveryCodes     MfaRecoveryCode[]
+  passwordResetTokens  PasswordResetToken[]
 
   @@map("users")
 }
@@ -111,14 +113,14 @@ model TokenType {
 }
 
 model JwtSession {
-  id          Int      @id @default(autoincrement())
-  jti         String   @unique
-  deviceUuid  String   @map("device_uuid")
-  userId      Int      @map("user_id")
-  tokenTypeId Int      @map("token_type_id")
-  issuedAt    DateTime @map("issued_at")
-  expiresAt   DateTime @map("expires_at")
-  isActive    Boolean  @default(true) @map("is_active")
+  id          Int       @id @default(autoincrement())
+  jti         String    @unique
+  deviceUuid  String    @map("device_uuid")
+  userId      Int       @map("user_id")
+  tokenTypeId Int       @map("token_type_id")
+  issuedAt    DateTime  @map("issued_at")
+  expiresAt   DateTime  @map("expires_at")
+  isActive    Boolean   @default(true) @map("is_active")
   // Rotation lineage (REFRESH rows only; null on access rows and fresh logins): the jti this
   // row's rotation replaced + when. Lets the refresh endpoint tell a LOST-RESPONSE replay of the
   // immediately-previous token (grace → re-rotate) from a genuinely old/stolen token (→ the
@@ -189,7 +191,6 @@ model UserPhone {
 
   user      User          @relation(fields: [userId], references: [id])
   phoneType UserPhoneType @relation(fields: [userPhoneTypeId], references: [id])
-  services  Service[]
 
   @@map("user_phones")
 }
@@ -386,8 +387,9 @@ model Zone {
   updatedAt      DateTime? @updatedAt @map("updated_at")
   createdAt      DateTime  @default(now()) @map("created_at")
 
-  municipality Municipality @relation(fields: [municipalityId], references: [id])
-  addresses    Address[]
+  municipality            Municipality            @relation(fields: [municipalityId], references: [id])
+  addresses               Address[]
+  clientRegistryAddresses ClientRegistryAddress[]
 
   @@map("zones")
 }
@@ -405,11 +407,108 @@ model Address {
   updatedAt           DateTime? @updatedAt @map("updated_at")
   createdAt           DateTime  @default(now()) @map("created_at")
 
-  user     User      @relation(fields: [userId], references: [id])
-  zone     Zone      @relation(fields: [zoneId], references: [id])
-  services Service[]
+  user User @relation(fields: [userId], references: [id])
+  zone Zone @relation(fields: [zoneId], references: [id])
 
   @@map("addresses")
+}
+
+// The purpose of an order (Evento familiar / Evento social / Otro — owner's taxonomy, 2026-07-16;
+// admin-parameterizable). `minLeadHours` is the CLIENT-side rule: clients can create an order only
+// if delivery is at least this far away, and edit/cancel only until this many hours before
+// delivery. The admin has NO time restrictions (only stock + spacing conflicts). `isActive` is a
+// publication flag (seeded-lookup pattern), never deletion.
+model EventType {
+  id           Int       @id @default(autoincrement())
+  name         String
+  description  String?
+  minLeadHours Int       @default(24) @map("min_lead_hours")
+  isActive     Boolean   @default(true) @map("is_active")
+  updatedAt    DateTime? @updatedAt @map("updated_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  services Service[]
+
+  @@map("event_types")
+}
+
+// Contact channels for client-registry contacts (WhatsApp / Teléfono / Correo / Otro). Separate
+// from `user_phone_types` because registry contacts include non-phone channels (email).
+model ContactType {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  isActive    Boolean   @default(true) @map("is_active")
+  updatedAt   DateTime? @updatedAt @map("updated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  clientRegistryContacts ClientRegistryContact[]
+
+  @@map("contact_types")
+}
+
+// A WALK-IN client (the WhatsApp/phone people — owner decision 2026-07-16, EPIC-2-ORDERS §9): the
+// admin's reusable record for orders on behalf of someone WITHOUT a platform account. Holds the
+// RESPONSIBLE person — who receives updates, takes the delivery, hands back at pickup. Conditional
+// NO-TRASH: the row soft-deletes (`isActive: false`) ONLY while services reference it and
+// hard-deletes otherwise; its contacts/addresses ALWAYS hard-delete — orders SNAPSHOT what they
+// used (see Service), so nothing here is load-bearing history.
+model ClientRegistry {
+  id        Int       @id @default(autoincrement())
+  nameKms   String    @map("name_kms")
+  notesKms  String?   @map("notes_kms")
+  isActive  Boolean   @default(true) @map("is_active")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  contacts  ClientRegistryContact[]
+  addresses ClientRegistryAddress[]
+  services  Service[]
+
+  @@map("client_registries")
+}
+
+// One contact method of a registry (≥1 per registry, enforced at the app layer; exactly one
+// principal). Pure attribute row: hard-deleted on edits, never tombstoned.
+model ClientRegistryContact {
+  id               Int       @id @default(autoincrement())
+  clientRegistryId Int       @map("client_registry_id")
+  contactTypeId    Int       @map("contact_type_id")
+  valueKms         String    @map("value_kms")
+  isPrincipal      Boolean   @default(false) @map("is_principal")
+  updatedAt        DateTime? @updatedAt @map("updated_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  clientRegistry ClientRegistry @relation(fields: [clientRegistryId], references: [id])
+  contactType    ContactType    @relation(fields: [contactTypeId], references: [id])
+
+  @@index([clientRegistryId])
+  @@map("client_registry_contacts")
+}
+
+// A registry's delivery address (≥1 per registry, exactly one favorite — app-enforced). `zoneId`
+// is OPTIONAL (unlike user addresses): walk-ins are often outside the seeded city zones (e.g.
+// Hacienda Real, the owner's village — free delivery there); the encrypted text carries the truth
+// and the zone is a future-automation hint. `domicilePrice` is the SUGGESTED delivery fee for this
+// address — the order snapshots what was actually charged in `services.delivery_amount`. Pure
+// attribute row: hard-deleted on edits, never tombstoned.
+model ClientRegistryAddress {
+  id               Int       @id @default(autoincrement())
+  clientRegistryId Int       @map("client_registry_id")
+  zoneId           Int?      @map("zone_id")
+  addressKms       String    @map("address_kms")
+  coordsKms        String?   @map("coords_kms")
+  instructionsKms  String?   @map("instructions_kms")
+  domicilePrice    Decimal?  @map("domicile_price") @db.Decimal(15, 2)
+  isFavorite       Boolean   @default(false) @map("is_favorite")
+  updatedAt        DateTime? @updatedAt @map("updated_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  clientRegistry ClientRegistry @relation(fields: [clientRegistryId], references: [id])
+  zone           Zone?          @relation(fields: [zoneId], references: [id])
+
+  @@index([clientRegistryId])
+  @@map("client_registry_addresses")
 }
 
 model ServiceStatus {
@@ -420,7 +519,10 @@ model ServiceStatus {
   updatedAt   DateTime? @updatedAt @map("updated_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  services Service[]
+  services          Service[]
+  statusHistoryFrom ServiceStatusHistory[] @relation("StatusHistoryFrom")
+  statusHistoryTo   ServiceStatusHistory[] @relation("StatusHistoryTo")
+  serviceEvidences  ServiceEvidence[]
 
   @@map("service_status")
 }
@@ -438,16 +540,58 @@ model PaymentStatus {
   @@map("payment_status")
 }
 
+// An ORDER (the business term; "service" is the historical table name). Identity is EITHER a
+// platform user (`userId`) OR a walk-in registry (`clientRegistryId`) — exactly ONE, enforced at
+// the application layer (the migration SQL must stay engine-written, so no hand-added CHECK
+// constraint). The operational contact/address fields are SNAPSHOTS — encrypted plain text
+// captured at order time (owner decision 2026-07-16, EPIC-2-ORDERS §9): editing a registry or
+// user address later must NEVER rewrite an order's history, and snapshotting keeps
+// address/contact rows hard-deletable (no-trash). Orders themselves are NEVER deleted, only
+// cancelled (`cancelledAt` + status) — they ARE the business history.
 model Service {
-  id               Int       @id @default(autoincrement())
-  userId           Int       @map("user_id")
-  deliveryNameKms  String    @map("delivery_name_kms")
-  addressId        Int       @map("address_id")
-  userPhoneId      Int       @map("user_phone_id")
-  description      String?
-  serviceStart     DateTime  @map("service_start")
-  serviceEnd       DateTime  @map("service_end")
-  totalAmount      Decimal   @map("total_amount") @db.Decimal(15, 2)
+  id               Int  @id @default(autoincrement())
+  userId           Int? @map("user_id")
+  clientRegistryId Int? @map("client_registry_id")
+
+  // Snapshots (AES-encrypted like all PII): who receives, how to reach them, where to deliver.
+  deliveryNameKms    String @map("delivery_name_kms")
+  deliveryContactKms String @map("delivery_contact_kms")
+  deliveryAddressKms String @map("delivery_address_kms")
+
+  description String?
+  eventTypeId Int     @map("event_type_id")
+
+  // Logistics, hour precision. `pickupAt` is NULL on purchase-only orders (Q-A, 2026-07-16).
+  // `deliveredAt`/`collectedAt` are the tracked ACTUALS behind the ENTREGADO/RECOLECTADO taps;
+  // `readyAt` is the explicit final "listo" press that returns the units to the fleet.
+  deliveryAt  DateTime  @map("delivery_at")
+  pickupAt    DateTime? @map("pickup_at")
+  deliveredAt DateTime? @map("delivered_at")
+  collectedAt DateTime? @map("collected_at")
+  readyAt     DateTime? @map("ready_at")
+
+  // The BILLED period (whole days derived from the delivery→pickup window; pickup time decides).
+  serviceStart DateTime @map("service_start")
+  serviceEnd   DateTime @map("service_end")
+
+  // The driver this order is assigned to (MVP: admin assigns manually; the admin is also a driver).
+  assignedUserId Int? @map("assigned_user_id")
+
+  // Money. `totalAmount` stays authoritative but RECOMPUTABLE from lines + extras + delivery −
+  // discount (the FEL/adjustments door). `deliveryAmount` = the fee actually charged (admin-set,
+  // distance-based; free inside Hacienda Real — owner 2026-07-16). `depositAmount` = anticipo;
+  // `paidAt` records when payment completed (paymentStatus stays the state lookup). Discounts are
+  // admin-only and occasional (§2) — nullable, no dedicated flow yet.
+  totalAmount    Decimal   @map("total_amount") @db.Decimal(15, 2)
+  deliveryAmount Decimal?  @map("delivery_amount") @db.Decimal(15, 2)
+  depositAmount  Decimal?  @map("deposit_amount") @db.Decimal(15, 2)
+  discountAmount Decimal?  @map("discount_amount") @db.Decimal(15, 2)
+  discountReason String?   @map("discount_reason")
+  paidAt         DateTime? @map("paid_at")
+
+  cancelledAt  DateTime? @map("cancelled_at")
+  cancelReason String?   @map("cancel_reason")
+
   currencyId       Int       @map("currency_id")
   serviceStatusId  Int       @map("service_status_id")
   paymentStatusId  Int       @map("payment_status_id")
@@ -457,15 +601,24 @@ model Service {
   updatedAt        DateTime? @updatedAt @map("updated_at")
   createdAt        DateTime  @default(now()) @map("created_at")
 
-  user           User            @relation(fields: [userId], references: [id])
-  address        Address         @relation(fields: [addressId], references: [id])
-  userPhone      UserPhone       @relation(fields: [userPhoneId], references: [id])
-  currency       Currency        @relation(fields: [currencyId], references: [id])
-  serviceStatus  ServiceStatus   @relation(fields: [serviceStatusId], references: [id])
-  paymentStatus  PaymentStatus   @relation(fields: [paymentStatusId], references: [id])
+  user           User?                  @relation("ServiceOwner", fields: [userId], references: [id])
+  clientRegistry ClientRegistry?        @relation(fields: [clientRegistryId], references: [id])
+  assignedUser   User?                  @relation("ServiceAssignee", fields: [assignedUserId], references: [id])
+  eventType      EventType              @relation(fields: [eventTypeId], references: [id])
+  currency       Currency               @relation(fields: [currencyId], references: [id])
+  serviceStatus  ServiceStatus          @relation(fields: [serviceStatusId], references: [id])
+  paymentStatus  PaymentStatus          @relation(fields: [paymentStatusId], references: [id])
   serviceDetails ServiceDetail[]
   serviceExtras  ServiceExtra[]
+  statusHistory  ServiceStatusHistory[]
+  evidences      ServiceEvidence[]
 
+  // The agenda + 1h-spacing checks scan by event time; "my orders" scans by owner/assignee.
+  @@index([deliveryAt])
+  @@index([pickupAt])
+  @@index([userId])
+  @@index([clientRegistryId])
+  @@index([assignedUserId])
   @@map("services")
 }
 
@@ -474,6 +627,10 @@ model ServiceDetail {
   serviceId    Int       @map("service_id")
   productId    Int       @map("product_id")
   quantity     Int
+  // Rent-vs-sale SNAPSHOT per line (a product's business type is editable later; the line records
+  // how it was ordered): rental lines bill unitary × qty × billed days and get picked up; sale
+  // lines bill once and permanently decrement the product's quantity.
+  isRental     Boolean   @map("is_rental")
   unitaryPrice Decimal   @map("unitary_price") @db.Decimal(15, 2)
   parcialPrice Decimal   @map("parcial_price") @db.Decimal(15, 2)
   currencyId   Int       @map("currency_id")
@@ -505,4 +662,60 @@ model ServiceExtra {
   currency Currency? @relation(fields: [currencyId], references: [id])
 
   @@map("service_extras")
+}
+
+// Audit trail of every order status transition (who moved it, from what, to what, when) — cheap,
+// answers every dispute (§4). `fromStatusId` is NULL on the creation row. Append-only: rows are
+// never updated or deleted.
+model ServiceStatusHistory {
+  id           Int      @id @default(autoincrement())
+  serviceId    Int      @map("service_id")
+  fromStatusId Int?     @map("from_status_id")
+  toStatusId   Int      @map("to_status_id")
+  byUserId     Int      @map("by_user_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  service    Service        @relation(fields: [serviceId], references: [id])
+  fromStatus ServiceStatus? @relation("StatusHistoryFrom", fields: [fromStatusId], references: [id])
+  toStatus   ServiceStatus  @relation("StatusHistoryTo", fields: [toStatusId], references: [id])
+  byUser     User           @relation(fields: [byUserId], references: [id])
+
+  @@index([serviceId])
+  @@map("service_status_history")
+}
+
+// Photo evidence for the ENTREGADO / RECOLECTADO taps (`serviceStatusId` = the phase evidenced).
+// Same R2 pattern as `product_images`: presigned browser upload, server-derived URL, unique key,
+// hard-deleted rows + post-commit batched object deletes (no-trash).
+model ServiceEvidence {
+  id              Int      @id @default(autoincrement())
+  serviceId       Int      @map("service_id")
+  serviceStatusId Int      @map("service_status_id")
+  r2Key           String   @unique @map("r2_key")
+  url             String
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  service       Service       @relation(fields: [serviceId], references: [id])
+  serviceStatus ServiceStatus @relation(fields: [serviceStatusId], references: [id])
+
+  @@index([serviceId])
+  @@map("service_evidence")
+}
+
+// A typed admin preference (owner direction 2026-07-15: every operational "constant" is really a
+// preference — spacing, turnaround, reminders, padding, evidence rules, notification cadence).
+// Code reads these from day one; the admin settings UI can lag. `value` is text, parsed per
+// `valueType` (int | bool | string | json). Seeded create-only in prisma/seed.ts — re-seeding must
+// NEVER clobber an admin-edited value. No `isActive`: a preference always has a value.
+model AppPreference {
+  id          Int       @id @default(autoincrement())
+  key         String    @unique
+  value       String
+  valueType   String    @map("value_type")
+  group       String
+  description String?
+  updatedAt   DateTime? @updatedAt @map("updated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@map("app_preferences")
 }
