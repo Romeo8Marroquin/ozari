@@ -49,9 +49,11 @@ export function playStaggerIn({ content, footer }: StaggerTargets): void {
 /**
  * Sweep the content out to the left (reverse order) and the footer out to the right — the mirror of
  * {@link playStaggerIn}. `onComplete` (if given) fires once the whole sweep has finished, which the
- * step transition uses to know when it's safe to swap in the next step's content.
+ * step transition uses to know when it's safe to swap in the next step's content. Returns the
+ * timeline so a caller can kill a still-running sweep before starting a new one (a rapid phase
+ * flip must cancel the pending commit, not stack a second one).
  */
-export function playStaggerOut({ content, footer }: StaggerTargets, onComplete?: () => void): void {
+export function playStaggerOut({ content, footer }: StaggerTargets, onComplete?: () => void): gsap.core.Timeline {
   const timeline = gsap.timeline({ onComplete });
   if (content.length) {
     timeline.to(
@@ -63,4 +65,5 @@ export function playStaggerOut({ content, footer }: StaggerTargets, onComplete?:
   if (footer) {
     timeline.to(footer, { x: 18, autoAlpha: 0, duration: 0.2, ease: 'power2.in', overwrite: true }, 0);
   }
+  return timeline;
 }

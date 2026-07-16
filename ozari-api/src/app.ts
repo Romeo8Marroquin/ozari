@@ -18,7 +18,7 @@ import { HttpEnum } from "./models/enums/httpEnum.js";
 import type { AppError } from "./models/common/error.js";
 
 import authRouter from "./modules/auth/auth.route.js";
-// import productsRouter from "./modules/products/products.route.js";
+import productsRouter from "./modules/products/products.route.js";
 import healthRouter from "./modules/health/health.route.js";
 import { mountApiDocs } from "./docs/swagger.js";
 
@@ -64,15 +64,11 @@ function configureMiddlewares(app: Express): void {
       },
     }),
   );
-  // Rate Limiters - Different limits for different endpoint types
-  // Strict limiter for authentication endpoints (prevent brute force)
-  const authLimiter = rateLimit({
-    windowMs: 60_000, // 1 minute
-    limit: 10, // 10 requests per minute per IP
-    standardHeaders: "draft-7",
-    legacyHeaders: false,
-    message: "Too many authentication requests, please try again later.",
-  });
+  // Rate Limiters - Different limits for different endpoint types.
+  // NOTE: the strict CREDENTIAL limiter (10/min, brute-force protection) lives in
+  // `auth.route.ts` and is applied PER-ROUTE to the endpoints that verify a secret — the /auth
+  // router as a whole rides the authenticated tier, so session reads like `GET /auth/me` (which
+  // the panel consults on every mount/focus) don't burn the credential budget.
 
   // Moderate limiter for public endpoints
   const publicLimiter = rateLimit({
@@ -94,7 +90,6 @@ function configureMiddlewares(app: Express): void {
 
   // Store rate limiters in app.locals for use in routes
   app.locals["rateLimiters"] = {
-    auth: authLimiter,
     public: publicLimiter,
     authenticated: authenticatedLimiter,
   };
@@ -215,7 +210,6 @@ function configureMiddlewares(app: Express): void {
 function configureRoutes(app: Express): void {
   const apiRouter = Router();
   const rateLimiters = app.locals["rateLimiters"] as {
-    auth: ReturnType<typeof rateLimit>;
     public: ReturnType<typeof rateLimit>;
     authenticated: ReturnType<typeof rateLimit>;
   };
@@ -224,11 +218,12 @@ function configureRoutes(app: Express): void {
   // Health check - public limiter (moderate)
   apiRouter.use("/health", rateLimiters["public"], healthRouter);
 
-  // Auth endpoints - strict limiter (prevent brute force)
-  apiRouter.use("/auth", rateLimiters["auth"], authRouter);
+  // Auth endpoints — authenticated tier for the router; the CREDENTIAL endpoints inside it stack
+  // their own strict 10/min limiter (see auth.route.ts), so /me and /signout never starve on it.
+  apiRouter.use("/auth", rateLimiters["authenticated"], authRouter);
 
   // Products endpoints - authenticated limiter (lenient)
-  // apiRouter.use("/products", rateLimiters["authenticated"], productsRouter);
+  apiRouter.use("/products", rateLimiters["authenticated"], productsRouter);
 
   // Mount API router at base path
   app.use(appConfig.basePath, apiRouter);

@@ -43,7 +43,9 @@ const setMe = (state: MeState): void => {
 const renderMenu = (): { navigate: ReturnType<typeof vi.fn> } => {
   const navigate = vi.fn();
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <PanelNavContext.Provider value={navigate as (to: PanelPath) => void}>{children}</PanelNavContext.Provider>
+    <PanelNavContext.Provider value={{ navigateTo: navigate as (to: PanelPath) => void, pending: null }}>
+      {children}
+    </PanelNavContext.Provider>
   );
   render(<UserMenu />, { wrapper });
   return { navigate };

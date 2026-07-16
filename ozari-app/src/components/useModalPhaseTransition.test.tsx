@@ -24,9 +24,10 @@ const initGsapMock = (): void => {
     vars?.onComplete?.();
     return {};
   });
+  // `kill` cancels the pending completion, mirroring real GSAP (a killed sweep never commits).
   gsapMock.timeline.mockReset().mockImplementation((vars?: { onComplete?: () => void }) => {
-    const tl = { to: vi.fn(() => tl) };
-    setTimeout(() => vars?.onComplete?.(), 0);
+    const id = setTimeout(() => vars?.onComplete?.(), 0);
+    const tl = { to: vi.fn(() => tl), kill: vi.fn(() => clearTimeout(id)) };
     return tl;
   });
 };
@@ -120,6 +121,21 @@ describe('useModalPhaseTransition', () => {
     expect(gsapMock.fromTo).toHaveBeenCalled();
     // jsdom reports height 0 for both, so the resize branch is skipped.
     expect(gsapMock.set).not.toHaveBeenCalled();
+  });
+
+  it('a rapid re-flip mid-sweep kills the pending sweep so only the LATEST phase commits', async () => {
+    setReducedMotion(false);
+    const { rerender } = render(<Harness target="form" />);
+    rerender(<Harness target="recovery" />); // sweep 1 starts (commit pending on a macrotask)
+    rerender(<Harness target="third" />); // re-flip mid-sweep: sweep 1 must be killed, sweep 2 starts
+
+    const firstSweep = gsapMock.timeline.mock.results[0].value as { kill: ReturnType<typeof vi.fn> };
+    expect(firstSweep.kill).toHaveBeenCalled();
+    expect(gsapMock.timeline).toHaveBeenCalledTimes(2);
+
+    // Only the latest target ever lands — the intermediate phase never commits.
+    expect(await screen.findByText('title-third')).toBeInTheDocument();
+    expect(screen.queryByText('title-recovery')).not.toBeInTheDocument();
   });
 
   it('pins the start height, clips the body, and tweens to the new height when it changes', async () => {

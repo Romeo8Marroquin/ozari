@@ -305,6 +305,7 @@ curl http://localhost:8080/api/health/check
 | `pnpm run prisma:studio` | Open Prisma Studio |
 | `pnpm run db:seed` | Seed reference data (idempotent; see below) |
 | `pnpm run cleanup:sessions` | Delete expired JWT sessions (see below) |
+| `pnpm run reconcile:images` | R2 ↔ DB orphan audit for product images (local-only; see below) |
 | `pnpm run lint` | Run ESLint |
 | `pnpm run lint:fix` | Fix ESLint errors |
 | `pnpm run type-check` | Check TypeScript types |
@@ -336,6 +337,34 @@ garbage. The only rows that linger are **expired** sessions from abandoned login
 - For the current scale, run it manually/occasionally — the garbage is negligible.
 - When it matters, schedule it with **Cloud Scheduler → a Cloud Run Job** (a Job is
   separate from the service and bills only for its runtime). Not wired up yet.
+
+### Product-image reconcile (R2 ↔ DB orphan audit)
+
+The presigned-upload design accepts one residual: files are PUT to R2 **before** a
+create/update references them, so an abandoned tab or a failed save can leave objects
+with no row. `pnpm run reconcile:images` diffs the bucket's `products/` prefix against
+`product_images.r2_key` and reports **both** orphan kinds: objects-without-row
+(deletable files) and rows-without-object (broken product images).
+
+```bash
+pnpm run reconcile:images                     # REPORT ONLY (dry run — the default)
+pnpm run reconcile:images -- --fix            # apply: delete aged orphans + broken rows
+pnpm run reconcile:images -- --grace-hours=48 # widen the in-flight-upload safety window
+```
+
+- **Local-only ops script** (`scripts/reconcile-product-images.ts`) — it lives outside
+  `src/`, so it is never compiled into `dist/` nor shipped in the Docker image. It reads
+  the normal `.env` (`DATABASE_URL` — the direct URL is fine — plus the `R2_*` vars).
+  English-only output on purpose (local telemetry, not user-facing copy).
+- **Safety:** unreferenced objects younger than the grace window (default 24 h) are
+  never touched (they may be an upload whose save is in progress); DB fixes run in one
+  transaction that re-verifies every row inside it; R2 deletions are batched with every
+  per-key failure logged.
+- **Exit codes:** `0` clean (or fixes applied cleanly) · `1` dry run found
+  discrepancies · `2` an error occurred.
+- Run it before the production cutover and periodically after — the update/delete flows
+  already clean R2 post-commit, so the diff should normally be empty; this is the
+  auditable proof.
 
 ## Technologies
 

@@ -102,6 +102,12 @@ describe('api response interceptor', () => {
     expect(error).toHaveBeenCalledWith('boom');
   });
 
+  it('toasts a 403 with the backend message (permission denial, even on a read)', async () => {
+    useAdapter(respond(403, { message: 'No tienes permiso' }));
+    await expect(api.get('/x', { public: true })).rejects.toBeDefined();
+    expect(error).toHaveBeenCalledWith('No tienes permiso');
+  });
+
   it('stays silent for a request that opted out (skipErrorNotification)', async () => {
     useAdapter(respond(400, { message: 'bad' }));
     await expect(api.post('/x', {}, { skipErrorNotification: true })).rejects.toBeDefined();

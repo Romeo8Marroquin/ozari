@@ -11,6 +11,7 @@
     "tooManyRequestsWait": "Demasiados intentos. Inténtalo de nuevo en {{seconds}} s.",
     "maintenance": "Estamos en mantenimiento. Vuelve en unos minutos.",
     "unauthorized": "Tu sesión no es válida o ha expirado.",
+    "forbidden": "No tienes permiso para realizar esta acción.",
     "sessionExpired": "Tu sesión expiró. Inicia sesión de nuevo.",
     "generic": "Ocurrió un error inesperado. Inténtalo de nuevo."
   },
@@ -57,6 +58,10 @@
       "error": "Error",
       "warning": "Atención",
       "info": "Información"
+    },
+    "share": {
+      "label": "Compartir",
+      "copied": "Enlace copiado"
     }
   },
   "modules": {
@@ -228,6 +233,240 @@
         "badge": "En construcción",
         "title": "{{section}} en camino",
         "description": "Esta sección estará disponible muy pronto. Estamos diseñando la mejor experiencia para ti."
+      },
+      "products": {
+        "lead": "Explora el catálogo de productos.",
+        "add": "Agregar producto",
+        "loading": "Cargando productos",
+        "imageAlt": "Foto de {{name}}",
+        "stock": {
+          "available": "Disponible",
+          "out": "Agotado",
+          "unavailable": "No disponible",
+          "count_one": "{{count}} disponible",
+          "count_other": "{{count}} disponibles",
+          "countOfTotal": "{{count}} de {{total}} disponibles",
+          "countOfTotalShort": "{{count}} de {{total}}"
+        },
+        "card": {
+          "viewDetails": "Ver detalles de {{name}}",
+          "noDescription": "Sin descripción todavía.",
+          "actions": {
+            "order": "Ordenar",
+            "rent": "Rentar",
+            "buy": "Comprar"
+          }
+        },
+        "filters": {
+          "label": "Filtrar productos",
+          "search": "Buscar por nombre",
+          "category": "Categoría",
+          "businessType": "Tipo",
+          "sort": "Ordenar por",
+          "sortOptions": {
+            "recientes": "Más recientes",
+            "nombre-az": "Nombre: A → Z",
+            "nombre-za": "Nombre: Z → A",
+            "precio-menor": "Precio: menor a mayor",
+            "precio-mayor": "Precio: mayor a menor"
+          },
+          "allFeminine": "Todas",
+          "allMasculine": "Todos",
+          "clear": "Limpiar filtros",
+          "toggle": "Filtros",
+          "toggleWithCount": "Filtros ({{total}})"
+        },
+        "filteredEmpty": {
+          "title": "Sin resultados",
+          "description": "Ningún producto coincide con los filtros actuales. Ajusta la búsqueda o límpialos.",
+          "clear": "Limpiar filtros"
+        },
+        "count": {
+          "partial": "Mostrando {{shown}} de {{total}} productos",
+          "all_one": "{{count}} producto",
+          "all_other": "{{count}} productos"
+        },
+        "nextPage": {
+          "error": "No pudimos cargar más productos.",
+          "retry": "Reintentar"
+        },
+        "detail": {
+          "back": "Volver a productos",
+          "loading": "Cargando producto",
+          "thumbAlt": "Foto {{index}} de {{name}}",
+          "descriptionTitle": "Descripción",
+          "detailsTitle": "Detalles",
+          "replacementPrice": "Precio de reposición",
+          "lightbox": {
+            "open": "Ver fotos en tamaño completo",
+            "close": "Cerrar",
+            "previous": "Foto anterior",
+            "next": "Siguiente foto",
+            "counter": "{{current}} de {{total}}"
+          },
+          "actions": {
+            "edit": "Editar",
+            "delete": "Eliminar"
+          },
+          "deleteModal": {
+            "title": "Eliminar producto",
+            "description": "Estás a punto de eliminar \"{{name}}\" del catálogo.",
+            "warning": "Esta acción no se puede deshacer: el producto y toda su información se eliminarán de forma permanente.",
+            "confirm": "Eliminar",
+            "cancel": "Cancelar",
+            "successTitle": "Producto eliminado",
+            "successToast": "El producto se eliminó del catálogo.",
+            "errors": {
+              "fallback": "No pudimos eliminar el producto. Intenta de nuevo."
+            }
+          },
+          "notFound": {
+            "title": "Producto no encontrado",
+            "description": "El producto no existe o ya no está disponible.",
+            "back": "Volver a productos"
+          },
+          "error": {
+            "title": "No pudimos cargar el producto",
+            "description": "Ocurrió un problema al cargar el producto. Vuelve a intentarlo.",
+            "retry": "Reintentar"
+          }
+        },
+        "empty": {
+          "title": "Aún no hay productos",
+          "description": "Cuando haya productos disponibles, aparecerán aquí.",
+          "adminTitle": "Comienza tu catálogo",
+          "adminDescription": "Agrega tu primer producto para empezar a construir el catálogo."
+        },
+        "error": {
+          "title": "No pudimos cargar los productos",
+          "description": "Ocurrió un problema al cargar el catálogo. Vuelve a intentarlo.",
+          "retry": "Reintentar"
+        },
+        "create": {
+          "title": "Nuevo producto",
+          "lead": "Registra un producto del inventario: su información, precios y detalles.",
+          "back": "Volver a productos",
+          "loading": "Cargando formulario",
+          "successTitle": "Producto creado",
+          "successToast": "El producto se agregó al catálogo.",
+          "catalogError": {
+            "title": "No pudimos cargar el formulario",
+            "description": "Ocurrió un problema al cargar los datos de referencia. Vuelve a intentarlo.",
+            "retry": "Reintentar"
+          },
+          "draft": {
+            "restored": "Restauramos un borrador guardado de este formulario.",
+            "discard": "Descartar borrador"
+          },
+          "sections": {
+            "info": {
+              "title": "Información",
+              "description": "Lo esencial del producto: cómo se llama y cómo se clasifica."
+            },
+            "photos": {
+              "title": "Fotos",
+              "description": "Hasta 8 fotos del producto. La que lleve la estrella será la principal del catálogo. Las fotos no se guardan en el borrador."
+            },
+            "pricing": {
+              "title": "Precios e inventario",
+              "description": "Los precios según el tipo de negocio y la cantidad disponible."
+            },
+            "details": {
+              "title": "Detalles",
+              "description": "Especificaciones opcionales como color, material o dimensiones."
+            }
+          },
+          "fields": {
+            "nameLabel": "Nombre",
+            "namePlaceholder": "Ej. Mesa redonda",
+            "descriptionLabel": "Descripción",
+            "descriptionPlaceholder": "Describe el producto",
+            "businessTypeLabel": "Tipo de negocio",
+            "categoryLabel": "Categoría",
+            "categoryPlaceholder": "Selecciona una categoría",
+            "currencyLabel": "Moneda",
+            "rentPriceLabel": "Precio de renta",
+            "rentTimeUnitLabel": "Unidad de tiempo",
+            "sellPriceLabel": "Precio de venta",
+            "replacementPriceLabel": "Precio de reposición",
+            "replacementPriceHint": "Lo que se cobra si el producto se pierde o daña.",
+            "pricePlaceholder": "0.00",
+            "quantityLabel": "Cantidad",
+            "quantityPlaceholder": "0",
+            "detailTypeLabel": "Tipo",
+            "detailTypePlaceholder": "Selecciona un tipo",
+            "detailValueLabel": "Detalle",
+            "detailValuePlaceholder": "Ej. Blanco nieve"
+          },
+          "actions": {
+            "submit": "Crear producto",
+            "uploading": "Subiendo fotos…",
+            "cancel": "Cancelar",
+            "addDetail": "Agregar detalle",
+            "removeDetail": "Quitar detalle"
+          },
+          "gallery": {
+            "dropzone": {
+              "cta": "Arrastra tus fotos aquí o haz clic para buscarlas",
+              "hint": "JPG, PNG, WebP o AVIF · máx. 5 MB por foto · hasta 8 fotos",
+              "add": "Agregar"
+            },
+            "counter": "{{count}} de {{max}} fotos",
+            "reorderHint": "Arrastra las fotos para cambiar su orden.",
+            "primaryBadge": "Principal",
+            "actions": {
+              "setPrimary": "Marcar {{name}} como foto principal",
+              "setPrimaryShort": "Marcar como principal",
+              "removeImage": "Quitar la foto {{name}}"
+            },
+            "errors": {
+              "invalidType": "Solo se permiten fotos JPG, PNG, WebP o AVIF.",
+              "tooLarge": "Cada foto debe pesar 5 MB o menos.",
+              "empty": "Una de las fotos está vacía o dañada.",
+              "duplicate": "Esa foto ya está en la galería.",
+              "tooMany": "Puedes agregar hasta {{max}} fotos.",
+              "uploadFailed": "No pudimos subir las fotos. Intenta de nuevo."
+            }
+          },
+          "errors": {
+            "requiredName": "El nombre es requerido.",
+            "invalidName": "Usa de 5 a 255 letras, números, espacios, apóstrofos o guiones.",
+            "invalidDescription": "Usa de 5 a 500 caracteres (letras, números y puntuación básica).",
+            "requiredBusinessType": "Selecciona el tipo de negocio.",
+            "requiredCategory": "Selecciona una categoría.",
+            "requiredCurrency": "Selecciona una moneda.",
+            "invalidQuantity": "Ingresa una cantidad entera entre 0 y 5000.",
+            "invalidRentPrice": "Ingresa un precio válido entre 0 y 1,000,000.",
+            "invalidSellPrice": "Ingresa un precio válido entre 0 y 1,000,000.",
+            "invalidReplacementPrice": "Ingresa un precio válido entre 0 y 1,000,000.",
+            "requiredRentPrice": "Un producto de alquiler requiere precio de renta.",
+            "requiredRentTimeUnit": "Selecciona la unidad de tiempo de la renta.",
+            "forbiddenSellPrice": "Un producto de alquiler no lleva precio de venta.",
+            "requiredSellPrice": "Un producto de venta requiere precio de venta.",
+            "forbiddenRentPrice": "Un producto de venta no lleva precio de renta.",
+            "forbiddenReplacementPrice": "Un producto de venta no lleva precio de reposición.",
+            "requiredDetailType": "Selecciona el tipo del detalle.",
+            "duplicateDetailType": "Este tipo de detalle ya está agregado.",
+            "requiredDetail": "El detalle es requerido.",
+            "invalidDetail": "Usa de 5 a 255 letras, números, espacios, apóstrofos o guiones.",
+            "submitFallback": "No pudimos crear el producto. Revisa los datos e intenta de nuevo."
+          }
+        },
+        "edit": {
+          "title": "Editar producto",
+          "lead": "Actualiza la información, las fotos, los precios y los detalles del producto.",
+          "back": "Volver al producto",
+          "loading": "Cargando producto",
+          "successTitle": "Producto actualizado",
+          "successToast": "Los cambios se guardaron.",
+          "photosDescription": "Hasta 8 fotos del producto. La que lleve la estrella será la principal del catálogo. Los cambios se aplican al guardar.",
+          "actions": {
+            "submit": "Guardar cambios"
+          },
+          "errors": {
+            "submitFallback": "No pudimos guardar los cambios. Revisa los datos e intenta de nuevo."
+          }
+        }
       },
       "logout": {
         "title": "Cerrar sesión",

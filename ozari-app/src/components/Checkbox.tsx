@@ -1,4 +1,4 @@
-import React, { forwardRef, useId } from 'react';
+﻿import React, { forwardRef, useId } from 'react';
 import { twMerge } from 'tailwind-merge';
 
 export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> {
@@ -66,7 +66,7 @@ const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
             strokeWidth="3.5"
             strokeLinecap="round"
             strokeLinejoin="round"
-            className="pointer-events-none relative size-3.5 scale-50 text-white opacity-0 transition-[opacity,transform] duration-200 ease-out peer-checked:scale-100 peer-checked:opacity-100 motion-reduce:transition-none"
+            className="pointer-events-none relative size-3.5 scale-50 text-white opacity-0 transition-[opacity,scale] duration-200 ease-out peer-checked:scale-100 peer-checked:opacity-100 motion-reduce:transition-none"
           >
             <path d="M5 12.5 10 17.5 19 7" />
           </svg>

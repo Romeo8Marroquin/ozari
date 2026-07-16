@@ -116,6 +116,9 @@ const gradientGeometry = (
 const useAuthCard = (variant: AuthVariant) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  // Once a departure (leave or redirect) starts, the card is committed to navigating — further
+  // leave/redirect calls are ignored so a double-fire can't stack a second timeline mid-flight.
+  const departing = useRef(false);
 
   const formShift = variant === 'login' ? 15 : -15;
   const articleShift = variant === 'login' ? -15 : 15;
@@ -176,6 +179,8 @@ const useAuthCard = (variant: AuthVariant) => {
   }, [variant]);
 
   const leaveTo = (path: string) => {
+    if (departing.current) return;
+    departing.current = true;
     const container = containerRef.current;
     const card = container?.querySelector<HTMLElement>(CARD_SELECTOR);
     cardHeightHandoff = card ? { height: card.offsetHeight, ts: performance.now() } : null;
@@ -244,6 +249,8 @@ const useAuthCard = (variant: AuthVariant) => {
   };
 
   const redirectAfterSuccess = (path: string) => {
+    if (departing.current) return;
+    departing.current = true;
     const container = containerRef.current;
     const geo = container ? gradientGeometry(container, variant, isMobileViewport()) : null;
 

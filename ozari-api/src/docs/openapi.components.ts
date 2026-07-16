@@ -323,6 +323,325 @@ export const schemas: Record<string, Schema> = {
       timestamp: { type: "string", format: "date-time", example: "2026-07-02T13:00:00.000Z" },
     },
   },
+
+  ProductImage: {
+    type: "object",
+    description:
+      "A product photo (R2). Arrays come in display order (`sortOrder`); the primary is FLAGGED, " +
+      "not necessarily first — clients open on the flagged photo.",
+    properties: {
+      id: { type: "integer", example: 1 },
+      url: { type: "string", format: "uri", example: "https://cdn.example.com/products/7/hero.webp" },
+      isPrimary: { type: "boolean", example: true },
+      sortOrder: { type: "integer", example: 0 },
+    },
+  },
+  ProductDetailItem: {
+    type: "object",
+    description: "A product spec (color, material, dimensions, …).",
+    properties: {
+      id: { type: "integer", example: 12 },
+      detail: { type: "string", example: "Blanco" },
+      detailType: { type: "string", example: "Color" },
+      detailTypeId: {
+        type: "integer",
+        description: "The type's lookup id — what the edit form prefills its select with.",
+        example: 1,
+      },
+    },
+  },
+  ProductListItem: {
+    type: "object",
+    description:
+      "A catalog product. The base fields are visible to **every** role; the remaining fields are " +
+      "**role-projected** (minimum privilege): `inStock` + the `available` count are added for " +
+      "Employee + Admin, and `total`, `replacementPrice`, `isActive` are **Admin only** (a Client " +
+      "never receives any stock information). `available` is DERIVED for Alquiler: the fleet minus " +
+      "units out on active rentals (delivered, or pending inside their event window).",
+    properties: {
+      id: { type: "integer", example: 7 },
+      name: { type: "string", example: "Mesa redonda" },
+      description: { type: "string", nullable: true, example: "Mesa para 8 personas" },
+      businessType: { type: "string", example: "Alquiler" },
+      businessTypeId: {
+        type: "integer",
+        description: "The business type's lookup id (1 = Alquiler, 2 = Venta) — public reference data.",
+        example: 1,
+      },
+      category: { type: "string", example: "Mesas" },
+      categoryId: { type: "integer", description: "The category's lookup id.", example: 1 },
+      currency: {
+        type: "object",
+        properties: {
+          id: { type: "integer", example: 1 },
+          iso4217Code: { type: "string", example: "GTQ" },
+          name: { type: "string", example: "Quetzal Guatemalteco" },
+          symbol: { type: "string", example: "Q" },
+        },
+      },
+      rentPrice: { type: "number", nullable: true, description: "Alquiler price per `rentTimeUnit`.", example: 75 },
+      sellPrice: { type: "number", nullable: true, description: "Venta price.", example: null },
+      rentTimeUnit: { type: "string", nullable: true, description: "Period the rent price is quoted against (Alquiler only).", example: "Día" },
+      rentTimeUnitId: { type: "integer", nullable: true, description: "Its lookup id (Alquiler only).", example: 2 },
+      images: { type: "array", items: schemaRef("ProductImage") },
+      details: { type: "array", items: schemaRef("ProductDetailItem") },
+      inStock: { type: "boolean", description: "Availability signal (`available > 0`) — **Employee + Admin only**.", example: true },
+      available: {
+        type: "integer",
+        description:
+          "Units takeable right now — **Employee + Admin only**. Venta: the recorded stock. " +
+          "Alquiler: fleet minus units out on active rentals.",
+        example: 35,
+      },
+      total: {
+        type: "integer",
+        description:
+          "The whole rental fleet in circulation (`available` + currently rented) — **Admin only, " +
+          "Alquiler only** (absent for Venta, where it would duplicate `available`).",
+        example: 40,
+      },
+      replacementPrice: { type: "number", description: "As-new replacement value — **Admin only**.", example: 900 },
+      isActive: { type: "boolean", description: "Soft-delete flag — **Admin only**.", example: true },
+    },
+  },
+  Pagination: {
+    type: "object",
+    properties: {
+      page: { type: "integer", example: 1 },
+      pageSize: { type: "integer", example: 15 },
+      total: { type: "integer", example: 1 },
+      totalPages: { type: "integer", example: 1 },
+    },
+  },
+  ProductListResponse: {
+    type: "object",
+    properties: {
+      products: { type: "array", items: schemaRef("ProductListItem") },
+      pagination: schemaRef("Pagination"),
+    },
+  },
+  ProductDetailResponse: {
+    type: "object",
+    properties: {
+      product: schemaRef("ProductListItem"),
+    },
+  },
+  CatalogOption: {
+    type: "object",
+    description: "A seeded lookup row — just enough to render a select option.",
+    properties: {
+      id: { type: "integer", example: 1 },
+      name: { type: "string", example: "Alquiler" },
+    },
+  },
+  ProductCatalog: {
+    type: "object",
+    description:
+      "The reference lists the product create/edit form renders as selects: every ACTIVE row of the " +
+      "five seeded lookups.",
+    properties: {
+      businessTypes: { type: "array", items: schemaRef("CatalogOption") },
+      categories: { type: "array", items: schemaRef("CatalogOption") },
+      currencies: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "integer", example: 1 },
+            name: { type: "string", example: "Quetzal Guatemalteco" },
+            iso4217Code: { type: "string", example: "GTQ" },
+            symbol: { type: "string", example: "Q" },
+          },
+        },
+      },
+      detailTypes: { type: "array", items: schemaRef("CatalogOption") },
+      rentTimeUnits: { type: "array", items: schemaRef("CatalogOption") },
+    },
+  },
+  CreateProductRequest: {
+    type: "object",
+    required: ["businessTypeId", "categoryId", "currencyId", "name", "quantity"],
+    description:
+      "Creates a product (+ nested details + gallery images). The CONDITIONAL price rule applies by " +
+      "business type: **Alquiler** requires `rentPrice` + `rentTimeUnitId` and forbids `sellPrice`; " +
+      "**Venta** requires `sellPrice` and forbids the rent fields AND `replacementPrice` (the " +
+      "as-new value billed for a lost/damaged RENTAL — a sold item is consumed, nothing to " +
+      "replace; optional for Alquiler). `images` reference R2 keys previously " +
+      "minted by `/products/images/upload-url` (the files must already be uploaded); the public URL " +
+      "is derived server-side from each key.",
+    properties: {
+      name: { type: "string", minLength: 5, maxLength: 255, example: "Mesa redonda" },
+      description: { type: "string", nullable: true, minLength: 5, maxLength: 500, example: "Mesa para 8 personas" },
+      businessTypeId: { type: "integer", description: "1 = Alquiler, 2 = Venta.", example: 1 },
+      categoryId: { type: "integer", example: 1 },
+      currencyId: { type: "integer", example: 1 },
+      quantity: { type: "integer", minimum: 0, maximum: 5000, example: 40 },
+      rentPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Alquiler; forbidden for Venta.", example: 75 },
+      rentTimeUnitId: { type: "integer", nullable: true, description: "Required for Alquiler; forbidden for Venta.", example: 2 },
+      replacementPrice: { type: "number", nullable: true, minimum: 0, example: 900 },
+      sellPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Venta; forbidden for Alquiler.", example: null },
+      productDetails: {
+        type: "array",
+        description:
+          "Optional specs created with the product — at most ONE per detail type (a duplicate " +
+          "`detailTypeId` is a 400), which also caps the list at the number of active types.",
+        items: {
+          type: "object",
+          required: ["detailTypeId", "detail"],
+          properties: {
+            detailTypeId: { type: "integer", example: 1 },
+            detail: { type: "string", minLength: 5, maxLength: 255, example: "Blanco" },
+          },
+        },
+      },
+      images: {
+        type: "array",
+        maxItems: 8,
+        description:
+          "Optional gallery (max 8). Array order = `sortOrder`. At most ONE image may set " +
+          "`isPrimary: true`; when none does, the FIRST image becomes the primary.",
+        items: {
+          type: "object",
+          required: ["key"],
+          properties: {
+            key: {
+              type: "string",
+              description: "R2 object key minted by `/products/images/upload-url`.",
+              example: "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp",
+            },
+            isPrimary: { type: "boolean", example: true },
+          },
+        },
+      },
+    },
+  },
+  UpdateProductRequest: {
+    type: "object",
+    required: ["businessTypeId", "categoryId", "currencyId", "name", "quantity"],
+    description:
+      "The product's FULL desired state (declarative, never a partial patch — the RECONCILE " +
+      "design): the same scalar rules as create (incl. the conditional price rule), plus the FINAL " +
+      "details and gallery lists. `productDetails` rows with an `id` keep/update one of the " +
+      "product's existing details, rows without create one, and existing rows absent from the list " +
+      "are deleted. `images` slots carry exactly ONE of `id` (a kept photo of this product) or " +
+      "`key` (a new upload minted by `/products/images/upload-url`); array order = `sortOrder`, at " +
+      "most one `isPrimary` (default: the first); existing photos absent from the list are deleted " +
+      "— DB row and R2 object.",
+    properties: {
+      name: { type: "string", minLength: 5, maxLength: 255, example: "Mesa redonda" },
+      description: { type: "string", nullable: true, minLength: 5, maxLength: 500, example: "Mesa para 8 personas" },
+      businessTypeId: { type: "integer", description: "1 = Alquiler, 2 = Venta.", example: 1 },
+      categoryId: { type: "integer", example: 1 },
+      currencyId: { type: "integer", example: 1 },
+      quantity: { type: "integer", minimum: 0, maximum: 5000, example: 40 },
+      rentPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Alquiler; forbidden for Venta.", example: 75 },
+      rentTimeUnitId: { type: "integer", nullable: true, description: "Required for Alquiler; forbidden for Venta.", example: 2 },
+      replacementPrice: { type: "number", nullable: true, minimum: 0, example: 900 },
+      sellPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Venta; forbidden for Alquiler.", example: null },
+      productDetails: {
+        type: "array",
+        description:
+          "The FINAL detail list — at most ONE row per detail type. `id` present = keep/update " +
+          "that existing row; absent = create. Existing rows missing from the list are deleted.",
+        items: {
+          type: "object",
+          required: ["detailTypeId", "detail"],
+          properties: {
+            id: { type: "integer", description: "An existing detail row of THIS product.", example: 12 },
+            detailTypeId: { type: "integer", example: 1 },
+            detail: { type: "string", minLength: 5, maxLength: 255, example: "Blanco" },
+          },
+        },
+      },
+      images: {
+        type: "array",
+        maxItems: 8,
+        description:
+          "The FINAL gallery in display order (array order = `sortOrder`). Each slot carries " +
+          "exactly ONE of `id`/`key`. At most ONE slot may set `isPrimary: true`; when none does, " +
+          "the FIRST becomes the primary.",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "integer", description: "A kept photo of this product.", example: 1 },
+            key: {
+              type: "string",
+              description: "A NEW photo's R2 key, minted by `/products/images/upload-url`.",
+              example: "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp",
+            },
+            isPrimary: { type: "boolean", example: true },
+          },
+        },
+      },
+    },
+  },
+  CreateProductImageUploadsRequest: {
+    type: "object",
+    required: ["files"],
+    description:
+      "Requests presigned R2 PUT URLs for product gallery uploads (1–8 per call). Each file's " +
+      "content type must be a whitelisted image type and its size within the 5 MB cap — both are " +
+      "bound INTO the signature, so a minted URL only works for exactly that file.",
+    properties: {
+      files: {
+        type: "array",
+        minItems: 1,
+        maxItems: 8,
+        items: {
+          type: "object",
+          required: ["contentType", "contentLength"],
+          properties: {
+            contentType: {
+              type: "string",
+              enum: ["image/jpeg", "image/png", "image/webp", "image/avif"],
+              example: "image/webp",
+            },
+            contentLength: {
+              type: "integer",
+              minimum: 1,
+              maximum: 5242880,
+              description: "Exact file size in bytes (≤ 5 MB).",
+              example: 245760,
+            },
+          },
+        },
+      },
+    },
+  },
+  ProductImageUploads: {
+    type: "object",
+    description:
+      "The minted presigned uploads, in the same order as the requested files. PUT each file to its " +
+      "`uploadUrl` (with the exact content type + length), then reference `key` in `POST /products`.",
+    properties: {
+      uploads: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            uploadUrl: {
+              type: "string",
+              format: "uri",
+              description: "Short-lived (5 min) presigned PUT URL — upload the file bytes here.",
+              example:
+                "https://account.r2.cloudflarestorage.com/bucket/products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp?X-Amz-Signature=abc123",
+            },
+            key: {
+              type: "string",
+              description: "Object key to reference in the product create body.",
+              example: "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp",
+            },
+            publicUrl: {
+              type: "string",
+              format: "uri",
+              description: "Public read URL the image will be served from once uploaded.",
+              example: "https://cdn.example.com/products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp",
+            },
+          },
+        },
+      },
+    },
+  },
 };
 
 // ── Response helpers ──────────────────────────────────────────────────────────────────────────────

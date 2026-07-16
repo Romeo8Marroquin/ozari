@@ -3,6 +3,7 @@ import SesionLayout from '@sesion/SesionLayout';
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { Storage } from '@utils/storage';
 import { isTokenValid } from '@utils/jwt';
+import { sanitizeLoginRedirect } from '@utils/loginRedirect';
 import { refreshAccessToken } from '@utils/tokenRefresh';
 
 // One silent-refresh probe per tab. The access token lives in (per-tab) sessionStorage,
@@ -15,7 +16,15 @@ import { refreshAccessToken } from '@utils/tokenRefresh';
 let silentRefreshProbed = false;
 
 export const Route = createFileRoute('/sesion')({
-  beforeLoad: async ({ location }) => {
+  // `?redirect=` is the deep-link memory: the panel guard writes the intended destination here when
+  // it bounces an unauthenticated visitor (a shared product link, a bookmarked filter), and the
+  // login navigates there after success. It lives in a shareable URL, so it's sanitized to in-panel
+  // paths at this single entry point — never trusted raw (see `sanitizeLoginRedirect`).
+  validateSearch: (search: Record<string, unknown>): { redirect?: string } => {
+    const redirect = sanitizeLoginRedirect(search.redirect);
+    return redirect === undefined ? {} : { redirect };
+  },
+  beforeLoad: async ({ location, search }) => {
     const token = Storage.get<string>(StorageKeys.TOKEN);
     let isLogged = isTokenValid(token);
 
@@ -42,8 +51,12 @@ export const Route = createFileRoute('/sesion')({
         typeof resetToken === 'string' &&
         resetToken.length > 0;
       if (!isResetWithToken) {
+        // Honor a pending deep link even when the session rehydrated here (e.g. the tab landed on
+        // the login WITH a redirect and the silent probe found a live cookie session). TanStack's
+        // typed `to` can't know a runtime-resolved path (`/panel/productos/6`) — the target was
+        // already sanitized to an in-panel path by `validateSearch`.
         throw redirect({
-          to: '/panel/productos',
+          to: (search.redirect ?? '/panel/productos') as never,
         });
       }
     }

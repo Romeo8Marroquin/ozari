@@ -2,6 +2,7 @@ import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { prefersReducedMotion } from '@utils/motion';
 import { FiRefreshCw } from 'react-icons/fi';
 import Button from './Button';
 import LogoMark from './LogoMark';
@@ -26,9 +27,6 @@ interface ErrorScreenProps {
   visible?: boolean;
   onExited?: () => void;
 }
-
-const prefersReducedMotion = (): boolean =>
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /**
  * The app's shared error surface — friendly, not technical (leads with the brand logo, plain copy, no
@@ -108,7 +106,7 @@ const ErrorScreen: React.FC<ErrorScreenProps> = ({
     <section
       ref={container}
       className={`relative flex w-full items-center justify-center overflow-hidden px-6 py-16 ${
-        fill === 'screen' ? 'min-h-screen' : 'min-h-full flex-1'
+        fill === 'screen' ? 'min-h-dvh' : 'min-h-full flex-1'
       }`}
       style={{ background: 'radial-gradient(120% 120% at 50% 0%, #faf7fa 0%, #efeaf0 58%, #e7dced 100%)' }}
     >

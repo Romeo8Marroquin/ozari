@@ -16,7 +16,10 @@ const SAFE_METHODS = new Set(['get', 'head', 'options']);
  * status code alone:
  *  - **Transient/global** failures (network, 429, 5xx) always surface — the user must know to slow
  *    down or that the server is down — even on a read.
- *  - **403 forbidden** always surfaces ("you're not allowed"), it's never silent.
+ *  - **403 forbidden** always surfaces with the backend's message ("no tienes permiso"). By design
+ *    the UI role-hides controls so a 403 shouldn't happen in normal use; if one does (a stale-role
+ *    race, a bug, or someone poking devtools) it's a defense-in-depth denial — inform clearly with a
+ *    non-blocking toast, don't take over the screen.
  *  - Everything else notifies only on **mutations** (user-initiated actions owed feedback); reads
  *    stay quiet and handle their own empty/error states.
  * Always silent for the token-refresh round-trip (its own flow owns the outcome), for a request
@@ -35,6 +38,7 @@ function shouldNotifyError(error: AxiosError): boolean {
   const status = getStatus(error);
   // The outage overlay owns backend-down states — don't also toast (before AND while it's up).
   if (isOutageStatus(status) || isOutageActive()) return false;
+  // A 403 is a permission denial — always surface it (with the backend's message), even on a read.
   if (isTransientStatus(status) || status === 403) return true;
 
   /* v8 ignore next -- `?? 'get'` is a defensive fallback; axios always sets config.method */

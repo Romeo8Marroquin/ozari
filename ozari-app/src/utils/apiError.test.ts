@@ -129,6 +129,7 @@ describe('resolveApiErrorMessage', () => {
     expect(resolveApiErrorMessage(axiosError(503))).toBe('errors.maintenance');
     expect(resolveApiErrorMessage(axiosError(429))).toBe('errors.tooManyRequests');
     expect(resolveApiErrorMessage(axiosError(500))).toBe('errors.server');
+    expect(resolveApiErrorMessage(axiosError(403))).toBe('errors.forbidden');
     expect(resolveApiErrorMessage(axiosError(401))).toBe('errors.unauthorized');
     expect(resolveApiErrorMessage(axiosError(418))).toBe('errors.generic');
   });

@@ -89,4 +89,21 @@ describe('CustomInput', () => {
     advanceGsap();
     expect(input).toHaveAttribute('type', 'password'); // unchanged — the disabled guard returns early
   });
+
+  it('drops the floating label when a controlled value is RESET to empty (discard-draft path)', () => {
+    const isLabelFloated = (container: HTMLElement): boolean =>
+      (container.querySelector('label')?.className ?? '').split(/\s+/).includes('-translate-y-6');
+
+    const { rerender, container } = render(
+      <CustomInput id="n" label="Nombre" value="Test" onChange={() => {}} />,
+    );
+    expect(isLabelFloated(container)).toBe(true);
+
+    // Arm the old stale-state trap (a change fires), then reset programmatically (no change event).
+    fireEvent.change(container.querySelector('input') as HTMLInputElement, {
+      target: { value: 'Test 2' },
+    });
+    rerender(<CustomInput id="n" label="Nombre" value="" onChange={() => {}} />);
+    expect(isLabelFloated(container)).toBe(false);
+  });
 });

@@ -322,11 +322,12 @@ describe("Auth Middleware", () => {
     expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.UNAUTHORIZED);
   });
 
-  it("should accept valid token with active session", async () => {
+  it("should accept valid token and take the role from the DB (source of truth)", async () => {
+    // Token was minted while the user was a Client, but the DB now says Admin (role changed since).
     const token = jwt.sign(
       {
         userId: 1,
-        userRole: RolesEnum.CLIENT,
+        userRole: RolesEnum.Client,
         tokenType: TokenEnum.ACCESS_TOKEN,
         deviceUuid: "test-device",
         jti: "test-jti",
@@ -343,7 +344,11 @@ describe("Auth Middleware", () => {
     (getPrismaClient as ReturnType<typeof vi.fn>).mockResolvedValue({
       jwtSession: {
         findMany: vi.fn().mockResolvedValue([
-          { jti: "test-jti", expiresAt: new Date(Date.now() + 100000) },
+          {
+            jti: "test-jti",
+            expiresAt: new Date(Date.now() + 100000),
+            user: { roleId: RolesEnum.Admin },
+          },
         ]),
       },
     });
@@ -357,7 +362,8 @@ describe("Auth Middleware", () => {
     expect(mockNext).toHaveBeenCalled();
     expect(mockReq.user).toBeDefined();
     expect(mockReq.user?.userId).toBe(1);
-    expect(mockReq.user?.userRole).toBe(RolesEnum.CLIENT);
+    // The DB role (Admin) overrides the stale token claim (Client).
+    expect(mockReq.user?.userRole).toBe(RolesEnum.Admin);
   });
 
   it("should handle database errors gracefully", async () => {

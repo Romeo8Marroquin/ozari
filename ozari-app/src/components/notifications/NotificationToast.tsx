@@ -2,6 +2,7 @@ import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import React, { useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { prefersReducedMotion } from '@utils/motion';
 import { DEFAULT_MAX_WIDTH, VARIANT_STYLES } from './notificationConfig';
 import { useNotificationStore, type NotificationItem } from './notificationStore';
 
@@ -10,9 +11,6 @@ interface NotificationToastProps {
   /** Screen edge the title tab is anchored to (follows the host position). */
   align: 'left' | 'right';
 }
-
-const prefersReducedMotion = (): boolean =>
-  typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const TAB_RADIUS = 12;
 const BODY_RADIUS = 16;

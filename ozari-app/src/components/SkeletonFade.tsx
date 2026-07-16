@@ -1,9 +1,7 @@
 import gsap from 'gsap';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { twMerge } from 'tailwind-merge';
-
-const prefersReducedMotion = (): boolean =>
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+import { prefersReducedMotion } from '@utils/motion';
 
 export interface SkeletonFadeProps {
   /** While true the skeleton is shown; when it flips false the real content crossfades in. */
@@ -21,18 +19,23 @@ export interface SkeletonFadeProps {
    */
   contentClassName?: string;
   /**
-   * Also morph the wrapper's WIDTH from the skeleton to the content on reveal, in step with the
-   * crossfade — for a container whose width depends on the data (e.g. the header pill adapting to the
-   * user's name) so it eases open/closed instead of snapping. Opt-in; fixed-width loaders don't need
-   * it. Needs a real `className` display where `width` applies (a flex item, `inline-block`, …).
+   * Also morph the wrapper's SIZE from the skeleton to the content on reveal, in step with the
+   * crossfade — for a container whose size depends on the data so it eases open/closed instead of
+   * snapping. `true`/`'width'` = width only (e.g. the header pill adapting to the user's name);
+   * `'height'` = height only (e.g. a block column whose skeleton approximates the final sections);
+   * `'both'` = both axes. Opt-in; fixed-size loaders don't need it. Needs a real `className` display
+   * where the dimension applies (a flex item, `inline-block`, `block`, …).
    */
-  animateSize?: boolean;
-  /** Crossfade duration (ms). Also the width-morph duration when `animateSize`. */
+  animateSize?: boolean | 'width' | 'height' | 'both';
+  /** Crossfade duration (ms). Also the size-morph duration when `animateSize`. */
   durationMs?: number;
 }
 
 /**
- * Crossfades a skeleton placeholder into real content — no pop, no movement, just opacity.
+ * Crossfades a skeleton placeholder into real content — no pop, no movement, just opacity. Works
+ * in BOTH directions: re-entering `loading` from displayed content plays the REVERSE crossfade
+ * (the previous content ghosts out over the returning skeleton — a grid tile easing back to
+ * shimmer when a filter re-queries), so no state change ever snaps.
  *
  * While loading, the skeleton sits in normal flow (defining the layout). The instant the data lands,
  * the real content takes that place in flow (so its own size/alignment is preserved) and the skeleton
@@ -41,9 +44,10 @@ export interface SkeletonFadeProps {
  *
  * The reveal is a single GSAP tween pair (content opacity in, skeleton opacity out) — one mechanism
  * so the two never fight or mis-time (a CSS-transition + rAF approach was fragile, especially next to
- * the width morph). With `animateSize`, the wrapper width additionally eases from the skeleton width
- * to the content's natural width, concurrently. Reduced-motion → instant. Shared by every skeleton
- * loader (settings, the header pill/menu, the MFA setup modal) so "loading → loaded" reads the same.
+ * the size morph). With `animateSize`, the wrapper width and/or height additionally eases from the
+ * skeleton's size to the content's natural size, concurrently. Reduced-motion → instant. Shared by
+ * every skeleton loader (settings, the header pill/menu, the MFA setup modal, the product create
+ * form) so "loading → loaded" reads the same.
  */
 const SkeletonFade: React.FC<SkeletonFadeProps> = ({
   loading,
@@ -57,28 +61,44 @@ const SkeletonFade: React.FC<SkeletonFadeProps> = ({
   // Is the skeleton overlay in the DOM? True while loading and while it fades out afterwards; the
   // fade's onComplete drops it. Starts true only if we opened in the loading state.
   const [skeletonMounted, setSkeletonMounted] = useState(loading);
+  // Is a GHOST of the previous content fading out over the returning skeleton? The REVERSE
+  // crossfade: re-entering loading from displayed content (a filter change re-querying a grid
+  // tile) eases content → skeleton instead of snapping.
+  const [ghostMounted, setGhostMounted] = useState(false);
 
-  // Re-arm whenever we RE-ENTER the loading state (a reused modal reopening, a query refetch, …) so
-  // the skeleton returns and the next resolve crossfades like the first time. React's "adjust state
-  // during render on a prop change" pattern (tracking the previous value), not an effect.
+  // Re-arm whenever we RE-ENTER the loading state (a reused modal reopening, a query refetch, a
+  // filter change, …) so the skeleton returns — WITH the reverse crossfade when content was on
+  // screen (`!skeletonMounted`; boolean assignment, not a branch, so a mid-reveal re-arm simply
+  // yields no ghost). React's "adjust state during render" pattern, not an effect.
   const [wasLoading, setWasLoading] = useState(loading);
   if (loading !== wasLoading) {
     setWasLoading(loading);
-    if (loading) setSkeletonMounted(true);
+    if (loading) {
+      setGhostMounted(!skeletonMounted);
+      setSkeletonMounted(true);
+    } else {
+      setGhostMounted(false);
+    }
   }
+
+  const morphWidth = animateSize === true || animateSize === 'width' || animateSize === 'both';
+  const morphHeight = animateSize === 'height' || animateSize === 'both';
 
   const wrapperRef = useRef<HTMLSpanElement>(null);
   const contentRef = useRef<HTMLSpanElement>(null);
   const overlayRef = useRef<HTMLSpanElement>(null);
+  const ghostRef = useRef<HTMLSpanElement>(null);
   const skeletonWidthRef = useRef(0);
+  const skeletonHeightRef = useRef(0);
 
-  // Remember the skeleton's rendered width while it's in flow, so we can morph FROM it on reveal.
+  // Remember the skeleton's rendered size while it's in flow, so we can morph FROM it on reveal.
   useLayoutEffect(() => {
-    if (!animateSize || !loading) return;
+    if ((!morphWidth && !morphHeight) || !loading) return;
     const el = wrapperRef.current;
     /* v8 ignore next -- the wrapper is always mounted while loading */
     if (!el) return;
     skeletonWidthRef.current = el.offsetWidth;
+    skeletonHeightRef.current = el.offsetHeight;
   });
 
   // The reveal. Crossfade the content in + the skeleton out together (GSAP, so they're guaranteed
@@ -104,40 +124,70 @@ const SkeletonFade: React.FC<SkeletonFadeProps> = ({
       ),
     ];
 
-    // Morph the width alongside the fade (same duration + ease) so the box resizes AS the content
+    // Morph the size alongside the fade (same duration + ease) so the box resizes AS the content
     // appears — one concurrent motion, not resize-then-pop.
-    if (animateSize && seconds > 0) {
-      const from = skeletonWidthRef.current;
-      const to = wrapper.offsetWidth;
-      if (from !== to) {
+    if (seconds > 0) {
+      const morphAxis = (property: 'width' | 'height', from: number, to: number): void => {
+        if (from === to) return;
         tweens.push(
           gsap.fromTo(
             wrapper,
-            { width: from },
+            { [property]: from },
             {
-              width: to,
+              [property]: to,
               duration: seconds,
               ease,
               onStart: () => {
                 wrapper.style.overflow = 'hidden';
               },
               onComplete: () => {
-                wrapper.style.width = '';
+                wrapper.style[property] = '';
                 wrapper.style.overflow = '';
               },
             },
           ),
         );
-      }
+      };
+      if (morphWidth) morphAxis('width', skeletonWidthRef.current, wrapper.offsetWidth);
+      if (morphHeight) morphAxis('height', skeletonHeightRef.current, wrapper.offsetHeight);
     }
 
     return () => tweens.forEach((tween) => tween.kill());
-  }, [loading, skeletonMounted, animateSize, durationMs]);
+  }, [loading, skeletonMounted, morphWidth, morphHeight, durationMs]);
+
+  // The CONCEAL — the reveal's mirror: the skeleton is back in flow and the previous content
+  // fades out as an absolute ghost on top of it, then unmounts. Instant under reduced motion.
+  useLayoutEffect(() => {
+    if (!loading || !ghostMounted) return;
+    const ghost = ghostRef.current;
+    /* v8 ignore next -- the ghost is always mounted while this effect runs */
+    if (!ghost) return;
+    const seconds = prefersReducedMotion() ? 0 : durationMs / 1000;
+    const tween = gsap.fromTo(
+      ghost,
+      { opacity: 1 },
+      { opacity: 0, duration: seconds, ease: 'power2.inOut', onComplete: () => setGhostMounted(false) },
+    );
+    return () => {
+      tween.kill();
+    };
+  }, [loading, ghostMounted, durationMs]);
 
   return (
     <span ref={wrapperRef} className={twMerge('relative', className)}>
       {loading ? (
-        <span className={contentClassName}>{skeleton}</span>
+        <>
+          <span className={contentClassName}>{skeleton}</span>
+          {ghostMounted && (
+            <span
+              ref={ghostRef}
+              aria-hidden
+              className={twMerge(contentClassName, 'pointer-events-none absolute inset-0')}
+            >
+              {children}
+            </span>
+          )}
+        </>
       ) : (
         <>
           <span ref={contentRef} className={contentClassName}>

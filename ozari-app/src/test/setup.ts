@@ -41,3 +41,29 @@ window.matchMedia = vi.fn().mockImplementation((query: string) => ({
   removeListener: vi.fn(),
   dispatchEvent: vi.fn(),
 }));
+
+// jsdom doesn't implement IntersectionObserver (the infinite-scroll sentinel would throw on
+// mount). This inert stand-in keeps components mountable; tests that assert observation behaviour
+// (the sentinel hook's own suite) stub `window.IntersectionObserver` with a controllable mock.
+class InertIntersectionObserver implements IntersectionObserver {
+  readonly root = null;
+  readonly rootMargin = '';
+  readonly scrollMargin = '';
+  readonly thresholds: readonly number[] = [];
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+}
+window.IntersectionObserver = InertIntersectionObserver;
+
+// jsdom doesn't implement ResizeObserver either (the overlay scrollbar resyncs on it). Same deal:
+// an inert stand-in keeps components mountable; suites that assert resize behaviour stub their own.
+class InertResizeObserver implements ResizeObserver {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+window.ResizeObserver = InertResizeObserver;

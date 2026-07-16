@@ -80,6 +80,8 @@ export const appConfig = {
     uploadUrlTtlSeconds: 300, // 5 min: long enough to upload, short enough that a leaked URL dies fast.
     // Max upload size, bound INTO the presigned signature (ContentLength) so a client can't exceed it.
     maxUploadBytes: 5 * 1024 * 1024, // 5 MB
+    // Gallery cap per product — bounds both a single upload-url mint and the `images` a create accepts.
+    maxImagesPerProduct: 8,
     // Whitelisted upload content types → their canonical file extension (the object key's suffix).
     allowedImageTypes: {
       "image/jpeg": "jpg",
@@ -103,6 +105,14 @@ export const appConfig = {
 
   maxGlobalAmount: 1000000,
   maxGlobalQuantity: 5000,
+
+  // Product list pagination: the grid's default page size and the hard upper bound a caller can
+  // request (so a single list call can never fetch an unbounded number of rows).
+  defaultProductPageSize: 15,
+  maxProductPageSize: 50,
+  // Longest name-search string the list endpoint honours; longer input is truncated, not rejected
+  // (the same clamp stance as the pagination params).
+  maxProductSearchLength: 100,
 
   sensitiveKeys: ["password", "token", "secret", "creditCard", "cvv", "auth"],
   basePath: "/api",

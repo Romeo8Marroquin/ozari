@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Header only reads the pathname via useLocation({ select }); stub exactly that.
-const { currentPath } = vi.hoisted(() => ({ currentPath: { value: '/panel/inicio' } }));
+const { currentPath } = vi.hoisted(() => ({ currentPath: { value: '/panel/productos' } }));
 vi.mock('@tanstack/react-router', () => ({
   useLocation: (opts: { select: (l: { pathname: string }) => unknown }) => opts.select({ pathname: currentPath.value }),
 }));
@@ -38,7 +38,7 @@ const setViewport = (mode: 'mobile' | 'desktop'): void => {
 const wrapper = ({ children }: { children: ReactNode }) => <PanelChromeProvider>{children}</PanelChromeProvider>;
 
 beforeEach(() => {
-  currentPath.value = '/panel/inicio';
+  currentPath.value = '/panel/productos';
   vi.clearAllMocks();
 });
 
@@ -49,19 +49,19 @@ afterEach(() => {
 describe('Header', () => {
   it('renders the section title for the active route and the notifications + user menu', () => {
     setViewport('desktop');
-    currentPath.value = '/panel/pedidos';
+    currentPath.value = '/panel/ajustes';
     render(<Header />, { wrapper });
 
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('modules.panel.nav.orders');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('modules.panel.nav.settings');
     expect(screen.getByRole('button', { name: 'modules.panel.actions.notifications' })).toBeInTheDocument();
     expect(screen.getByTestId('user-menu')).toBeInTheDocument();
   });
 
-  it('falls back to the dashboard title when the path matches no nav item', () => {
+  it('falls back to the products title when the path matches no nav item', () => {
     setViewport('desktop');
     currentPath.value = '/panel/unknown-area';
     render(<Header />, { wrapper });
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('modules.panel.nav.dashboard');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('modules.panel.nav.products');
   });
 
   it('hides the hamburger on desktop', () => {

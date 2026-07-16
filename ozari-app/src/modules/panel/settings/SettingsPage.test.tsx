@@ -45,7 +45,7 @@ vi.mock('./MfaDisableModal', () => ({
     ) : null,
 }));
 
-import { PanelPageTransitionContext } from '../PanelPageTransitionContext';
+import { PanelPageTransitionContext, type PanelPageMotion } from '../PanelPageTransitionContext';
 import SettingsPage from './SettingsPage';
 
 type MeState = {
@@ -68,18 +68,18 @@ const setMe = (state: MeState): (() => void) => {
   return refetch;
 };
 
-// Render, capturing the exit animation the page registers with the (mocked) panel layout so we can
-// invoke it directly (the real layout would call it on tab-change / logout).
-const renderPage = (): { registeredExit: () => (() => Promise<void>) | null } => {
-  let exit: (() => Promise<void>) | null = null;
-  const register = (fn: (() => Promise<void>) | null): void => {
-    if (fn) exit = fn;
+// Render, capturing the motion pair the page registers with the (mocked) panel layout so we can
+// invoke it directly (the real layout calls `exit` on tab-change / logout, `enter` on a cancel).
+const renderPage = (): { registeredMotion: () => PanelPageMotion | null } => {
+  let motion: PanelPageMotion | null = null;
+  const register = (value: PanelPageMotion | null): void => {
+    if (value) motion = value;
   };
   const wrapper = ({ children }: { children: ReactNode }) => (
     <PanelPageTransitionContext.Provider value={register}>{children}</PanelPageTransitionContext.Provider>
   );
   render(<SettingsPage />, { wrapper });
-  return { registeredExit: () => exit };
+  return { registeredMotion: () => motion };
 };
 
 // A full matchMedia mock (gsap's matchMedia calls addEventListener, so the bare object won't do).
@@ -225,32 +225,32 @@ describe('SettingsPage', () => {
     expect(screen.queryByTestId('cpw-modal')).not.toBeInTheDocument();
   });
 
-  describe('registered page exit', () => {
-    it('resolves immediately under reduced motion', async () => {
+  describe('registered page motion', () => {
+    it('exit resolves immediately under reduced motion', async () => {
       setMe({ data: { id: 1, fullName: 'Ana', role: 'Client', mfaEnabled: false, createdAt: '2026-01-01' } });
-      const { registeredExit } = renderPage();
+      const { registeredMotion } = renderPage();
       // Global setup reports prefers-reduced-motion: reduce → the exit short-circuits (resolves).
-      await expect(registeredExit()!()).resolves.toBeUndefined();
+      await expect(registeredMotion()!.exit()).resolves.toBeUndefined();
     });
 
-    it('resolves immediately when there are no blocks to animate', async () => {
+    it('exit resolves immediately when there are no blocks to animate', async () => {
       setMe({ data: { id: 1, fullName: 'Ana', role: 'Client', mfaEnabled: false, createdAt: '2026-01-01' } });
-      const { registeredExit } = renderPage();
+      const { registeredMotion } = renderPage();
 
       // No reduced-motion, but no reveal-blocks either → still resolves without touching gsap.to.
       setMatchMedia(false);
       vi.spyOn(gsap.utils, 'selector').mockReturnValue((() => []) as ReturnType<typeof gsap.utils.selector>);
       const toSpy = vi.spyOn(gsap, 'to');
 
-      await expect(registeredExit()!()).resolves.toBeUndefined();
+      await expect(registeredMotion()!.exit()).resolves.toBeUndefined();
       expect(toSpy).not.toHaveBeenCalled();
     });
 
     it('plays the gsap exit and resolves on complete when animating', async () => {
-      // Render WITHOUT reduced motion so the page's own entrance (gsap.from) also runs.
+      // Render WITHOUT reduced motion so the page's own entrance also runs.
       setMatchMedia(false);
       setMe({ data: { id: 1, fullName: 'Ana', role: 'Client', mfaEnabled: false, createdAt: '2026-01-01' } });
-      const { registeredExit } = renderPage();
+      const { registeredMotion } = renderPage();
 
       // Drive the exit animation to completion synchronously so the promise resolves deterministically.
       const toSpy = vi.spyOn(gsap, 'to').mockImplementation((_targets, vars) => {
@@ -258,8 +258,14 @@ describe('SettingsPage', () => {
         return {} as gsap.core.Tween;
       });
 
-      await expect(registeredExit()!()).resolves.toBeUndefined();
+      await expect(registeredMotion()!.exit()).resolves.toBeUndefined();
       expect(toSpy).toHaveBeenCalled();
+    });
+
+    it('enter replays the reveal (snaps under reduced motion) for a cancelled departure', () => {
+      setMe({ data: { id: 1, fullName: 'Ana', role: 'Client', mfaEnabled: false, createdAt: '2026-01-01' } });
+      const { registeredMotion } = renderPage();
+      expect(() => registeredMotion()!.enter({ fromCurrent: true })).not.toThrow();
     });
   });
 });

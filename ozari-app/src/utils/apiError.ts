@@ -123,6 +123,8 @@ export function resolveApiErrorMessage(error: AxiosError): string {
   if (status === 503) return i18next.t('errors.maintenance');
   if (status === 429) return i18next.t('errors.tooManyRequests');
   if (status !== undefined && status >= 500) return i18next.t('errors.server');
-  if (status === 401 || status === 403) return i18next.t('errors.unauthorized');
+  // 403 = a permission denial ("no tienes permiso"), distinct from 401 = a dead/expired session.
+  if (status === 403) return i18next.t('errors.forbidden');
+  if (status === 401) return i18next.t('errors.unauthorized');
   return i18next.t('errors.generic');
 }

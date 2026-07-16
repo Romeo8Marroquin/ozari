@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+﻿import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import ErrorScreen from './ErrorScreen';
@@ -44,12 +44,12 @@ describe('ErrorScreen', () => {
     const { container } = render(<ErrorScreen fill="container" />);
     const section = container.querySelector('section');
     expect(section).toHaveClass('min-h-full');
-    expect(section).not.toHaveClass('min-h-screen');
+    expect(section).not.toHaveClass('min-h-dvh');
   });
 
   it('fills the viewport by default (fill="screen")', () => {
     const { container } = render(<ErrorScreen />);
-    expect(container.querySelector('section')).toHaveClass('min-h-screen');
+    expect(container.querySelector('section')).toHaveClass('min-h-dvh');
   });
 
   it('renders a custom action slot instead of the default reload button', () => {

@@ -85,21 +85,91 @@ describe('SkeletonFade', () => {
     await waitFor(() => expect(screen.queryByTestId('skel')).not.toBeInTheDocument());
   });
 
-  describe('animateSize (width morph)', () => {
+  it('REVERSE-crossfades displayed content back to the skeleton (a filter re-query), ghost included', async () => {
+    const { rerender } = render(
+      <SkeletonFade loading={false} skeleton={skeleton} durationMs={20}>
+        <span>Real</span>
+      </SkeletonFade>,
+    );
+    expect(screen.getByText('Real')).toBeInTheDocument();
+
+    // Re-entering loading from CONTENT: the skeleton takes the flow and a ghost of the content
+    // fades out on top of it (instant under the suite's reduced motion), then unmounts.
+    rerender(
+      <SkeletonFade loading skeleton={skeleton} durationMs={20}>
+        <span>Real</span>
+      </SkeletonFade>,
+    );
+    expect(screen.getByTestId('skel')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Real')).not.toBeInTheDocument());
+
+    // A fast resolve mid-conceal never strands the ghost — the content branch owns the DOM again.
+    rerender(
+      <SkeletonFade loading skeleton={skeleton} durationMs={20}>
+        <span>Real</span>
+      </SkeletonFade>,
+    );
+    rerender(
+      <SkeletonFade loading={false} skeleton={skeleton} durationMs={20}>
+        <span>Real</span>
+      </SkeletonFade>,
+    );
+    expect(screen.getAllByText('Real')).toHaveLength(1);
+    await waitFor(() => expect(screen.queryByTestId('skel')).not.toBeInTheDocument());
+  });
+
+  it('runs the reverse crossfade as a REAL tween when motion is allowed', async () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false, // motion allowed
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      const { rerender } = render(
+        <SkeletonFade loading={false} skeleton={skeleton} durationMs={20}>
+          <span>Real</span>
+        </SkeletonFade>,
+      );
+      rerender(
+        <SkeletonFade loading skeleton={skeleton} durationMs={20}>
+          <span>Real</span>
+        </SkeletonFade>,
+      );
+      // The ghost is mounted while the 20ms fade runs, then unmounts on completion.
+      expect(screen.getByText('Real')).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByText('Real')).not.toBeInTheDocument());
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
+  });
+
+  describe('animateSize (size morph)', () => {
     let realMatchMedia: typeof window.matchMedia;
     let originalOffsetWidth: PropertyDescriptor | undefined;
+    let originalOffsetHeight: PropertyDescriptor | undefined;
 
     const mockWidth = (get: () => number): void => {
       Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get });
+    };
+    const mockHeight = (get: () => number): void => {
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get });
     };
 
     beforeEach(() => {
       realMatchMedia = window.matchMedia;
       originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+      originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
     });
     afterEach(() => {
       window.matchMedia = realMatchMedia;
       if (originalOffsetWidth) Object.defineProperty(HTMLElement.prototype, 'offsetWidth', originalOffsetWidth);
+      if (originalOffsetHeight) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight);
       vi.restoreAllMocks();
     });
 
@@ -112,12 +182,13 @@ describe('SkeletonFade', () => {
         return { kill: vi.fn() } as unknown as gsap.core.Tween;
       });
 
-    // The reveal always fades opacity; the WIDTH tween is the one whose `from` carries `width`.
-    const widthCalls = (spy: ReturnType<typeof vi.spyOn>): unknown[][] =>
+    // The reveal always fades opacity; the size tweens are the ones whose `from` carries the axis.
+    const axisCalls = (spy: ReturnType<typeof vi.spyOn>, axis: 'width' | 'height'): unknown[][] =>
       (spy.mock.calls as unknown[][]).filter((call) => {
         const from = call[1] as Record<string, unknown> | undefined;
-        return Boolean(from && 'width' in from);
+        return Boolean(from && axis in from);
       });
+    const widthCalls = (spy: ReturnType<typeof vi.spyOn>): unknown[][] => axisCalls(spy, 'width');
 
     it('crossfades but does NOT morph the width under reduced motion', () => {
       // The global setup reports prefers-reduced-motion: reduce → the fade still runs, no width tween.
@@ -176,6 +247,76 @@ describe('SkeletonFade', () => {
       expect(calls[0][1]).toEqual({ width: 100 });
       // Same duration as the opacity crossfade → they resize and appear together.
       expect(calls[0][2]).toMatchObject({ width: 200, duration: 0.2 });
+    });
+
+    it("accepts 'width' as the explicit string form of the boolean", () => {
+      setMatchMedia(false);
+      let width = 100;
+      mockWidth(() => width);
+      const fromTo = spyFromTo();
+
+      const { rerender } = render(
+        <SkeletonFade loading animateSize="width" skeleton={skeleton}>
+          <span>Real</span>
+        </SkeletonFade>,
+      );
+      width = 200;
+      rerender(
+        <SkeletonFade loading={false} animateSize="width" skeleton={skeleton}>
+          <span>Real</span>
+        </SkeletonFade>,
+      );
+
+      expect(widthCalls(fromTo)).toHaveLength(1);
+      expect(axisCalls(fromTo, 'height')).toHaveLength(0);
+    });
+
+    it("eases the wrapper HEIGHT (and only the height) with animateSize='height'", () => {
+      setMatchMedia(false);
+      let height = 400; // the skeleton column...
+      mockHeight(() => height);
+      const fromTo = spyFromTo();
+
+      const { rerender } = render(
+        <SkeletonFade loading animateSize="height" durationMs={200} skeleton={skeleton}>
+          <span>Real</span>
+        </SkeletonFade>,
+      );
+      height = 640; // ...grows to the loaded form
+      rerender(
+        <SkeletonFade loading={false} animateSize="height" durationMs={200} skeleton={skeleton}>
+          <span>Real</span>
+        </SkeletonFade>,
+      );
+
+      const calls = axisCalls(fromTo, 'height');
+      expect(calls).toHaveLength(1);
+      expect(calls[0][1]).toEqual({ height: 400 });
+      expect(calls[0][2]).toMatchObject({ height: 640, duration: 0.2 });
+      expect(widthCalls(fromTo)).toHaveLength(0);
+    });
+
+    it("morphs BOTH axes with animateSize='both'", () => {
+      setMatchMedia(false);
+      let size = 100;
+      mockWidth(() => size);
+      mockHeight(() => size);
+      const fromTo = spyFromTo();
+
+      const { rerender } = render(
+        <SkeletonFade loading animateSize="both" skeleton={skeleton}>
+          <span>Real</span>
+        </SkeletonFade>,
+      );
+      size = 300;
+      rerender(
+        <SkeletonFade loading={false} animateSize="both" skeleton={skeleton}>
+          <span>Real</span>
+        </SkeletonFade>,
+      );
+
+      expect(widthCalls(fromTo)).toHaveLength(1);
+      expect(axisCalls(fromTo, 'height')).toHaveLength(1);
     });
   });
 });

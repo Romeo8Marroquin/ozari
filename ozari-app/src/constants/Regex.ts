@@ -28,3 +28,18 @@ export const UNSAFE_SYMBOL_REGEX = /[^\x21-\x7E]/;
 // the character set is a policy/UX choice, not an injection defence.
 export const PASSWORD_REGEX =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d])[\x21-\x7E]{12,128}$/;
+
+// ── Product form policy — mirrors the backend product validator ─────────────────────────────
+// (`ozari-api/src/modules/products/products.validator.ts` + `regex.ts` + `config/app.ts`).
+// A product/detail NAME reuses the backend's `fullNameRegex` → `FULLNAME_REGEX` above.
+// Free-text description: 5–500 chars of letters (incl. accents), digits, spaces and .,!?():-
+export const PRODUCT_DESCRIPTION_REGEX = /^(?=.{5,500}$)[A-Za-zÀ-ÖØ-öø-ÿ0-9\s.,!?():-]+$/;
+// Money and quantity ceilings — mirror `appConfig.maxGlobalAmount` / `maxGlobalQuantity`.
+export const PRODUCT_MAX_AMOUNT = 1000000;
+export const PRODUCT_MAX_QUANTITY = 5000;
+
+// Gallery upload policy — mirrors `appConfig.storage` (the backend re-enforces all of it: the
+// content type + exact size are bound INTO each presigned URL, and the create endpoint caps images).
+export const PRODUCT_IMAGE_MAX_COUNT = 8;
+export const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+export const PRODUCT_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];

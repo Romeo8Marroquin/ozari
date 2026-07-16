@@ -9,7 +9,32 @@ import PageLoader from '@components/PageLoader';
 import ErrorBoundary from '@components/ErrorBoundary';
 import ErrorScreen, { type ErrorScreenVariant } from '@components/ErrorScreen';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { installHistoryDepartureInterceptor } from '@utils/historyDeparture';
 import { initializeTokenRefresh } from '@utils/tokenRefresh';
+
+// Choreographed history departures: pages (the product detail) can hold a browser/device back
+// just long enough to play their exit. MUST install before the view-transition listener below and
+// before `createRouter` — popstate listener order is the mechanism (see utils/historyDeparture).
+installHistoryDepartureInterceptor();
+
+// ── Panel history-back view-transition opt-out ────────────────────────────────────────────────
+// In-app panel navigations pass `viewTransition: false` (the GSAP timelines own the motion), but
+// BROWSER/DEVICE back is handled by the router directly with the global default (true — the auth
+// flows want it). That ran the browser cross-fade inside the panel: the old page ghosted over the
+// new one, and the VT overlay paints in the TOP LAYER — above the shared-element image clone,
+// hiding its return flight entirely. This listener registers BEFORE the router creates its own
+// popstate handler (registration order = firing order), tags panel→panel history moves on <html>,
+// and the CSS in index.css skips the cross-fade for them. The tag self-clears shortly after so a
+// later auth navigation's view transition is never suppressed by a stale flag.
+let lastResolvedPathname = window.location.pathname;
+window.addEventListener('popstate', () => {
+  const panelToPanel =
+    lastResolvedPathname.startsWith('/panel') && window.location.pathname.startsWith('/panel');
+  document.documentElement.classList.toggle('vt-panel-skip', panelToPanel);
+  if (panelToPanel) {
+    window.setTimeout(() => document.documentElement.classList.remove('vt-panel-skip'), 600);
+  }
+});
 
 export const router = createRouter({
   routeTree,
@@ -25,6 +50,12 @@ export const router = createRouter({
   defaultErrorComponent: ({ reset }) => (
     <ErrorScreen variant="crash" fill="container" onAction={reset} />
   ),
+});
+
+// Keeps the popstate tag's "from" accurate: after every resolved navigation (in-app or history),
+// this is the pathname the NEXT popstate departs from.
+router.subscribe('onResolved', () => {
+  lastResolvedPathname = router.state.location.pathname;
 });
 
 export const queryClient = new QueryClient({

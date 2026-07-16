@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import type { IconType } from 'react-icons';
@@ -231,7 +231,7 @@ const UserMenu: React.FC = () => {
             ? t('modules.panel.actions.userMenu')
             : t('modules.panel.actions.userMenuFor', { name: displayName })
         }
-        className={`flex cursor-pointer items-center gap-2.5 rounded-full p-1 pr-2.5 transition-colors hover:bg-charcoal/[0.05] sm:gap-3 sm:pr-3.5 ${FOCUS_RING}`}
+        className={`flex cursor-pointer items-center gap-2.5 rounded-full p-1 pr-2.5 transition-[color,background-color,box-shadow] duration-200 hover:bg-charcoal/[0.05] sm:gap-3 sm:pr-3.5 ${FOCUS_RING}`}
       >
         <SkeletonFade
           loading={loading}
@@ -363,7 +363,7 @@ const UserMenu: React.FC = () => {
                       action.onSelect();
                       close();
                     }}
-                    className={`flex w-full cursor-pointer items-center gap-3 rounded-control px-2.5 py-2 text-sm transition-colors ${FOCUS_RING} ${
+                    className={`flex w-full cursor-pointer items-center gap-3 rounded-control px-2.5 py-2 text-sm transition-[color,background-color,box-shadow] duration-200 ${FOCUS_RING} ${
                       isSignOut
                         ? 'text-red-600 hover:bg-red-50 hover:text-red-700'
                         : 'text-charcoal/80 hover:bg-charcoal/[0.05] hover:text-charcoal'

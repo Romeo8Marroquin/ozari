@@ -40,7 +40,7 @@ const FormError: React.FC<FormErrorProps> = ({ message, id }) => {
         <p
           id={id}
           role="alert"
-          className={`mb-4 flex items-start gap-1.5 text-left text-sm text-red-600 transition-[opacity,transform] duration-300 ease-in-out motion-reduce:transition-none ${
+          className={`mb-4 flex items-start gap-1.5 text-left text-sm text-red-600 transition-[opacity,translate] duration-300 ease-in-out motion-reduce:transition-none ${
             open ? 'translate-y-0 opacity-100' : '-translate-y-1 opacity-0'
           }`}
         >
