@@ -1,23 +1,43 @@
 import { describe, expect, it } from 'vitest';
 import { HiOutlineCube } from 'react-icons/hi2';
 import { Role } from '@constants/Roles';
-import { PANEL_NAV, filterNavByRole, panelHomeFor, type PanelNavItem } from './navConfig';
+import {
+  PANEL_NAV,
+  filterNavByRole,
+  panelHomeFor,
+  panelSectionFor,
+  type PanelNavItem,
+} from './navConfig';
 
 describe('PANEL_NAV', () => {
-  it('lists only the built modules (products + settings), all reachable', () => {
-    expect(PANEL_NAV.map((item) => item.to)).toEqual(['/panel/productos', '/panel/ajustes']);
+  it('lists only the built modules (products + orders + settings), all reachable', () => {
+    expect(PANEL_NAV.map((item) => item.to)).toEqual([
+      '/panel/productos',
+      '/panel/pedidos',
+      '/panel/ajustes',
+    ]);
   });
 
   it('restricts products to Admin + Client — a Driver never sees the tab (Epic-2A)', () => {
     expect(filterNavByRole(PANEL_NAV, Role.Driver).map((i) => i.to)).toEqual(['/panel/ajustes']);
     expect(filterNavByRole(PANEL_NAV, Role.Admin).map((i) => i.to)).toEqual([
       '/panel/productos',
+      '/panel/pedidos',
       '/panel/ajustes',
     ]);
     expect(filterNavByRole(PANEL_NAV, Role.Client).map((i) => i.to)).toEqual([
       '/panel/productos',
       '/panel/ajustes',
     ]);
+  });
+
+  it('restricts orders to Admin only until the Client/Driver backend slices land', () => {
+    expect(filterNavByRole(PANEL_NAV, Role.Client).map((i) => i.to)).not.toContain(
+      '/panel/pedidos',
+    );
+    expect(filterNavByRole(PANEL_NAV, Role.Driver).map((i) => i.to)).not.toContain(
+      '/panel/pedidos',
+    );
   });
 });
 
@@ -37,6 +57,22 @@ describe('filterNavByRole', () => {
       '/panel/productos',
       '/panel/ajustes',
     ]);
+  });
+});
+
+describe('panelSectionFor', () => {
+  it('resolves any nested products path to the products tab', () => {
+    expect(panelSectionFor('/panel/productos')).toBe('/panel/productos');
+    expect(panelSectionFor('/panel/productos/nuevo')).toBe('/panel/productos');
+    expect(panelSectionFor('/panel/productos/7')).toBe('/panel/productos');
+    expect(panelSectionFor('/panel/productos/7/editar')).toBe('/panel/productos');
+  });
+
+  it('resolves the other tabs and returns null for unknown paths', () => {
+    expect(panelSectionFor('/panel/pedidos')).toBe('/panel/pedidos');
+    expect(panelSectionFor('/panel/ajustes')).toBe('/panel/ajustes');
+    expect(panelSectionFor('/panel')).toBeNull();
+    expect(panelSectionFor('/sesion/inicio')).toBeNull();
   });
 });
 

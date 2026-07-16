@@ -2,7 +2,13 @@
 import { Link, useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineChevronLeft, HiOutlineXMark } from 'react-icons/hi2';
-import { PANEL_NAV, filterNavByRole, type PanelNavItem, type PanelPath } from '../navConfig';
+import {
+  PANEL_NAV,
+  filterNavByRole,
+  panelSectionFor,
+  type PanelNavItem,
+  type PanelPath,
+} from '../navConfig';
 import { usePanelChrome } from '../hooks/usePanelChrome';
 import { usePanelNavigate, usePanelNavPending } from '../PanelNavContext';
 import { useRole } from '@hooks/useRole';
@@ -137,11 +143,16 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
   // no imperative click bookkeeping.
   const pending = usePanelNavPending();
   const routeActiveKey = visibleNav.find((navItem) => pathname.startsWith(navItem.to))?.to ?? null;
-  // Where the pill should sit right now: the in-flight destination, else the committed route.
-  const visualTarget = pending ?? routeActiveKey;
+  // The chrome animates by SECTION: a pending detail/create path resolves to its parent tab, so a
+  // grid → detail move keeps the products pill and tint perfectly still (raw-path comparison used
+  // to hide the pill — no nav item matches `/panel/productos/7` — and fade the tint out and back).
+  const pendingSection = pending === null ? null : panelSectionFor(pending);
+  // Where the pill should sit right now: the in-flight destination's tab, else the committed route.
+  const visualTarget = pending === null ? routeActiveKey : pendingSection;
   // The tab being LEFT mid-transition — its tint fades out now (with the content exit), while the
-  // destination's fades in. Null again the moment the move commits or is cancelled.
-  const leavingKey = pending !== null && pending !== routeActiveKey ? routeActiveKey : null;
+  // destination's fades in. Null again the moment the move commits or is cancelled — and never set
+  // for a same-section move (nothing is being left).
+  const leavingKey = pending !== null && pendingSection !== routeActiveKey ? routeActiveKey : null;
 
   // Position the single active pill over a target item, measuring its LAYOUT position (offset*,
   // so it's scroll-, transform-, and viewport-proof — correct on any size and after a rotation).

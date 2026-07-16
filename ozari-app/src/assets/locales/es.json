@@ -204,6 +204,49 @@
         "customers": "Clientes",
         "settings": "Ajustes"
       },
+      "orders": {
+        "lead": "Tu agenda de entregas y recolecciones, y el historial de pedidos.",
+        "views": {
+          "label": "Vista de pedidos",
+          "agenda": "Agenda",
+          "history": "Historial"
+        },
+        "loading": "Cargando pedidos",
+        "day": {
+          "today": "Hoy",
+          "tomorrow": "Mañana",
+          "yesterday": "Ayer"
+        },
+        "ticket": {
+          "items_one": "{{count}} artículo",
+          "items_other": "{{count}} artículos",
+          "purchaseOnly": "Solo entrega"
+        },
+        "empty": {
+          "agenda": {
+            "title": "Sin entregas próximas",
+            "description": "Cuando exista un pedido confirmado, su entrega y recolección aparecerán aquí."
+          },
+          "history": {
+            "title": "Aún no hay historial",
+            "description": "Los pedidos finalizados o cancelados aparecerán aquí."
+          }
+        },
+        "error": {
+          "title": "No pudimos cargar los pedidos",
+          "description": "Ha ocurrido un error al obtener los pedidos. Verifica tu conexión e intenta de nuevo.",
+          "retry": "Reintentar"
+        },
+        "nextPage": {
+          "error": "No pudimos cargar más pedidos.",
+          "retry": "Reintentar"
+        },
+        "count": {
+          "partial": "Mostrando {{shown}} de {{total}} pedidos",
+          "all_one": "{{count}} pedido",
+          "all_other": "{{count}} pedidos"
+        }
+      },
       "actions": {
         "openMenu": "Abrir menú",
         "closeMenu": "Cerrar menú",

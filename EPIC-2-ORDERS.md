@@ -14,10 +14,17 @@
 > all **Admin-only** (widen ONLY together with Client/Driver row-scoping), authenticated rate tier,
 > OpenAPI + i18n + tests same-commit. Pagination is **congruent at 20 per page across products AND
 > orders** (owner, 2026-07-16 — `PRODUCTS_PAGE_SIZE`, `defaultProductPageSize`,
-> `defaultOrderPageSize`). **Next**: the frontend agenda (day-grouped ticket list + segmented
-> Agenda/Historial + empty states — infinite scroll like products, NO empty-day placeholders; the
-> month-with-empty-days visual belongs to the future §2 calendar/planning page), then
-> `POST /orders` + client registries. Update this file as things land.
+> `defaultOrderPageSize`). **The frontend agenda is BUILT (2026-07-16)**:
+> `ozari-app/src/modules/panel/orders/` + the Admin-only `/panel/pedidos` route + sidebar tab
+> (`ORDERS_ROLES` in navConfig, same single-source pattern as products; other roles bounce to
+> `panelHomeFor(role)`). Day-grouped ticket list (Hoy/Mañana/Ayer/dated headers via
+> `orderDayGroups.ts`), an accessible **tablist segmented control** (Agenda/Historial, roving
+> tabindex + arrow keys, URL-held `?view=historial`), per-view empty states, cold-error retry
+> panel, infinite scroll with append shimmer + `.order-appended` stagger, skeleton
+> sweep-out→body-stagger-in resolve, panel motion pair registered. Tickets are deliberately
+> **non-interactive** until the detail page lands. **Next**: `POST /orders` + client registries
+> (backend), then the admin order-create page, then the order detail page (tickets become links).
+> Update this file as things land.
 
 ## 1. The business, in one paragraph
 

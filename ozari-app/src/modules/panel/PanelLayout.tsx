@@ -7,7 +7,7 @@ import Header from './components/Header';
 import PanelScrollbar from './components/PanelScrollbar';
 import Sidebar from './components/Sidebar';
 import ForcedLogoutListener from './ForcedLogoutListener';
-import type { PanelPath } from './navConfig';
+import { panelSectionFor, type PanelPath } from './navConfig';
 import { PanelChromeProvider } from './hooks/usePanelChrome';
 import { fadeIn, fadeOut, headerTitleIn, headerTitleOut, type EnterOptions } from './pageMotion';
 import { PanelExitContext } from './PanelExitContext';
@@ -21,6 +21,10 @@ import PanelScrollMemory from './PanelScrollMemory';
 // completion handler can tell it was superseded and must not navigate.
 interface ExitRun {
   pending: PanelPath;
+  /** Whether this run has played the header title's exit — only cross-SECTION moves do (the title
+   *  is the section's name; animating the same text out and back in on a grid→detail move read as
+   *  a glitch). A mid-exit retarget to another section fires it late. */
+  titleOut: boolean;
 }
 
 const PanelShell: React.FC = () => {
@@ -158,30 +162,45 @@ const PanelShell: React.FC = () => {
       if (run) {
         if (to === pathnameRef.current) {
           // Cancel: cut the exit where it stands and settle back in. Detaching the token first
-          // makes the in-flight exit's completion handler a no-op.
+          // makes the in-flight exit's completion handler a no-op. (`enterCurrent`'s title-in is a
+          // visual no-op when this run never took the title out — `fromCurrent` resumes a tween
+          // from the current, already-settled state.)
           exitRef.current = null;
           setPending(null);
           enterCurrent({ fromCurrent: true });
         } else {
-          // Retarget: same exit, new destination.
+          // Retarget: same exit, new destination. If the original target shared the leaving page's
+          // section (title held still) but the NEW one doesn't, the title exits now — late, but in
+          // step with the still-running content exit.
           run.pending = to;
+          if (!run.titleOut && panelSectionFor(pathnameRef.current) !== panelSectionFor(to)) {
+            run.titleOut = true;
+            void headerTitleOut();
+          }
           setPending(to);
           preload(to);
         }
         return;
       }
       if (to === pathnameRef.current) return;
-      const newRun: ExitRun = { pending: to };
       // The route this run is leaving FROM. Only an EXTERNAL commit (browser back/forward — our
       // own navigate hasn't fired yet) can change the pathname while the exit plays; if one does,
       // the pop is the NEWER intent and must win (see the completion guard below).
       const fromPath = pathnameRef.current;
+      // The header title is the SECTION's name — it only animates when the section changes
+      // (products grid → product detail keeps "Productos" perfectly still).
+      const sectionChanges = panelSectionFor(fromPath) !== panelSectionFor(to);
+      const newRun: ExitRun = { pending: to, titleOut: sectionChanges };
       exitRef.current = newRun;
       setPending(to);
       preload(to);
-      // Leaving: the content body and the header title exit together, THEN we navigate — so the
-      // header is in lock-step with the content instead of popping after the swap.
-      void Promise.all([runContentExit(), headerTitleOut()]).then(() => {
+      // Leaving: the content body (and, on a section change, the header title) exit together,
+      // THEN we navigate — so the header is in lock-step with the content instead of popping
+      // after the swap.
+      void Promise.all([
+        runContentExit(),
+        ...(sectionChanges ? [headerTitleOut()] : []),
+      ]).then(() => {
         if (exitRef.current !== newRun) return; // cancelled or superseded (logout) — abandon
         exitRef.current = null;
         setPending(null);
@@ -201,14 +220,20 @@ const PanelShell: React.FC = () => {
   // with the content entrance), and the default body-in runs UNLESS the page owns its own entrance
   // (custom motion, played by the page itself on mount). The child's registration effect runs
   // before this parent effect, so `customMotion.current` is already set for the incoming page here.
-  // The header title-in is skipped on the very first mount (the chrome mount timeline reveals it).
+  // The header title-in is skipped on the very first mount (the chrome mount timeline reveals it)
+  // AND on same-SECTION commits (grid → detail keeps the same title — it never left, see
+  // `navigateBody`; this also covers history pops within a section).
+  const prevPanelPathname = useRef(pathname);
   useLayoutEffect(() => {
+    const from = prevPanelPathname.current;
+    prevPanelPathname.current = pathname;
     if (!screen.current || !pathname.startsWith('/panel')) return;
     if (!customMotion.current) fadeIn(screen.current);
     if (firstTitleIn.current) {
       firstTitleIn.current = false;
       return;
     }
+    if (panelSectionFor(from) === panelSectionFor(pathname)) return;
     headerTitleIn();
   }, [pathname]);
 
