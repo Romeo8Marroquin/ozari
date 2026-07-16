@@ -1,6 +1,26 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The drag hook has its own tests (pointer choreography with injected geometry); here it is
+// mocked so the component's DRAG-STATE rendering (cursor/elevation classes, handler wiring) is
+// controllable without forging pointer events.
+const drag = vi.hoisted(() => ({
+  draggingId: null as string | null,
+  onPointerDown: vi.fn(),
+}));
+vi.mock('./useGalleryDrag', () => ({
+  useGalleryDrag: () => ({
+    draggingId: drag.draggingId,
+    getThumbHandlers: () => ({
+      onPointerDown: drag.onPointerDown,
+      onPointerMove: vi.fn(),
+      onPointerUp: vi.fn(),
+      onPointerCancel: vi.fn(),
+    }),
+  }),
+}));
+
 import ProductImageGallery from './ProductImageGallery';
 import type { GalleryImage, GalleryState } from './useGalleryImages';
 
@@ -9,6 +29,7 @@ const KEY = 'modules.panel.products.create.gallery';
 const image = (id: string, name = `${id}.png`): GalleryImage => ({
   id,
   file: new File(['x'], name, { type: 'image/png' }),
+  name,
   previewUrl: `blob:${id}`,
 });
 
@@ -19,6 +40,7 @@ const galleryState = (overrides: Partial<GalleryState> = {}): GalleryState => ({
   addFiles: vi.fn(),
   removeImage: vi.fn(),
   setPrimary: vi.fn(),
+  moveImage: vi.fn(),
   isFull: false,
   ...overrides,
 });
@@ -39,7 +61,10 @@ const renderGallery = (
 const fileInput = (): HTMLInputElement =>
   document.querySelector('input[type="file"]') as HTMLInputElement;
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  drag.draggingId = null;
+});
 
 describe('ProductImageGallery — empty state & picking', () => {
   it('shows the big dropzone when empty; clicking it opens the hidden picker', async () => {
@@ -197,6 +222,52 @@ describe('ProductImageGallery — thumbnails, the star, and removal', () => {
       expect(remove).toBeDisabled();
     }
     expect(screen.getByRole('button', { name: `${KEY}.dropzone.cta` })).toBeDisabled();
+  });
+});
+
+describe('ProductImageGallery — drag-to-reorder wiring', () => {
+  const twoPhotos = () => galleryState({ images: [image('a'), image('b')], primaryId: 'a' });
+
+  it('disables the browser image drag (the phantom-copy duplicate bug) and wires the pointer drag', () => {
+    renderGallery(twoPhotos());
+
+    // Native drag OFF: dragging a thumb must move the CARD, never spawn a phantom image copy
+    // that the dropzone would re-add as a duplicate.
+    for (const img of screen.getAllByRole('img')) {
+      expect(img).toHaveAttribute('draggable', 'false');
+    }
+
+    // The card drag starts from the tile itself (the hook's pointerdown is attached to the li).
+    fireEvent.pointerDown(screen.getAllByRole('listitem')[0]);
+    expect(drag.onPointerDown).toHaveBeenCalled();
+  });
+
+  it('suppresses the long-press/right-click image menu on the tiles (a long press means "pick up")', () => {
+    renderGallery(twoPhotos());
+    const tile = screen.getAllByRole('listitem')[0];
+    const prevented = !fireEvent.contextMenu(tile);
+    expect(prevented).toBe(true);
+  });
+
+  it('elevates the tile in hand and swaps its cursor while dragging', () => {
+    drag.draggingId = 'a';
+    renderGallery(twoPhotos());
+
+    const [tileA, tileB] = screen.getAllByRole('listitem');
+    expect(tileA.className).toContain('cursor-grabbing');
+    expect(tileA.className).toContain('shadow-xl');
+    expect(tileB.className).not.toContain('shadow-xl');
+    expect(tileB.className).toContain('cursor-grab');
+  });
+
+  it('says the reorder affordance out loud once there is something to reorder', () => {
+    const { unmount } = renderGallery(twoPhotos());
+    expect(screen.getByText(`${KEY}.reorderHint`)).toBeInTheDocument();
+    unmount();
+
+    // One photo (or none) → nothing to reorder → no hint.
+    renderGallery(galleryState({ images: [image('a')], primaryId: 'a' }));
+    expect(screen.queryByText(`${KEY}.reorderHint`)).not.toBeInTheDocument();
   });
 });
 

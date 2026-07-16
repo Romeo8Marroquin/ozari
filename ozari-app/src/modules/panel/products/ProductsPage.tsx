@@ -17,6 +17,7 @@ import { claimProductImageMorphWithin, releaseProductImageMorph } from './produc
 import { clearProductsScroll, restoreProductsScroll } from './productsScroll';
 import ProductsStatus from './ProductsStatus';
 import { hasActiveFilters, type ProductListSearch } from './productListSearch';
+import { useGridListTransition } from './useGridListTransition';
 import { PRODUCTS_PAGE_SIZE, useProducts } from './useProducts';
 
 const KEY = 'modules.panel.products';
@@ -75,10 +76,15 @@ const ProductsPage: React.FC = () => {
   const filtered = hasActiveFilters(search);
   const products = useMemo(() => data?.products ?? [], [data]);
   const pagination = data?.pagination;
-  // Only a COLD state (nothing cached to show) drives the skeleton / error panel; a background refetch
-  // (and a filter change riding `keepPreviousData`) keeps the current grid on screen instead of
-  // flashing back to skeletons.
-  const loading = isLoading && !data;
+  // COLD = nothing cached to show at all (first visit / cold reload) — drives the skeleton grid
+  // and the error panel.
+  const coldLoading = isLoading && !data;
+  // A FILTER change rides `keepPreviousData`: the previous tiles are still on screen, and the
+  // skeleton doctrine takes over IN PLACE — each existing tile crossfades to shimmer (SkeletonFade
+  // reverse), missing tiles stagger in, and the resolve replays the standard pairwise hand-off —
+  // the first load's language, not a dimmed freeze.
+  const filterTransition = isPlaceholderData && isFetching;
+  const loading = coldLoading || filterTransition;
   const hasError = isError && !data;
 
   /** Commit a new filter state to the URL (never through the panel transition — same route). */
@@ -140,6 +146,12 @@ const ProductsPage: React.FC = () => {
 
   const empty = products.length === 0;
   const settled = !loading && !showSkeleton;
+
+  // A background refetch landing on the WARM grid (a delete/create just invalidated the list)
+  // plays the two-phase diff — leaving cards shrink out, survivors glide, new cards rise in —
+  // instead of the old abrupt slot swap. Every other flow (cold/filter/append) keeps its own
+  // machinery; the grid renders from `displayed`, which follows `products` accordingly.
+  const displayed = useGridListTransition(products, settled && !isFetchingNextPage, body);
   // A filtered empty result is NOT the empty catalog: the chrome stays so the filters can be
   // cleared, and the panel says "no matches", not "start your catalog".
   const filteredEmpty = settled && !hasError && empty && filtered;
@@ -161,33 +173,40 @@ const ProductsPage: React.FC = () => {
     const arrivedFromPanel = populated && !wasPopulated.current && !showSkeleton && !wasChromeUp.current;
     wasPopulated.current = populated;
     wasChromeUp.current = showChrome;
-    if (firstRender || loading || (settled && !populated && !showChrome) || arrivedFromPanel) {
+    // NOTE `coldLoading`, not `loading`: a filter transition keeps the chrome (and the tiles,
+    // ghost-fading in place) — re-staggering the whole root would flash them.
+    if (firstRender || coldLoading || (settled && !populated && !showChrome) || arrivedFromPanel) {
       staggerIn(root.current, '.reveal-item');
     }
-  }, [loading, showSkeleton, hasError, empty, settled, showChrome]);
+  }, [coldLoading, loading, showSkeleton, hasError, empty, settled, showChrome]);
+
+  // A filter transition's MISSING tiles (the previous list was shorter than the skeleton grid):
+  // they mount fresh, so they sweep in exactly like a first load's skeletons — while the existing
+  // tiles crossfade to shimmer in place (SkeletonFade reverse; no stagger, they never move).
+  const wasFilterTransition = useRef(false);
+  useLayoutEffect(() => {
+    if (filterTransition && !wasFilterTransition.current) staggerIn(root.current, '.skel-enter');
+    wasFilterTransition.current = filterTransition;
+  }, [filterTransition]);
 
   // Chrome-persistent BODY transitions (the header + filter bar hold still; only the area under
-  // them changes): grid ⇄ filtered-empty swaps stagger the incoming body in, and a resolved filter
-  // change (`keepPreviousData` placeholder → fresh results) re-staggers the new cards. The first
-  // settle is excluded — the cold hand-off (grid) or the skeleton-sweep entrance above owns it —
-  // EXCEPT filtered-empty, whose panel mounts only after the sweep and needs its own entrance.
+  // them changes): grid ⇄ filtered-empty swaps stagger the incoming body in. The first settle is
+  // excluded — the cold hand-off (grid) or the skeleton-sweep entrance above owns it — EXCEPT
+  // filtered-empty, whose panel mounts only after the sweep and needs its own entrance. (A
+  // resolved filter change needs nothing here anymore: it replays the skeleton hand-off.)
   const bodyKey = !settled || hasError ? null : !empty ? 'grid' : filteredEmpty ? 'filteredEmpty' : null;
   const prevBodyKey = useRef<typeof bodyKey>(null);
-  const wasPlaceholder = useRef(false);
   useLayoutEffect(() => {
     const previous = prevBodyKey.current;
     prevBodyKey.current = bodyKey;
-    const placeholderResolved = wasPlaceholder.current && !isPlaceholderData;
-    wasPlaceholder.current = isPlaceholderData;
     if (bodyKey === null) return;
     if (previous === null) {
       if (bodyKey === 'filteredEmpty') staggerIn(body.current, '.reveal-item');
       return;
     }
-    if (previous !== bodyKey || (placeholderResolved && bodyKey === 'grid')) {
-      staggerIn(body.current, '.reveal-item');
-    }
-  }, [bodyKey, isPlaceholderData]);
+    // The deps guarantee this only runs when the key CHANGED — always a body swap to stagger in.
+    staggerIn(body.current, '.reveal-item');
+  }, [bodyKey]);
 
   // ── Infinite scroll ─────────────────────────────────────────────────────────────────────────────
   // The appended page repeats the cold load's language in miniature: a batch of skeleton slots
@@ -246,15 +265,13 @@ const ProductsPage: React.FC = () => {
   // How many grid SLOTS are on screen. Slots are keyed by INDEX so a cell keeps its identity
   // across the loading → loaded flip — that identity is what lets its SkeletonFade crossfade the
   // skeleton into the card in place instead of remounting. Appended-page skeletons ride the same
-  // slot machinery after the real cards.
+  // slot machinery after the real cards; a FILTER transition keeps the previous list's slots
+  // (each ghost-fading to shimmer) and tops them up to the skeleton count.
   const visibleSlots = loading
-    ? SKELETON_COUNT
+    ? Math.max(SKELETON_COUNT, displayed.length)
     : showSkeleton
-      ? Math.max(SKELETON_COUNT, products.length)
-      : products.length + appendCount;
-
-  // A filter change with previous results on screen: keep the grid, dim it while the new page loads.
-  const dimming = isPlaceholderData && isFetching;
+      ? Math.max(SKELETON_COUNT, displayed.length)
+      : displayed.length + appendCount;
 
   // The chrome sweeps out with the skeletons ONLY when the resolution can drop it (unfiltered →
   // possibly the standalone empty/error panel); a filtered resolution always keeps it.
@@ -296,20 +313,25 @@ const ProductsPage: React.FC = () => {
             ) : (
               <>
                 <div
-                  className={`${GRID} transition-opacity duration-300${dimming ? ' opacity-60' : ''}`}
+                  className={GRID}
                   role={loading ? 'status' : undefined}
                   aria-label={loading ? t(`${KEY}.loading`) : undefined}
-                  aria-busy={loading || dimming || isFetchingNextPage || undefined}
+                  aria-busy={loading || isFetchingNextPage || undefined}
                 >
                   {Array.from({ length: visibleSlots }).map((_, index) => {
-                    const product = products[index];
+                    const product = displayed[index];
                     const isAppendCell = settled && product === undefined;
                     const isSkeletonCell = loading || product === undefined;
                     const isOrphan = !loading && showSkeleton && product === undefined;
                     const isLateEntry = !loading && showSkeleton && index >= SKELETON_COUNT;
+                    // A filter transition's fresh tile (the previous list was shorter) — it mounts
+                    // as shimmer and sweeps in like a first-load skeleton.
+                    const isFilterExtra = filterTransition && product === undefined;
                     const cellClass = `reveal-item${isSkeletonCell ? ' product-skel' : ''}${
                       isOrphan ? ' product-skel-orphan' : ''
-                    }${isLateEntry ? ' grid-enter' : ''}${isAppendCell ? ' append-skel' : ''}`;
+                    }${isLateEntry ? ' grid-enter' : ''}${isAppendCell ? ' append-skel' : ''}${
+                      isFilterExtra ? ' skel-enter' : ''
+                    }`;
                     return (
                       <div key={`slot-${index}`} className={cellClass}>
                         {isOrphan ? (
@@ -323,7 +345,14 @@ const ProductsPage: React.FC = () => {
                             className="block"
                             contentClassName="block"
                           >
-                            {product && <ProductCard product={product} />}
+                            {/* The FLIP wrapper: slots are keyed by INDEX (load-bearing for the
+                                skeleton crossfade), so the diff choreography matches a product
+                                across slots by this id instead (see useGridListTransition). */}
+                            {product && (
+                              <div data-flip-id={product.id}>
+                                <ProductCard product={product} />
+                              </div>
+                            )}
                           </SkeletonFade>
                         )}
                       </div>

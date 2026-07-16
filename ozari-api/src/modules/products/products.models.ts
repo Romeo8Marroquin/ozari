@@ -52,24 +52,50 @@ export interface CreateProductRequestModel {
   rentPrice: number | undefined;
   /** The period the rent price is quoted against — required with `rentPrice`, forbidden for Venta. */
   rentTimeUnitId: number | undefined;
-  /** "As-new" value billed for a lost/damaged rental. Optional, but always captured when given. */
+  /** "As-new" value billed for a lost/damaged RENTAL — Alquiler only (a sale is consumed, nothing
+   *  to replace); optional there, forbidden for Venta. */
   replacementPrice: number | undefined;
   /** Required when `businessTypeId` = Venta; forbidden for Alquiler. */
   sellPrice: number | undefined;
 }
 
+/**
+ * One detail row in the FINAL desired detail list (`PUT /products/:id` is declarative, like the
+ * gallery): `id` present = an existing row of THIS product to keep/update; absent = create. Rows
+ * the product has that are missing from the list are deleted — the list IS the state.
+ */
 export interface UpdateProductDetailRequestModel extends CreateProductDetailRequestModel {
-  id: number;
+  id?: number;
 }
 
-export interface UpdateProductRequestModel extends CreateProductRequestModel {
-  id: number;
+/**
+ * One slot of the FINAL desired gallery (the RECONCILE design — owner decision, 2026-07-13):
+ * exactly ONE of `id` (a kept photo of this product) or `key` (a new photo already uploaded via the
+ * presign flow). Array order = `sortOrder`; at most one `isPrimary` (default: the first). Rows the
+ * product has that are absent from the list are deleted (DB row + the R2 object, post-commit).
+ */
+export interface UpdateProductImageRequestModel {
+  id?: number;
+  key?: string;
+  isPrimary?: boolean;
+}
+
+/**
+ * `PUT /products/:id` — the product's FULL desired state (never a partial patch): the same scalar
+ * rules as create (incl. the conditional price rule), plus the declarative details + gallery lists.
+ * The id travels in the route param, not the body.
+ */
+export interface UpdateProductRequestModel
+  extends Omit<CreateProductRequestModel, "images" | "productDetails"> {
+  images: UpdateProductImageRequestModel[];
   productDetails: UpdateProductDetailRequestModel[];
 }
 
 export interface BaseProductDetailsResponseModel {
   detail: string;
   detailType: string;
+  /** The type's lookup id — what the edit form prefills its select with (public reference data). */
+  detailTypeId: number;
   id: number;
 }
 
@@ -82,26 +108,41 @@ export interface ProductImageResponseModel {
 
 /**
  * A product as returned by the list endpoint. The "catalog" fields are visible to every role; the
- * `inStock`/`quantity`/`replacementPrice`/`isActive` fields are **role-gated** — present only for the
- * roles allowed to see them (see `projectProductForRole`), so they are optional here.
+ * `inStock`/`available`/`total`/`replacementPrice`/`isActive` fields are **role-gated** — present
+ * only for the roles allowed to see them (see `projectProductForRole`), so they are optional here.
  */
 export interface ProductListItemResponseModel {
   id: number;
   name: string;
   description: string | undefined;
   businessType: string;
+  /** The business type's lookup id (1 = Alquiler, 2 = Venta) — the edit form's select value.
+   *  Public reference data (the name is already in `businessType`), so it ships to every role. */
+  businessTypeId: number;
   category: string;
+  /** The category's lookup id — same public-reference stance as `businessTypeId`. */
+  categoryId: number;
   currency: CurrencyModel;
   rentPrice: number | undefined;
   sellPrice: number | undefined;
   /** The period `rentPrice` is quoted against (Alquiler only), e.g. "Día". */
   rentTimeUnit: string | undefined;
+  /** Its lookup id (Alquiler only) — the edit form's select value; absent alongside `rentTimeUnit`. */
+  rentTimeUnitId: number | undefined;
   images: ProductImageResponseModel[];
   details: BaseProductDetailsResponseModel[];
-  /** Availability signal (Employee + Admin). */
+  /** Availability signal (Employee + Admin) — derived: `available > 0`. */
   inStock?: boolean;
-  /** Available stock count (Employee + Admin) — today = on-hand; minus reservations once orders land. */
-  quantity?: number;
+  /**
+   * Units takeable RIGHT NOW (Employee + Admin). Venta: the recorded stock (sales decrement it).
+   * Alquiler: fleet minus units out on active rentals (see `buildRentedNowWhere`).
+   */
+  available?: number;
+  /**
+   * The WHOLE rental fleet in circulation (Admin only, **Alquiler only** — absent for Venta, where
+   * it would duplicate `available`): `available` + currently rented.
+   */
+  total?: number;
   /** "As-new" replacement value (Admin only; may itself be absent on a product). */
   replacementPrice?: number | undefined;
   /** Soft-delete flag (Admin only). */
@@ -109,9 +150,25 @@ export interface ProductListItemResponseModel {
 }
 
 /**
- * The parsed `GET /products` query — pagination plus the optional catalog filters. Everything is
- * produced by `parseProductListQuery` under the clamp-never-reject stance: a bad value falls back
- * (pagination) or drops out (filters), so this shape is always safe to hand to Prisma.
+ * The catalog's presentation orders. `recent` (newest first) is the default; `name*` uses the
+ * Spanish collation; `price*` orders by THE product's price — rent or sell, whichever it has (the
+ * conditional rule guarantees exactly one) — with priceless rows sinking to the end either way.
+ * There is deliberately NO availability filter/sort: "available" means different things per role
+ * (an admin cares about the whole fleet) and a rented-out product isn't gone — sorting replaced it
+ * (owner decision, 2026-07-15). A "popular" order awaits real order data (see EPIC-1 §5).
+ */
+export type ProductListSortModel =
+  | "recent"
+  | "nameAsc"
+  | "nameDesc"
+  | "priceAsc"
+  | "priceDesc";
+
+/**
+ * The parsed `GET /products` query — pagination plus the optional catalog filters and the sort.
+ * Everything is produced by `parseProductListQuery` under the clamp-never-reject stance: a bad
+ * value falls back (pagination/sort) or drops out (filters), so this shape is always safe to hand
+ * to Prisma.
  */
 export interface ProductListQueryModel {
   page: number;
@@ -120,11 +177,8 @@ export interface ProductListQueryModel {
   search: string | undefined;
   categoryId: number | undefined;
   businessTypeId: number | undefined;
-  /**
-   * Availability filter — Employee/Admin only (a Client gets no stock signal, so it could otherwise
-   * probe availability through the filter). `true` = in stock, `false` = out of stock, absent = all.
-   */
-  inStock: boolean | undefined;
+  /** Presentation order — any role may sort (nothing role-gated leaks through an ordering). */
+  sort: ProductListSortModel;
   /** Admin-only: include soft-deleted rows. Always false for every other role. */
   includeInactive: boolean;
 }

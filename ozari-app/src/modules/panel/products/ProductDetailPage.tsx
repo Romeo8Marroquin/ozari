@@ -1,10 +1,12 @@
 import { useParams } from '@tanstack/react-router';
 import type { AxiosError } from 'axios';
+import gsap from 'gsap';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   HiOutlineArrowLeft,
   HiOutlineArrowPath,
+  HiOutlineArrowsPointingOut,
   HiOutlineCalendarDays,
   HiOutlineClipboardDocumentList,
   HiOutlinePencilSquare,
@@ -14,10 +16,12 @@ import {
 import Button from '@components/Button';
 import LogoMark from '@components/LogoMark';
 import RoleGate from '@components/RoleGate';
+import ShareButton from '@components/ShareButton';
 import { Role } from '@constants/Roles';
 import { useRole } from '@hooks/useRole';
 import { getStatus } from '@utils/apiError';
 import { clearHistoryDepartureHold, setHistoryDepartureHold } from '@utils/historyDeparture';
+import { prefersReducedMotion } from '@utils/motion';
 import { headerTitleOut, staggerIn, staggerOut } from '../pageMotion';
 import { usePanelNavigate } from '../PanelNavContext';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
@@ -28,9 +32,12 @@ import {
   hasProductImageMorphInFlight,
   releaseProductImageMorph,
 } from './productImageMorph';
+import ProductDeleteModal from './ProductDeleteModal';
+import ProductLightbox from './ProductLightbox';
 import { scrollPanelToTop } from './productsScroll';
 import ProductsStatus from './ProductsStatus';
-import { formatMoney, formatProductPrice } from './productPresentation';
+import SectionReveal from './SectionReveal';
+import { formatMoney, formatProductPrice, primaryImageIndex } from './productPresentation';
 import { useProduct } from './useProduct';
 import type { Product } from './product.types';
 
@@ -40,20 +47,32 @@ const SECONDARY_COLOR = '#262626';
 const DANGER_COLOR = '#dc2626';
 
 /**
- * The stock line — same field-presence contract as the card's badge: `quantity` (Employee + Admin)
- * → the available count in the role's ink; bare `inStock` → the signal; neither (Client) → nothing.
+ * The stock line — same field-presence contract as the card's badge: `available` + `total`
+ * (Admin, Alquiler) → the fleet view "5 de 10 disponibles", spelled out here where space allows
+ * (the tile keeps the short "5 de 10") and kept visible at 0 — a fully-rented fleet is not gone;
+ * `available` alone (Employee / Admin-Venta) → the takeable count; bare `inStock` → the signal;
+ * neither (Client) → nothing. Zero wording is business-type-aware like the card's: Venta =
+ * "Agotado" (gone until restocked), anything else = "No disponible" (rented units come back).
  */
 const StockLine: React.FC<{ product: Product }> = ({ product }) => {
   const { t } = useTranslation();
-  const { quantity, inStock } = product;
+  const { available: availableCount, total, inStock } = product;
+  const zeroLabel =
+    product.businessType === SELL_BUSINESS_TYPE
+      ? t(`${KEY}.stock.out`)
+      : t(`${KEY}.stock.unavailable`);
   let available: boolean;
   let label: string;
-  if (quantity !== undefined) {
-    available = quantity > 0;
-    label = available ? t(`${KEY}.stock.count`, { count: quantity }) : t(`${KEY}.stock.out`);
+  if (availableCount !== undefined) {
+    available = availableCount > 0;
+    if (total !== undefined) {
+      label = t(`${KEY}.stock.countOfTotal`, { count: availableCount, total });
+    } else {
+      label = available ? t(`${KEY}.stock.count`, { count: availableCount }) : zeroLabel;
+    }
   } else if (inStock !== undefined) {
     available = inStock;
-    label = inStock ? t(`${KEY}.stock.available`) : t(`${KEY}.stock.out`);
+    label = inStock ? t(`${KEY}.stock.available`) : zeroLabel;
   } else {
     return null;
   }
@@ -89,12 +108,14 @@ const DetailSkeleton: React.FC = () => (
  * **Arrival is designed around the shared-element morph** (see `productImageMorph.ts`): the query
  * is seeded from the cached list pages, so coming from the grid renders the full page instantly and
  * the floating card photo glides onto the hero (which sits out of the entrance stagger while it
- * waits — the morph reveals it). A cold deep-link skips all of that: skeleton → content, standard
- * stagger, any in-flight clone is released. Errors split not-found (404, gone) from transient
- * (retry).
+ * waits — the morph reveals it). A cold deep-link skips all of that: the skeleton shows, and when
+ * the data lands it dissolves IN PLACE while the content cascades in (`SectionReveal` — never a
+ * blank-out + re-entrance); any in-flight clone is released. Errors split not-found (404, gone)
+ * from transient (retry).
  *
  * Role actions mirror the card's mapping — Client → Rentar/Comprar, Employee/Admin → Ordenar — plus
- * Admin's management verbs **Editar/Eliminar** (design-complete placeholders; Step 3b wires them).
+ * Admin's management verbs: **Editar** navigates to `/panel/productos/:id/editar` (the edit form);
+ * **Eliminar** is still a design-complete placeholder (Step 3b wires it).
  */
 const ProductDetailPage: React.FC = () => {
   const { t } = useTranslation();
@@ -108,13 +129,55 @@ const ProductDetailPage: React.FC = () => {
   const heroImage = useRef<HTMLImageElement>(null);
 
   const loading = isLoading && !product;
-  const notFound = isError && !product && getStatus(error as AxiosError) === 404;
+  // A 404 wins even over cached data: a background refetch discovering the product was deleted
+  // elsewhere must flip to the honest not-found panel, never keep rendering a ghost.
+  const notFound = isError && getStatus(error as AxiosError) === 404;
   const hasError = isError && !product && !notFound;
 
-  // The visible gallery image (primary first — the backend orders them that way).
-  const [activeIndex, setActiveIndex] = useState(0);
+  // The visible gallery image. `null` = "no explicit pick yet" → the FLAGGED primary, wherever it
+  // sits in the gallery: images arrive in the admin's display order and the star is independent of
+  // it, so the page OPENS on the primary without reordering the thumbnails around it.
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const images = useMemo(() => product?.images ?? [], [product]);
+  const activeIndex = selectedIndex ?? (product ? primaryImageIndex(product) : 0);
   const activeImage = images[activeIndex] ?? images[0];
+
+  // The full-size viewer (opens on the hero / its expand affordance, at the current image).
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  // The delete confirmation (Admin's Eliminar) — destructive, so always an explicit dialog step.
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  // True once THIS product was deleted: the departure to the grid must be a PLAIN fade — there is
+  // no card left to fly the hero onto, so every morph lift-off below stands down.
+  const deletedRef = useRef(false);
+  const handleDeleted = (): void => {
+    deletedRef.current = true;
+    panelNavigate('/panel/productos');
+  };
+
+  // Switching images CROSSFADES (never snaps): the outgoing image stays as a ghost layer under
+  // the incoming one, which fades in quick-but-smooth; the ghost drops when the fade settles.
+  const [ghostImageUrl, setGhostImageUrl] = useState<string | null>(null);
+  const selectImage = (index: number): void => {
+    if (index === activeIndex) return;
+    /* v8 ignore next -- defensive `??`: the thumbnails only render alongside an active image */
+    setGhostImageUrl(activeImage?.url ?? null);
+    setSelectedIndex(index);
+  };
+  useLayoutEffect(() => {
+    if (!ghostImageUrl) return;
+    const incoming = heroImage.current;
+    /* v8 ignore next -- a ghost only exists after a switch, when the hero img is mounted */
+    if (!incoming) return;
+    const seconds = prefersReducedMotion() ? 0 : 0.22;
+    const tween = gsap.fromTo(
+      incoming,
+      { autoAlpha: 0 },
+      { autoAlpha: 1, duration: seconds, ease: 'power2.inOut', onComplete: () => setGhostImageUrl(null) },
+    );
+    return () => {
+      tween.kill();
+    };
+  }, [ghostImageUrl]);
 
   // A detail page always OPENS AT THE TOP — the shared panel scroller still carries the grid's
   // position otherwise. Pre-paint and before the morph claim below (declaration order), so the
@@ -150,10 +213,13 @@ const ProductDetailPage: React.FC = () => {
     if (!claimed) heroElement.classList.add('reveal-item');
   });
 
-  // Entrance for whichever state is on screen (mount, skeleton→content, error→retry→content).
+  // Entrance on mount and when an ERROR panel replaces the content. Deliberately NOT keyed on
+  // `loading`: skeleton → content is `SectionReveal`'s move — the skeleton stays on screen and
+  // dissolves while the real items cascade in. Replaying the page stagger there would blank
+  // everything (back row included) and re-run the whole entrance — the "reload" jank.
   useLayoutEffect(() => {
     staggerIn(root.current, '.reveal-item');
-  }, [loading, notFound, hasError]);
+  }, [notFound, hasError]);
 
   usePanelPageMotion(
     useMemo(
@@ -183,6 +249,7 @@ const ProductDetailPage: React.FC = () => {
   useEffect(() => {
     const hold = (nextPathname: string): Promise<void> | null => {
       if (nextPathname !== '/panel/productos') return null;
+      if (deletedRef.current) return null; // deleted → plain fade, nothing to fly onto
       if (hasProductImageMorphInFlight()) return null;
       beginProductImageMorph(id, heroImage.current);
       return Promise.all([staggerOut(root.current, '.reveal-item'), headerTitleOut()]).then(
@@ -199,6 +266,7 @@ const ProductDetailPage: React.FC = () => {
   // claims and lands it — same machinery, no special path.
   useLayoutEffect(() => {
     return () => {
+      if (deletedRef.current) return; // deleted → plain fade, nothing to fly onto
       if (hasProductImageMorphInFlight()) return;
       if (window.location.pathname !== '/panel/productos') return;
       // Reading the LIVE ref at unmount is the point: thumbnails can swap the hero, and the image
@@ -208,29 +276,11 @@ const ProductDetailPage: React.FC = () => {
     };
   }, [id]);
 
-  const backButton = (
-    <button
-      type="button"
-      onClick={goBack}
-      className="reveal-item flex w-fit cursor-pointer items-center gap-1.5 rounded-chip text-sm text-charcoal/55 transition-colors hover:text-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta focus-visible:ring-offset-2"
-    >
-      <HiOutlineArrowLeft aria-hidden className="size-4" />
-      {t(`${DKEY}.back`)}
-    </button>
-  );
-
   const isSell = product?.businessType === SELL_BUSINESS_TYPE;
 
   return (
     <div ref={root} className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6">
-      {loading ? (
-        <>
-          {backButton}
-          <div role="status" aria-label={t(`${DKEY}.loading`)}>
-            <DetailSkeleton />
-          </div>
-        </>
-      ) : notFound ? (
+      {notFound ? (
         <ProductsStatus
           tone="empty"
           title={t(`${DKEY}.notFound.title`)}
@@ -266,10 +316,47 @@ const ProductDetailPage: React.FC = () => {
           }
         />
       ) : (
-        product && (
-          <>
-            {backButton}
-            <div className="grid gap-6 lg:grid-cols-2 lg:gap-10">
+        <>
+          {/* The back affordance + the page's SHARE — real chrome from first paint, OUTSIDE the
+              reveal so the skeleton → content hand-off never touches it. The share is ALWAYS
+              mounted (it sizes the row from the first frame — a late mount reflowed the whole
+              column, the "glitch tilt") and merely FADES in once the product is known: binary
+              state, so CSS owns the transition. While hidden it is inert + aria-hidden (nothing
+              focusable/clickable shares a nameless product). A warm arrival renders it visible
+              from the first frame, so the grid→detail morph sees exactly what it always saw.
+              Share = the product's deep link; every role can spread the catalog (hidden info
+              never leaves the server anyway). */}
+          <div className="reveal-item flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={goBack}
+              className="flex w-fit cursor-pointer items-center gap-1.5 rounded-chip text-sm text-charcoal/55 transition-colors hover:text-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta focus-visible:ring-offset-2"
+            >
+              <HiOutlineArrowLeft aria-hidden className="size-4" />
+              {t(`${DKEY}.back`)}
+            </button>
+            <div
+              aria-hidden={!product}
+              inert={!product}
+              className={`transition-opacity duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
+                product ? 'opacity-100' : 'opacity-0'
+              }`}
+            >
+              <ShareButton title={product?.name ?? ''} url={window.location.href} />
+            </div>
+          </div>
+          {/* Skeleton → content is an IN-PLACE reveal (the add-product doctrine): the shimmer
+              dissolves while the real items cascade in — never a blank-out + re-entrance. */}
+          <SectionReveal
+            loading={loading}
+            skeleton={
+              <div role="status" aria-label={t(`${DKEY}.loading`)}>
+                <DetailSkeleton />
+              </div>
+            }
+          >
+            {product && (
+              <div className="grid gap-6 lg:grid-cols-2 lg:gap-10">
               {/* ── Gallery ─────────────────────────────────────────────────────────────── */}
               <div className="flex flex-col gap-3">
                 {/* The hero — the morph's TARGET (same `data-morph-id` as the card photo). */}
@@ -278,13 +365,37 @@ const ProductDetailPage: React.FC = () => {
                   data-morph-id={id}
                   className="reveal-item relative aspect-[4/3] overflow-hidden rounded-card bg-white ring-1 ring-black/[0.04] shadow-sm"
                 >
-                  {activeImage ? (
+                  {/* The GHOST layer (the outgoing image) sits under the incoming one during the
+                      crossfade — rendered first so the real hero stays on top. */}
+                  {ghostImageUrl && (
                     <img
-                      ref={heroImage}
-                      src={activeImage.url}
-                      alt={t(`${KEY}.imageAlt`, { name: product.name })}
+                      aria-hidden
+                      src={ghostImageUrl}
                       className="absolute inset-0 size-full object-cover"
                     />
+                  )}
+                  {activeImage ? (
+                    <>
+                      <img
+                        ref={heroImage}
+                        data-testid="product-hero-image"
+                        src={activeImage.url}
+                        alt={t(`${KEY}.imageAlt`, { name: product.name })}
+                        className="absolute inset-0 size-full object-cover"
+                      />
+                      {/* The whole hero opens the full-size viewer; the corner glyph is the
+                          visible affordance (part of the same button — one control). */}
+                      <button
+                        type="button"
+                        aria-label={t(`${DKEY}.lightbox.open`)}
+                        onClick={() => setLightboxOpen(true)}
+                        className="group/zoom absolute inset-0 z-[1] cursor-zoom-in rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
+                      >
+                        <span className="absolute right-2 top-2 grid size-9 place-items-center rounded-full bg-white/85 text-charcoal opacity-75 shadow-sm transition-[opacity,scale] duration-200 ease-[var(--ease-settle)] group-hover/zoom:scale-105 group-hover/zoom:opacity-100 motion-reduce:transition-none">
+                          <HiOutlineArrowsPointingOut aria-hidden className="size-4" />
+                        </span>
+                      </button>
+                    </>
                   ) : (
                     <span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-cream to-blossom text-charcoal/25">
                       <LogoMark className="size-20" />
@@ -299,11 +410,16 @@ const ProductDetailPage: React.FC = () => {
                         type="button"
                         aria-label={t(`${DKEY}.thumbAlt`, { index: index + 1, name: product.name })}
                         aria-current={index === activeIndex || undefined}
-                        onClick={() => setActiveIndex(index)}
-                        className={`relative size-16 cursor-pointer overflow-hidden rounded-control transition-[box-shadow,opacity] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta ${
+                        onClick={() => selectImage(index)}
+                        // ACTIVE = the brand magenta, thicker, with a settle-eased pop (scale) —
+                        // the selection reads instantly; FOCUS = charcoal (swapped on purpose so
+                        // keyboard focus and selection never look alike); HOVER = a slight lift
+                        // and grow, not just the opacity clear. Transitions name `scale`/
+                        // `translate` explicitly (Tailwind v4 independent-property trap).
+                        className={`relative size-16 shrink-0 cursor-pointer overflow-hidden rounded-control transition-[box-shadow,opacity,scale,translate] duration-200 ease-[var(--ease-settle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-charcoal motion-reduce:transition-none ${
                           index === activeIndex
-                            ? 'ring-2 ring-charcoal'
-                            : 'opacity-70 ring-1 ring-black/[0.06] hover:opacity-100'
+                            ? 'scale-[1.06] ring-[2.5px] ring-magenta'
+                            : 'opacity-70 ring-1 ring-black/[0.06] hover:-translate-y-0.5 hover:scale-[1.04] hover:opacity-100'
                         }`}
                       >
                         <img src={image.url} alt="" className="absolute inset-0 size-full object-cover" />
@@ -358,7 +474,7 @@ const ProductDetailPage: React.FC = () => {
                 )}
 
                 {/* Role actions — the card's mapping, full-size. Ordering/renting/buying land with
-                    the orders epic; Editar/Eliminar are design-complete placeholders for Step 3b. */}
+                    the orders epic; Editar opens the edit form; Eliminar stays a placeholder. */}
                 <div className="reveal-item mt-2 flex flex-wrap gap-3">
                   {role === Role.Client ? (
                     isSell ? (
@@ -381,6 +497,7 @@ const ProductDetailPage: React.FC = () => {
                       color={SECONDARY_COLOR}
                       size="sm"
                       startIcon={<HiOutlinePencilSquare className="size-4" />}
+                      onClick={() => panelNavigate(`/panel/productos/${id}/editar`)}
                     >
                       {t(`${DKEY}.actions.edit`)}
                     </Button>
@@ -389,6 +506,7 @@ const ProductDetailPage: React.FC = () => {
                       color={DANGER_COLOR}
                       size="sm"
                       startIcon={<HiOutlineTrash className="size-4" />}
+                      onClick={() => setDeleteOpen(true)}
                     >
                       {t(`${DKEY}.actions.delete`)}
                     </Button>
@@ -396,8 +514,25 @@ const ProductDetailPage: React.FC = () => {
                 </div>
               </div>
             </div>
-          </>
-        )
+            )}
+          </SectionReveal>
+          {lightboxOpen && product && (
+            <ProductLightbox
+              images={images}
+              initialIndex={activeIndex}
+              productName={product.name}
+              onClose={() => setLightboxOpen(false)}
+            />
+          )}
+          {product && (
+            <ProductDeleteModal
+              open={deleteOpen}
+              onClose={() => setDeleteOpen(false)}
+              product={product}
+              onDeleted={handleDeleted}
+            />
+          )}
+        </>
       )}
     </div>
   );

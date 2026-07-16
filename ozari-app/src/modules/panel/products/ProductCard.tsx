@@ -26,30 +26,48 @@ export const SELL_BUSINESS_TYPE = 'Venta';
 /**
  * The stock chip — driven entirely by **which role-gated fields are present** (the projection
  * contract), so there's no role check here:
- *  - `quantity` present (Employee + Admin) → the available count, or "Agotado" at zero;
- *  - else `inStock` present → a plain available / out signal (defensive fallback — the current
+ *  - `available` + `total` present (Admin, Alquiler) → the fleet view, SHORT on the tile ("5 de
+ *    10" — the tile is space-constrained; the detail page spells out "disponibles"); "0 de 10"
+ *    stays visible in amber — a fully-rented fleet is NOT gone, and the admin must see both
+ *    numbers at a glance;
+ *  - `available` alone (Employee, or Admin on Venta) → the takeable count, or the zero wording;
+ *  - else `inStock` present → a plain available / zero signal (defensive fallback — the current
  *    projection always pairs the flag with the count);
  *  - else (Client) → nothing (clients never see stock — deliberate for a rentals catalog).
+ *
+ * The ZERO wording is business-type-aware: a sold-out **Venta** is "Agotado" (gone until the
+ * business restocks), but a fully-booked **Alquiler** is only "No disponible" — its units come
+ * back, so "agotado" would lie. Unknown types take the gentler wording.
  */
 const StockBadge: React.FC<{ product: Product }> = ({ product }) => {
   const { t } = useTranslation();
-  const { quantity, inStock } = product;
+  const { available: availableCount, total, inStock } = product;
+  const zeroLabel =
+    product.businessType === SELL_BUSINESS_TYPE
+      ? t(`${KEY}.stock.out`)
+      : t(`${KEY}.stock.unavailable`);
 
   let available: boolean;
   let label: string;
-  if (quantity !== undefined) {
-    available = quantity > 0;
-    label = available ? t(`${KEY}.stock.count`, { count: quantity }) : t(`${KEY}.stock.out`);
+  if (availableCount !== undefined) {
+    available = availableCount > 0;
+    if (total !== undefined) {
+      label = t(`${KEY}.stock.countOfTotalShort`, { count: availableCount, total });
+    } else {
+      label = available ? t(`${KEY}.stock.count`, { count: availableCount }) : zeroLabel;
+    }
   } else if (inStock !== undefined) {
     available = inStock;
-    label = inStock ? t(`${KEY}.stock.available`) : t(`${KEY}.stock.out`);
+    label = inStock ? t(`${KEY}.stock.available`) : zeroLabel;
   } else {
     return null;
   }
 
   return (
+    // `shrink-0` holds the numbers whole while the type chip yields; `max-w-full truncate` is the
+    // last-resort cap so even a pathologically narrow tile clips with an ellipsis, never overlaps.
     <span
-      className={`inline-flex shrink-0 items-center rounded-chip px-2 py-0.5 text-[11px] font-semibold shadow-sm backdrop-blur ${
+      className={`shrink-0 max-w-full truncate rounded-chip px-2 py-0.5 text-[11px] font-semibold shadow-sm backdrop-blur ${
         available ? 'bg-white/85 text-emerald-600' : 'bg-white/85 text-amber-600'
       }`}
     >
@@ -194,15 +212,18 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
         className="absolute inset-0 z-[1] cursor-pointer rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
       />
 
-      {/* Floating chips: what it is (top-left) and whether it's available (top-right, role-gated).
-          They stay put in both states — no duplicated stock line on the glass. Pointer-transparent
-          (non-interactive) so taps on them reach the stretched button. */}
-      <span className="pointer-events-none absolute left-2 top-2 z-[2] rounded-chip bg-white/85 px-2 py-0.5 text-[11px] font-medium text-charcoal/70 shadow-sm backdrop-blur">
-        {product.businessType}
-      </span>
-      <span className="pointer-events-none absolute right-2 top-2 z-[2] flex">
+      {/* Floating chips: what it is (left) and whether it's available (right, role-gated). ONE
+          flex row instead of two absolutely-pinned corners, so they can NEVER overlap on a narrow
+          tile: the row lays them side by side with a fixed gap, the type chip yields first
+          (truncates — its full name lives on the detail anyway) and the stock badge, already the
+          short "5 de 5" form, holds its numbers. They stay put in both states — no duplicated
+          stock line on the glass. Pointer-transparent so taps on them reach the stretched button. */}
+      <div className="pointer-events-none absolute inset-x-2 top-2 z-[2] flex items-start justify-between gap-2">
+        <span className="min-w-0 truncate rounded-chip bg-white/85 px-2 py-0.5 text-[11px] font-medium text-charcoal/70 shadow-sm backdrop-blur">
+          {product.businessType}
+        </span>
         <StockBadge product={product} />
-      </span>
+      </div>
 
       {/* THE single info block — its text transforms in place (color + size), and the detail rows
           grow open underneath it. Everything moves together on the same 200ms settle curve.

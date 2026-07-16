@@ -7,7 +7,9 @@ import {
   createProductSchema,
   parseMoney,
   parseQuantity,
+  productToFormValues,
   toCreateProductBody,
+  toUpdateProductBody,
   type CreateProductFormType,
 } from './SchemaCreateProduct';
 
@@ -118,6 +120,15 @@ describe('createProductSchema', () => {
       expect(errorPaths({ ...validSell(), rentPrice: '75' })).toContain('rentPrice');
     });
 
+    it('Venta forbids replacementPrice (a sold item is consumed — nothing to replace)', () => {
+      expect(errorPaths({ ...validSell(), replacementPrice: '900' })).toContain('replacementPrice');
+      // Absent/empty on Venta is fine — the rule only bites a PRESENT value.
+      expect(createProductSchema.safeParse({ ...validSell(), replacementPrice: undefined }).success).toBe(true);
+      // Alquiler keeps it optional — present or absent are both fine.
+      expect(createProductSchema.safeParse(validRent()).success).toBe(true);
+      expect(createProductSchema.safeParse({ ...validRent(), replacementPrice: '' }).success).toBe(true);
+    });
+
     it('treats fully ABSENT price fields like empty ones (optional strings)', () => {
       expect(errorPaths({ ...validRent(), rentPrice: undefined })).toContain('rentPrice');
       expect(errorPaths({ ...validSell(), sellPrice: undefined })).toContain('sellPrice');
@@ -221,8 +232,110 @@ describe('toCreateProductBody', () => {
     const absentReplacement = toCreateProductBody({ ...validSell(), replacementPrice: undefined });
     expect(absentReplacement).not.toHaveProperty('replacementPrice');
 
+    // Alquiler WITHOUT a replacement price: the key stays absent (it is optional there) —
+    // empty string and fully absent both map the same way.
+    const rentNoReplacement = toCreateProductBody({ ...validRent(), replacementPrice: '' });
+    expect(rentNoReplacement).not.toHaveProperty('replacementPrice');
+    const rentAbsentReplacement = toCreateProductBody({ ...validRent(), replacementPrice: undefined });
+    expect(rentAbsentReplacement).not.toHaveProperty('replacementPrice');
+
     const nullUnit = toCreateProductBody({ ...validRent(), rentTimeUnitId: null as never });
     expect(nullUnit.rentTimeUnitId).toBeUndefined();
+  });
+});
+
+describe('toUpdateProductBody', () => {
+  it('keeps detail row ids (kept rows update in place; id-less rows create)', () => {
+    const body = toUpdateProductBody({
+      ...validRent(),
+      details: [
+        { id: 12, detailTypeId: 1, detail: '  Blanco nieve  ' },
+        { detailTypeId: 2, detail: 'Madera de pino' },
+      ],
+    });
+
+    expect(body.productDetails).toEqual([
+      { id: 12, detailTypeId: 1, detail: 'Blanco nieve' },
+      { detailTypeId: 2, detail: 'Madera de pino' },
+    ]);
+    expect(body.productDetails[1]).not.toHaveProperty('id');
+    // The gallery is assembled by the FORM (kept ids + uploaded keys) — the mapper leaves it empty.
+    expect(body.images).toEqual([]);
+  });
+
+  it('maps the scalars exactly like the create body (conditional pricing included)', () => {
+    const rent = toUpdateProductBody(validRent());
+    expect(rent).toMatchObject({ rentPrice: 75, rentTimeUnitId: 2, replacementPrice: 900 });
+    expect(rent).not.toHaveProperty('sellPrice');
+
+    const sell = toUpdateProductBody(validSell());
+    expect(sell).toMatchObject({ sellPrice: 12.5 });
+    expect(sell.rentPrice).toBeUndefined();
+  });
+});
+
+describe('productToFormValues', () => {
+  const adminRentProduct = {
+    name: 'Mesa redonda',
+    description: 'Mesa para 8 personas',
+    businessTypeId: BUSINESS_TYPE_RENT,
+    categoryId: 3,
+    currency: { id: 1 },
+    rentPrice: 75,
+    rentTimeUnitId: 2,
+    replacementPrice: 900,
+    available: 35,
+    total: 40,
+    details: [{ id: 12, detailTypeId: 1, detail: 'Blanco' }],
+  };
+
+  it('prefills an Alquiler product — the recorded quantity is the fleet TOTAL', () => {
+    expect(productToFormValues(adminRentProduct)).toEqual({
+      name: 'Mesa redonda',
+      description: 'Mesa para 8 personas',
+      businessTypeId: BUSINESS_TYPE_RENT,
+      categoryId: 3,
+      currencyId: 1,
+      quantity: '40',
+      rentPrice: '75',
+      rentTimeUnitId: 2,
+      replacementPrice: '900',
+      sellPrice: '',
+      details: [{ id: 12, detailTypeId: 1, detail: 'Blanco' }],
+    });
+  });
+
+  it('prefills a Venta product — the recorded quantity IS `available` (no fleet total)', () => {
+    const values = productToFormValues({
+      name: 'Vasos',
+      businessTypeId: BUSINESS_TYPE_SELL,
+      categoryId: 2,
+      currency: { id: 1 },
+      sellPrice: 12.5,
+      available: 100,
+      details: [],
+    });
+
+    expect(values).toMatchObject({
+      quantity: '100',
+      sellPrice: '12.5',
+      rentPrice: '',
+      replacementPrice: '',
+      rentTimeUnitId: null,
+      description: '',
+    });
+  });
+
+  it('falls back to 0 when the projection carries no quantity field at all', () => {
+    expect(
+      productToFormValues({
+        name: 'Vasos',
+        businessTypeId: BUSINESS_TYPE_SELL,
+        categoryId: 2,
+        currency: { id: 1 },
+        details: [],
+      }).quantity,
+    ).toBe('0');
   });
 });
 

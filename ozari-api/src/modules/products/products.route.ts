@@ -5,13 +5,17 @@ import { RolesEnum } from "@models/enums/rolesEnum.js";
 import {
   createProduct,
   createProductImageUploads,
+  deleteProduct,
   getProductById,
   getProductCatalog,
   getProducts,
+  updateProduct,
 } from "./products.controller.js";
 import {
   validateCreateProduct,
   validateCreateProductImageUploads,
+  validateDeleteProduct,
+  validateUpdateProduct,
 } from "./products.validator.js";
 
 const router: RouterType = Router();
@@ -42,8 +46,25 @@ router.post(
   createProductImageUploads,
 );
 
-// Region: remaining writes — WIP, not mounted until rebuilt against the new Product shape.
-// router.put("/:id", verifyJwt, isGrantedRoles([RolesEnum.Admin]), validateUpdateProduct, updateProduct);
-// router.delete("/:id", verifyJwt, isGrantedRoles([RolesEnum.Admin]), validateDeleteProduct, deleteProduct);
+// Declarative full-state update (the RECONCILE design): the body carries the product's FINAL
+// desired state — scalars + details + gallery — and the backend diffs in one transaction. Same
+// cheap-role-check-first ordering as create.
+router.put(
+  "/:id",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  validateUpdateProduct,
+  updateProduct,
+);
+
+// Deletion under the NO-TRASH policy: the row tombstones (soft) only when order history references
+// it; otherwise it hard-deletes — details/images rows and the R2 objects go either way.
+router.delete(
+  "/:id",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  validateDeleteProduct,
+  deleteProduct,
+);
 
 export default router;

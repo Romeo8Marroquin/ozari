@@ -13,8 +13,16 @@ import { useProductImageUploads } from './useProductImageUploads';
 const image = (id: string, name = `${id}.png`): GalleryImage => {
   const file = new File(['x'], name, { type: 'image/png' });
   Object.defineProperty(file, 'size', { value: 2048 });
-  return { id, file, previewUrl: `blob:${id}` };
+  return { id, file, name, previewUrl: `blob:${id}` };
 };
+
+/** An EXISTING (already-uploaded) photo — no `file`, so it must never upload again. */
+const existingImage = (id: string, existingId: number): GalleryImage => ({
+  id,
+  existingId,
+  name: `foto-${existingId}`,
+  previewUrl: `https://cdn.test/products/${existingId}.webp`,
+});
 
 const presignResponse = (keys: string[]) => ({
   data: {
@@ -31,14 +39,23 @@ const presignResponse = (keys: string[]) => ({
 beforeEach(() => vi.clearAllMocks());
 
 describe('useProductImageUploads', () => {
-  it('resolves [] immediately for an empty gallery — no network at all', async () => {
+  it('resolves {} immediately for an empty gallery — no network at all', async () => {
     const { result } = renderHook(() => useProductImageUploads());
-    await expect(result.current.uploadImages([])).resolves.toEqual([]);
+    await expect(result.current.uploadImages([])).resolves.toEqual({});
     expect(apiPost).not.toHaveBeenCalled();
     expect(axiosPut).not.toHaveBeenCalled();
   });
 
-  it('mints presigned URLs then PUTs each file straight to R2, returning the keys in order', async () => {
+  it('resolves {} for a gallery of only EXISTING photos — kept photos never re-upload', async () => {
+    const { result } = renderHook(() => useProductImageUploads());
+    await expect(
+      result.current.uploadImages([existingImage('a', 11), existingImage('b', 12)]),
+    ).resolves.toEqual({});
+    expect(apiPost).not.toHaveBeenCalled();
+    expect(axiosPut).not.toHaveBeenCalled();
+  });
+
+  it('mints presigned URLs then PUTs each file straight to R2, returning keys by local id', async () => {
     apiPost.mockResolvedValue(presignResponse(['products/k1.png', 'products/k2.png']));
     axiosPut.mockResolvedValue({});
     const images = [image('a'), image('b')];
@@ -46,7 +63,7 @@ describe('useProductImageUploads', () => {
     const { result } = renderHook(() => useProductImageUploads());
     const keys = await result.current.uploadImages(images);
 
-    expect(keys).toEqual(['products/k1.png', 'products/k2.png']);
+    expect(keys).toEqual({ a: 'products/k1.png', b: 'products/k2.png' });
     // The presign request carries type + exact size (both bound into the signature server-side).
     expect(apiPost).toHaveBeenCalledWith(
       '/products/images/upload-url',
@@ -79,9 +96,10 @@ describe('useProductImageUploads', () => {
     });
 
     const { result } = renderHook(() => useProductImageUploads());
-    let pending: Promise<string[]>;
+    let pending: Promise<Record<string, string>>;
     act(() => {
-      pending = result.current.uploadImages([image('a')]);
+      // A mixed gallery: the kept photo is skipped entirely; only the new file presigns/uploads.
+      pending = result.current.uploadImages([existingImage('kept', 11), image('a')]);
     });
 
     await vi.waitFor(() => expect(result.current.isUploading).toBe(true));
@@ -115,7 +133,7 @@ describe('useProductImageUploads', () => {
   it('treats a malformed presign payload (no data) as zero uploads', async () => {
     apiPost.mockResolvedValue({ data: {} });
     const { result } = renderHook(() => useProductImageUploads());
-    await expect(result.current.uploadImages([image('a')])).resolves.toEqual([]);
+    await expect(result.current.uploadImages([image('a')])).resolves.toEqual({});
     expect(axiosPut).not.toHaveBeenCalled();
   });
 });

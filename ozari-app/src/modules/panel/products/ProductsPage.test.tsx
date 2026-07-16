@@ -68,7 +68,9 @@ const product = (id: number, name: string): Product => ({
   id,
   name,
   businessType: 'Alquiler',
+  businessTypeId: 1,
   category: 'Mesas',
+  categoryId: 1,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
   rentPrice: 75,
   rentTimeUnit: 'Día',
@@ -429,7 +431,7 @@ describe('ProductsPage', () => {
     expect(screen.getByText(`${K}.count.all`)).toBeInTheDocument();
   });
 
-  it('dims the current grid while a filter change loads over it (keepPreviousData)', () => {
+  it('turns the current tiles into skeletons during a filter change (reverse crossfade, extras sweep in)', async () => {
     setProducts({
       ...withProducts([product(1, 'Mesa redonda')]),
       isPlaceholderData: true,
@@ -437,9 +439,16 @@ describe('ProductsPage', () => {
     });
     renderPage();
 
-    // The stale grid stays interactive but visibly dimmed; the cards never flash to skeletons.
-    expect(document.querySelector('.opacity-60')).not.toBeNull();
-    expect(screen.getAllByText('Mesa redonda').length).toBeGreaterThan(0);
+    // The skeleton doctrine takes over IN PLACE: the grid announces loading, the existing tile
+    // ghost-fades to shimmer (instant under reduced motion), and the missing tiles top up to the
+    // skeleton count as fresh `.skel-enter` sweeps.
+    expect(screen.getByRole('status', { name: `${K}.loading` })).toBeInTheDocument();
+    // Scoped to the grid — the chrome rows carry their own sweep tag on unfiltered transitions.
+    expect(document.querySelectorAll('[role="status"] .product-skel')).toHaveLength(12);
+    expect(document.querySelectorAll('.skel-enter')).toHaveLength(11);
+    await waitFor(() => expect(screen.queryByText('Mesa redonda')).not.toBeInTheDocument());
+    // The chrome never flinches — header + filter bar stay put through the transition.
+    expect(screen.getByText(`${K}.lead`)).toBeInTheDocument();
   });
 
   it('swaps a settled grid for the filtered-empty panel (and back) without a skeleton phase', async () => {
@@ -464,7 +473,7 @@ describe('ProductsPage', () => {
     expect(screen.getAllByText('Mesa redonda').length).toBeGreaterThan(0);
   });
 
-  it('stays calm when a filter change resolves empty over an already-empty result', async () => {
+  it('cycles filtered-empty → skeletons → filtered-empty across an empty-over-empty filter change', async () => {
     routerState.search = { q: 'zzz' };
     setProducts(withProducts([]));
     const { rerender } = renderPage();
@@ -472,14 +481,18 @@ describe('ProductsPage', () => {
       expect(screen.getByRole('heading', { name: `${K}.filteredEmpty.title` })).toBeInTheDocument(),
     );
 
-    // Narrow the filter further: the placeholder rides over the same empty panel, then resolves
-    // empty again — no re-stagger target changes, the panel simply remains.
+    // Narrowing the filter re-queries: the skeleton grid takes the panel's place while it loads…
     routerState.search = { q: 'zzzz' };
     setProducts({ ...withProducts([]), isPlaceholderData: true, isFetching: true });
     rerender(<ProductsPage />);
+    expect(screen.getByRole('status', { name: `${K}.loading` })).toBeInTheDocument();
+
+    // …and an empty resolution sweeps the skeletons out and brings the panel back.
     setProducts(withProducts([]));
     rerender(<ProductsPage />);
-    expect(screen.getByRole('heading', { name: `${K}.filteredEmpty.title` })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: `${K}.filteredEmpty.title` })).toBeInTheDocument(),
+    );
   });
 
   it('falls back to a full page of append skeletons when the total is unknown', () => {
@@ -494,19 +507,22 @@ describe('ProductsPage', () => {
     expect(document.querySelectorAll('.append-skel')).toHaveLength(24);
   });
 
-  it('re-staggers the fresh results when a filter change resolves', async () => {
+  it('replays the pairwise hand-off when a filter change resolves (skeletons crossfade to the new cards)', async () => {
     setProducts({
       ...withProducts([product(1, 'Mesa redonda')]),
       isPlaceholderData: true,
       isFetching: true,
     });
     const { rerender } = renderPage();
+    expect(screen.getByRole('status')).toBeInTheDocument();
 
     setProducts(withProducts([product(9, 'Silla plegable')]));
     rerender(<ProductsPage />);
 
     await waitFor(() => expect(screen.getAllByText('Silla plegable').length).toBeGreaterThan(0));
-    expect(document.querySelector('.opacity-60')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    // The orphan skeletons finished their sweep — only the real card remains.
+    await waitFor(() => expect(document.querySelectorAll('.product-skel')).toHaveLength(0));
   });
 
   it('registers a motion pair whose exit resolves and whose enter replays the reveal', async () => {

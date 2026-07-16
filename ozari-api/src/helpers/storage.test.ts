@@ -8,6 +8,7 @@ const {
   sendMock,
   putCommandCtor,
   deleteCommandCtor,
+  deleteBatchCommandCtor,
   getSignedUrlMock,
 } = vi.hoisted(() => {
   const sendMock = vi.fn();
@@ -20,12 +21,16 @@ const {
   const deleteCommandCtor = vi.fn(function DeleteMock(input: unknown) {
     return { input };
   });
+  const deleteBatchCommandCtor = vi.fn(function DeleteBatchMock(input: unknown) {
+    return { input };
+  });
   const getSignedUrlMock = vi.fn();
   return {
     s3ClientCtor,
     sendMock,
     putCommandCtor,
     deleteCommandCtor,
+    deleteBatchCommandCtor,
     getSignedUrlMock,
   };
 });
@@ -33,6 +38,7 @@ vi.mock("@aws-sdk/client-s3", () => ({
   S3Client: s3ClientCtor,
   PutObjectCommand: putCommandCtor,
   DeleteObjectCommand: deleteCommandCtor,
+  DeleteObjectsCommand: deleteBatchCommandCtor,
 }));
 vi.mock("@aws-sdk/s3-request-presigner", () => ({
   getSignedUrl: getSignedUrlMock,
@@ -124,6 +130,27 @@ describe("R2Storage", () => {
       Key: "products/abc.png",
     });
     expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes a whole gallery in ONE batched round-trip", async () => {
+    const { R2Storage } = await import("./storage.js");
+    await new R2Storage(CONFIG).deleteObjects(["products/a.png", "products/b.webp"]);
+
+    expect(deleteBatchCommandCtor).toHaveBeenCalledWith({
+      Bucket: "ozari-assets",
+      Delete: {
+        Objects: [{ Key: "products/a.png" }, { Key: "products/b.webp" }],
+        Quiet: true,
+      },
+    });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("never calls out for an empty key list", async () => {
+    const { R2Storage } = await import("./storage.js");
+    await new R2Storage(CONFIG).deleteObjects([]);
+    expect(deleteBatchCommandCtor).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
   });
 
   it("builds a public URL, stripping a trailing slash from the base", async () => {

@@ -159,3 +159,98 @@ describe('useGalleryImages — removing & the primary star', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('useGalleryImages — seeding from a product (edit mode)', () => {
+  const productImages = [
+    { id: 11, url: 'https://cdn/a.webp', isPrimary: false, sortOrder: 0 },
+    { id: 12, url: 'https://cdn/b.webp', isPrimary: true, sortOrder: 1 },
+  ];
+
+  it('seeds existing photos in display order, starring the FLAGGED one', () => {
+    const { result } = renderHook(() => useGalleryImages(productImages));
+
+    expect(result.current.images).toHaveLength(2);
+    expect(result.current.images[0]).toMatchObject({
+      existingId: 11,
+      previewUrl: 'https://cdn/a.webp',
+      name: 'foto-1',
+    });
+    expect(result.current.images[0].file).toBeUndefined();
+    // The star follows the isPrimary flag, NOT the position.
+    expect(result.current.primaryId).toBe(result.current.images[1].id);
+  });
+
+  it('falls back to the FIRST photo when no seed is flagged (the backend default)', () => {
+    const flagless = productImages.map((image) => ({ ...image, isPrimary: false }));
+    const { result } = renderHook(() => useGalleryImages(flagless));
+    expect(result.current.primaryId).toBe(result.current.images[0].id);
+  });
+
+  it('mixes staged files in after the seed, and the duplicate check ignores existing photos', () => {
+    const { result } = renderHook(() => useGalleryImages(productImages));
+    act(() => result.current.addFiles([makeFile('c.png')]));
+
+    expect(result.current.images).toHaveLength(3);
+    expect(result.current.images[2].file).toBeDefined();
+    expect(result.current.error).toBeUndefined();
+  });
+
+  it('removing an EXISTING photo never revokes (its URL is remote, not an object URL)', () => {
+    const { result, unmount } = renderHook(() => useGalleryImages(productImages));
+    act(() => result.current.removeImage(result.current.images[0].id));
+
+    expect(result.current.images).toHaveLength(1);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+
+    // Unmount cleanup skips existing photos too.
+    unmount();
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  });
+});
+
+describe('useGalleryImages — reordering', () => {
+  const threePhotos = () => {
+    const view = renderHook(() => useGalleryImages());
+    act(() =>
+      view.result.current.addFiles([
+        makeFile('a.png', { lastModified: 1 }),
+        makeFile('b.png', { lastModified: 2 }),
+        makeFile('c.png', { lastModified: 3 }),
+      ]),
+    );
+    return view;
+  };
+
+  it('moves a photo to the target slot — the star rides the PHOTO, never the slot', () => {
+    const { result } = threePhotos();
+    const [a, b, c] = result.current.images;
+    expect(result.current.primaryId).toBe(a.id);
+
+    act(() => result.current.moveImage(c.id, 0));
+    expect(result.current.images.map((image) => image.id)).toEqual([c.id, a.id, b.id]);
+    // The primary is still photo `a`, now in the middle — order and star are independent.
+    expect(result.current.primaryId).toBe(a.id);
+  });
+
+  it('clamps an out-of-range target index to the ends', () => {
+    const { result } = threePhotos();
+    const [a, , c] = result.current.images;
+
+    act(() => result.current.moveImage(a.id, 99));
+    expect(result.current.images[2].id).toBe(a.id);
+
+    act(() => result.current.moveImage(c.id, -5));
+    expect(result.current.images[0].id).toBe(c.id);
+  });
+
+  it('no-ops for an unknown id and for a same-slot move', () => {
+    const { result } = threePhotos();
+    const before = result.current.images;
+
+    act(() => result.current.moveImage('gallery-nope', 0));
+    expect(result.current.images).toBe(before);
+
+    act(() => result.current.moveImage(before[1].id, 1));
+    expect(result.current.images).toBe(before);
+  });
+});

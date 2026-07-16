@@ -277,8 +277,10 @@ model Product {
 
 // A product photo stored in R2. Supersedes the retired single `Product.imageUrl`: a product has a
 // gallery of images ordered by `sortOrder`, exactly one of which is the primary (`isPrimary`) shown
-// in the grid/list and as the hero. `r2Key` is the object key (used to delete from R2); `url` is the
-// public read URL. Soft-deleted via `isActive` (cascade is application-level, not a DB cascade).
+// in the grid/list and opened first on the detail page. `r2Key` is the object key (used to delete
+// from R2); `url` is the public read URL. **Hard-deleted, never tombstoned** (the no-trash policy,
+// owner decision 2026-07-15): a removed photo's row is deleted in the update/delete transaction and
+// its R2 object is removed post-commit — nothing references an image row, so nothing needs a flag.
 model ProductImage {
   id        Int       @id @default(autoincrement())
   productId Int       @map("product_id")
@@ -288,13 +290,12 @@ model ProductImage {
   url       String
   sortOrder Int       @default(0) @map("sort_order")
   isPrimary Boolean   @default(false) @map("is_primary")
-  isActive  Boolean   @default(true) @map("is_active")
   updatedAt DateTime? @updatedAt @map("updated_at")
   createdAt DateTime  @default(now()) @map("created_at")
 
   product Product @relation(fields: [productId], references: [id])
 
-  @@index([productId, isActive])
+  @@index([productId])
   @@map("product_images")
 }
 
@@ -311,12 +312,13 @@ model ProductDetailType {
   @@map("product_detail_types")
 }
 
+// A product spec row (color, material, …). **Hard-deleted, never tombstoned** (the no-trash
+// policy): pure attributes with no dependents — the declarative update/delete reconciles rows away.
 model ProductDetail {
   id                  Int       @id @default(autoincrement())
   productId           Int       @map("product_id")
   productDetailTypeId Int       @map("product_detail_type_id")
   detail              String
-  isActive            Boolean   @default(true) @map("is_active")
   updatedAt           DateTime? @updatedAt @map("updated_at")
   createdAt           DateTime  @default(now()) @map("created_at")
 

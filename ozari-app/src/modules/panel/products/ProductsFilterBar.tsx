@@ -8,10 +8,9 @@ import {
 import Button from '@components/Button';
 import CustomInput from '@components/CustomInput';
 import CustomSelect from '@components/CustomSelect';
-import RoleGate from '@components/RoleGate';
-import { Role } from '@constants/Roles';
 import {
   hasActiveFilters,
+  PRODUCT_LIST_ORDERS,
   PRODUCT_SEARCH_MAX_LENGTH,
   type ProductListSearch,
 } from './productListSearch';
@@ -24,10 +23,6 @@ const KEY = 'modules.panel.products.filters';
  * purpose: a short pause mid-phrase must NOT search yet (Enter is the "search now" fast path).
  */
 export const SEARCH_DEBOUNCE_MS = 600;
-
-/** The stock select's option values (a native select option can't carry a boolean). */
-const STOCK_IN = 1;
-const STOCK_OUT = 2;
 
 const CLEAR_COLOR = '#262626';
 const PANEL_ID = 'products-filters-panel';
@@ -43,8 +38,11 @@ interface ProductsFilterBarProps {
  * The catalog's filter toolbar, ONE composition at every width (owner decision, 2026-07-14 — it
  * replaced an inline-on-desktop variant): the **always-visible search** — the primary, most-used
  * filter — shares its row with a **"Filtros" toggle**, and the secondary selects (category /
- * business type / — Employee+Admin only — availability) live in a `grid-rows 0fr↔1fr` panel that
- * eases open and closed. Keeping the search out of the panel is deliberate best practice: hiding
+ * business type / sort, all roles) live in a `grid-rows 0fr↔1fr` panel that eases open and closed.
+ * The SORT is a single select with explicit combined options ("Nombre: A → Z", "Precio: menor a
+ * mayor" — each states its own direction, no separate asc/desc switch to decode; the placeholder
+ * IS the default, "Más recientes"). It replaced the old availability filter (owner decision,
+ * 2026-07-15): availability means different things per role, while an ordering serves everyone. Keeping the search out of the panel is deliberate best practice: hiding
  * the highest-frequency control behind a click hurts discoverability; the facets are the part that
  * earns progressive disclosure. Hidden never means invisible: the toggle is badged with the active
  * select count, the panel starts open when a deep link arrives with a select filter set, and the
@@ -123,18 +121,20 @@ const ProductsFilterBar: React.FC<ProductsFilterBarProps> = ({ search, onChange 
     value: option.id,
     label: option.name,
   }));
-  const stockOptions = [
-    { value: STOCK_IN, label: t(`${KEY}.stockIn`) },
-    { value: STOCK_OUT, label: t(`${KEY}.stockOut`) },
-  ];
+  // Each option states its own direction in words — self-explanatory, nothing to decode.
+  const sortOptions = PRODUCT_LIST_ORDERS.map((value) => ({
+    value,
+    label: t(`${KEY}.sortOptions.${value}`),
+  }));
 
   const clearActive = hasActiveFilters(search);
-  // How many SELECT filters are active — the toggle's badge (the search is always visible, so `q`
-  // doesn't count; the badge is what keeps hidden-but-active filters evident).
+  // How many SELECT states are non-default — the toggle's badge (the search is always visible, so
+  // `q` doesn't count; the badge is what keeps hidden-but-active panel state evident). A
+  // non-default sort counts too: it reshapes the list and clears with the same button.
   const selectFilterCount =
     (search.categoria === undefined ? 0 : 1) +
     (search.tipo === undefined ? 0 : 1) +
-    (search.stock === undefined ? 0 : 1);
+    (search.orden === undefined ? 0 : 1);
 
   // The panel starts open when a deep link already carries a select filter (arriving state should
   // be visible), and toggles freely afterwards. Local UI state — never in the URL.
@@ -219,19 +219,20 @@ const ProductsFilterBar: React.FC<ProductsFilterBarProps> = ({ search, onChange 
               disabled={!catalog}
               onChange={(event) => onChange({ ...search, tipo: selectValue(event.target.value) })}
             />
-            <RoleGate roles={[Role.Admin, Role.Employee]}>
-              <CustomSelect
-                id="products-filter-stock"
-                label={t(`${KEY}.stock`)}
-                options={stockOptions}
-                placeholderOption={t(`${KEY}.allMasculine`)}
-                value={search.stock === undefined ? '' : search.stock ? STOCK_IN : STOCK_OUT}
-                onChange={(event) => {
-                  const value = selectValue(event.target.value);
-                  onChange({ ...search, stock: value === undefined ? undefined : value === STOCK_IN });
-                }}
-              />
-            </RoleGate>
+            <CustomSelect
+              id="products-filter-orden"
+              label={t(`${KEY}.sort`)}
+              options={sortOptions}
+              placeholderOption={t(`${KEY}.sortOptions.recientes`)}
+              value={search.orden ?? ''}
+              onChange={(event) => {
+                const raw = event.target.value;
+                onChange({
+                  ...search,
+                  orden: PRODUCT_LIST_ORDERS.find((value) => value === raw),
+                });
+              }}
+            />
           </div>
         </div>
       </div>

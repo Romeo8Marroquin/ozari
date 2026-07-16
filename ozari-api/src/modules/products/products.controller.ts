@@ -18,23 +18,54 @@ import {
   type ProductDetailResponseModel,
   type ProductImageUploadsResponseModel,
   type ProductListResponseModel,
+  type UpdateProductRequestModel,
 } from "./products.models.js";
 import {
+  applyProductDelete,
+  applyProductUpdate,
   buildPaginationMeta,
   buildProductImagesCreate,
   buildProductListWhere,
+  buildRentedNowWhere,
   parseProductListQuery,
+  ProductStateConflictError,
+  productSortSelect,
   projectProductForRole,
+  rentProductIds,
   richProductInclude,
+  sortProductIdPage,
+  type RichProduct,
 } from "./products.service.js";
+
+/**
+ * Units of each RENT product currently out on active rentals (`buildRentedNowWhere` is the business
+ * rule), keyed by product id. Venta products are skipped (their `quantity` IS the availability) and
+ * so is the query itself when the page has no rentals. Products without active rentals simply have
+ * no entry — callers default to 0.
+ */
+const loadRentedNowByProductId = async (
+  products: ReadonlyArray<Pick<RichProduct, "id" | "productBusinessTypeId">>,
+): Promise<Map<number, number>> => {
+  const ids = rentProductIds(products);
+  if (ids.length === 0) {
+    return new Map();
+  }
+  const prismaClient = await getPrismaClient();
+  const grouped = await prismaClient.serviceDetail.groupBy({
+    by: ["productId"],
+    where: buildRentedNowWhere(ids, new Date()),
+    _sum: { quantity: true },
+  });
+  return new Map(grouped.map((row) => [row.productId, row._sum.quantity ?? 0]));
+};
 
 /**
  * `GET /products` — the paginated product catalog. Available to **every authenticated role**; the
  * response is **role-projected** so each role sees only the fields it should (minimum privilege — the
  * exact stock count is Admin-only, an in-stock signal is Employee+, everything else is shared). Row
  * visibility is uniform (the active catalog); the role axis is the *fields* (`projectProductForRole`).
- * Optional filters (`search`/`categoryId`/`businessTypeId`, Employee+ `inStock`, Admin-only
- * `includeInactive`) narrow the rows; like the pagination params they clamp or drop, never 400.
+ * Optional filters (`search`/`categoryId`/`businessTypeId`, Admin-only `includeInactive`) narrow the
+ * rows and `sort` orders them; like the pagination params they clamp or drop, never 400.
  */
 export const getProducts = async (
   req: CustomRequest,
@@ -45,27 +76,57 @@ export const getProducts = async (
     // The role feeds the parser too: `includeInactive` is honoured for Admin only.
     const role = req.user?.userRole ?? RolesEnum.Client;
     const query = parseProductListQuery(req.query, role);
-    const { page, pageSize } = query;
+    const { page, pageSize, sort } = query;
 
     const prismaClient = await getPrismaClient();
     const where = buildProductListWhere(query);
-    const [rawProducts, total] = await Promise.all([
-      prismaClient.product.findMany({
+
+    let rawProducts: RichProduct[];
+    let total: number;
+    if (sort === "recent") {
+      // The default order lives in SQL: newest first (oldest land at the bottom of the grid),
+      // `id` tiebreaking same-timestamp rows so pagination pages never shuffle.
+      [rawProducts, total] = await Promise.all([
+        prismaClient.product.findMany({
+          where,
+          include: richProductInclude,
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        prismaClient.product.count({ where }),
+      ]);
+    } else {
+      // Name/price orders need the Spanish collation / COALESCE — the in-memory id-page path
+      // (see `sortProductIdPage`): fetch the filtered set minimally, order + slice, then fetch
+      // the page rich. The minimal fetch doubles as the count.
+      const sortRows = await prismaClient.product.findMany({
         where,
-        include: richProductInclude,
-        // Newest first (oldest land at the bottom of the grid) — the DEFAULT order until admin
-        // filters/custom ordering arrive. `id` tiebreaks same-timestamp rows so pagination pages
-        // never shuffle.
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      prismaClient.product.count({ where }),
-    ]);
+        select: productSortSelect,
+      });
+      total = sortRows.length;
+      const pageIds = sortProductIdPage(sortRows, sort, page, pageSize);
+      const unordered =
+        pageIds.length > 0
+          ? await prismaClient.product.findMany({
+              where: { id: { in: pageIds } },
+              include: richProductInclude,
+            })
+          : [];
+      const byId = new Map(unordered.map((product) => [product.id, product]));
+      // The id-page order is authoritative; a row deleted between the two reads drops out cleanly.
+      rawProducts = pageIds.flatMap((id) => {
+        const product = byId.get(id);
+        return product ? [product] : [];
+      });
+    }
+
+    // Derived availability: what each rental has OUT right now (one grouped query for the page).
+    const rentedNow = await loadRentedNowByProductId(rawProducts);
 
     const response: ProductListResponseModel = {
       products: rawProducts.map((product) =>
-        projectProductForRole(product, role),
+        projectProductForRole(product, role, rentedNow.get(product.id) ?? 0),
       ),
       pagination: buildPaginationMeta(page, pageSize, total),
     };
@@ -139,8 +200,13 @@ export const getProductById = async (
       return;
     }
 
+    const rentedNow = await loadRentedNowByProductId([rawProduct]);
     const response: ProductDetailResponseModel = {
-      product: projectProductForRole(rawProduct, role),
+      product: projectProductForRole(
+        rawProduct,
+        role,
+        rentedNow.get(rawProduct.id) ?? 0,
+      ),
     };
     logger.info(
       i18next.t("products.getProductById.logs.productFetched", { id }),
@@ -391,22 +457,201 @@ export const createProductImageUploads = async (
   }
 };
 
-// ─────────────────────────────────────────────────────────────────────────────────────────────────
-// WIP: update / delete are Admin-only writes, kept commented until they're rebuilt against the new
-// Product shape (conditional pricing, fix-style detail updates, soft-delete cascade). Create is
-// live above — follow its shape when rebuilding these.
-//
-// GALLERY ON UPDATE — the agreed RECONCILE design (owner decision, 2026-07-13). The client stages
-// every gallery movement locally (add/remove/reorder/star = zero network) and, on save, sends the
-// FINAL desired gallery declaratively, in display order: kept photos by `id`, new photos by `key`
-// (already uploaded via the presign flow), exactly one primary. NOT an operation log. The backend
-// computes the diff in ONE $transaction — kept → update sortOrder/isPrimary; rows absent from the
-// list → delete; new keys → create (reuse `buildProductImagesCreate`'s url-derivation stance) —
-// and only AFTER the commit best-effort-deletes the removed objects from R2 (`storage.deleteObject`,
-// log failures, never fail the request; a failed tx must never orphan DB rows pointing at deleted
-// files). Residual: a failed save between upload and update leaves stray R2 objects — bounded,
-// sweepable by a cleanup job diffing the `products/` prefix against `product_images.r2_key`.
-// ─────────────────────────────────────────────────────────────────────────────────────────────────
+/**
+ * `PUT /products/:id` — the declarative full-state update, the RECONCILE design (owner decision,
+ * 2026-07-13). **Admin only** (route guard). The client stages every gallery/detail movement
+ * locally and sends the FINAL desired state; the validator has already enforced the create rules +
+ * ownership, and `applyProductUpdate` diffs it against the live rows in ONE `$transaction` (kept →
+ * update, absent → delete, new → create). Removed R2 objects are deleted best-effort only AFTER
+ * the commit — a rolled-back save can never orphan DB rows pointing at deleted files. Residual: a
+ * save that fails between upload and update leaves stray R2 objects — bounded, sweepable by a
+ * cleanup job diffing the `products/` prefix against `product_images.r2_key` (EPIC-1 §5).
+ *
+ * A kept id that vanished mid-save (another admin's concurrent edit) is a clean **409** — the
+ * client reloads and retries; a replayed R2 key another image owns is the same **400** as create.
+ * The response is the role-projected product, fetched INSIDE the transaction (the committed state).
+ */
+export const updateProduct = async (
+  req: CustomRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const body = req.body as UpdateProductRequestModel;
+    const role = req.user?.userRole ?? RolesEnum.Client;
+    // The validator already resolved this to an existing active product.
+    const id = Number(req.params["id"]);
 
-// export const updateProduct = async (req, res) => { ... };
-// export const deleteProduct = async (req, res) => { ... };
+    const prismaClient = await getPrismaClient();
+    const { removedImageKeys, updated } = await prismaClient.$transaction(
+      async (tx) => {
+        const reconciled = await applyProductUpdate(tx, id, body);
+        return {
+          removedImageKeys: reconciled.removedImageKeys,
+          updated: await tx.product.findUniqueOrThrow({
+            where: { id },
+            include: richProductInclude,
+          }),
+        };
+      },
+    );
+
+    // Post-commit, best-effort R2 cleanup: the DB rows are already gone, so a failed object delete
+    // only leaves a stray file (swept later) — it must NEVER fail the request. Awaited on purpose
+    // (Cloud Run only allocates CPU during the request; fire-and-forget would silently drop it).
+    if (removedImageKeys.length > 0) {
+      const storage = getStorage();
+      await Promise.all(
+        removedImageKeys.map(async (key) => {
+          try {
+            await storage.deleteObject(key);
+          } catch (cleanupError) {
+            logger.warn(
+              i18next.t("products.updateProduct.logs.imageCleanupFailed", {
+                key,
+                error: cleanupError,
+              }),
+            );
+          }
+        }),
+      );
+    }
+
+    logger.info(
+      i18next.t("products.updateProduct.logs.productUpdated", { id }),
+    );
+
+    // Audit log: product updated (deployed environments only, like every audit event).
+    if (isDeployedEnvironment()) {
+      logAudit({
+        action: AuditAction.ADMIN_ACTION,
+        ...(req.user && { userId: req.user.userId }),
+        ...(req.ip && { ipAddress: req.ip }),
+        resource: `Product ID ${id}`,
+        success: true,
+        metadata: { operation: "PRODUCT_UPDATED" },
+      });
+    }
+
+    const rentedNow = await loadRentedNowByProductId([updated]);
+    sendOzariSuccess(
+      res,
+      HttpEnum.OK,
+      i18next.t("products.updateProduct.productUpdated"),
+      projectProductForRole(updated, role, rentedNow.get(id) ?? 0),
+    );
+  } catch (error) {
+    // A kept image/detail id vanished between the validator's read and the transaction — another
+    // admin's save/delete won the race. The transaction rolled back; the client reloads and retries.
+    if (error instanceof ProductStateConflictError) {
+      logger.warn(
+        i18next.t("products.updateProduct.logs.conflict", { error }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.CONFLICT,
+        i18next.t("products.updateProduct.conflict"),
+      );
+      return;
+    }
+    // Same DB guard as create: a new key that another image row already owns.
+    if (isUniqueViolation(error)) {
+      logger.warn(
+        i18next.t("products.createProduct.validators.logs.duplicateImageKey", {
+          key: violationTarget(error),
+        }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.BAD_REQUEST,
+        i18next.t("products.createProduct.validators.duplicateImageKey"),
+      );
+      return;
+    }
+    logger.error(
+      i18next.t("products.updateProduct.logs.genericError", { error }),
+    );
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("products.updateProduct.genericError"),
+    );
+  }
+};
+
+/**
+ * `DELETE /products/:id` — **Admin only** (route guard). The NO-TRASH policy (owner decision,
+ * 2026-07-15): the product row survives as a soft-deleted tombstone ONLY when order history
+ * references it (`service_details` rows — erasing it would falsify past orders); otherwise the row
+ * is hard-deleted. Its details and gallery rows are hard-deleted either way, in ONE `$transaction`
+ * (`applyProductDelete`), and the gallery's R2 objects are removed AFTER the commit in one batched
+ * call — best-effort, like update's cleanup: a failed object delete only leaves a sweepable stray,
+ * never a failed request or a DB row pointing at a deleted file.
+ */
+export const deleteProduct = async (
+  req: CustomRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    // The validator already resolved this to an existing active product.
+    const id = Number(req.params["id"]);
+
+    const prismaClient = await getPrismaClient();
+    const { removedImageKeys, hardDeleted } = await prismaClient.$transaction(
+      (tx) => applyProductDelete(tx, id),
+    );
+
+    // Post-commit, batched, best-effort R2 cleanup (see the doc above). Awaited on purpose —
+    // Cloud Run only allocates CPU during the request; fire-and-forget would silently drop it.
+    if (removedImageKeys.length > 0) {
+      try {
+        await getStorage().deleteObjects(removedImageKeys);
+      } catch (cleanupError) {
+        logger.warn(
+          i18next.t("products.deleteProduct.logs.imageCleanupFailed", {
+            count: removedImageKeys.length,
+            error: cleanupError,
+          }),
+        );
+      }
+    }
+
+    logger.info(
+      i18next.t(
+        hardDeleted
+          ? "products.deleteProduct.logs.productDeleted"
+          : "products.deleteProduct.logs.productDeactivated",
+        { id },
+      ),
+    );
+
+    // Audit log: product deleted (deployed environments only, like every audit event).
+    if (isDeployedEnvironment()) {
+      logAudit({
+        action: AuditAction.ADMIN_ACTION,
+        ...(req.user && { userId: req.user.userId }),
+        ...(req.ip && { ipAddress: req.ip }),
+        resource: `Product ID ${id}`,
+        success: true,
+        metadata: {
+          operation: "PRODUCT_DELETED",
+          mode: hardDeleted ? "HARD" : "SOFT",
+        },
+      });
+    }
+
+    sendOzariSuccess(
+      res,
+      HttpEnum.OK,
+      i18next.t("products.deleteProduct.productDeleted"),
+    );
+  } catch (error) {
+    logger.error(
+      i18next.t("products.deleteProduct.logs.genericError", { error }),
+    );
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("products.deleteProduct.genericError"),
+    );
+  }
+};

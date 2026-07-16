@@ -85,6 +85,70 @@ describe('SkeletonFade', () => {
     await waitFor(() => expect(screen.queryByTestId('skel')).not.toBeInTheDocument());
   });
 
+  it('REVERSE-crossfades displayed content back to the skeleton (a filter re-query), ghost included', async () => {
+    const { rerender } = render(
+      <SkeletonFade loading={false} skeleton={skeleton} durationMs={20}>
+        <span>Real</span>
+      </SkeletonFade>,
+    );
+    expect(screen.getByText('Real')).toBeInTheDocument();
+
+    // Re-entering loading from CONTENT: the skeleton takes the flow and a ghost of the content
+    // fades out on top of it (instant under the suite's reduced motion), then unmounts.
+    rerender(
+      <SkeletonFade loading skeleton={skeleton} durationMs={20}>
+        <span>Real</span>
+      </SkeletonFade>,
+    );
+    expect(screen.getByTestId('skel')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('Real')).not.toBeInTheDocument());
+
+    // A fast resolve mid-conceal never strands the ghost — the content branch owns the DOM again.
+    rerender(
+      <SkeletonFade loading skeleton={skeleton} durationMs={20}>
+        <span>Real</span>
+      </SkeletonFade>,
+    );
+    rerender(
+      <SkeletonFade loading={false} skeleton={skeleton} durationMs={20}>
+        <span>Real</span>
+      </SkeletonFade>,
+    );
+    expect(screen.getAllByText('Real')).toHaveLength(1);
+    await waitFor(() => expect(screen.queryByTestId('skel')).not.toBeInTheDocument());
+  });
+
+  it('runs the reverse crossfade as a REAL tween when motion is allowed', async () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false, // motion allowed
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      const { rerender } = render(
+        <SkeletonFade loading={false} skeleton={skeleton} durationMs={20}>
+          <span>Real</span>
+        </SkeletonFade>,
+      );
+      rerender(
+        <SkeletonFade loading skeleton={skeleton} durationMs={20}>
+          <span>Real</span>
+        </SkeletonFade>,
+      );
+      // The ghost is mounted while the 20ms fade runs, then unmounts on completion.
+      expect(screen.getByText('Real')).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByText('Real')).not.toBeInTheDocument());
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
+  });
+
   describe('animateSize (size morph)', () => {
     let realMatchMedia: typeof window.matchMedia;
     let originalOffsetWidth: PropertyDescriptor | undefined;

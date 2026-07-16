@@ -75,6 +75,9 @@ const baseCreateProductSchema = z.object({
   sellPrice: moneyField(t(`${KEY}.invalidSellPrice`)).optional(),
   details: z.array(
     z.object({
+      // Present on EDIT for a detail row the product already has (keep/update by id); absent on a
+      // row the user just added. Never rendered — it rides the row through RHF into the body.
+      id: z.number().optional(),
       detailTypeId: z.number({ error: t(`${KEY}.requiredDetailType`) }),
       detail: z
         .string()
@@ -128,6 +131,16 @@ export const createProductSchema = baseCreateProductSchema.superRefine((data, ct
     }
     if (rent !== undefined) {
       ctx.addIssue({ code: 'custom', path: ['rentPrice'], message: t(`${KEY}.forbiddenRentPrice`) });
+    }
+    // Replacement price is billed for a lost/damaged RENTAL — a sold item is consumed, nothing to
+    // replace. The UI hides + clears the field for Venta; this catches a stale draft (mirrors the
+    // backend's `replacementPriceForbidden`).
+    if (parseMoney(data.replacementPrice ?? '') !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['replacementPrice'],
+        message: t(`${KEY}.forbiddenReplacementPrice`),
+      });
     }
   }
 });
@@ -190,9 +203,11 @@ export function toCreateProductBody(data: CreateProductFormType): CreateProductB
     quantity: parseQuantity(data.quantity) ?? 0,
     ...(isRent && { rentPrice: money(data.rentPrice), rentTimeUnitId: data.rentTimeUnitId ?? undefined }),
     ...(!isRent && { sellPrice: money(data.sellPrice) }),
-    ...(money(data.replacementPrice) !== undefined && {
-      replacementPrice: money(data.replacementPrice),
-    }),
+    // Alquiler only — a Venta body never carries the key (the backend forbids it there).
+    ...(isRent &&
+      money(data.replacementPrice) !== undefined && {
+        replacementPrice: money(data.replacementPrice),
+      }),
     productDetails: data.details.map((row) => ({
       detailTypeId: row.detailTypeId,
       detail: row.detail.trim(),
@@ -201,3 +216,74 @@ export function toCreateProductBody(data: CreateProductFormType): CreateProductB
 }
 
 export const createProductRequiredPatterns = getZodRequiredPatterns(baseCreateProductSchema);
+
+/**
+ * One slot of the FINAL gallery for `PUT /products/:id` (the RECONCILE design): a kept photo by its
+ * DB row `id`, or a new photo by its uploaded R2 `key`. Array order = display order (`sortOrder`).
+ */
+export interface UpdateProductImageRef {
+  id?: number;
+  key?: string;
+  isPrimary: boolean;
+}
+
+/** The `PUT /products/:id` body — the product's FULL desired state, never a partial patch. */
+export interface UpdateProductBody extends Omit<CreateProductBody, 'images' | 'productDetails'> {
+  /** Kept rows carry their `id` (update in place); id-less rows create; absent rows delete. */
+  productDetails: { id?: number; detailTypeId: number; detail: string }[];
+  images: UpdateProductImageRef[];
+}
+
+/** Maps the validated form values to the update body — the create mapping, keeping detail row ids. */
+export function toUpdateProductBody(data: CreateProductFormType): UpdateProductBody {
+  const createBody = toCreateProductBody(data);
+  return {
+    ...createBody,
+    productDetails: data.details.map((row) => ({
+      ...(row.id !== undefined && { id: row.id }),
+      detailTypeId: row.detailTypeId,
+      detail: row.detail.trim(),
+    })),
+    images: [],
+  };
+}
+
+/**
+ * The edit form's initial values, from the role-projected product (Admin view — the edit page is
+ * admin-gated). Money/quantity map back to the TEXT inputs; the recorded fleet quantity is `total`
+ * for Alquiler (units come back) and `available` for Venta (sales already decremented it) —
+ * exactly how the projection encodes it.
+ */
+export function productToFormValues(product: {
+  name: string;
+  description?: string;
+  businessTypeId: number;
+  categoryId: number;
+  currency: { id: number };
+  rentPrice?: number;
+  sellPrice?: number;
+  rentTimeUnitId?: number;
+  replacementPrice?: number;
+  total?: number;
+  available?: number;
+  details: { id: number; detailTypeId: number; detail: string }[];
+}): CreateProductFormType {
+  const money = (value: number | undefined): string => (value === undefined ? '' : String(value));
+  return {
+    name: product.name,
+    description: product.description ?? '',
+    businessTypeId: product.businessTypeId,
+    categoryId: product.categoryId,
+    currencyId: product.currency.id,
+    quantity: String(product.total ?? product.available ?? 0),
+    rentPrice: money(product.rentPrice),
+    rentTimeUnitId: product.rentTimeUnitId ?? null,
+    replacementPrice: money(product.replacementPrice),
+    sellPrice: money(product.sellPrice),
+    details: product.details.map((detail) => ({
+      id: detail.id,
+      detailTypeId: detail.detailTypeId,
+      detail: detail.detail,
+    })),
+  };
+}

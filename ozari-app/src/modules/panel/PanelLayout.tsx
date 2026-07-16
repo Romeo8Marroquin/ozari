@@ -13,6 +13,7 @@ import { fadeIn, fadeOut, headerTitleIn, headerTitleOut, type EnterOptions } fro
 import { PanelExitContext } from './PanelExitContext';
 import { PanelNavContext, type PanelNav } from './PanelNavContext';
 import { PanelPageTransitionContext, type PanelPageMotion } from './PanelPageTransitionContext';
+import PanelScrollMemory from './PanelScrollMemory';
 
 // One in-flight tab transition. The object is a run TOKEN: `pending` is the latest intended
 // destination (a mid-exit click just swaps it — the running exit is never restarted), and the
@@ -216,6 +217,9 @@ const PanelShell: React.FC = () => {
               {/* The relative box scopes the overlay scrollbar to the CONTENT area only (never the
                   header); `min-h-0` lets the flex child actually shrink so `main` scrolls. */}
               <div className="relative min-h-0 flex-1">
+                {/* BEFORE the scroller on purpose: its restore-on-commit layout effect must run
+                    before any page's own effects (always-top pages override it and win). */}
+                <PanelScrollMemory target={main} />
                 <main
                   ref={main}
                   className="panel-main h-full overflow-y-auto bg-gradient-to-b from-[#f8f5f8] to-[#f0ecf1] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"

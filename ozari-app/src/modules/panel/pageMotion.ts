@@ -169,6 +169,9 @@ export interface SectionRevealOptions {
   delaySeconds: number;
   /** Fired once the whole reveal settles — the caller drops the skeleton overlay. */
   onSettled: () => void;
+  /** What cascades inside the content — `.reveal-item` fields by default; a PAGE-level reveal
+   *  (product detail/edit) passes `.reveal-block` so whole section cards ride the wave instead. */
+  itemSelector?: string;
 }
 
 /**
@@ -183,7 +186,7 @@ export function revealSectionContent(
   wrapper: HTMLElement,
   content: HTMLElement,
   overlay: HTMLElement,
-  { skeletonHeight, delaySeconds, onSettled }: SectionRevealOptions,
+  { skeletonHeight, delaySeconds, onSettled, itemSelector = '.reveal-item' }: SectionRevealOptions,
 ): () => void {
   if (prefersReducedMotion()) {
     onSettled();
@@ -217,7 +220,7 @@ export function revealSectionContent(
     );
   }
 
-  const items = gsap.utils.selector(content)('.reveal-item') as HTMLElement[];
+  const items = gsap.utils.selector(content)(itemSelector) as HTMLElement[];
   if (items.length > 0) {
     const delays = waveDelays(items, SECTION_ITEM_STAGGER);
     timeline.fromTo(
@@ -286,11 +289,78 @@ export function detailRowOut(row: HTMLElement | null): Promise<void> {
 /**
  * Snapshot the gallery's `.gallery-flip` boxes (tiles + the mounted picker) BEFORE a mutation —
  * hand it to {@link animateGalleryLayout}. The two pickers (empty-state dropzone, in-grid add
- * tile) share a `data-flip-id`, so a capture on one side can morph into the other.
+ * tile) share a `data-flip-id`, so a capture on one side can morph into the other. `selector`
+ * generalizes the same capture to any FLIP-choreographed list (the product grid's card wrappers).
  */
-export function captureGalleryLayout(scope: HTMLElement | null): Flip.FlipState | null {
+export function captureGalleryLayout(
+  scope: HTMLElement | null,
+  selector = '.gallery-flip',
+): Flip.FlipState | null {
   if (!scope || prefersReducedMotion()) return null;
-  return Flip.getState(scope.querySelectorAll('.gallery-flip'));
+  return Flip.getState(scope.querySelectorAll(selector));
+}
+
+/**
+ * A refetch-driven LIST DIFF, phase 2 (see `useGridListTransition`): after the new list commits,
+ * SURVIVING cards (matched across different DOM nodes by `data-flip-id` — the grid's slots are
+ * index-keyed, so a product's wrapper changes node between renders) GLIDE from their captured
+ * boxes to their new cells, while cards that just APPEARED (an id absent from the captured state)
+ * fade-rise in. Removed cards were already tweened out in phase 1. Reduced motion / no capture →
+ * instant, like every FLIP here.
+ */
+export function animateListReflow(
+  scope: HTMLElement | null,
+  selector: string,
+  state: Flip.FlipState | null,
+): void {
+  if (!scope || !state || prefersReducedMotion()) return;
+  const targets = scope.querySelectorAll(selector);
+  // The grid's slots are INDEX-keyed, so React REUSES the wrapper node that hosted a removed card
+  // for whichever survivor takes its slot — phase 1's leftovers (opacity 0, scale .9) would leave
+  // that survivor invisible. Sanitize every target before the glide; the FLIP + onEnter own all
+  // motion from here.
+  gsap.killTweensOf(targets);
+  gsap.set(targets, { clearProps: 'opacity,visibility,transform' });
+  Flip.from(state, {
+    targets,
+    duration: 0.4,
+    ease: 'power3.out',
+    overwrite: true,
+    onEnter: (elements) =>
+      gsap.fromTo(
+        elements,
+        { autoAlpha: 0, y: 12, scale: 0.96 },
+        {
+          autoAlpha: 1,
+          y: 0,
+          scale: 1,
+          duration: 0.4,
+          ease: PAGE_ENTER.ease,
+          overwrite: true,
+          clearProps: 'transform',
+        },
+      ),
+  });
+}
+
+/**
+ * A refetch-driven LIST DIFF, phase 1: the cards about to LEAVE shrink and fade in place (the
+ * gallery-removal language) BEFORE the new list commits — so a deletion never just blinks out.
+ * Resolves when they're gone (immediately under reduced motion / with nothing to remove).
+ */
+export function animateTilesOut(els: HTMLElement[]): Promise<void> {
+  if (els.length === 0 || prefersReducedMotion()) return Promise.resolve();
+  return new Promise((resolve) => {
+    gsap.to(els, {
+      scale: 0.9,
+      autoAlpha: 0,
+      duration: 0.25,
+      ease: PAGE_EXIT.ease,
+      overwrite: true,
+      onComplete: resolve,
+      onInterrupt: resolve,
+    });
+  });
 }
 
 /** The subtle, professional pop for photos joining the grid — a hint of overshoot, not a cartoon. */
@@ -379,6 +449,78 @@ export function animateGalleryBoundary(container: HTMLElement | null, fromHeight
       },
     );
   }
+}
+
+/**
+ * FLIP the grid after a mid-DRAG reorder: every tile EXCEPT the dragged one glides from the
+ * captured layout to its new cell (the dragged tile is pinned under the pointer — the drag hook
+ * repositions it itself). Reduced motion (or no captured state) just snaps, like the other FLIPs.
+ */
+export function animateGalleryReorder(
+  scope: HTMLElement | null,
+  state: Flip.FlipState | null,
+  dragged: HTMLElement | null,
+): void {
+  if (!scope || !state || prefersReducedMotion()) return;
+  const targets = [...scope.querySelectorAll('.gallery-flip')].filter((el) => el !== dragged);
+  // `overwrite: true` = the interruptibility rule: a second reorder landing mid-glide kills the
+  // first glide's tweens and continues from the current frame — never two transforms fighting.
+  Flip.from(state, { targets, duration: 0.3, ease: 'power3.out', overwrite: true });
+}
+
+/**
+ * A tile's RESTING box: its live rect minus any in-flight x/y transform (a FLIP glide, the drag
+ * pin). The reorder hit test MUST use this, never the live rect — mid-glide a displaced tile still
+ * covers its OLD cell, so testing live rects re-triggers the swap it is animating away from and the
+ * order thrashes back and forth every pointermove (the "teleporting" bug).
+ */
+export function getTileRestingRect(el: HTMLElement): {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+} {
+  const rect = el.getBoundingClientRect();
+  const x = Number(gsap.getProperty(el, 'x')) || 0;
+  const y = Number(gsap.getProperty(el, 'y')) || 0;
+  return { left: rect.left - x, top: rect.top - y, right: rect.right - x, bottom: rect.bottom - y };
+}
+
+/** The picked-up tile rises above its siblings and swells slightly — "I'm in your hand" feedback. */
+export function galleryDragLift(el: HTMLElement | null): void {
+  if (!el) return;
+  gsap.set(el, { zIndex: 40 });
+  if (prefersReducedMotion()) return;
+  gsap.to(el, { scale: 1.05, duration: 0.15, ease: 'power2.out', overwrite: true });
+}
+
+/** Pin the dragged tile under the pointer. A raw `set` on purpose — tracking is interaction, not
+ *  decoration, so it runs identically under reduced motion. */
+export function galleryDragMove(el: HTMLElement | null, x: number, y: number): void {
+  if (!el) return;
+  gsap.set(el, { x, y });
+}
+
+/** The released tile settles back into its (possibly new) cell; resolves when it lands. */
+export function galleryDragSettle(el: HTMLElement | null): Promise<void> {
+  if (!el) return Promise.resolve();
+  if (prefersReducedMotion()) {
+    gsap.set(el, { x: 0, y: 0, scale: 1, clearProps: 'transform,zIndex' });
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    gsap.to(el, {
+      x: 0,
+      y: 0,
+      scale: 1,
+      duration: 0.3,
+      ease: 'power3.out',
+      overwrite: true,
+      clearProps: 'transform,zIndex',
+      onComplete: resolve,
+      onInterrupt: resolve,
+    });
+  });
 }
 
 /** A removed photo shrinks and fades in place; resolves so the caller can then commit + reflow. */

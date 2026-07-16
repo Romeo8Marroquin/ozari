@@ -25,7 +25,9 @@ const base: Product = {
   id: 1,
   name: 'Mesa redonda',
   businessType: 'Alquiler',
+  businessTypeId: 1,
   category: 'Mesas',
+  categoryId: 1,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
   rentPrice: 75,
   rentTimeUnit: 'Día',
@@ -36,8 +38,10 @@ const base: Product = {
 const K = 'modules.panel.products';
 const STOCK = {
   count: `${K}.stock.count`,
+  countOfTotalShort: `${K}.stock.countOfTotalShort`,
   available: `${K}.stock.available`,
   out: `${K}.stock.out`,
+  unavailable: `${K}.stock.unavailable`,
 };
 const ACTIONS = {
   order: `${K}.card.actions.order`,
@@ -118,19 +122,44 @@ describe('ProductCard', () => {
     expect(screen.getByText(`${K}.card.noDescription`)).toBeInTheDocument();
   });
 
-  it('shows the exact count for Admin (quantity present) and "out" at zero', () => {
-    render(<ProductCard product={{ ...base, quantity: 40, inStock: true }} />);
+  it('shows the takeable count when `available` is present (Employee view)', () => {
+    render(<ProductCard product={{ ...base, available: 40, inStock: true }} />);
     expect(screen.getAllByText(STOCK.count).length).toBeGreaterThan(0);
+  });
 
-    render(<ProductCard product={{ ...base, quantity: 0, inStock: false }} />);
+  it('words ZERO by business type: Alquiler = "No disponible" (frees later), Venta = "Agotado"', () => {
+    // The base fixture is Alquiler — a fully-booked fleet is NOT "agotado", the units come back.
+    render(<ProductCard product={{ ...base, available: 0, inStock: false }} />);
+    expect(screen.getAllByText(STOCK.unavailable).length).toBeGreaterThan(0);
+    expect(screen.queryByText(STOCK.out)).not.toBeInTheDocument();
+
+    render(
+      <ProductCard
+        product={{ ...base, businessType: 'Venta', available: 0, inStock: false }}
+      />,
+    );
     expect(screen.getAllByText(STOCK.out).length).toBeGreaterThan(0);
   });
 
-  it('shows an availability signal for Employee (inStock, no quantity) and "out" when not', () => {
+  it('shows the SHORT fleet view "X de Y" when `total` rides along (Admin, Alquiler) — even at 0', () => {
+    render(<ProductCard product={{ ...base, available: 35, total: 40, inStock: true }} />);
+    expect(screen.getAllByText(STOCK.countOfTotalShort).length).toBeGreaterThan(0);
+
+    // Fully rented ≠ gone: the admin keeps seeing both numbers, in the "out" (amber) tone.
+    render(<ProductCard product={{ ...base, available: 0, total: 40, inStock: false }} />);
+    expect(screen.getAllByText(STOCK.countOfTotalShort).length).toBeGreaterThan(0);
+    expect(screen.queryByText(STOCK.out)).not.toBeInTheDocument();
+    expect(screen.queryByText(STOCK.unavailable)).not.toBeInTheDocument();
+  });
+
+  it('shows an availability signal for the bare inStock fallback, worded by type when off', () => {
     render(<ProductCard product={{ ...base, inStock: true }} />);
     expect(screen.getAllByText(STOCK.available).length).toBeGreaterThan(0);
 
     render(<ProductCard product={{ ...base, inStock: false }} />);
+    expect(screen.getAllByText(STOCK.unavailable).length).toBeGreaterThan(0);
+
+    render(<ProductCard product={{ ...base, businessType: 'Venta', inStock: false }} />);
     expect(screen.getAllByText(STOCK.out).length).toBeGreaterThan(0);
   });
 

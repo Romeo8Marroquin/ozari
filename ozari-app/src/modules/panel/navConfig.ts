@@ -14,6 +14,7 @@ export type PanelPath =
   | '/panel/productos'
   | '/panel/productos/nuevo'
   | `/panel/productos/${number}`
+  | `/panel/productos/${number}/editar`
   | '/panel/ajustes';
 
 export interface PanelNavItem {

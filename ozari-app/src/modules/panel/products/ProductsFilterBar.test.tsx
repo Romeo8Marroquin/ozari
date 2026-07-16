@@ -1,11 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// The catalog feeds the selects' options; RoleGate (via useHasRole) gates the stock filter.
+// The catalog feeds the category/type selects' options (the sort options are static).
 const { useProductCatalog } = vi.hoisted(() => ({ useProductCatalog: vi.fn() }));
 vi.mock('./useProductCatalog', () => ({ useProductCatalog }));
-const { useHasRole } = vi.hoisted(() => ({ useHasRole: vi.fn() }));
-vi.mock('@hooks/useRole', () => ({ useHasRole, useRole: () => null }));
 
 import type { ProductListSearch } from './productListSearch';
 import ProductsFilterBar, { SEARCH_DEBOUNCE_MS } from './ProductsFilterBar';
@@ -34,7 +32,6 @@ const panel = (): HTMLElement => document.getElementById('products-filters-panel
 beforeEach(() => {
   vi.useFakeTimers();
   useProductCatalog.mockReturnValue({ data: catalog });
-  useHasRole.mockReturnValue(false);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -63,8 +60,8 @@ describe('ProductsFilterBar', () => {
     expect(panel()).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('badges the toggle with the active SELECT count and starts open on a filtered deep link', () => {
-    renderBar({ categoria: 3, tipo: 1, stock: true });
+  it('badges the toggle with the active SELECT count (sort included) and starts open on a deep link', () => {
+    renderBar({ categoria: 3, tipo: 1, orden: 'precio-menor' });
     const toggle = screen.getByRole('button', { name: `${K}.toggleWithCount` });
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(panel()).toHaveAttribute('aria-hidden', 'false');
@@ -192,28 +189,21 @@ describe('ProductsFilterBar', () => {
     expect(onChange).toHaveBeenLastCalledWith({});
   });
 
-  it('hides the stock filter from a Client and maps it for Employee/Admin', () => {
-    const { rerender } = renderBar();
-    expect(screen.queryByLabelText(`${K}.stock`)).not.toBeInTheDocument();
+  it('offers the sort to EVERY role: applies, clears, and reflects the committed value', () => {
+    const { onChange, rerender } = renderBar();
+    const sort = screen.getByLabelText<HTMLSelectElement>(`${K}.sort`);
 
-    useHasRole.mockReturnValue(true);
-    const onChange = vi.fn();
-    rerender(<ProductsFilterBar search={{}} onChange={onChange} />);
-    const stock = screen.getByLabelText(`${K}.stock`);
-    fireEvent.change(stock, { target: { value: '1' } });
-    expect(onChange).toHaveBeenLastCalledWith({ stock: true });
-    fireEvent.change(stock, { target: { value: '2' } });
-    expect(onChange).toHaveBeenLastCalledWith({ stock: false });
+    // Each option is explicit about its own direction ("Precio: menor a mayor").
+    fireEvent.change(sort, { target: { value: 'precio-menor' } });
+    expect(onChange).toHaveBeenLastCalledWith({ orden: 'precio-menor' });
+    fireEvent.change(sort, { target: { value: 'nombre-za' } });
+    expect(onChange).toHaveBeenLastCalledWith({ orden: 'nombre-za' });
 
-    rerender(<ProductsFilterBar search={{ stock: false }} onChange={onChange} />);
-    fireEvent.change(screen.getByLabelText(`${K}.stock`), { target: { value: '' } });
+    // The placeholder IS the default ("Más recientes") — picking it clears the param.
+    rerender(<ProductsFilterBar search={{ orden: 'precio-mayor' }} onChange={onChange} />);
+    expect(screen.getByLabelText<HTMLSelectElement>(`${K}.sort`).value).toBe('precio-mayor');
+    fireEvent.change(screen.getByLabelText(`${K}.sort`), { target: { value: '' } });
     expect(onChange).toHaveBeenLastCalledWith({});
-
-    // Both committed values render back into the select (true = in stock, false = out).
-    rerender(<ProductsFilterBar search={{ stock: true }} onChange={onChange} />);
-    expect(screen.getByLabelText<HTMLSelectElement>(`${K}.stock`).value).toBe('1');
-    rerender(<ProductsFilterBar search={{ stock: false }} onChange={onChange} />);
-    expect(screen.getByLabelText<HTMLSelectElement>(`${K}.stock`).value).toBe('2');
   });
 
   it('offers "clear filters" only while a filter is active (collapsed but MOUNTED otherwise)', () => {

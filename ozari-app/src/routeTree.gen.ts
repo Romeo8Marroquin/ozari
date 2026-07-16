@@ -20,8 +20,10 @@ import { Route as SesionInicioRouteImport } from './routes/sesion/inicio'
 import { Route as SesionSplatRouteImport } from './routes/sesion/$'
 import { Route as PanelProductosRouteImport } from './routes/panel/productos'
 import { Route as PanelAjustesRouteImport } from './routes/panel/ajustes'
+import { Route as PanelSplatRouteImport } from './routes/panel/$'
 import { Route as PanelProductosNuevoRouteImport } from './routes/panel/productos_.nuevo'
 import { Route as PanelProductosProductIdRouteImport } from './routes/panel/productos_.$productId'
+import { Route as PanelProductosProductIdEditarRouteImport } from './routes/panel/productos_.$productId_.editar'
 
 const SesionRoute = SesionRouteImport.update({
   id: '/sesion',
@@ -78,6 +80,11 @@ const PanelAjustesRoute = PanelAjustesRouteImport.update({
   path: '/ajustes',
   getParentRoute: () => PanelRoute,
 } as any)
+const PanelSplatRoute = PanelSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
+  getParentRoute: () => PanelRoute,
+} as any)
 const PanelProductosNuevoRoute = PanelProductosNuevoRouteImport.update({
   id: '/productos_/nuevo',
   path: '/productos/nuevo',
@@ -88,12 +95,19 @@ const PanelProductosProductIdRoute = PanelProductosProductIdRouteImport.update({
   path: '/productos/$productId',
   getParentRoute: () => PanelRoute,
 } as any)
+const PanelProductosProductIdEditarRoute =
+  PanelProductosProductIdEditarRouteImport.update({
+    id: '/productos_/$productId_/editar',
+    path: '/productos/$productId/editar',
+    getParentRoute: () => PanelRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
   '/panel': typeof PanelRouteWithChildren
   '/sesion': typeof SesionRouteWithChildren
+  '/panel/$': typeof PanelSplatRoute
   '/panel/ajustes': typeof PanelAjustesRoute
   '/panel/productos': typeof PanelProductosRoute
   '/sesion/$': typeof SesionSplatRoute
@@ -103,11 +117,13 @@ export interface FileRoutesByFullPath {
   '/panel/': typeof PanelIndexRoute
   '/panel/productos/$productId': typeof PanelProductosProductIdRoute
   '/panel/productos/nuevo': typeof PanelProductosNuevoRoute
+  '/panel/productos/$productId/editar': typeof PanelProductosProductIdEditarRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$': typeof SplatRoute
   '/sesion': typeof SesionRouteWithChildren
+  '/panel/$': typeof PanelSplatRoute
   '/panel/ajustes': typeof PanelAjustesRoute
   '/panel/productos': typeof PanelProductosRoute
   '/sesion/$': typeof SesionSplatRoute
@@ -117,6 +133,7 @@ export interface FileRoutesByTo {
   '/panel': typeof PanelIndexRoute
   '/panel/productos/$productId': typeof PanelProductosProductIdRoute
   '/panel/productos/nuevo': typeof PanelProductosNuevoRoute
+  '/panel/productos/$productId/editar': typeof PanelProductosProductIdEditarRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -124,6 +141,7 @@ export interface FileRoutesById {
   '/$': typeof SplatRoute
   '/panel': typeof PanelRouteWithChildren
   '/sesion': typeof SesionRouteWithChildren
+  '/panel/$': typeof PanelSplatRoute
   '/panel/ajustes': typeof PanelAjustesRoute
   '/panel/productos': typeof PanelProductosRoute
   '/sesion/$': typeof SesionSplatRoute
@@ -133,6 +151,7 @@ export interface FileRoutesById {
   '/panel/': typeof PanelIndexRoute
   '/panel/productos_/$productId': typeof PanelProductosProductIdRoute
   '/panel/productos_/nuevo': typeof PanelProductosNuevoRoute
+  '/panel/productos_/$productId_/editar': typeof PanelProductosProductIdEditarRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -141,6 +160,7 @@ export interface FileRouteTypes {
     | '/$'
     | '/panel'
     | '/sesion'
+    | '/panel/$'
     | '/panel/ajustes'
     | '/panel/productos'
     | '/sesion/$'
@@ -150,11 +170,13 @@ export interface FileRouteTypes {
     | '/panel/'
     | '/panel/productos/$productId'
     | '/panel/productos/nuevo'
+    | '/panel/productos/$productId/editar'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/$'
     | '/sesion'
+    | '/panel/$'
     | '/panel/ajustes'
     | '/panel/productos'
     | '/sesion/$'
@@ -164,12 +186,14 @@ export interface FileRouteTypes {
     | '/panel'
     | '/panel/productos/$productId'
     | '/panel/productos/nuevo'
+    | '/panel/productos/$productId/editar'
   id:
     | '__root__'
     | '/'
     | '/$'
     | '/panel'
     | '/sesion'
+    | '/panel/$'
     | '/panel/ajustes'
     | '/panel/productos'
     | '/sesion/$'
@@ -179,6 +203,7 @@ export interface FileRouteTypes {
     | '/panel/'
     | '/panel/productos_/$productId'
     | '/panel/productos_/nuevo'
+    | '/panel/productos_/$productId_/editar'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -267,6 +292,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PanelAjustesRouteImport
       parentRoute: typeof PanelRoute
     }
+    '/panel/$': {
+      id: '/panel/$'
+      path: '/$'
+      fullPath: '/panel/$'
+      preLoaderRoute: typeof PanelSplatRouteImport
+      parentRoute: typeof PanelRoute
+    }
     '/panel/productos_/nuevo': {
       id: '/panel/productos_/nuevo'
       path: '/productos/nuevo'
@@ -281,23 +313,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PanelProductosProductIdRouteImport
       parentRoute: typeof PanelRoute
     }
+    '/panel/productos_/$productId_/editar': {
+      id: '/panel/productos_/$productId_/editar'
+      path: '/productos/$productId/editar'
+      fullPath: '/panel/productos/$productId/editar'
+      preLoaderRoute: typeof PanelProductosProductIdEditarRouteImport
+      parentRoute: typeof PanelRoute
+    }
   }
 }
 
 interface PanelRouteChildren {
+  PanelSplatRoute: typeof PanelSplatRoute
   PanelAjustesRoute: typeof PanelAjustesRoute
   PanelProductosRoute: typeof PanelProductosRoute
   PanelIndexRoute: typeof PanelIndexRoute
   PanelProductosProductIdRoute: typeof PanelProductosProductIdRoute
   PanelProductosNuevoRoute: typeof PanelProductosNuevoRoute
+  PanelProductosProductIdEditarRoute: typeof PanelProductosProductIdEditarRoute
 }
 
 const PanelRouteChildren: PanelRouteChildren = {
+  PanelSplatRoute: PanelSplatRoute,
   PanelAjustesRoute: PanelAjustesRoute,
   PanelProductosRoute: PanelProductosRoute,
   PanelIndexRoute: PanelIndexRoute,
   PanelProductosProductIdRoute: PanelProductosProductIdRoute,
   PanelProductosNuevoRoute: PanelProductosNuevoRoute,
+  PanelProductosProductIdEditarRoute: PanelProductosProductIdEditarRoute,
 }
 
 const PanelRouteWithChildren = PanelRoute._addFileChildren(PanelRouteChildren)

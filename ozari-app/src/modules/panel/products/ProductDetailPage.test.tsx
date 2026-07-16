@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -46,6 +46,32 @@ vi.mock('./productImageMorph', () => ({
 const { scrollPanelToTop } = vi.hoisted(() => ({ scrollPanelToTop: vi.fn() }));
 vi.mock('./productsScroll', () => ({ scrollPanelToTop }));
 
+// The full-size viewer has its own suite — a stub captures the wiring.
+const lightbox = vi.hoisted(() => ({
+  props: null as null | { initialIndex: number; productName: string; onClose: () => void },
+}));
+vi.mock('./ProductLightbox', () => ({
+  default: (props: { initialIndex: number; productName: string; onClose: () => void }) => {
+    lightbox.props = props;
+    return <div data-testid="lightbox-stub" />;
+  },
+}));
+
+// The delete confirmation has its own suite — a stub captures the open/close/deleted wiring.
+type DeleteModalProps = {
+  open: boolean;
+  onClose: () => void;
+  onDeleted: () => void;
+  product: { id: number };
+};
+const deleteModal = vi.hoisted(() => ({ props: null as null | DeleteModalProps }));
+vi.mock('./ProductDeleteModal', () => ({
+  default: (props: DeleteModalProps) => {
+    deleteModal.props = props;
+    return <div data-testid="delete-modal-stub" data-open={props.open} />;
+  },
+}));
+
 import { Role } from '@constants/Roles';
 import { PanelNavContext, type PanelNav } from '../PanelNavContext';
 import { PanelPageTransitionContext, type PanelPageMotion } from '../PanelPageTransitionContext';
@@ -60,7 +86,9 @@ const base: Product = {
   name: 'Mesa redonda',
   description: 'Mesa para 8 personas',
   businessType: 'Alquiler',
+  businessTypeId: 1,
   category: 'Mesas',
+  categoryId: 1,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
   rentPrice: 75,
   rentTimeUnit: 'Día',
@@ -68,7 +96,7 @@ const base: Product = {
     { id: 1, url: 'https://cdn/a.webp', isPrimary: true, sortOrder: 0 },
     { id: 2, url: 'https://cdn/b.webp', isPrimary: false, sortOrder: 1 },
   ],
-  details: [{ id: 12, detail: 'Blanco', detailType: 'Color' }],
+  details: [{ id: 12, detail: 'Blanco', detailType: 'Color', detailTypeId: 1 }],
 };
 
 type State = {
@@ -132,7 +160,7 @@ describe('ProductDetailPage', () => {
   });
 
   it('renders the product (chips, name, price, stock count, description, details) and claims the morph', () => {
-    setProduct({ data: { ...base, quantity: 40, inStock: true } });
+    setProduct({ data: { ...base, available: 40, inStock: true } });
     renderPage();
 
     expect(screen.getByText('Mesas')).toBeInTheDocument();
@@ -167,7 +195,7 @@ describe('ProductDetailPage', () => {
     expect(hero.classList.contains('reveal-item')).toBe(true);
   });
 
-  it('switches the hero image from the thumbnail rail (aria-current follows)', async () => {
+  it('switches the hero image via a CROSSFADE (ghost of the outgoing image, then it drops)', async () => {
     setProduct({ data: base });
     renderPage();
 
@@ -178,8 +206,106 @@ describe('ProductDetailPage', () => {
     await userEvent.click(thumbs[1]!);
     expect(thumbs[1]).toHaveAttribute('aria-current', 'true');
     expect(thumbs[0]).not.toHaveAttribute('aria-current');
-    const hero = document.querySelector('[data-morph-id="7"] img')!;
-    expect(hero).toHaveAttribute('src', 'https://cdn/b.webp');
+    expect(screen.getByTestId('product-hero-image')).toHaveAttribute('src', 'https://cdn/b.webp');
+    // The outgoing image ghosts UNDER the incoming one, then unmounts when the fade settles
+    // (instant under reduced motion).
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-morph-id="7"] img')).toHaveLength(1),
+    );
+
+    // Re-clicking the ACTIVE thumbnail is a no-op — no ghost, no fade.
+    await userEvent.click(thumbs[1]!);
+    expect(document.querySelectorAll('[data-morph-id="7"] img')).toHaveLength(1);
+  });
+
+  it('keeps the share control MOUNTED through the skeleton (row sized, inert) and fades it in with the data', () => {
+    setProduct({ data: undefined, isLoading: true, isFetching: true });
+    const { rerender } = renderPage();
+
+    // Present from first paint so the row never reflows (a late mount tilted the whole column),
+    // but invisible AND inert — nothing focusable/clickable shares a nameless product.
+    const shareWrap = document.querySelector(
+      'button[aria-label="components.share.label"]',
+    )!.parentElement!;
+    expect(shareWrap).toHaveAttribute('aria-hidden', 'true');
+    expect(shareWrap).toHaveAttribute('inert');
+    expect(shareWrap.className).toContain('opacity-0');
+
+    // The data lands → the same element fades visible (CSS transition — binary state).
+    setProduct({ data: base });
+    rerender(<ProductDetailPage />);
+    expect(shareWrap).toHaveAttribute('aria-hidden', 'false');
+    expect(shareWrap).not.toHaveAttribute('inert');
+    expect(shareWrap.className).toContain('opacity-100');
+  });
+
+  it('OPENS on the FLAGGED primary wherever it sits — the gallery order stays untouched', async () => {
+    // The star lives on the LAST slot: the page must open there (hero + aria-current), while the
+    // thumbnails keep the admin's display order (never reordered around the star).
+    setProduct({
+      data: {
+        ...base,
+        images: [
+          { id: 1, url: 'https://cdn/a.webp', isPrimary: false, sortOrder: 0 },
+          { id: 2, url: 'https://cdn/b.webp', isPrimary: false, sortOrder: 1 },
+          { id: 3, url: 'https://cdn/c.webp', isPrimary: true, sortOrder: 2 },
+        ],
+      },
+    });
+    renderPage();
+
+    expect(screen.getByTestId('product-hero-image')).toHaveAttribute('src', 'https://cdn/c.webp');
+    const thumbs = screen.getAllByRole('button', { name: `${D}.thumbAlt` });
+    expect(thumbs[2]).toHaveAttribute('aria-current', 'true');
+    expect(thumbs[0]).not.toHaveAttribute('aria-current');
+
+    // An explicit pick still works from there.
+    await userEvent.click(thumbs[0]!);
+    expect(screen.getByTestId('product-hero-image')).toHaveAttribute('src', 'https://cdn/a.webp');
+  });
+
+  it('opens the lightbox from the hero at the CURRENT image, and closes it back', async () => {
+    setProduct({ data: base });
+    renderPage();
+
+    // Switch to the second image first — the viewer must open exactly there.
+    await userEvent.click(screen.getAllByRole('button', { name: `${D}.thumbAlt` })[1]!);
+    await userEvent.click(screen.getByRole('button', { name: `${D}.lightbox.open` }));
+
+    expect(screen.getByTestId('lightbox-stub')).toBeInTheDocument();
+    expect(lightbox.props).toMatchObject({ initialIndex: 1, productName: 'Mesa redonda' });
+
+    act(() => lightbox.props!.onClose());
+    expect(screen.queryByTestId('lightbox-stub')).not.toBeInTheDocument();
+  });
+
+  it('plays the hero crossfade as a REAL tween when motion is allowed', async () => {
+    const realMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false, // motion allowed
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      setProduct({ data: base });
+      renderPage();
+      // The page ENTRANCE also runs for real now — wait for the thumbs to become visible.
+      const thumbs = await screen.findAllByRole('button', { name: `${D}.thumbAlt` }, { timeout: 3000 });
+      await userEvent.click(thumbs[1]!);
+      // Two layers exist while the 0.22s crossfade runs; the ghost drops when it settles.
+      expect(document.querySelectorAll('[data-morph-id="7"] img').length).toBeGreaterThan(1);
+      await waitFor(
+        () => expect(document.querySelectorAll('[data-morph-id="7"] img')).toHaveLength(1),
+        { timeout: 2000 },
+      );
+    } finally {
+      window.matchMedia = realMatchMedia;
+    }
   });
 
   it('falls back to the first image when the active index outlives a shrunken gallery', async () => {
@@ -189,8 +315,7 @@ describe('ProductDetailPage', () => {
 
     setProduct({ data: { ...base, images: [base.images[0]!] } });
     rerender(<ProductDetailPage />);
-    const hero = document.querySelector('[data-morph-id="7"] img')!;
-    expect(hero).toHaveAttribute('src', 'https://cdn/a.webp');
+    expect(screen.getByTestId('product-hero-image')).toHaveAttribute('src', 'https://cdn/a.webp');
   });
 
   it('shows the brand mark (no thumbnails, no price line) for a bare product', () => {
@@ -227,6 +352,60 @@ describe('ProductDetailPage', () => {
     expect(screen.getByRole('button', { name: new RegExp(`${D}.actions.delete`) })).toBeInTheDocument();
   });
 
+  it('Eliminar opens the delete confirmation (never deletes directly), and it closes back', async () => {
+    useRole.mockReturnValue(Role.Admin);
+    useHasRole.mockReturnValue(true);
+    setProduct({ data: base });
+    renderPage();
+
+    expect(deleteModal.props).toMatchObject({ open: false, product: { id: 7 } });
+    await userEvent.click(screen.getByRole('button', { name: new RegExp(`${D}.actions.delete`) }));
+    expect(deleteModal.props).toMatchObject({ open: true });
+
+    act(() => deleteModal.props?.onClose());
+    expect(deleteModal.props).toMatchObject({ open: false });
+  });
+
+  it('after a deletion, leaves to the grid with a PLAIN fade — the morph never lifts off', () => {
+    useRole.mockReturnValue(Role.Admin);
+    useHasRole.mockReturnValue(true);
+    setProduct({ data: base });
+    const { navigate, unmount } = renderPage();
+
+    // The modal reports the deletion; the PAGE owns the departure.
+    act(() => deleteModal.props?.onDeleted());
+    expect(navigate).toHaveBeenCalledWith('/panel/productos');
+
+    // A browser-back racing the delete departure must decline the hold the same way (no lift).
+    expect(departure.hold?.('/panel/productos')).toBeNull();
+    expect(beginProductImageMorph).not.toHaveBeenCalled();
+
+    // Unmounting while headed to the grid would normally lift the hero toward its card — but the
+    // card no longer exists, so the lift must stand down (plain page fade instead).
+    window.history.replaceState({}, '', '/panel/productos');
+    hasProductImageMorphInFlight.mockReturnValue(false);
+    unmount();
+    expect(beginProductImageMorph).not.toHaveBeenCalled();
+  });
+
+  it('flips to the not-found panel when a background refetch discovers the product is GONE', () => {
+    // Cached data + a 404 error = deleted elsewhere while on screen — never keep the ghost.
+    setProduct({ data: base, isError: true, error: { response: { status: 404 } } });
+    renderPage();
+    expect(screen.getByRole('heading', { name: `${D}.notFound.title` })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Mesa redonda' })).not.toBeInTheDocument();
+  });
+
+  it('Editar navigates to the product edit page through the panel transition', async () => {
+    useRole.mockReturnValue(Role.Admin);
+    useHasRole.mockReturnValue(true);
+    setProduct({ data: base });
+    const { navigate } = renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: new RegExp(`${D}.actions.edit`) }));
+    expect(navigate).toHaveBeenCalledWith('/panel/productos/7/editar');
+  });
+
   it('shows the replacement price ONLY when the projection sent it (Admin) — by field presence', () => {
     setProduct({ data: { ...base, replacementPrice: 900 } });
     const { rerender } = renderPage();
@@ -238,10 +417,21 @@ describe('ProductDetailPage', () => {
     expect(screen.queryByText(`${D}.replacementPrice`, { exact: false })).not.toBeInTheDocument();
   });
 
-  it('shows availability variants: zero count, bare signal, and nothing for a Client projection', () => {
-    setProduct({ data: { ...base, quantity: 0, inStock: false } });
+  it('shows availability variants: zero wording by type, fleet view, bare signal, Client nothing', () => {
+    // The base fixture is Alquiler — a fully-booked fleet is "No disponible", never "Agotado".
+    setProduct({ data: { ...base, available: 0, inStock: false } });
     const { rerender } = renderPage();
+    expect(screen.getByText(`${K}.stock.unavailable`)).toBeInTheDocument();
+
+    // A sold-out VENTA product IS "Agotado" (gone until the business restocks).
+    setProduct({ data: { ...base, businessType: 'Venta', available: 0, inStock: false } });
+    rerender(<ProductDetailPage />);
     expect(screen.getByText(`${K}.stock.out`)).toBeInTheDocument();
+
+    // Admin + Alquiler: available AND the fleet total — the "X de Y disponibles" view.
+    setProduct({ data: { ...base, available: 35, total: 40, inStock: true } });
+    rerender(<ProductDetailPage />);
+    expect(screen.getByText(`${K}.stock.countOfTotal`)).toBeInTheDocument();
 
     setProduct({ data: { ...base, inStock: true } });
     rerender(<ProductDetailPage />);
@@ -249,12 +439,13 @@ describe('ProductDetailPage', () => {
 
     setProduct({ data: { ...base, inStock: false } });
     rerender(<ProductDetailPage />);
-    expect(screen.getByText(`${K}.stock.out`)).toBeInTheDocument();
+    expect(screen.getByText(`${K}.stock.unavailable`)).toBeInTheDocument();
 
     setProduct({ data: base });
     rerender(<ProductDetailPage />);
     expect(screen.queryByText(`${K}.stock.available`)).not.toBeInTheDocument();
     expect(screen.queryByText(`${K}.stock.out`)).not.toBeInTheDocument();
+    expect(screen.queryByText(`${K}.stock.unavailable`)).not.toBeInTheDocument();
   });
 
   it('shows the NOT-FOUND panel for a 404 with a way back', async () => {

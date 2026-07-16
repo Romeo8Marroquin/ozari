@@ -5,9 +5,11 @@
  * fields below are **optional** — their mere presence IS the contract:
  *
  * - everyone (incl. Client) gets the shared catalog fields (name, price, images, …);
- * - **Employee** additionally gets the availability: `inStock` AND the available `quantity`
+ * - **Employee** additionally gets the availability: `inStock` AND the `available` count
  *   (a bare flag can't answer "can I take an order for 10?" — owner decision, 2026-07-14);
- * - **Admin** additionally gets the internal detail (`replacementPrice`, `isActive`).
+ * - **Admin** additionally gets the internal detail (`replacementPrice`, `isActive`) and — for
+ *   Alquiler only — the fleet `total` alongside the available slice ("5 de 10 disponibles":
+ *   an employee sees what can be taken, only the admin sees what the business OWNS).
  *
  * The UI reacts to which fields exist rather than re-deriving the role, so if the projection changes it
  * changes in exactly two mirrored places (this file + the backend model). Do not read a gated field
@@ -25,6 +27,8 @@ export interface ProductDetail {
   id: number;
   detail: string;
   detailType: string;
+  /** The type's lookup id — what the edit form prefills its select with. */
+  detailTypeId: number;
 }
 
 export interface ProductCurrency {
@@ -39,7 +43,11 @@ export interface Product {
   name: string;
   description?: string;
   businessType: string;
+  /** The business type's lookup id (1 = Alquiler, 2 = Venta) — the edit form's select value. */
+  businessTypeId: number;
   category: string;
+  /** The category's lookup id — same public-reference stance as `businessTypeId`. */
+  categoryId: number;
   currency: ProductCurrency;
   /** Rental price per `rentTimeUnit`; absent for sale-only products. */
   rentPrice?: number;
@@ -47,12 +55,22 @@ export interface Product {
   sellPrice?: number;
   /** The rental period the `rentPrice` applies to (e.g. "Día"); present with `rentPrice`. */
   rentTimeUnit?: string;
+  /** Its lookup id (Alquiler only) — present alongside `rentTimeUnit`. */
+  rentTimeUnitId?: number;
   images: ProductImage[];
   details: ProductDetail[];
-  /** Availability signal — Employee + Admin only (never sent to Client). */
+  /** Availability signal (`available > 0`) — Employee + Admin only (never sent to Client). */
   inStock?: boolean;
-  /** Available stock count — Employee + Admin only (today = on-hand; minus reservations later). */
-  quantity?: number;
+  /**
+   * Units takeable RIGHT NOW — Employee + Admin only. Venta: the recorded stock (sales decrement
+   * it). Alquiler: the fleet minus units out on active rentals (derived server-side).
+   */
+  available?: number;
+  /**
+   * The WHOLE rental fleet in circulation — Admin only, **Alquiler only** (absent for Venta,
+   * where it would duplicate `available`): `available` + currently rented.
+   */
+  total?: number;
   /** Internal replacement cost — Admin only. */
   replacementPrice?: number;
   /** Catalog active flag — Admin only. */

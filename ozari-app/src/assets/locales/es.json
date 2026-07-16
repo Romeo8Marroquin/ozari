@@ -58,6 +58,10 @@
       "error": "Error",
       "warning": "Atención",
       "info": "Información"
+    },
+    "share": {
+      "label": "Compartir",
+      "copied": "Enlace copiado"
     }
   },
   "modules": {
@@ -238,7 +242,11 @@
         "stock": {
           "available": "Disponible",
           "out": "Agotado",
-          "count": "{{count}} en stock"
+          "unavailable": "No disponible",
+          "count_one": "{{count}} disponible",
+          "count_other": "{{count}} disponibles",
+          "countOfTotal": "{{count}} de {{total}} disponibles",
+          "countOfTotalShort": "{{count}} de {{total}}"
         },
         "card": {
           "viewDetails": "Ver detalles de {{name}}",
@@ -254,9 +262,14 @@
           "search": "Buscar por nombre",
           "category": "Categoría",
           "businessType": "Tipo",
-          "stock": "Disponibilidad",
-          "stockIn": "Disponibles",
-          "stockOut": "Agotados",
+          "sort": "Ordenar por",
+          "sortOptions": {
+            "recientes": "Más recientes",
+            "nombre-az": "Nombre: A → Z",
+            "nombre-za": "Nombre: Z → A",
+            "precio-menor": "Precio: menor a mayor",
+            "precio-mayor": "Precio: mayor a menor"
+          },
           "allFeminine": "Todas",
           "allMasculine": "Todos",
           "clear": "Limpiar filtros",
@@ -284,9 +297,28 @@
           "descriptionTitle": "Descripción",
           "detailsTitle": "Detalles",
           "replacementPrice": "Precio de reposición",
+          "lightbox": {
+            "open": "Ver fotos en tamaño completo",
+            "close": "Cerrar",
+            "previous": "Foto anterior",
+            "next": "Siguiente foto",
+            "counter": "{{current}} de {{total}}"
+          },
           "actions": {
             "edit": "Editar",
             "delete": "Eliminar"
+          },
+          "deleteModal": {
+            "title": "Eliminar producto",
+            "description": "Estás a punto de eliminar \"{{name}}\" del catálogo.",
+            "warning": "Esta acción no se puede deshacer: el producto y toda su información se eliminarán de forma permanente.",
+            "confirm": "Eliminar",
+            "cancel": "Cancelar",
+            "successTitle": "Producto eliminado",
+            "successToast": "El producto se eliminó del catálogo.",
+            "errors": {
+              "fallback": "No pudimos eliminar el producto. Intenta de nuevo."
+            }
           },
           "notFound": {
             "title": "Producto no encontrado",
@@ -380,6 +412,7 @@
               "add": "Agregar"
             },
             "counter": "{{count}} de {{max}} fotos",
+            "reorderHint": "Arrastra las fotos para cambiar su orden.",
             "primaryBadge": "Principal",
             "actions": {
               "setPrimary": "Marcar {{name}} como foto principal",
@@ -411,11 +444,27 @@
             "forbiddenSellPrice": "Un producto de alquiler no lleva precio de venta.",
             "requiredSellPrice": "Un producto de venta requiere precio de venta.",
             "forbiddenRentPrice": "Un producto de venta no lleva precio de renta.",
+            "forbiddenReplacementPrice": "Un producto de venta no lleva precio de reposición.",
             "requiredDetailType": "Selecciona el tipo del detalle.",
             "duplicateDetailType": "Este tipo de detalle ya está agregado.",
             "requiredDetail": "El detalle es requerido.",
             "invalidDetail": "Usa de 5 a 255 letras, números, espacios, apóstrofos o guiones.",
             "submitFallback": "No pudimos crear el producto. Revisa los datos e intenta de nuevo."
+          }
+        },
+        "edit": {
+          "title": "Editar producto",
+          "lead": "Actualiza la información, las fotos, los precios y los detalles del producto.",
+          "back": "Volver al producto",
+          "loading": "Cargando producto",
+          "successTitle": "Producto actualizado",
+          "successToast": "Los cambios se guardaron.",
+          "photosDescription": "Hasta 8 fotos del producto. La que lleve la estrella será la principal del catálogo. Los cambios se aplican al guardar.",
+          "actions": {
+            "submit": "Guardar cambios"
+          },
+          "errors": {
+            "submitFallback": "No pudimos guardar los cambios. Revisa los datos e intenta de nuevo."
           }
         }
       },

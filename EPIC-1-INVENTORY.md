@@ -189,15 +189,26 @@ is role-gated + documented; both packages green at 100%; the nav shows only buil
 as the default landing.
 
 ## 5. Pending — verify before "functionality complete" / production cutover
-- **R2 ↔ DB orphan reconcile script** (accepted residual of the presigned-upload design: files PUT
-  to R2 *before* the create references them, so an abandoned tab / failed create between the two
-  steps leaves objects with no row). Build a dev-run ops script (next to `cleanup:sessions`) that
-  diffs the bucket's `products/` prefix against `product_images.r2_key` and reports BOTH kinds of
-  orphan: object-without-row (candidate to delete from R2) and row-without-object (broken image —
-  fix the product). Run it before the production cutover and periodically after; near-zero
-  likelihood with two trusted admins, but the check is cheap and makes releases auditable.
-- When the **delete/edit flows** land, pair the script with their post-commit R2 deletes (the
-  reconcile design in `products.controller.ts`'s WIP banner) so the diff should always be empty.
+- ✅ **R2 ↔ DB orphan reconcile script — BUILT (2026-07-15)**: `ozari-api/scripts/reconcile-product-images.ts`,
+  run locally with `pnpm reconcile:images` (report-only dry run; `-- --fix` applies; `--grace-hours=N`
+  widens the 24h in-flight-upload safety window). English-only local telemetry; NEVER deployed (lives
+  outside `src/`, excluded from `tsconfig.build.json` and the Docker runner image; only its env
+  secrets are sensitive, the code is fine in the public repo). Reports BOTH orphan kinds; `--fix`
+  deletes aged orphan objects (batched `DeleteObjects`) and broken rows (ONE transaction with
+  in-transaction re-verification). Exit codes: 0 clean/fixed · 1 dry-run findings · 2 errors.
+  Verified against dev (13 rows ↔ 13 objects, CLEAN). Run before the production cutover and
+  periodically after.
+- The delete/edit flows' post-commit R2 deletes are live (RECONCILE design), so the diff should
+  normally be empty — the script is the auditable proof.
 - If staging catalog data is migrated to production at MVP: `pg_dump` the product tables +
   bucket-to-bucket object copy + remap `R2_PUBLIC_URL` hosts — then run the reconcile script on
   prod as the post-migration check.
+- **Orders epic — availability follow-ups.** The projection derives `available` (fleet minus units
+  on active rentals — `buildRentedNowWhere` in `products.service.ts` is the business rule: DELIVERED
+  holds unconditionally, PENDING holds inside its event window, CANCELLED/COLLECTED free). The old
+  `inStock` list filter was REMOVED in favour of `sort` (owner decision, 2026-07-15 — availability
+  means different things per role). When orders land: (1) order-time validation must run the same
+  rented-now rule against the **event's window**, not `now` — incl. rejecting a Client buying a
+  zero-stock Venta product (Clients see no stock info by design, so the backend is the only guard);
+  (2) add the deferred **"Populares" sort** (aggregate `service_details` counts per product — same
+  groupBy shape as rented-now, without the window).

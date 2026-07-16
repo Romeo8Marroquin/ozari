@@ -28,81 +28,44 @@ import {
   readProductDraft,
   saveProductDraft,
 } from './productDraft';
+import {
+  DetailsSkeleton,
+  FormSection,
+  InfoSkeleton,
+  PhotosSkeleton,
+  PricingSkeleton,
+} from './ProductFormChrome';
 import ProductImageGallery from './ProductImageGallery';
 import ProductsStatus from './ProductsStatus';
 import SectionReveal from './SectionReveal';
 import { useGalleryImages } from './useGalleryImages';
 import { useProductImageUploads } from './useProductImageUploads';
+import type { Product } from './product.types';
 import {
   BUSINESS_TYPE_RENT,
   createProductDefaultValues,
   createProductRequiredPatterns,
   createProductSchema,
   DEFAULT_RENT_TIME_UNIT_ID,
+  productToFormValues,
   toCreateProductBody,
+  toUpdateProductBody,
   type CreateProductFormType,
+  type UpdateProductImageRef,
 } from './SchemaCreateProduct';
 import { useCreateProduct } from './useCreateProduct';
 import { useProductCatalog } from './useProductCatalog';
+import { useUpdateProduct } from './useUpdateProduct';
 
 const FORM_ID = 'create-product-form';
 const KEY = 'modules.panel.products.create';
+const EDIT_KEY = 'modules.panel.products.edit';
 const SECONDARY_COLOR = '#262626';
-const SKELETON = 'animate-pulse rounded bg-charcoal/10 motion-reduce:animate-none';
-
-/** A section card matching the settings surface language — each one is a `.reveal-block`. */
-const FormSection: React.FC<{ title: string; description: string; children: React.ReactNode }> = ({
-  title,
-  description,
-  children,
-}) => (
-  <section className="reveal-block min-w-0 rounded-card border border-charcoal/[0.07] bg-white px-5 py-5 shadow-sm sm:px-6">
-    <h3 className="text-base font-semibold text-charcoal">{title}</h3>
-    <p className="mb-5 mt-1 text-sm leading-relaxed text-charcoal/55">{description}</p>
-    {children}
-  </section>
-);
 
 const toOptions = (rows: CatalogOption[]) =>
   rows.map((row) => ({ value: row.id, label: row.name }));
 const toCurrencyOptions = (rows: CurrencyCatalogOption[]) =>
   rows.map((row) => ({ value: row.id, label: `${row.name} (${row.symbol})` }));
-
-// ── Skeleton BODIES, one per section (the card chrome — title/description — stays REAL while
-// loading; only the catalog-dependent body shimmers). Shapes mirror the real fields so each card's
-// reveal barely has to morph. Static JSX: no props, rendered by `SectionReveal` in both layers. ──
-const INFO_SKELETON = (
-  <div className="flex flex-col gap-5">
-    <span aria-hidden className={`block h-11 w-full ${SKELETON}`} />
-    <span aria-hidden className={`block h-24 w-full ${SKELETON}`} />
-    <div className="grid gap-5 sm:grid-cols-2">
-      <span aria-hidden className={`block h-11 ${SKELETON}`} />
-      <span aria-hidden className={`block h-11 ${SKELETON}`} />
-    </div>
-    <span aria-hidden className={`block h-11 w-full ${SKELETON}`} />
-  </div>
-);
-const PHOTOS_SKELETON = (
-  <div className="flex flex-col gap-4">
-    <span aria-hidden className={`block h-36 w-full rounded-control ${SKELETON}`} />
-    <span aria-hidden className={`block h-3 w-24 self-end ${SKELETON}`} />
-  </div>
-);
-const PRICING_SKELETON = (
-  <div className="flex flex-col gap-5">
-    <div className="grid gap-5 sm:grid-cols-2">
-      <span aria-hidden className={`block h-11 ${SKELETON}`} />
-      <span aria-hidden className={`block h-11 ${SKELETON}`} />
-    </div>
-    <div className="grid gap-5 sm:grid-cols-2">
-      <span aria-hidden className={`block h-11 ${SKELETON}`} />
-      <span aria-hidden className={`block h-11 ${SKELETON}`} />
-    </div>
-  </div>
-);
-const DETAILS_SKELETON = (
-  <span aria-hidden className={`block h-9 w-40 rounded-control ${SKELETON}`} />
-);
 
 /**
  * A catalog the form can actually work with: every REQUIRED lookup non-empty. A 200 with empty
@@ -181,44 +144,65 @@ const DetailRow: React.FC<{
   );
 };
 
+interface ProductFormProps {
+  /** `create` (default) posts a new product; `edit` sends the declarative full-state update. */
+  mode?: 'create' | 'edit';
+  /** Edit mode's subject (the Admin projection) — prefills every field and seeds the gallery. */
+  product?: Product;
+}
+
 /**
- * The product create form. Owns its errors per the form doctrine (`skipErrorNotification` +
- * `toFormError`): backend validation lands in the form-level banner, ambient failures toast, an
- * outage goes silent (the overlay owns it). Work is protected by a SILENT sessionStorage draft —
- * autosaved on every change, restored on return with a visible note + explicit discard, cleared on
- * a successful create (and on logout via `clearAuthState`). No blocking "leave?" dialogs, ever.
+ * The product create/edit form. Owns its errors per the form doctrine (`skipErrorNotification` +
+ * `toFormError`): backend validation lands in the form-level banner (including the edit's 409
+ * mid-save conflict), ambient failures toast, an outage goes silent (the overlay owns it).
+ *
+ * **Create** is protected by a SILENT sessionStorage draft — autosaved on every change, restored on
+ * return with a visible note + explicit discard, cleared on a successful create (and on logout via
+ * `clearAuthState`). No blocking "leave?" dialogs, ever. **Edit** deliberately has NO draft: the
+ * server state is the source of truth, and a stale edit draft restored over a product someone else
+ * already changed would silently resurrect old values — a refresh simply reloads the live product.
+ *
+ * Edit follows the RECONCILE design end-to-end: every gallery/detail movement (add, remove,
+ * reorder, star, add/edit/delete detail rows) is staged locally with zero network, and ONE save
+ * sends the final desired state — new photos upload first (presigned PUTs), kept photos travel by
+ * row id, and the backend diffs in a single transaction.
  *
  * Loading is per-card: every section renders its REAL chrome from first paint with a shimmer body
  * (`SectionReveal`), and when the catalog lands the cards reveal in a cascade — each one morphing
  * to its content's height while its fields wave in (`.reveal-item`) — so "loading → loaded" is one
  * integrated transformation, never a swap.
  */
-const ProductForm: React.FC = () => {
+const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) => {
   const { t } = useTranslation();
   const panelNavigate = usePanelNavigate();
   const queryClient = useQueryClient();
   const { data: catalog, isLoading, isError, isFetching, refetch } = useProductCatalog();
-  const { createProduct, isPending } = useCreateProduct();
+  const { createProduct, isPending: isCreating } = useCreateProduct();
+  const { updateProduct, isPending: isUpdating } = useUpdateProduct();
   const [formError, setFormError] = useState<string | undefined>(undefined);
+  const isEdit = mode === 'edit';
+  // The mode-specific copy (submit label, success toast, fallback error); shared copy stays on KEY.
+  const MODE_KEY = isEdit ? EDIT_KEY : KEY;
 
   // Photos live OUTSIDE the RHF form: File objects can't join the sessionStorage draft, and the
-  // gallery validates imperatively on add (see useGalleryImages). Uploaded only at submit time —
-  // presigned PUTs straight to R2 — so an abandoned form never leaves orphaned objects behind.
-  const gallery = useGalleryImages();
+  // gallery validates imperatively on add (see useGalleryImages). Edit seeds it with the product's
+  // existing photos (staged locally from then on); new files upload only at submit time — presigned
+  // PUTs straight to R2 — so an abandoned form never leaves orphaned objects behind.
+  const gallery = useGalleryImages(product?.images);
   const { uploadImages, isUploading, progress } = useProductImageUploads();
-  const isBusy = isPending || isUploading;
+  const isBusy = isCreating || isUpdating || isUploading;
 
   // Root of whichever view is on screen — the sweep target for the form ↔ error-panel swap.
   const viewRoot = useRef<HTMLDivElement>(null);
 
   // The draft is read ONCE per mount (never re-read mid-session — the form itself is the source of
-  // truth once mounted); its presence drives the "restored" note until discarded.
-  const [draft] = useState(readProductDraft);
+  // truth once mounted); its presence drives the "restored" note until discarded. Create-only.
+  const [draft] = useState(() => (isEdit ? null : readProductDraft()));
   const [draftRestored, setDraftRestored] = useState(Boolean(draft));
 
   const methods = useForm<CreateProductFormType>({
     resolver: zodResolver(createProductSchema),
-    defaultValues: draft ?? createProductDefaultValues,
+    defaultValues: isEdit && product ? productToFormValues(product) : (draft ?? createProductDefaultValues),
     mode: 'onTouched',
   });
   const { handleSubmit, setValue, clearErrors, reset, control } = methods;
@@ -247,15 +231,17 @@ const ProductForm: React.FC = () => {
     });
   };
 
-  // Silent autosave: every change persists the draft (tiny object, sessionStorage); a form back at
-  // its pristine state clears it instead, so an untouched visit never leaves residue. `useWatch`
-  // (not `watch()`) so the React Compiler can still memoize this component.
+  // Silent autosave (create only — see the component doc for why edit never drafts): every change
+  // persists the draft (tiny object, sessionStorage); a form back at its pristine state clears it
+  // instead, so an untouched visit never leaves residue. `useWatch` (not `watch()`) so the React
+  // Compiler can still memoize this component.
   const liveValues = useWatch({ control });
   useEffect(() => {
+    if (isEdit) return;
     const current = liveValues as CreateProductFormType;
     if (isMeaningfulDraft(current)) saveProductDraft(current);
     else clearProductDraft();
-  }, [liveValues]);
+  }, [liveValues, isEdit]);
 
   // A business-type SWITCH clears the now-irrelevant price fields (stale values must never submit)
   // and re-arms the rent defaults. Reacts only to real changes — never the initial mount, which may
@@ -285,7 +271,10 @@ const ProductForm: React.FC = () => {
       // `null`, never `undefined` — RHF ignores undefined in setValue/reset (falls back to defaults).
       setValue('rentTimeUnitId', null as unknown as number);
       setValue('rentPrice', '');
-      clearErrors(['rentPrice', 'rentTimeUnitId']);
+      // Replacement price is a RENTAL concept (billed for a lost/damaged rental) — a sale is
+      // consumed, so the field hides for Venta and any typed value is cleared here.
+      setValue('replacementPrice', '');
+      clearErrors(['rentPrice', 'rentTimeUnitId', 'replacementPrice']);
     }
   }, [businessTypeId, setValue, clearErrors]);
 
@@ -299,15 +288,18 @@ const ProductForm: React.FC = () => {
     setDraftRestored(false);
   };
 
+  // Where leaving the form lands: create came from the list; edit came from the product's detail.
+  const exitPath = isEdit && product ? (`/panel/productos/${product.id}` as const) : '/panel/productos';
+
   const submitWithImages = async (data: CreateProductFormType): Promise<void> => {
     setFormError(undefined);
 
-    // Phase 1 — upload the staged photos (presign + direct-to-R2 PUTs). A failure here keeps the
-    // staged files intact, surfaces per the form doctrine, and never reaches the create call — so
-    // the user just fixes/retries the same submit.
-    let imageKeys: string[];
+    // Phase 1 — upload the staged NEW photos (presign + direct-to-R2 PUTs); kept photos are
+    // already in R2 and travel by row id. A failure here keeps the staged files intact, surfaces
+    // per the form doctrine, and never reaches the save call — the user just retries the submit.
+    let keyByImageId: Record<string, string>;
     try {
-      imageKeys = await uploadImages(gallery.images);
+      keyByImageId = await uploadImages(gallery.images);
     } catch (error) {
       const { inline, toast } = toFormError(error, t(`${KEY}.gallery.errors.uploadFailed`));
       if (inline) setFormError(inline);
@@ -315,15 +307,57 @@ const ProductForm: React.FC = () => {
       return;
     }
 
-    // Phase 2 — create the product referencing the uploaded keys (order = display order; the
-    // starred photo carries the primary flag).
+    // The FINAL gallery, declaratively: array order = display order, the starred photo carries the
+    // primary flag, kept photos by `id`, new photos by their freshly-minted `key`.
+    const finalGallery: UpdateProductImageRef[] = gallery.images.map((image) => ({
+      ...(image.existingId !== undefined
+        ? { id: image.existingId }
+        : { key: keyByImageId[image.id] }),
+      isPrimary: image.id === gallery.primaryId,
+    }));
+
+    const onError = (error: unknown): void => {
+      const { inline, toast } = toFormError(error, t(`${MODE_KEY}.errors.submitFallback`));
+      if (inline) setFormError(inline);
+      if (toast) notify.error(toast);
+    };
+
+    // Phase 2 — persist. Edit sends the product's FULL desired state (the RECONCILE design: the
+    // backend diffs details + gallery in one transaction); create posts the new product.
+    if (isEdit && product) {
+      updateProduct(
+        { id: product.id, body: { ...toUpdateProductBody(data), images: finalGallery } },
+        {
+          onSuccess: (response) => {
+            // The 200 payload IS the authoritative post-save product (the same role projection
+            // the detail page renders) — write it straight into the detail cache so returning
+            // shows the fresh data instantly, with no refetch flash mid-transition. The list
+            // refreshes in the background (its pages keep rendering while they refetch).
+            const updated = response.data.data;
+            if (updated) {
+              queryClient.setQueryData([QueryKeys.PRODUCT, product.id], updated);
+            } else {
+              // A 2xx without a payload shouldn't happen — refetch rather than serve stale data.
+              void queryClient.invalidateQueries({ queryKey: [QueryKeys.PRODUCT, product.id] });
+            }
+            void queryClient.invalidateQueries({ queryKey: [QueryKeys.PRODUCTS] });
+            notify.success(t(`${EDIT_KEY}.successToast`), { title: t(`${EDIT_KEY}.successTitle`) });
+            panelNavigate(exitPath);
+          },
+          onError,
+        },
+      );
+      return;
+    }
+
     createProduct(
       {
         ...toCreateProductBody(data),
-        ...(imageKeys.length > 0 && {
-          images: imageKeys.map((key, index) => ({
-            key,
-            isPrimary: gallery.images[index].id === gallery.primaryId,
+        // On create every staged photo is new, so each slot carries a key.
+        ...(finalGallery.length > 0 && {
+          images: finalGallery.map((slot) => ({
+            key: slot.key as string,
+            isPrimary: slot.isPrimary,
           })),
         }),
       },
@@ -334,11 +368,7 @@ const ProductForm: React.FC = () => {
           notify.success(t(`${KEY}.successToast`), { title: t(`${KEY}.successTitle`) });
           panelNavigate('/panel/productos');
         },
-        onError: (error) => {
-          const { inline, toast } = toFormError(error, t(`${KEY}.errors.submitFallback`));
-          if (inline) setFormError(inline);
-          if (toast) notify.error(toast);
-        },
+        onError,
       },
     );
   };
@@ -427,7 +457,7 @@ const ProductForm: React.FC = () => {
           </div>
 
           <FormSection title={t(`${KEY}.sections.info.title`)} description={t(`${KEY}.sections.info.description`)}>
-            <SectionReveal loading={!catalogReady} skeleton={INFO_SKELETON}>
+            <SectionReveal loading={!catalogReady} skeleton={<InfoSkeleton />}>
               {catalog && (
                 <div className="flex flex-col gap-5">
                   <div className="reveal-item">
@@ -485,12 +515,13 @@ const ProductForm: React.FC = () => {
 
           <FormSection
             title={t(`${KEY}.sections.photos.title`)}
-            description={t(`${KEY}.sections.photos.description`)}
+            // Edit gets its own copy: there is no draft here, and removals apply on save.
+            description={t(isEdit ? `${EDIT_KEY}.photosDescription` : `${KEY}.sections.photos.description`)}
           >
             <SectionReveal
               loading={!catalogReady}
               delaySeconds={SECTION_REVEAL_STEP}
-              skeleton={PHOTOS_SKELETON}
+              skeleton={<PhotosSkeleton />}
             >
               <div className="reveal-item">
                 <ProductImageGallery
@@ -510,7 +541,7 @@ const ProductForm: React.FC = () => {
             <SectionReveal
               loading={!catalogReady}
               delaySeconds={SECTION_REVEAL_STEP * 2}
-              skeleton={PRICING_SKELETON}
+              skeleton={<PricingSkeleton />}
             >
               {catalog && (
                 <div className="flex flex-col gap-5">
@@ -557,21 +588,26 @@ const ProductForm: React.FC = () => {
                     </div>
                   )}
                   <div className="grid gap-5 sm:grid-cols-2">
-                    <div className="reveal-item min-w-0">
-                      <CustomInputForm<CreateProductFormType>
-                        id="product-replacement-price"
-                        name="replacementPrice"
-                        type="number"
-                        inputMode="decimal"
-                        min={0}
-                        step="0.01"
-                        optionalLabel
-                        label={t(`${KEY}.fields.replacementPriceLabel`)}
-                        placeholder={t(`${KEY}.fields.pricePlaceholder`)}
-                        aria-label={t(`${KEY}.fields.replacementPriceLabel`)}
-                        instructions={t(`${KEY}.fields.replacementPriceHint`)}
-                      />
-                    </div>
+                    {/* Alquiler only: what the client pays for a lost/damaged rental. A SOLD item
+                        is consumed — there is nothing to replace — so Venta hides the field (the
+                        type-switch effect clears any typed value; schema + backend forbid it). */}
+                    {isRent && (
+                      <div className="reveal-item min-w-0">
+                        <CustomInputForm<CreateProductFormType>
+                          id="product-replacement-price"
+                          name="replacementPrice"
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          step="0.01"
+                          optionalLabel
+                          label={t(`${KEY}.fields.replacementPriceLabel`)}
+                          placeholder={t(`${KEY}.fields.pricePlaceholder`)}
+                          aria-label={t(`${KEY}.fields.replacementPriceLabel`)}
+                          instructions={t(`${KEY}.fields.replacementPriceHint`)}
+                        />
+                      </div>
+                    )}
                     <div className="reveal-item min-w-0">
                       <CustomInputForm<CreateProductFormType>
                         id="product-quantity"
@@ -598,7 +634,7 @@ const ProductForm: React.FC = () => {
             <SectionReveal
               loading={!catalogReady}
               delaySeconds={SECTION_REVEAL_STEP * 3}
-              skeleton={DETAILS_SKELETON}
+              skeleton={<DetailsSkeleton />}
             >
               {catalog && (
                 <div className="flex flex-col gap-5">
@@ -676,7 +712,7 @@ const ProductForm: React.FC = () => {
                 color={SECONDARY_COLOR}
                 fullWidth
                 disabled={isBusy}
-                onClick={() => panelNavigate('/panel/productos')}
+                onClick={() => panelNavigate(exitPath)}
                 className="sm:w-auto"
               >
                 {t(`${KEY}.actions.cancel`)}
@@ -690,7 +726,7 @@ const ProductForm: React.FC = () => {
                 loading={isBusy}
                 className="sm:w-auto"
               >
-                {isUploading ? t(`${KEY}.actions.uploading`) : t(`${KEY}.actions.submit`)}
+                {isUploading ? t(`${KEY}.actions.uploading`) : t(`${MODE_KEY}.actions.submit`)}
               </Button>
             </div>
           </div>

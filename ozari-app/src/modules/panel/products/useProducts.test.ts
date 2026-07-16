@@ -49,7 +49,7 @@ describe('useProducts', () => {
     get.mockResolvedValue({ data: { data: page(1, 1, []) } });
 
     const { result } = renderHook(
-      () => useProducts({ q: 'mesa', categoria: 3, tipo: 1, stock: true }),
+      () => useProducts({ q: 'mesa', categoria: 3, tipo: 1, orden: 'precio-menor' }),
       { wrapper: createQueryWrapper() },
     );
 
@@ -61,7 +61,7 @@ describe('useProducts', () => {
         search: 'mesa',
         categoryId: 3,
         businessTypeId: 1,
-        inStock: true,
+        sort: 'priceAsc',
       },
     });
   });

@@ -13,9 +13,11 @@ import { PAGE_ENTER, prefersReducedMotion } from '@utils/motion';
  *
  *  1. `beginProductImageMorph(id, img, estimate?)` — at click time, a fixed-position CLONE of the
  *     photo is portaled to `<body>` at the photo's exact rect (`--z-float-body`) and starts MOVING
- *     IMMEDIATELY (the click is t=0): toward the predicted destination when one is known
- *     ({@link estimateDetailHeroRect}) or a whisper of a drift otherwise. The photo's own cell is
- *     dimmed at once — only the image travels; nothing lingers behind it.
+ *     IMMEDIATELY (the click is t=0) toward its destination — the predicted hero rect
+ *     ({@link estimateDetailHeroRect}) forward, the remembered card rect back. **No destination =
+ *     no morph**: with nothing to fly to (a refresh wiped the memory, the layout reflowed) the
+ *     begin no-ops and the standard page fade handles the photo. The photo's own cell is dimmed at
+ *     once — only the image travels; nothing lingers behind it.
  *  2. `claimProductImageMorph(id, target, reveal?, onSettled?)` — when the destination with the
  *     SAME id mounts, `reveal` is hidden and the measured rect is compared with the flight's
  *     destination: CONFIRMED (within tolerance) → nothing restarts, the single in-progress tween
@@ -49,8 +51,8 @@ export interface MorphRect {
 interface MorphStash {
   productId: number;
   clone: HTMLImageElement;
-  /** The in-progress travel toward the known destination (null = blind drift, no destination). */
-  flight: { tween: gsap.core.Tween; destination: MorphRect } | null;
+  /** The in-progress travel toward the known destination (a begin without one no-ops instead). */
+  flight: { tween: gsap.core.Tween; destination: MorphRect };
 }
 
 interface MorphLanding {
@@ -158,7 +160,11 @@ export function estimateDetailHeroRect(): MorphRect | null {
   const contentLeft = box.left + (box.width - contentWidth) / 2;
   const heroWidth = window.innerWidth >= 1024 ? (contentWidth - 40) / 2 : contentWidth; // lg: gap-10 split
   const padding = window.innerWidth >= 1024 ? 32 : window.innerWidth >= 768 ? 24 : 16; // p-4/md:6/lg:8
-  const top = scrollerBox.top + padding + 44; // + the back row (~20px) and the page's gap-6
+  // + the back/share row (36px — the always-mounted share control sizes it) and the page's gap-6.
+  // This constant MUST track the detail page's pre-hero chrome: a stale value makes every
+  // first-flight-of-a-session (nothing measured yet — e.g. right after a refresh) land short and
+  // then visibly correct.
+  const top = scrollerBox.top + padding + 60;
   return { left: contentLeft, top, width: heroWidth, height: (heroWidth * 3) / 4 };
 }
 
@@ -233,7 +239,12 @@ export function releaseProductImageMorph(instant = false): void {
  *  - BACK (no estimate — the detail's back affordance): the flight aims at the remembered return
  *    rect, and the source (the hero — a bare image the clone covers 1:1) hides INSTANTLY, so the
  *    page exit can never be seen sweeping it "upwards" behind the clone.
- * No-ops under reduced motion or without a usable photo.
+ *
+ * **No destination = no morph.** A BACK with no valid remembered card rect (the page was refreshed,
+ * or the layout reflowed since lift-off) has nothing to fly to — a blind, unfading drift over the
+ * grid skeleton reads as broken. It no-ops instead: the hero simply fades out with the standard
+ * page exit, exactly like a product with no photo. Same rule covers a FORWARD whose estimate
+ * couldn't be computed. Also no-ops under reduced motion or without a usable photo.
  */
 export function beginProductImageMorph(
   productId: number,
@@ -252,7 +263,9 @@ export function beginProductImageMorph(
   if (rect.width === 0 || rect.height === 0) return;
 
   const forward = estimate !== null;
+  let destination: MorphRect;
   if (forward) {
+    destination = estimate;
     // The card's rect — pixel-correct for the back flight (the return restores this scroll), as
     // long as the layout hasn't reflowed in between (the signature guards that).
     returnTarget = {
@@ -260,14 +273,17 @@ export function beginProductImageMorph(
       rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       signature: layoutSignature(),
     };
+  } else {
+    if (
+      !returnTarget ||
+      returnTarget.productId !== productId ||
+      returnTarget.signature !== layoutSignature()
+    ) {
+      // Nothing to fly to (refresh wiped the memory / the layout changed) → standard exit instead.
+      return;
+    }
+    destination = returnTarget.rect;
   }
-  const destination = forward
-    ? estimate
-    : returnTarget &&
-        returnTarget.productId === productId &&
-        returnTarget.signature === layoutSignature()
-      ? returnTarget.rect
-      : null;
 
   const clone = document.createElement('img');
   clone.src = image.currentSrc || image.src;
@@ -301,16 +317,10 @@ export function beginProductImageMorph(
   }
 
   // ONE continuous flight from the very first frame — the claim will hook its completion rather
-  // than restart it (no velocity kink, ever). Without a destination (should not happen in the
-  // bound flows) a whisper of a drift keeps the clone from reading as frozen.
-  let flight: MorphStash['flight'] = null;
-  if (destination) {
-    const tween = gsap.to(clone, { ...destination, duration: FLIGHT.duration, ease: FLIGHT.ease });
-    flight = { tween, destination };
-  } else {
-    gsap.to(clone, { scale: 0.97, duration: FLIGHT.duration, ease: FLIGHT.ease });
-  }
-  stash = { productId, clone, flight };
+  // than restart it (no velocity kink, ever). A destination is GUARANTEED here (a begin without
+  // one no-ops above), so a clone can never float blind over the next page.
+  const tween = gsap.to(clone, { ...destination, duration: FLIGHT.duration, ease: FLIGHT.ease });
+  stash = { productId, clone, flight: { tween, destination } };
   safetyTimer = window.setTimeout(() => releaseProductImageMorph(), SAFETY_TIMEOUT_MS);
 }
 
@@ -367,7 +377,6 @@ function performClaim(
   // handoff — pixel-perfect landings, no masked offsets. Only a genuinely different rect (the
   // destination went stale: sidebar toggled, resize, reflow) takes the correction path.
   const confirmed =
-    flight !== null &&
     Math.abs(rect.left - flight.destination.left) <= DESTINATION_TOLERANCE_PX &&
     Math.abs(rect.top - flight.destination.top) <= DESTINATION_TOLERANCE_PX &&
     Math.abs(rect.width - flight.destination.width) <= DESTINATION_TOLERANCE_PX &&

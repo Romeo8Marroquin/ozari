@@ -120,7 +120,9 @@ or a deploy and an apply overwrite each other — §6). The two **credentials** 
    ]
    ```
 
-   Public **reads** don't need CORS (plain `<img>` tags aren't CORS requests).
+   Public **reads** don't need CORS (plain `<img>` tags aren't CORS requests). If a feature ever
+   needs to `fetch` an image from the app origin (e.g. attaching a photo as a Web Share Level 2
+   file — tried and removed 2026-07: share sheets lead with links), add `"GET"` here first.
 
    **Per-environment origins (security):** CORS here is a *browser gate*, not the upload
    authorization — that is the presigned signature (admin-minted, 5-min TTL, bound to key + type +

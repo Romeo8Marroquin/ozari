@@ -32,7 +32,10 @@ export interface SkeletonFadeProps {
 }
 
 /**
- * Crossfades a skeleton placeholder into real content — no pop, no movement, just opacity.
+ * Crossfades a skeleton placeholder into real content — no pop, no movement, just opacity. Works
+ * in BOTH directions: re-entering `loading` from displayed content plays the REVERSE crossfade
+ * (the previous content ghosts out over the returning skeleton — a grid tile easing back to
+ * shimmer when a filter re-queries), so no state change ever snaps.
  *
  * While loading, the skeleton sits in normal flow (defining the layout). The instant the data lands,
  * the real content takes that place in flow (so its own size/alignment is preserved) and the skeleton
@@ -58,14 +61,24 @@ const SkeletonFade: React.FC<SkeletonFadeProps> = ({
   // Is the skeleton overlay in the DOM? True while loading and while it fades out afterwards; the
   // fade's onComplete drops it. Starts true only if we opened in the loading state.
   const [skeletonMounted, setSkeletonMounted] = useState(loading);
+  // Is a GHOST of the previous content fading out over the returning skeleton? The REVERSE
+  // crossfade: re-entering loading from displayed content (a filter change re-querying a grid
+  // tile) eases content → skeleton instead of snapping.
+  const [ghostMounted, setGhostMounted] = useState(false);
 
-  // Re-arm whenever we RE-ENTER the loading state (a reused modal reopening, a query refetch, …) so
-  // the skeleton returns and the next resolve crossfades like the first time. React's "adjust state
-  // during render on a prop change" pattern (tracking the previous value), not an effect.
+  // Re-arm whenever we RE-ENTER the loading state (a reused modal reopening, a query refetch, a
+  // filter change, …) so the skeleton returns — WITH the reverse crossfade when content was on
+  // screen (`!skeletonMounted`; boolean assignment, not a branch, so a mid-reveal re-arm simply
+  // yields no ghost). React's "adjust state during render" pattern, not an effect.
   const [wasLoading, setWasLoading] = useState(loading);
   if (loading !== wasLoading) {
     setWasLoading(loading);
-    if (loading) setSkeletonMounted(true);
+    if (loading) {
+      setGhostMounted(!skeletonMounted);
+      setSkeletonMounted(true);
+    } else {
+      setGhostMounted(false);
+    }
   }
 
   const morphWidth = animateSize === true || animateSize === 'width' || animateSize === 'both';
@@ -74,6 +87,7 @@ const SkeletonFade: React.FC<SkeletonFadeProps> = ({
   const wrapperRef = useRef<HTMLSpanElement>(null);
   const contentRef = useRef<HTMLSpanElement>(null);
   const overlayRef = useRef<HTMLSpanElement>(null);
+  const ghostRef = useRef<HTMLSpanElement>(null);
   const skeletonWidthRef = useRef(0);
   const skeletonHeightRef = useRef(0);
 
@@ -141,10 +155,39 @@ const SkeletonFade: React.FC<SkeletonFadeProps> = ({
     return () => tweens.forEach((tween) => tween.kill());
   }, [loading, skeletonMounted, morphWidth, morphHeight, durationMs]);
 
+  // The CONCEAL — the reveal's mirror: the skeleton is back in flow and the previous content
+  // fades out as an absolute ghost on top of it, then unmounts. Instant under reduced motion.
+  useLayoutEffect(() => {
+    if (!loading || !ghostMounted) return;
+    const ghost = ghostRef.current;
+    /* v8 ignore next -- the ghost is always mounted while this effect runs */
+    if (!ghost) return;
+    const seconds = prefersReducedMotion() ? 0 : durationMs / 1000;
+    const tween = gsap.fromTo(
+      ghost,
+      { opacity: 1 },
+      { opacity: 0, duration: seconds, ease: 'power2.inOut', onComplete: () => setGhostMounted(false) },
+    );
+    return () => {
+      tween.kill();
+    };
+  }, [loading, ghostMounted, durationMs]);
+
   return (
     <span ref={wrapperRef} className={twMerge('relative', className)}>
       {loading ? (
-        <span className={contentClassName}>{skeleton}</span>
+        <>
+          <span className={contentClassName}>{skeleton}</span>
+          {ghostMounted && (
+            <span
+              ref={ghostRef}
+              aria-hidden
+              className={twMerge(contentClassName, 'pointer-events-none absolute inset-0')}
+            >
+              {children}
+            </span>
+          )}
+        </>
       ) : (
         <>
           <span ref={contentRef} className={contentClassName}>

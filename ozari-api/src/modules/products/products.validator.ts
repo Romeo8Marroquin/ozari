@@ -16,6 +16,7 @@ import {
   type CreateProductRequestModel,
   type ProductImageUploadFileModel,
   type UpdateProductDetailRequestModel,
+  type UpdateProductImageRequestModel,
   type UpdateProductRequestModel,
 } from "./products.models.js";
 
@@ -238,7 +239,8 @@ export const validateCreateProduct = async (
 
     // The CONDITIONAL price rule — a product is exactly ONE business type:
     // Alquiler → rentPrice + a valid rent time unit, sellPrice forbidden; Venta → sellPrice only,
-    // rent fields forbidden. `replacementPrice` is optional for both (always captured when given).
+    // rent fields forbidden. `replacementPrice` is Alquiler-only too (what a client pays for a
+    // lost/damaged RENTAL — a sold item is simply consumed, there is nothing to replace).
     const isRent = businessTypeId === BusinessTypeEnum.RENT;
     const hasRentTimeUnit =
       rentTimeUnitId !== undefined && rentTimeUnitId !== null;
@@ -270,6 +272,10 @@ export const validateCreateProduct = async (
         rejectCreate(res, "sellPricingRequired", { sellPrice });
         return;
       }
+      if (replacementMoney.value !== undefined) {
+        rejectCreate(res, "replacementPriceForbidden", { replacementPrice });
+        return;
+      }
     }
 
     const validatedBody: CreateProductRequestModel = {
@@ -283,7 +289,7 @@ export const validateCreateProduct = async (
       quantity,
       rentPrice: isRent ? rentMoney.value : undefined,
       rentTimeUnitId: isRent ? rentTimeUnitId : undefined,
-      replacementPrice: replacementMoney.value,
+      replacementPrice: isRent ? replacementMoney.value : undefined,
       sellPrice: isRent ? undefined : sellMoney.value,
     };
     req.body = validatedBody;
@@ -302,6 +308,37 @@ export const validateCreateProduct = async (
   }
 };
 
+/** Log the update-validator warning for `key` and send its standard 400 (updateProduct namespace). */
+const rejectUpdate = (
+  res: Response,
+  key: string,
+  logParams: Record<string, unknown>,
+): void => {
+  logger.warn(
+    i18next.t(`products.updateProduct.validators.logs.${key}`, logParams),
+  );
+  sendOzariError(
+    res,
+    HttpEnum.BAD_REQUEST,
+    i18next.t(`products.updateProduct.validators.${key}`),
+  );
+};
+
+/**
+ * `PUT /products/:id` — the declarative full-state update (the RECONCILE design). Follows
+ * `validateCreateProduct`'s shape exactly for the shared rules (same messages, same conditional
+ * price rule), plus the update-only checks:
+ *
+ * - the `:id` param must be an existing ACTIVE product — malformed and unknown are both a plain
+ *   `404`, like `GET /products/:id` (there is nothing for the client to "fix");
+ * - each detail row either carries the `id` of one of THIS product's active details (keep/update)
+ *   or none (create) — an id of another product, an unknown id, or a repeated id is a 400;
+ * - each gallery slot carries exactly ONE of `id` (a kept photo of this product) or `key` (a new
+ *   upload matching our presign shape) — same ownership/duplicate/primary rules.
+ *
+ * Ownership here is the request-shaped check; the transaction re-verifies kept ids against the
+ * live rows (see `applyProductUpdate`), so a save racing another admin's delete is a clean 409.
+ */
 export const validateUpdateProduct = async (
   req: Request,
   res: Response,
@@ -313,48 +350,57 @@ export const validateUpdateProduct = async (
       categoryId,
       currencyId,
       description,
-      id,
+      images,
       name,
       productDetails,
       quantity,
       rentPrice,
+      rentTimeUnitId,
+      replacementPrice,
       sellPrice,
     } = req.body as UpdateProductRequestModel;
+
+    // The target product: malformed id and unknown/soft-deleted product are both a 404 — a detail
+    // lookup either finds the row or it doesn't (the getProductById stance).
+    const productId = Number(req.params["id"]);
+    const prismaClient = await getPrismaClient();
+    const product =
+      Number.isInteger(productId) && productId >= 1
+        ? await prismaClient.product.findFirst({
+            where: { id: productId, isActive: true },
+            select: {
+              id: true,
+              productImages: { select: { id: true } },
+              productDetails: { select: { id: true } },
+            },
+          })
+        : null;
+    if (!product) {
+      logger.warn(
+        i18next.t("products.updateProduct.validators.logs.productNotFound", {
+          id: req.params["id"],
+        }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.NOT_FOUND,
+        i18next.t("products.updateProduct.validators.productNotFound"),
+      );
+      return;
+    }
 
     if (
       !businessTypeId ||
       !isValidEnumValue(BusinessTypeEnum, businessTypeId)
     ) {
-      logger.warn(
-        i18next.t(
-          "products.createProduct.validators.logs.invalidBusinessTypeId",
-          {
-            businessTypeId,
-          },
-        ),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidBusinessTypeId"),
-      );
+      rejectCreate(res, "invalidBusinessTypeId", { businessTypeId });
       return;
     }
-    const prismaClient = await getPrismaClient();
     const validCategories = await prismaClient.productCategory.findFirst({
       where: { id: (categoryId as number | undefined) ?? 0, isActive: true },
     });
     if (!categoryId || !validCategories) {
-      logger.warn(
-        i18next.t("products.createProduct.validators.logs.invalidCategoryId", {
-          categoryId,
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidCategoryId"),
-      );
+      rejectCreate(res, "invalidCategoryId", { categoryId });
       return;
     }
 
@@ -362,129 +408,137 @@ export const validateUpdateProduct = async (
       where: { id: (currencyId as number | undefined) ?? 0, isActive: true },
     });
     if (!currencyId || !validCurrencies) {
-      logger.warn(
-        i18next.t("products.createProduct.validators.logs.invalidCurrencyId", {
-          currencyId,
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidCurrencyId"),
-      );
+      rejectCreate(res, "invalidCurrencyId", { currencyId });
       return;
     }
 
     if (description?.trim() && !descriptionTextRegex.test(description)) {
-      logger.warn(
-        i18next.t("products.createProduct.validators.logs.invalidDescription", {
-          description,
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidDescription"),
-      );
-      return;
-    }
-
-    const validProduct = await prismaClient.product.findFirst({
-      where: { id: (id as number | undefined) ?? 0, isActive: true },
-    });
-    if (!validProduct) {
-      logger.warn(
-        i18next.t("products.updateProduct.validators.logs.invalidId", { id }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.updateProduct.validators.invalidId"),
-      );
+      rejectCreate(res, "invalidDescription", { description });
       return;
     }
 
     if (!name || !fullNameRegex.test(name)) {
-      logger.warn(
-        i18next.t("products.createProduct.validators.logs.invalidName", {
-          name,
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidName"),
-      );
+      rejectCreate(res, "invalidName", { name });
       return;
     }
 
-    const validProductDetailsTypes =
-      await prismaClient.productDetailType.findMany({
-        select: { id: true },
-        where: { isActive: true },
-      });
-    const validProductDetails = await prismaClient.productDetail.findMany({
+    // Details — the FINAL desired list: rows with an `id` keep/update one of THIS product's active
+    // details; rows without create. The create rules apply on top (valid type, one per type, text).
+    const validDetailTypes = await prismaClient.productDetailType.findMany({
       select: { id: true },
-      where: { isActive: true, productId: id },
+      where: { isActive: true },
     });
     const sanitizedProductDetails: UpdateProductDetailRequestModel[] = [];
+    const seenDetailTypes = new Set<number>();
+    const seenDetailIds = new Set<number>();
     const reqProductDetails = productDetails as
-      | undefined
-      | UpdateProductDetailRequestModel[];
+      | UpdateProductDetailRequestModel[]
+      | undefined;
     for (const detail of reqProductDetails ?? []) {
-      if (!detail.id || !validProductDetails.some((d) => d.id === detail.id)) {
-        logger.warn(
-          i18next.t("products.updateProduct.validators.logs.invalidDetailId", {
-            detailId: detail.id,
-          }),
-        );
-        sendOzariError(
-          res,
-          HttpEnum.BAD_REQUEST,
-          i18next.t("products.updateProduct.validators.invalidDetailId"),
-        );
-        return;
+      if (detail.id !== undefined) {
+        if (
+          typeof detail.id !== "number" ||
+          !product.productDetails.some((row) => row.id === detail.id) ||
+          seenDetailIds.has(detail.id)
+        ) {
+          rejectUpdate(res, "invalidDetailId", { detailId: detail.id });
+          return;
+        }
+        seenDetailIds.add(detail.id);
       }
-
       if (
         !detail.detailTypeId ||
-        !validProductDetailsTypes.some((d) => d.id === detail.detailTypeId)
+        !validDetailTypes.some((d) => d.id === detail.detailTypeId)
       ) {
-        logger.warn(
-          i18next.t(
-            "products.createProduct.validators.logs.invalidDetailTypeId",
-            {
-              detailTypeId: detail.detailTypeId,
-            },
-          ),
-        );
-        sendOzariError(
-          res,
-          HttpEnum.BAD_REQUEST,
-          i18next.t("products.createProduct.validators.invalidDetailTypeId"),
-        );
+        rejectCreate(res, "invalidDetailTypeId", {
+          detailTypeId: detail.detailTypeId,
+        });
         return;
       }
-
+      if (seenDetailTypes.has(detail.detailTypeId)) {
+        rejectCreate(res, "duplicateDetailType", {
+          detailTypeId: detail.detailTypeId,
+        });
+        return;
+      }
+      seenDetailTypes.add(detail.detailTypeId);
       if (!detail.detail || !fullNameRegex.test(detail.detail)) {
-        logger.warn(
-          i18next.t("products.createProduct.validators.logs.invalidDetail", {
-            detail: detail.detail,
-          }),
-        );
-        sendOzariError(
-          res,
-          HttpEnum.BAD_REQUEST,
-          i18next.t("products.createProduct.validators.invalidDetail"),
-        );
+        rejectCreate(res, "invalidDetail", { detail: detail.detail });
         return;
       }
       sanitizedProductDetails.push({
         detail: detail.detail.trim(),
         detailTypeId: detail.detailTypeId,
-        id: detail.id,
+        ...(detail.id !== undefined && { id: detail.id }),
       });
     }
+
+    // Gallery — the FINAL desired list in display order: each slot is EXACTLY one of `id` (kept
+    // photo of this product) or `key` (new upload, our presign shape). Same cap/dup/primary rules
+    // as create; rows of the product absent from the list will be deleted by the reconcile.
+    const reqImages = images as UpdateProductImageRequestModel[] | undefined;
+    if (reqImages !== undefined && !Array.isArray(reqImages)) {
+      rejectCreate(res, "invalidImages", { images });
+      return;
+    }
+    if ((reqImages?.length ?? 0) > appConfig.storage.maxImagesPerProduct) {
+      rejectCreate(res, "tooManyImages", {
+        count: reqImages?.length,
+        max: appConfig.storage.maxImagesPerProduct,
+      });
+      return;
+    }
+    const imageKeyRegex = buildProductImageKeyRegex();
+    const seenImageKeys = new Set<string>();
+    const seenImageIds = new Set<number>();
+    let primaryCount = 0;
+    for (const image of reqImages ?? []) {
+      const hasId = image?.id !== undefined;
+      const hasKey = image?.key !== undefined;
+      if (!image || hasId === hasKey) {
+        rejectUpdate(res, "invalidImageEntry", { image });
+        return;
+      }
+      if (hasId) {
+        if (
+          typeof image.id !== "number" ||
+          !product.productImages.some((row) => row.id === image.id) ||
+          seenImageIds.has(image.id)
+        ) {
+          rejectUpdate(res, "invalidImageId", { imageId: image.id });
+          return;
+        }
+        seenImageIds.add(image.id);
+      } else {
+        if (typeof image.key !== "string" || !imageKeyRegex.test(image.key)) {
+          rejectCreate(res, "invalidImageKey", { key: image.key });
+          return;
+        }
+        if (seenImageKeys.has(image.key)) {
+          rejectCreate(res, "duplicateImageKey", { key: image.key });
+          return;
+        }
+        seenImageKeys.add(image.key);
+      }
+      if (image.isPrimary === true) {
+        primaryCount += 1;
+      }
+    }
+    if (primaryCount > 1) {
+      rejectCreate(res, "multiplePrimaryImages", { primaryCount });
+      return;
+    }
+    const sanitizedImages: UpdateProductImageRequestModel[] = (
+      reqImages ?? []
+    ).map((image, index) => ({
+      // The XOR check above guarantees exactly one side; `?? {}` keeps the compiler convinced.
+      ...(image.id !== undefined
+        ? { id: image.id }
+        : image.key !== undefined
+          ? { key: image.key }
+          : {}),
+      isPrimary: primaryCount === 0 ? index === 0 : image.isPrimary === true,
+    }));
 
     if (
       (!quantity && quantity !== 0) ||
@@ -493,100 +547,81 @@ export const validateUpdateProduct = async (
       quantity < 0 ||
       quantity > appConfig.maxGlobalQuantity
     ) {
-      logger.warn(
-        i18next.t("products.createProduct.validators.logs.invalidQuantity", {
-          quantity,
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidQuantity"),
-      );
+      rejectCreate(res, "invalidQuantity", { quantity });
       return;
     }
 
-    let sanitizedRentPrice: number | undefined;
-    if (rentPrice || rentPrice === 0) {
-      if (
-        typeof rentPrice !== "number" ||
-        rentPrice < 0 ||
-        rentPrice > appConfig.maxGlobalAmount
-      ) {
-        logger.warn(
-          i18next.t("products.createProduct.validators.logs.invalidRentPrice", {
-            rentPrice,
-          }),
-        );
-        sendOzariError(
-          res,
-          HttpEnum.BAD_REQUEST,
-          i18next.t("products.createProduct.validators.invalidRentPrice"),
-        );
-        return;
-      } else {
-        sanitizedRentPrice = Math.trunc(rentPrice * 100) / 100;
-      }
-    }
-
-    let sanitizedSellPrice: number | undefined;
-    if (sellPrice || sellPrice === 0) {
-      if (
-        typeof sellPrice !== "number" ||
-        sellPrice < 0 ||
-        sellPrice > appConfig.maxGlobalAmount
-      ) {
-        logger.warn(
-          i18next.t("products.createProduct.validators.logs.invalidSellPrice", {
-            sellPrice,
-          }),
-        );
-        sendOzariError(
-          res,
-          HttpEnum.BAD_REQUEST,
-          i18next.t("products.createProduct.validators.invalidSellPrice"),
-        );
-        return;
-      } else {
-        sanitizedSellPrice = Math.trunc(sellPrice * 100) / 100;
-      }
-    }
-
-    if (!sanitizedRentPrice && !sanitizedSellPrice) {
-      logger.warn(
-        i18next.t(
-          "products.createProduct.validators.logs.invalidRentAndSellPrice",
-          {
-            rentPrice: sanitizedRentPrice,
-            sellPrice: sanitizedSellPrice,
-          },
-        ),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.createProduct.validators.invalidRentAndSellPrice"),
-      );
+    const rentMoney = sanitizeOptionalMoney(rentPrice);
+    if (!rentMoney.ok) {
+      rejectCreate(res, "invalidRentPrice", { rentPrice });
       return;
     }
 
-    // WIP: update is NOT mounted yet. It still lacks the conditional price rule and the new
-    // fields — `rentTimeUnitId`/`replacementPrice` pass through as absent until the update rebuild
-    // lands. Kept compiling against the new request model only.
+    const sellMoney = sanitizeOptionalMoney(sellPrice);
+    if (!sellMoney.ok) {
+      rejectCreate(res, "invalidSellPrice", { sellPrice });
+      return;
+    }
+
+    const replacementMoney = sanitizeOptionalMoney(replacementPrice);
+    if (!replacementMoney.ok) {
+      rejectCreate(res, "invalidReplacementPrice", { replacementPrice });
+      return;
+    }
+
+    // The CONDITIONAL price rule — identical to create (a product is exactly ONE business type),
+    // and it applies to the product's NEW type: switching Alquiler → Venta must arrive with the
+    // Venta shape (the reconcile then nulls the now-irrelevant columns).
+    const isRent = businessTypeId === BusinessTypeEnum.RENT;
+    const hasRentTimeUnit =
+      rentTimeUnitId !== undefined && rentTimeUnitId !== null;
+    const pricingParams = { businessTypeId, rentPrice, sellPrice, rentTimeUnitId };
+    if (isRent) {
+      if (sellMoney.value !== undefined) {
+        rejectCreate(res, "pricingMismatch", pricingParams);
+        return;
+      }
+      if (rentMoney.value === undefined) {
+        rejectCreate(res, "rentPricingRequired", { rentPrice });
+        return;
+      }
+      const validRentTimeUnit = hasRentTimeUnit
+        ? await prismaClient.rentTimeUnit.findFirst({
+            where: { id: rentTimeUnitId, isActive: true },
+          })
+        : null;
+      if (!validRentTimeUnit) {
+        rejectCreate(res, "invalidRentTimeUnitId", { rentTimeUnitId });
+        return;
+      }
+    } else {
+      if (rentMoney.value !== undefined || hasRentTimeUnit) {
+        rejectCreate(res, "pricingMismatch", pricingParams);
+        return;
+      }
+      if (sellMoney.value === undefined) {
+        rejectCreate(res, "sellPricingRequired", { sellPrice });
+        return;
+      }
+      if (replacementMoney.value !== undefined) {
+        rejectCreate(res, "replacementPriceForbidden", { replacementPrice });
+        return;
+      }
+    }
+
     const validatedBody: UpdateProductRequestModel = {
       businessTypeId,
       categoryId,
       currencyId,
-      description: description?.trim(),
-      id: id,
-      images: [], // WIP: gallery edits land with the update rebuild.
+      description: description?.trim() ? description.trim() : undefined,
+      images: sanitizedImages,
       name: name.trim(),
       productDetails: sanitizedProductDetails,
       quantity,
-      rentPrice: sanitizedRentPrice,
-      rentTimeUnitId: undefined,
-      replacementPrice: undefined,
-      sellPrice: sanitizedSellPrice,
+      rentPrice: isRent ? rentMoney.value : undefined,
+      rentTimeUnitId: isRent ? rentTimeUnitId : undefined,
+      replacementPrice: isRent ? replacementMoney.value : undefined,
+      sellPrice: isRent ? undefined : sellMoney.value,
     };
     req.body = validatedBody;
     next();
@@ -690,36 +725,36 @@ export const validateCreateProductImageUploads = (
   }
 };
 
+/**
+ * `DELETE /products/:id` — the target must be an existing ACTIVE product; malformed and unknown
+ * ids are both a plain `404` (the getProductById/update stance: there is nothing for the client
+ * to "fix"). The deletion itself carries no body; the controller applies the no-trash policy.
+ */
 export const validateDeleteProduct = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
   try {
-    const { id } = req.query;
-    if (!id || Number.isNaN(Number(id))) {
-      logger.warn(
-        i18next.t("products.deleteProduct.validators.logs.invalidId", { id }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.deleteProduct.validators.invalidId"),
-      );
-      return;
-    }
+    const productId = Number(req.params["id"]);
     const prismaClient = await getPrismaClient();
-    const validProduct = await prismaClient.product.findFirst({
-      where: { id: Number(id), isActive: true },
-    });
-    if (!validProduct) {
+    const product =
+      Number.isInteger(productId) && productId >= 1
+        ? await prismaClient.product.findFirst({
+            where: { id: productId, isActive: true },
+            select: { id: true },
+          })
+        : null;
+    if (!product) {
       logger.warn(
-        i18next.t("products.deleteProduct.validators.logs.invalidId", { id }),
+        i18next.t("products.deleteProduct.validators.logs.productNotFound", {
+          id: req.params["id"],
+        }),
       );
       sendOzariError(
         res,
-        HttpEnum.BAD_REQUEST,
-        i18next.t("products.deleteProduct.validators.invalidId"),
+        HttpEnum.NOT_FOUND,
+        i18next.t("products.deleteProduct.validators.productNotFound"),
       );
       return;
     }

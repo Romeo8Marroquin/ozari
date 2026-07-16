@@ -15,6 +15,14 @@ vi.mock('./useCreateProduct', () => ({
   useCreateProduct: () => ({ createProduct, isPending: pending.value }),
 }));
 
+const { updateProduct, updatePending } = vi.hoisted(() => ({
+  updateProduct: vi.fn(),
+  updatePending: { value: false },
+}));
+vi.mock('./useUpdateProduct', () => ({
+  useUpdateProduct: () => ({ updateProduct, isPending: updatePending.value }),
+}));
+
 const { notify } = vi.hoisted(() => ({ notify: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@components/notifications/notify', () => ({ notify }));
 
@@ -37,6 +45,7 @@ import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from '@utils/storage';
 import { PanelNavContext, type PanelNav } from '../PanelNavContext';
 import ProductForm from './ProductForm';
+import type { Product } from './product.types';
 import { BUSINESS_TYPE_SELL, createProductDefaultValues } from './SchemaCreateProduct';
 
 const KEY = 'modules.panel.products.create';
@@ -100,9 +109,10 @@ const axiosError = (status: number, message?: string) => ({
   response: { status, data: message ? { message } : {} },
 });
 
-const renderForm = () => {
+const renderForm = (props: { mode?: 'create' | 'edit'; product?: Product } = {}) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const invalidate = vi.spyOn(client, 'invalidateQueries');
+  const setData = vi.spyOn(client, 'setQueryData');
   const navigate = vi.fn();
   const nav: PanelNav = { navigateTo: navigate, pending: null };
   const wrapper = ({ children }: { children: ReactNode }) => (
@@ -110,8 +120,8 @@ const renderForm = () => {
       <PanelNavContext.Provider value={nav}>{children}</PanelNavContext.Provider>
     </QueryClientProvider>
   );
-  const utils = render(<ProductForm />, { wrapper });
-  return { ...utils, navigate, invalidate };
+  const utils = render(<ProductForm {...props} />, { wrapper });
+  return { ...utils, navigate, invalidate, setData };
 };
 
 type MutateHandlers = { onSuccess: () => void; onError: (error: unknown) => void };
@@ -123,8 +133,9 @@ beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
   pending.value = false;
+  updatePending.value = false;
   uploading.value = false;
-  uploadImages.mockResolvedValue([]);
+  uploadImages.mockResolvedValue({});
   URL.createObjectURL = vi.fn(() => 'blob:mock');
   URL.revokeObjectURL = vi.fn();
   setCatalog({ data: catalog });
@@ -389,7 +400,14 @@ describe('ProductForm — submit', () => {
 
   it('uploads staged photos first and references their keys (the starred one primary)', async () => {
     seedValidDraft();
-    uploadImages.mockResolvedValue(['products/k1.png']);
+    // The upload hook resolves keys BY LOCAL IMAGE ID — mirror that contract here.
+    uploadImages.mockImplementation((images: { id: string; file?: File }[]) =>
+      Promise.resolve(
+        Object.fromEntries(
+          images.filter((img) => img.file).map((img) => [img.id, 'products/k1.png']),
+        ),
+      ),
+    );
     renderForm();
     stagePhoto();
 
@@ -447,5 +465,158 @@ describe('ProductForm — submit', () => {
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.cancel` }));
     expect(navigate).toHaveBeenCalledWith('/panel/productos');
     expect(Storage.get(StorageKeys.PRODUCT_CREATE_DRAFT)).not.toBeNull();
+  });
+});
+
+describe('ProductForm — edit mode', () => {
+  const EDIT_KEY = 'modules.panel.products.edit';
+
+  /** The edit subject — an Admin-projected Alquiler product with two photos and one detail. */
+  const editProduct: Product = {
+    id: 7,
+    name: 'Mesa redonda',
+    description: 'Mesa para 8 personas',
+    businessType: 'Alquiler',
+    businessTypeId: 1,
+    category: 'Mesas',
+    categoryId: 1,
+    currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
+    rentPrice: 75,
+    rentTimeUnit: 'Día',
+    rentTimeUnitId: 2,
+    replacementPrice: 900,
+    inStock: true,
+    available: 35,
+    total: 40,
+    isActive: true,
+    images: [
+      { id: 11, url: 'https://cdn/a.webp', isPrimary: true, sortOrder: 0 },
+      { id: 12, url: 'https://cdn/b.webp', isPrimary: false, sortOrder: 1 },
+    ],
+    details: [{ id: 21, detail: 'Blanco nieve', detailType: 'Color', detailTypeId: 1 }],
+  };
+
+  const renderEdit = () => renderForm({ mode: 'edit', product: editProduct });
+
+  type UpdateHandlers = {
+    onSuccess: (response: { data: { data?: Product } }) => void;
+    onError: (error: unknown) => void;
+  };
+  const lastUpdateHandlers = (): UpdateHandlers =>
+    updateProduct.mock.calls[updateProduct.mock.calls.length - 1]?.[1] as UpdateHandlers;
+
+  it('prefills every field from the product and seeds the gallery (star on the flagged photo)', () => {
+    renderEdit();
+
+    expect(screen.getByLabelText(new RegExp(`${KEY}.fields.nameLabel`))).toHaveValue('Mesa redonda');
+    expect(screen.getByLabelText(new RegExp(`${KEY}.fields.quantityLabel`))).toHaveValue(40);
+    expect(screen.getByLabelText(new RegExp(`${KEY}.fields.rentPriceLabel`))).toHaveValue(75);
+    expect(screen.getByLabelText(new RegExp(`${KEY}.fields.detailValueLabel`))).toHaveValue('Blanco nieve');
+
+    // The gallery holds the EXISTING photos (remote previews), the flagged one starred.
+    expect(screen.getByAltText('foto-1')).toHaveAttribute('src', 'https://cdn/a.webp');
+    expect(screen.getByAltText('foto-2')).toHaveAttribute('src', 'https://cdn/b.webp');
+    const stars = screen.getAllByRole('button', {
+      name: new RegExp(`${KEY}.gallery.actions.setPrimary`),
+    });
+    expect(stars[0]).toHaveAttribute('aria-pressed', 'true');
+
+    // Mode copy: the submit verb and the photos-section description are the edit ones.
+    expect(screen.getByRole('button', { name: `${EDIT_KEY}.actions.submit` })).toBeInTheDocument();
+    expect(screen.getByText(`${EDIT_KEY}.photosDescription`)).toBeInTheDocument();
+  });
+
+  it('never drafts: ignores a stored create draft and autosaves nothing', async () => {
+    seedValidDraft();
+    renderEdit();
+
+    // The form shows the PRODUCT, and the create draft's restored note stays collapsed.
+    const noteContainer = screen.getByText(`${KEY}.draft.restored`).closest('[aria-hidden]');
+    expect(noteContainer).toHaveAttribute('aria-hidden', 'true');
+
+    // Typing must not touch the stored create draft (edit has no draft at all).
+    await userEvent.type(screen.getByLabelText(new RegExp(`${KEY}.fields.nameLabel`)), 'X');
+    await act(async () => {});
+    expect(
+      Storage.get<{ description: string }>(StorageKeys.PRODUCT_CREATE_DRAFT)?.description,
+    ).toBe('Mesa para 8 personas');
+  });
+
+  it('submits the FULL desired state: kept photos by id in display order, new by key, details keep ids', async () => {
+    uploadImages.mockImplementation((images: { id: string; file?: File }[]) =>
+      Promise.resolve(
+        Object.fromEntries(
+          images.filter((img) => img.file).map((img) => [img.id, 'products/new.webp']),
+        ),
+      ),
+    );
+    renderEdit();
+    stagePhoto('nueva.png');
+
+    await userEvent.click(screen.getByRole('button', { name: `${EDIT_KEY}.actions.submit` }));
+    await waitFor(() => expect(updateProduct).toHaveBeenCalled());
+
+    expect(createProduct).not.toHaveBeenCalled();
+    expect(updateProduct.mock.calls[0]?.[0]).toMatchObject({
+      id: 7,
+      body: {
+        name: 'Mesa redonda',
+        businessTypeId: 1,
+        quantity: 40,
+        rentPrice: 75,
+        rentTimeUnitId: 2,
+        replacementPrice: 900,
+        productDetails: [{ id: 21, detailTypeId: 1, detail: 'Blanco nieve' }],
+        images: [
+          { id: 11, isPrimary: true },
+          { id: 12, isPrimary: false },
+          { key: 'products/new.webp', isPrimary: false },
+        ],
+      },
+    });
+  });
+
+  it('success writes the 200 payload into the detail cache, refreshes the list, toasts, and returns', async () => {
+    const { navigate, invalidate, setData } = renderEdit();
+    await userEvent.click(screen.getByRole('button', { name: `${EDIT_KEY}.actions.submit` }));
+    await waitFor(() => expect(updateProduct).toHaveBeenCalled());
+
+    // The response body IS the authoritative post-save product — the detail page must render it
+    // instantly on return (no refetch flash), while the list refreshes in the background.
+    const saved = { ...editProduct, name: 'Mesa redonda XL' };
+    act(() => lastUpdateHandlers().onSuccess({ data: { data: saved } }));
+    expect(setData).toHaveBeenCalledWith([QueryKeys.PRODUCT, 7], saved);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: [QueryKeys.PRODUCTS] });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: [QueryKeys.PRODUCT, 7] });
+    expect(notify.success).toHaveBeenCalledWith(`${EDIT_KEY}.successToast`, {
+      title: `${EDIT_KEY}.successTitle`,
+    });
+    expect(navigate).toHaveBeenCalledWith('/panel/productos/7');
+  });
+
+  it('falls back to a detail refetch if a 2xx somehow arrives without the payload', async () => {
+    const { invalidate, setData } = renderEdit();
+    await userEvent.click(screen.getByRole('button', { name: `${EDIT_KEY}.actions.submit` }));
+    await waitFor(() => expect(updateProduct).toHaveBeenCalled());
+
+    act(() => lastUpdateHandlers().onSuccess({ data: {} }));
+    expect(setData).not.toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: [QueryKeys.PRODUCT, 7] });
+  });
+
+  it('the mid-save conflict (409) lands INLINE in the banner, per the form doctrine', async () => {
+    renderEdit();
+    await userEvent.click(screen.getByRole('button', { name: `${EDIT_KEY}.actions.submit` }));
+    await waitFor(() => expect(updateProduct).toHaveBeenCalled());
+
+    act(() => lastUpdateHandlers().onError(axiosError(409, 'el producto cambió')));
+    expect(await screen.findByText('el producto cambió')).toBeInTheDocument();
+    expect(notify.error).not.toHaveBeenCalled();
+  });
+
+  it('cancel returns to the product detail (where the edit began)', async () => {
+    const { navigate } = renderEdit();
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.cancel` }));
+    expect(navigate).toHaveBeenCalledWith('/panel/productos/7');
   });
 });

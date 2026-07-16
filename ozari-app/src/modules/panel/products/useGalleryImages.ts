@@ -5,15 +5,27 @@ import {
   PRODUCT_IMAGE_MAX_COUNT,
   PRODUCT_IMAGE_TYPES,
 } from '@constants/Regex';
+import type { ProductImage } from './product.types';
 
 const KEY = 'modules.panel.products.create.gallery.errors';
 
-/** A picked photo staged in the gallery: the File to upload + its local object-URL preview. */
+/**
+ * A photo staged in the gallery. Two flavors, discriminated by which optional field is present:
+ * a NEW photo carries the `file` to upload (+ a local object-URL preview); an EXISTING photo
+ * (edit mode, seeded from the product) carries its DB row id in `existingId` and previews from its
+ * public URL. The save maps them to the declarative body: existing by `id`, new by uploaded `key`.
+ */
 export interface GalleryImage {
   /** Stable local id (never sent to the API) — keys the list, the primary flag and progress. */
   id: string;
-  file: File;
+  /** What the thumbnail renders: an object URL (new) or the public R2 URL (existing). */
   previewUrl: string;
+  /** Display name for a11y labels (file name, or a positional label for existing photos). */
+  name: string;
+  /** The staged File to upload — present only on NEW photos. */
+  file?: File;
+  /** The `product_images` row id — present only on EXISTING photos. */
+  existingId?: number;
 }
 
 export interface GalleryState {
@@ -25,6 +37,8 @@ export interface GalleryState {
   addFiles: (files: Iterable<File>) => void;
   removeImage: (id: string) => void;
   setPrimary: (id: string) => void;
+  /** Reorder: move the image to `toIndex` (clamped). The primary flag rides the id, not the slot. */
+  moveImage: (id: string, toIndex: number) => void;
   /** Whether the gallery is at the backend's per-product cap (the picker hides itself). */
   isFull: boolean;
 }
@@ -36,32 +50,57 @@ const nextLocalId = (): string => `gallery-${++localIdCounter}`;
 /** Two picks of the same underlying file (name+size+mtime) are one photo — silently a duplicate. */
 const fingerprint = (file: File): string => `${file.name}|${file.size}|${file.lastModified}`;
 
+/** Seeds the gallery from a product's existing photos (edit mode) — input order = display order. */
+const seedFromProduct = (initialImages: ProductImage[]): GalleryImage[] =>
+  initialImages.map((image, index) => ({
+    id: nextLocalId(),
+    previewUrl: image.url,
+    name: `foto-${index + 1}`,
+    existingId: image.id,
+  }));
+
 /**
- * Owns the product-photo gallery state for the create form. Deliberately OUTSIDE react-hook-form:
- * `File` objects can't be drafted to sessionStorage (the silent-draft doctrine keeps drafts to the
- * serializable fields), and gallery validation is imperative (validate on add, not on submit).
- * The mirror contract still holds — count/type/size mirror `appConfig.storage`, and the backend
- * re-enforces every rule (the presign binds type+size into the signature; create caps the list).
+ * Owns the product-photo gallery state for the create/edit form. Deliberately OUTSIDE
+ * react-hook-form: `File` objects can't be drafted to sessionStorage (the silent-draft doctrine
+ * keeps drafts to the serializable fields), and gallery validation is imperative (validate on add,
+ * not on submit). The mirror contract still holds — count/type/size mirror `appConfig.storage`, and
+ * the backend re-enforces every rule (the presign binds type+size into the signature; create/update
+ * cap the list).
  *
- * Preview URLs are `URL.createObjectURL` handles — revoked on remove and on unmount (never leaked).
- * The primary defaults to the FIRST photo and follows removals; `setPrimary` moves the star.
+ * `initialImages` (edit mode) seeds the grid with the product's EXISTING photos — read once on
+ * mount; every movement after that (add/remove/reorder/star) is staged locally, zero network, and
+ * only the save sends the final state (the RECONCILE design).
+ *
+ * Preview URLs of NEW photos are `URL.createObjectURL` handles — revoked on remove and on unmount
+ * (never leaked); existing photos preview from their public URL (nothing to revoke). The primary
+ * defaults to the flagged/first photo and follows removals; `setPrimary` moves the star; the order
+ * and the star are INDEPENDENT — any slot can be the primary.
  */
-export function useGalleryImages(): GalleryState {
+export function useGalleryImages(initialImages?: ProductImage[]): GalleryState {
   const { t } = useTranslation();
-  const [images, setImages] = useState<GalleryImage[]>([]);
-  const [primaryId, setPrimaryId] = useState<string | null>(null);
+  // Seed ONCE (lazy initializer): both the list and the starred id come from the same seeded array,
+  // so their local ids always agree. The flagged photo takes the star; a flag-less seed falls back
+  // to the first (mirroring the backend default).
+  const [seeded] = useState(() => seedFromProduct(initialImages ?? []));
+  const [images, setImages] = useState<GalleryImage[]>(seeded);
+  const [primaryId, setPrimaryId] = useState<string | null>(() => {
+    const flaggedIndex = (initialImages ?? []).findIndex((image) => image.isPrimary);
+    return seeded.length === 0 ? null : seeded[Math.max(flaggedIndex, 0)].id;
+  });
   const [error, setError] = useState<string | undefined>(undefined);
 
   // Unmount cleanup only — live revocation happens in removeImage. A ref mirror (updated in an
   // effect, never during render) lets the unmount effect see the latest list without re-running
-  // (and revoking in-use URLs) on every change.
+  // (and revoking in-use URLs) on every change. Only NEW photos hold revocable object URLs.
   const imagesRef = useRef(images);
   useEffect(() => {
     imagesRef.current = images;
   }, [images]);
   useEffect(
     () => () => {
-      for (const image of imagesRef.current) URL.revokeObjectURL(image.previewUrl);
+      for (const image of imagesRef.current) {
+        if (image.file) URL.revokeObjectURL(image.previewUrl);
+      }
     },
     [],
   );
@@ -73,7 +112,9 @@ export function useGalleryImages(): GalleryState {
       if (incoming.length === 0) return;
 
       setImages((current) => {
-        const known = new Set(current.map((image) => fingerprint(image.file)));
+        const known = new Set(
+          current.flatMap((image) => (image.file ? [fingerprint(image.file)] : [])),
+        );
         const accepted: GalleryImage[] = [];
         let firstError: string | undefined;
         // First rule violation wins the message; valid files are still accepted (a mixed drop adds
@@ -107,6 +148,7 @@ export function useGalleryImages(): GalleryState {
           accepted.push({
             id: nextLocalId(),
             file,
+            name: file.name,
             previewUrl: URL.createObjectURL(file),
           });
         }
@@ -126,8 +168,8 @@ export function useGalleryImages(): GalleryState {
     setError(undefined);
     setImages((current) => {
       const removed = current.find((image) => image.id === id);
-      /* v8 ignore next -- defensive: the UI only ever passes ids of rendered images */
-      if (removed) URL.revokeObjectURL(removed.previewUrl);
+      // Only NEW photos hold an object URL to release; an existing photo's URL is just remote.
+      if (removed?.file) URL.revokeObjectURL(removed.previewUrl);
       const next = current.filter((image) => image.id !== id);
       // The star never dangles: removing the primary hands it to the first remaining photo.
       setPrimaryId((currentPrimary) =>
@@ -142,6 +184,18 @@ export function useGalleryImages(): GalleryState {
     setPrimaryId(id);
   }, []);
 
+  const moveImage = useCallback((id: string, toIndex: number) => {
+    setImages((current) => {
+      const fromIndex = current.findIndex((image) => image.id === id);
+      const clamped = Math.max(0, Math.min(toIndex, current.length - 1));
+      if (fromIndex === -1 || fromIndex === clamped) return current;
+      const next = [...current];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(clamped, 0, moved);
+      return next;
+    });
+  }, []);
+
   return {
     images,
     primaryId,
@@ -149,6 +203,7 @@ export function useGalleryImages(): GalleryState {
     addFiles,
     removeImage,
     setPrimary,
+    moveImage,
     isFull: images.length >= PRODUCT_IMAGE_MAX_COUNT,
   };
 }

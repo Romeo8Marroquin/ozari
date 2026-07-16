@@ -4,7 +4,8 @@ import { HiChevronDown } from 'react-icons/hi2';
 import { twMerge } from 'tailwind-merge';
 
 export interface SelectOption {
-  value: number;
+  /** A native `<option>` value serializes to a string anyway — ids stay numbers for convenience. */
+  value: number | string;
   label: string;
 }
 

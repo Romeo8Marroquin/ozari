@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -44,6 +45,8 @@ export interface PresignedUpload {
 export interface Storage {
   createUpload(input: CreateUploadInput): Promise<PresignedUpload>;
   deleteObject(key: string): Promise<void>;
+  /** Batch delete — ONE round-trip for a whole gallery (S3 `DeleteObjects`, up to 1000 keys). */
+  deleteObjects(keys: string[]): Promise<void>;
   getPublicUrl(key: string): string;
 }
 
@@ -123,6 +126,20 @@ export class R2Storage implements Storage {
   async deleteObject(key: string): Promise<void> {
     await this.client.send(
       new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+    );
+  }
+
+  async deleteObjects(keys: string[]): Promise<void> {
+    if (keys.length === 0) {
+      return;
+    }
+    // One batched round-trip for the whole gallery (product galleries cap at 8, far below the
+    // S3 DeleteObjects limit of 1000 — no chunking needed).
+    await this.client.send(
+      new DeleteObjectsCommand({
+        Bucket: this.bucket,
+        Delete: { Objects: keys.map((key) => ({ Key: key })), Quiet: true },
+      }),
     );
   }
 

@@ -27,7 +27,19 @@ export function formatProductPrice(product: Product): string | null {
   return null;
 }
 
-/** The primary image URL (backend orders images primary-first), or `null` when the product has none. */
+/**
+ * The FLAGGED primary image's index in the gallery, or `0` when none is flagged. Images arrive in
+ * display order (`sortOrder`) and the star may sit anywhere in it — the card shows this photo and
+ * the detail page opens on it, without reordering the gallery around it.
+ */
+export function primaryImageIndex(product: Pick<Product, 'images'>): number {
+  return Math.max(
+    product.images.findIndex((image) => image.isPrimary),
+    0,
+  );
+}
+
+/** The primary (flagged, else first) image URL, or `null` when the product has none. */
 export function primaryImageUrl(product: Product): string | null {
-  return product.images[0]?.url ?? null;
+  return product.images[primaryImageIndex(product)]?.url ?? null;
 }

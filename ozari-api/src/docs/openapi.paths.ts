@@ -15,6 +15,10 @@ const STALE_TOKEN_401 = "Missing, invalid, or revoked access token.";
 const EXAMPLE_PASSWORD = "Ex4mple!Secret";
 const EXAMPLE_NEW_PASSWORD = "N3w!Passw0rd";
 const EXAMPLE_EMAIL = "ana.garcia@example.com";
+// The illustrative product reused across every /products example.
+const EXAMPLE_PRODUCT_NAME = "Mesa redonda";
+const EXAMPLE_PRODUCT_DESCRIPTION = "Mesa para 8 personas";
+const EXAMPLE_CURRENCY_NAME = "Quetzal Guatemalteco";
 
 const rateLimited: OpenAPIV3.ReferenceObject = {
   $ref: "#/components/responses/TooManyRequests",
@@ -40,6 +44,8 @@ const userNotFound = (): OpenAPIV3.ResponseObject =>
   errorResponse("The user no longer exists or is inactive.", 404, "User not found");
 const unauthorized = (description: string): OpenAPIV3.ResponseObject =>
   errorResponse(description, 401, "Unauthorized");
+const adminOnly = (): OpenAPIV3.ResponseObject =>
+  errorResponse("Authenticated but not an admin.", 403, "Forbidden");
 
 // Response headers set by the two session-issuing paths (login success + refresh).
 const sessionHeaders: Record<string, OpenAPIV3.HeaderObject> = {
@@ -461,7 +467,7 @@ export const paths: OpenAPIV3.PathsObject = {
           },
         ], "Users fetched"),
         "401": unauthorized("Missing or invalid access token."),
-        "403": errorResponse("Authenticated but not an admin.", 403, "Forbidden"),
+        "403": adminOnly(),
         "429": rateLimited,
         "500": serverError,
       },
@@ -475,10 +481,11 @@ export const paths: OpenAPIV3.PathsObject = {
       operationId: "getProducts",
       description:
         "Returns the paginated **active** catalog. Available to **any authenticated role**; the " +
-        "response fields are **role-projected** (minimum privilege): Admin sees the exact `quantity` " +
-        "plus internal fields, Employee gets `inStock` + the available `quantity`, and a Client sees only the shared " +
-        "catalog fields. Pagination and the optional filters are clamped or dropped (never " +
-        "rejected), so there is no 400. Authenticated limiter (100/min).",
+        "response fields are **role-projected** (minimum privilege): Admin sees the `available` " +
+        "count plus internal fields (incl. the Alquiler fleet `total`), Employee gets `inStock` + " +
+        "`available`, and a Client sees only the shared catalog fields. For Alquiler, `available` " +
+        "is derived: fleet minus units out on active rentals. Pagination, the optional filters and " +
+        "`sort` are clamped or dropped (never rejected), so there is no 400. Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         {
@@ -523,13 +530,20 @@ export const paths: OpenAPIV3.PathsObject = {
           schema: { type: "integer", minimum: 1 },
         },
         {
-          name: "inStock",
+          name: "sort",
           in: "query",
           required: false,
           description:
-            "**Employee/Admin only** — `true` = only products in stock, `false` = only out of " +
-            "stock. Silently ignored for a Client (stock is invisible to that role).",
-          schema: { type: "boolean" },
+            "Presentation order, any role. `recent` (default) = newest first; `nameAsc`/`nameDesc` " +
+            "= Spanish collation; `priceAsc`/`priceDesc` = THE product's price (rent or sell, " +
+            "whichever it has — the conditional rule guarantees exactly one), priceless rows " +
+            "sinking to the end either way. An unknown value clamps to `recent`. There is " +
+            "deliberately no availability filter — a rented-out Alquiler isn't gone, and an admin " +
+            "NEEDS to see unavailable rows.",
+          schema: {
+            type: "string",
+            enum: ["recent", "nameAsc", "nameDesc", "priceAsc", "priceDesc"],
+          },
         },
         {
           name: "includeInactive",
@@ -546,18 +560,22 @@ export const paths: OpenAPIV3.PathsObject = {
           products: [
             {
               id: 7,
-              name: "Mesa redonda",
-              description: "Mesa para 8 personas",
+              name: EXAMPLE_PRODUCT_NAME,
+              description: EXAMPLE_PRODUCT_DESCRIPTION,
               businessType: "Alquiler",
+              businessTypeId: 1,
               category: "Mesas",
-              currency: { id: 1, iso4217Code: "GTQ", name: "Quetzal Guatemalteco", symbol: "Q" },
+              categoryId: 1,
+              currency: { id: 1, iso4217Code: "GTQ", name: EXAMPLE_CURRENCY_NAME, symbol: "Q" },
               rentPrice: 75,
               sellPrice: null,
               rentTimeUnit: "Día",
+              rentTimeUnitId: 2,
               images: [{ id: 1, url: "https://cdn.example.com/products/7/hero.webp", isPrimary: true, sortOrder: 0 }],
-              details: [{ id: 12, detail: "Blanco", detailType: "Color" }],
+              details: [{ id: 12, detail: "Blanco", detailType: "Color", detailTypeId: 1 }],
               inStock: true,
-              quantity: 40,
+              available: 35,
+              total: 40,
               replacementPrice: 900,
               isActive: true,
             },
@@ -583,8 +601,8 @@ export const paths: OpenAPIV3.PathsObject = {
         "(100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       requestBody: bodyRef("CreateProductRequest", {
-        name: "Mesa redonda",
-        description: "Mesa para 8 personas",
+        name: EXAMPLE_PRODUCT_NAME,
+        description: EXAMPLE_PRODUCT_DESCRIPTION,
         businessTypeId: 1,
         categoryId: 1,
         currencyId: 1,
@@ -603,18 +621,22 @@ export const paths: OpenAPIV3.PathsObject = {
           "ProductListItem",
           {
             id: 7,
-            name: "Mesa redonda",
-            description: "Mesa para 8 personas",
+            name: EXAMPLE_PRODUCT_NAME,
+            description: EXAMPLE_PRODUCT_DESCRIPTION,
             businessType: "Alquiler",
+            businessTypeId: 1,
             category: "Mesas",
-            currency: { id: 1, iso4217Code: "GTQ", name: "Quetzal Guatemalteco", symbol: "Q" },
+            categoryId: 1,
+            currency: { id: 1, iso4217Code: "GTQ", name: EXAMPLE_CURRENCY_NAME, symbol: "Q" },
             rentPrice: 75,
             sellPrice: null,
             rentTimeUnit: "Día",
+            rentTimeUnitId: 2,
             images: [],
-            details: [{ id: 12, detail: "Blanco", detailType: "Color" }],
+            details: [{ id: 12, detail: "Blanco", detailType: "Color", detailTypeId: 1 }],
             inStock: true,
-            quantity: 40,
+            available: 40,
+            total: 40,
             replacementPrice: 900,
             isActive: true,
           },
@@ -628,7 +650,7 @@ export const paths: OpenAPIV3.PathsObject = {
           "Los precios enviados no corresponden al tipo de negocio del producto.",
         ),
         "401": unauthorized(STALE_TOKEN_401),
-        "403": errorResponse("Authenticated but not an admin.", 403, "Forbidden"),
+        "403": adminOnly(),
         "429": rateLimited,
         "500": serverError,
       },
@@ -642,9 +664,10 @@ export const paths: OpenAPIV3.PathsObject = {
       operationId: "getProductById",
       description:
         "Returns a single **active** product in the exact role-projected shape of a list item " +
-        "(Admin sees internal fields, Employee gets `inStock` + the available `quantity`, a Client " +
-        "sees only the shared catalog fields). A malformed id and an unknown/soft-deleted product " +
-        "are both a plain `404`. Available to any authenticated role. Authenticated limiter (100/min).",
+        "(Admin sees internal fields incl. the Alquiler fleet `total`, Employee gets `inStock` + " +
+        "`available`, a Client sees only the shared catalog fields). A malformed id and an " +
+        "unknown/soft-deleted product are both a plain `404`. Available to any authenticated role. " +
+        "Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         {
@@ -659,24 +682,145 @@ export const paths: OpenAPIV3.PathsObject = {
         "200": dataResponse("The role-projected product (example shows the Admin view).", "ProductDetailResponse", {
           product: {
             id: 7,
-            name: "Mesa redonda",
-            description: "Mesa para 8 personas",
+            name: EXAMPLE_PRODUCT_NAME,
+            description: EXAMPLE_PRODUCT_DESCRIPTION,
             businessType: "Alquiler",
+            businessTypeId: 1,
             category: "Mesas",
-            currency: { id: 1, iso4217Code: "GTQ", name: "Quetzal Guatemalteco", symbol: "Q" },
+            categoryId: 1,
+            currency: { id: 1, iso4217Code: "GTQ", name: EXAMPLE_CURRENCY_NAME, symbol: "Q" },
             rentPrice: 75,
             sellPrice: null,
             rentTimeUnit: "Día",
+            rentTimeUnitId: 2,
             images: [{ id: 1, url: "https://cdn.example.com/products/7/hero.webp", isPrimary: true, sortOrder: 0 }],
-            details: [{ id: 12, detail: "Blanco", detailType: "Color" }],
+            details: [{ id: 12, detail: "Blanco", detailType: "Color", detailTypeId: 1 }],
             inStock: true,
-            quantity: 40,
+            available: 35,
+            total: 40,
             replacementPrice: 900,
             isActive: true,
           },
         }, "Product fetched"),
         "401": unauthorized(STALE_TOKEN_401),
         "404": errorResponse("Unknown, malformed, or soft-deleted product id.", 404, "Product not found"),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    put: {
+      tags: ["Products"],
+      summary: "Update a product declaratively (admin only)",
+      operationId: "updateProduct",
+      description:
+        "Replaces the product with its FULL desired state — the RECONCILE design: the body carries " +
+        "the final scalars, detail list, and gallery, and the backend diffs them against the " +
+        "current rows in ONE transaction (kept rows update, absent rows are deleted, new rows are " +
+        "created; removed photos' R2 objects are deleted only AFTER the commit). Requires the " +
+        "`Admin` role. The same conditional-price and gallery rules as create apply. A kept " +
+        "image/detail id that no longer exists (a concurrent edit) is a `409` — reload and retry. " +
+        "Returns the updated product in the role-projected list shape. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          description: "The product id.",
+          schema: { type: "integer", minimum: 1 },
+        },
+      ],
+      requestBody: bodyRef("UpdateProductRequest", {
+        name: EXAMPLE_PRODUCT_NAME,
+        description: EXAMPLE_PRODUCT_DESCRIPTION,
+        businessTypeId: 1,
+        categoryId: 1,
+        currencyId: 1,
+        quantity: 40,
+        rentPrice: 75,
+        rentTimeUnitId: 2,
+        replacementPrice: 900,
+        productDetails: [
+          { id: 12, detailTypeId: 1, detail: "Blanco" },
+          { detailTypeId: 2, detail: "Madera" },
+        ],
+        images: [
+          { id: 1, isPrimary: true },
+          { key: "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp" },
+        ],
+      }),
+      responses: {
+        "200": dataResponse(
+          "The updated product, projected for the caller's role (Admin — full view).",
+          "ProductListItem",
+          {
+            id: 7,
+            name: EXAMPLE_PRODUCT_NAME,
+            description: EXAMPLE_PRODUCT_DESCRIPTION,
+            businessType: "Alquiler",
+            businessTypeId: 1,
+            category: "Mesas",
+            categoryId: 1,
+            currency: { id: 1, iso4217Code: "GTQ", name: EXAMPLE_CURRENCY_NAME, symbol: "Q" },
+            rentPrice: 75,
+            sellPrice: null,
+            rentTimeUnit: "Día",
+            rentTimeUnitId: 2,
+            images: [{ id: 1, url: "https://cdn.example.com/products/7/hero.webp", isPrimary: true, sortOrder: 0 }],
+            details: [{ id: 12, detail: "Blanco", detailType: "Color", detailTypeId: 1 }],
+            inStock: true,
+            available: 35,
+            total: 40,
+            replacementPrice: 900,
+            isActive: true,
+          },
+          "Product updated",
+        ),
+        "400": errorResponse(
+          "A field failed validation — bad lookup id, a conditional-pricing violation, a malformed " +
+            "gallery slot (must carry exactly one of `id`/`key`), an image/detail id that doesn't " +
+            "belong to the product, or an image key already owned by another product.",
+          400,
+          "Los precios enviados no corresponden al tipo de negocio del producto.",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse("Unknown, malformed, or soft-deleted product id.", 404, "Product not found"),
+        "409": errorResponse(
+          "A kept image/detail id no longer exists — the product changed under the editor " +
+            "(a concurrent save/delete). Reload and retry.",
+          409,
+          "El producto cambió mientras lo editabas. Recarga la página e intenta de nuevo.",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    delete: {
+      tags: ["Products"],
+      summary: "Delete a product (admin only, no-trash policy)",
+      operationId: "deleteProduct",
+      description:
+        "Deletes a product under the NO-TRASH policy: the row survives as a soft-deleted tombstone " +
+        "ONLY when order history references it (erasing it would falsify past orders); otherwise " +
+        "it is hard-deleted. Its detail and gallery rows are hard-deleted either way, and the " +
+        "gallery's R2 objects are removed after the commit in one batched call (best-effort). " +
+        "Requires the `Admin` role. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          description: "The product id.",
+          schema: { type: "integer", minimum: 1 },
+        },
+      ],
+      responses: {
+        "200": messageResponse("The product is gone from the catalog.", "Product deleted"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse("Unknown, malformed, or already-deleted product id.", 404, "Product not found"),
         "429": rateLimited,
         "500": serverError,
       },
@@ -721,7 +865,7 @@ export const paths: OpenAPIV3.PathsObject = {
           "El tipo de archivo no está permitido.",
         ),
         "401": unauthorized(STALE_TOKEN_401),
-        "403": errorResponse("Authenticated but not an admin.", 403, "Forbidden"),
+        "403": adminOnly(),
         "429": rateLimited,
         "500": serverError,
       },
@@ -748,7 +892,7 @@ export const paths: OpenAPIV3.PathsObject = {
             { id: 1, name: "Mesas" },
             { id: 2, name: "Sillas" },
           ],
-          currencies: [{ id: 1, name: "Quetzal Guatemalteco", iso4217Code: "GTQ", symbol: "Q" }],
+          currencies: [{ id: 1, name: EXAMPLE_CURRENCY_NAME, iso4217Code: "GTQ", symbol: "Q" }],
           detailTypes: [
             { id: 1, name: "Color" },
             { id: 2, name: "Material" },

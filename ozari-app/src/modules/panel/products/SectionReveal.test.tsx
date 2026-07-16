@@ -14,7 +14,12 @@ import SectionReveal from './SectionReveal';
 
 const skeleton = <span data-testid="skel">shimmer</span>;
 
-type RevealOptions = { skeletonHeight: number; delaySeconds: number; onSettled: () => void };
+type RevealOptions = {
+  skeletonHeight: number;
+  delaySeconds: number;
+  onSettled: () => void;
+  itemSelector?: string;
+};
 const lastOptions = (): RevealOptions =>
   revealSectionContent.mock.calls[revealSectionContent.mock.calls.length - 1]?.[3] as RevealOptions;
 
@@ -66,6 +71,8 @@ describe('SectionReveal', () => {
     expect(screen.getByTestId('skel')).toBeInTheDocument();
     expect(revealSectionContent).toHaveBeenCalledTimes(1);
     expect(lastOptions()).toMatchObject({ skeletonHeight: 420, delaySeconds: 0.16 });
+    // No override → the choreography falls back to its own `.reveal-item` default.
+    expect(lastOptions()).not.toHaveProperty('itemSelector');
 
     // The choreography reports settled → the overlay unmounts.
     act(() => lastOptions().onSettled());
@@ -74,6 +81,21 @@ describe('SectionReveal', () => {
     if (originalOffsetHeight) {
       Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight);
     }
+  });
+
+  it('forwards a custom itemSelector to the choreography (the page-scale reveal)', () => {
+    const { rerender } = render(
+      <SectionReveal loading skeleton={skeleton} itemSelector=".reveal-block">
+        <span>Real</span>
+      </SectionReveal>,
+    );
+    rerender(
+      <SectionReveal loading={false} skeleton={skeleton} itemSelector=".reveal-block">
+        <span>Real</span>
+      </SectionReveal>,
+    );
+    expect(lastOptions()).toMatchObject({ itemSelector: '.reveal-block' });
+    act(() => lastOptions().onSettled());
   });
 
   it('re-arms when loading returns (a refetch): skeleton back, then a second reveal', () => {

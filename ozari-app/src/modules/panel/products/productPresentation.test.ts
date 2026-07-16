@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { formatMoney, formatProductPrice, primaryImageUrl } from './productPresentation';
+import {
+  formatMoney,
+  formatProductPrice,
+  primaryImageIndex,
+  primaryImageUrl,
+} from './productPresentation';
 import type { Product } from './product.types';
 
 const base: Product = {
   id: 1,
   name: 'Mesa redonda',
   businessType: 'Alquiler',
+  businessTypeId: 1,
   category: 'Mesas',
+  categoryId: 1,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
   images: [],
   details: [],
@@ -40,13 +47,28 @@ describe('formatProductPrice', () => {
   });
 });
 
-describe('primaryImageUrl', () => {
-  it('returns the first image url (backend orders primary-first)', () => {
-    const product = { ...base, images: [{ id: 3, url: 'https://cdn/x.webp', isPrimary: true, sortOrder: 0 }] };
+describe('primaryImageIndex / primaryImageUrl', () => {
+  const gallery = [
+    { id: 3, url: 'https://cdn/x.webp', isPrimary: false, sortOrder: 0 },
+    { id: 4, url: 'https://cdn/y.webp', isPrimary: false, sortOrder: 1 },
+    { id: 5, url: 'https://cdn/z.webp', isPrimary: true, sortOrder: 2 },
+  ];
+
+  it('finds the FLAGGED photo wherever it sits — the star is independent of the order', () => {
+    const product = { ...base, images: gallery };
+    expect(primaryImageIndex(product)).toBe(2);
+    expect(primaryImageUrl(product)).toBe('https://cdn/z.webp');
+  });
+
+  it('falls back to the first image when no photo carries the flag', () => {
+    const flagless = gallery.map((image) => ({ ...image, isPrimary: false }));
+    const product = { ...base, images: flagless };
+    expect(primaryImageIndex(product)).toBe(0);
     expect(primaryImageUrl(product)).toBe('https://cdn/x.webp');
   });
 
   it('returns null when the product has no images', () => {
+    expect(primaryImageIndex(base)).toBe(0);
     expect(primaryImageUrl(base)).toBeNull();
   });
 });

@@ -9,6 +9,7 @@ import {
   animateThumbOut,
   captureGalleryLayout,
 } from '../pageMotion';
+import { useGalleryDrag } from './useGalleryDrag';
 import type { GalleryState } from './useGalleryImages';
 
 const KEY = 'modules.panel.products.create.gallery';
@@ -24,16 +25,24 @@ interface ProductImageGalleryProps {
 }
 
 /**
- * The create-form photo gallery: a drag-&-drop / click picker plus a thumbnail grid where ONE photo
- * wears the star — the **primary** shown on the product card (`ProductCard` renders `images[0]`,
- * which the backend orders primary-first). The first photo takes the star by default; clicking the
- * star on any other thumbnail moves it (the "Principal" chip glides along via CSS transitions —
- * binary state, so CSS owns it per the motion division rule). All controls freeze while disabled.
+ * The create/edit-form photo gallery: a drag-&-drop / click picker plus a thumbnail grid where ONE
+ * photo wears the star — the **primary** shown on the product card and opened first on the detail
+ * page. The star is a FLAG, independent of the order: images persist in ARRAY order (= `sortOrder`,
+ * the detail page's display order) and the primary may sit anywhere in it. The first photo takes
+ * the star by default; clicking the star on any other thumbnail moves it (the "Principal" chip
+ * glides along via CSS transitions — binary state, so CSS owns it per the motion division rule).
+ * All controls freeze while disabled.
  *
  * Grid mutations are FLIPped (`pageMotion`): the layout is captured BEFORE an add/remove commits,
  * then surviving tiles glide to their new cells while new photos bounce in softly — space is
  * opened and closed smoothly, never snapped. A removal is two-phase: the thumb tweens out first,
  * then the survivors reflow.
+ *
+ * The tiles are also **drag-to-reorder** (`useGalleryDrag`): the CARD itself lifts and follows the
+ * pointer while its siblings glide aside — array order = the detail page's display order, and the
+ * star (primary) is independent of it. The `<img>`s are `draggable={false}` on purpose: the
+ * browser's native image drag produced a phantom copy that, dropped back onto the picker, re-added
+ * the same photo — the old duplicate bug this reorder replaces.
  */
 const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
   gallery,
@@ -53,7 +62,15 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
   const removingRef = useRef<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
 
-  const { images, primaryId, error, addFiles, removeImage, setPrimary, isFull } = gallery;
+  const { images, primaryId, error, addFiles, removeImage, setPrimary, moveImage, isFull } =
+    gallery;
+  const { draggingId, getThumbHandlers } = useGalleryDrag({
+    disabled,
+    images,
+    moveImage,
+    scopeRef: swapRef,
+    thumbRefs,
+  });
 
   const captureBefore = (): void => {
     pendingLayout.current = captureGalleryLayout(swapRef.current);
@@ -164,6 +181,7 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5" role="list">
           {images.map((image) => {
             const isPrimary = image.id === primaryId;
+            const isDragging = image.id === draggingId;
             const ratio = progress[image.id] ?? 0;
             return (
               <li
@@ -172,11 +190,23 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
                   if (el) thumbRefs.current.set(image.id, el);
                   else thumbRefs.current.delete(image.id);
                 }}
-                className="gallery-flip group relative aspect-square overflow-hidden rounded-control bg-charcoal/[0.04] ring-1 ring-black/[0.06]"
+                {...getThumbHandlers(image.id)}
+                // A long-press here means "pick the tile up", never the browser's image menu
+                // (copy/share/download) — that lives in the lightbox. `-webkit-touch-callout`
+                // covers iOS Safari, which skips the contextmenu event for its callout.
+                onContextMenu={(event) => event.preventDefault()}
+                // The native image drag is disabled below, so this drag is the CARD itself; the
+                // shadow + ring elevate the tile in hand (scale/position are GSAP's — never CSS).
+                className={`gallery-flip group relative aspect-square select-none overflow-hidden rounded-control bg-charcoal/[0.04] transition-[box-shadow] duration-200 [-webkit-touch-callout:none] ${
+                  isDragging
+                    ? 'cursor-grabbing shadow-xl ring-2 ring-magenta/40'
+                    : 'pointer-fine:cursor-grab ring-1 ring-black/[0.06]'
+                }`}
               >
                 <img
                   src={image.previewUrl}
-                  alt={image.file.name}
+                  alt={image.name}
+                  draggable={false}
                   className={`size-full object-cover transition-opacity duration-200 ${isUploading ? 'opacity-50' : 'opacity-100'}`}
                 />
 
@@ -187,7 +217,7 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
                   disabled={disabled || isPrimary}
                   onClick={() => setPrimary(image.id)}
                   aria-pressed={isPrimary}
-                  aria-label={t(`${KEY}.actions.setPrimary`, { name: image.file.name })}
+                  aria-label={t(`${KEY}.actions.setPrimary`, { name: image.name })}
                   title={isPrimary ? t(`${KEY}.primaryBadge`) : t(`${KEY}.actions.setPrimaryShort`)}
                   className={`absolute left-1.5 top-1.5 grid size-7 place-items-center rounded-full bg-white/85 shadow-sm backdrop-blur ${controlMotion} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta ${
                     isPrimary
@@ -202,7 +232,7 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
                   type="button"
                   disabled={disabled}
                   onClick={() => handleRemove(image.id)}
-                  aria-label={t(`${KEY}.actions.removeImage`, { name: image.file.name })}
+                  aria-label={t(`${KEY}.actions.removeImage`, { name: image.name })}
                   className={`absolute right-1.5 top-1.5 grid size-7 cursor-pointer place-items-center rounded-full bg-white/85 text-charcoal/50 opacity-100 shadow-sm backdrop-blur ${controlMotion} hover:scale-110 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta disabled:cursor-not-allowed ${controlReveal}`}
                 >
                   <HiOutlineXMark aria-hidden className="size-4" />
@@ -257,7 +287,13 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
       </div>
 
       <div className="flex items-start justify-between gap-3">
-        <AnimatedMessage id="product-gallery-error" errorMessage={error} />
+        <div className="flex min-w-0 flex-col gap-1">
+          <AnimatedMessage id="product-gallery-error" errorMessage={error} />
+          {/* Discoverability: drag-to-reorder isn't guessable, so the grid says it out loud. */}
+          {images.length > 1 && (
+            <span className="text-xs text-charcoal/45">{t(`${KEY}.reorderHint`)}</span>
+          )}
+        </div>
         <span className="shrink-0 text-xs text-charcoal/45">
           {t(`${KEY}.counter`, { count: images.length, max: PRODUCT_IMAGE_MAX_COUNT })}
         </span>

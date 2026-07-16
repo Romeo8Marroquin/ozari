@@ -448,6 +448,7 @@
         "rentPricingRequired": "Un producto de alquiler requiere precio de renta.",
         "sellPricingRequired": "Un producto de venta requiere precio de venta.",
         "pricingMismatch": "Los precios enviados no corresponden al tipo de negocio del producto.",
+        "replacementPriceForbidden": "Un producto de venta no lleva precio de reposición.",
         "invalidRentAndSellPrice": "El precio de renta y el precio de venta no pueden ser vacíos al mismo tiempo.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
@@ -472,6 +473,7 @@
           "rentPricingRequired": "Producto de alquiler sin precio de renta <{{-rentPrice}}>.",
           "sellPricingRequired": "Producto de venta sin precio de venta <{{-sellPrice}}>.",
           "pricingMismatch": "Precios inconsistentes con el tipo de negocio <{{-businessTypeId}}>: renta <{{-rentPrice}}>, venta <{{-sellPrice}}>, unidad <{{-rentTimeUnitId}}>.",
+          "replacementPriceForbidden": "Producto de venta con precio de reposición <{{-replacementPrice}}>; solo aplica a alquiler.",
           "invalidRentAndSellPrice": "El precio de renta <{{-rentPrice}}> y el precio de venta <{{-sellPrice}}> no pueden ser vacíos al mismo tiempo.",
           "validationError": "Error de validación: {{-error}}."
         }
@@ -519,39 +521,44 @@
     },
     "updateProduct": {
       "productUpdated": "Producto actualizado exitosamente.",
-
+      "conflict": "El producto cambió mientras lo editabas. Recarga la página e intenta de nuevo.",
       "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "validators": {
-        "invalidId": "El id del producto es requerido y debe ser válido.",
+        "productNotFound": "El producto no existe o ya no está disponible.",
         "invalidDetailId": "El id de un detalle del producto no es válido.",
+        "invalidImageEntry": "Una imagen del producto no es válida.",
+        "invalidImageId": "Una imagen del producto no es válida.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
-          "invalidId": "El id del producto <{{-id}}> no es válido.",
+          "productNotFound": "Producto no encontrado para el id <{{-id}}>.",
           "invalidDetailId": "El id del detalle <{{-detailId}}> del producto no es válido.",
+          "invalidImageEntry": "Una entrada de imagen no lleva exactamente uno de id o clave: <{{-image}}>.",
+          "invalidImageId": "El id de imagen <{{-imageId}}> no pertenece al producto o está repetido.",
           "validationError": "Error de validación: {{-error}}."
         }
       },
       "logs": {
         "productUpdated": "Producto id <{{-id}}> actualizado exitosamente.",
-
+        "conflict": "Conflicto de concurrencia al actualizar producto: {{-error}}.",
+        "imageCleanupFailed": "No se pudo eliminar el objeto R2 <{{-key}}> tras la actualización: {{-error}}.",
         "genericError": "Error al actualizar producto: {{-error}}."
       }
     },
     "deleteProduct": {
       "productDeleted": "Producto eliminado exitosamente.",
-
       "genericError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "validators": {
-        "invalidId": "El id del producto es requerido y debe ser válido.",
+        "productNotFound": "El producto no existe o ya no está disponible.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
-          "invalidId": "El id del producto <{{-id}}> no es válido.",
+          "productNotFound": "Producto no encontrado para el id <{{-id}}>.",
           "validationError": "Error de validación: {{-error}}."
         }
       },
       "logs": {
-        "productDeleted": "Producto id <{{-id}}> eliminado exitosamente.",
-
+        "productDeleted": "Producto id <{{-id}}> eliminado definitivamente (sin órdenes que lo referencien).",
+        "productDeactivated": "Producto id <{{-id}}> desactivado (conservado por historial de órdenes).",
+        "imageCleanupFailed": "No se pudieron eliminar <{{-count}}> objetos R2 tras el borrado: {{-error}}.",
         "genericError": "Error al eliminar producto: {{-error}}."
       }
     }

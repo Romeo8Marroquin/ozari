@@ -3,6 +3,7 @@ import type { Request, Response, NextFunction } from "express";
 import {
   validateCreateProduct,
   validateCreateProductImageUploads,
+  validateDeleteProduct,
   validateUpdateProduct,
 } from "./products.validator.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
@@ -62,7 +63,14 @@ const mockValidPrisma = async () => {
     currency: { findFirst: vi.fn().mockResolvedValue({ id: 1, isActive: true }) },
     productDetailType: { findMany: vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }]) },
     rentTimeUnit: { findFirst: vi.fn().mockResolvedValue({ id: 2, isActive: true }) },
-    product: { findFirst: vi.fn().mockResolvedValue({ id: 1, isActive: true }) },
+    // The update validator's target product, WITH its active rows (ownership checks read them).
+    product: {
+      findFirst: vi.fn().mockResolvedValue({
+        id: 1,
+        productImages: [{ id: 11 }, { id: 12 }],
+        productDetails: [{ id: 21 }, { id: 22 }],
+      }),
+    },
   };
   const { getPrismaClient } = await import("@/services/prisma.service.js");
   (getPrismaClient as ReturnType<typeof vi.fn>).mockResolvedValue(prisma);
@@ -385,6 +393,13 @@ describe("Products Validator", () => {
       expectRejected("sellPricingRequired");
     });
 
+    it("Venta: rejects a replacementPrice (a sold item is consumed — nothing to replace)", async () => {
+      await mockValidPrisma();
+      mockReq.body = { ...validSellBody(), replacementPrice: 900 };
+      await run();
+      expectRejected("replacementPriceForbidden");
+    });
+
     // ── Happy paths ───────────────────────────────────────────────────────────────────────────
 
     it("Alquiler: passes and sanitizes the body (truncated money, trimmed text, no sell fields)", async () => {
@@ -557,41 +572,284 @@ describe("Products Validator", () => {
   });
 
   describe("validateUpdateProduct", () => {
-    it("should reject invalid product ID", async () => {
-      mockReq.body = {
-        productId: "invalid",
-      };
-
-      await validateUpdateProduct(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
-
-      expect(mockNext).not.toHaveBeenCalled();
-      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.BAD_REQUEST);
+    /** A valid full-state Alquiler update: one kept image + one new key, one kept + one new detail. */
+    const validUpdateBody = () => ({
+      ...validRentBody(),
+      productDetails: [
+        { id: 21, detailTypeId: 1, detail: "Blanco nieve" },
+        { detailTypeId: 2, detail: "Madera de pino" },
+      ],
+      images: [{ id: 11, isPrimary: true }, { key: mintedKey(1) }],
     });
 
-    it("should reject non-existent product", async () => {
-      mockReq.body = {
-        productId: 999,
-      };
-
-      const { getPrismaClient } = await import("@/services/prisma.service.js");
-      (getPrismaClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-        product: {
-          findFirst: vi.fn().mockResolvedValue(null),
-        },
-      });
-
-      await validateUpdateProduct(
+    const runUpdate = async (id: string | undefined = "1") => {
+      mockReq.params = id === undefined ? {} : { id };
+      return validateUpdateProduct(
         mockReq as Request,
         mockRes as Response,
         mockNext as NextFunction,
       );
+    };
 
+    const expectUpdateRejected = (key: string) => {
       expect(mockNext).not.toHaveBeenCalled();
       expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.BAD_REQUEST);
+      expect(lastErrorKey()).toBe(`products.updateProduct.validators.${key}`);
+    };
+
+    it("passes a valid full-state body through, sanitized", async () => {
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), name: "  Mesa redonda blanca  " };
+      await runUpdate();
+
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.body).toEqual({
+        businessTypeId: BusinessTypeEnum.RENT,
+        categoryId: 1,
+        currencyId: 1,
+        description: "Mesa para 8 personas",
+        images: [
+          { id: 11, isPrimary: true },
+          { key: mintedKey(1), isPrimary: false },
+        ],
+        name: "Mesa redonda blanca",
+        productDetails: [
+          { id: 21, detailTypeId: 1, detail: "Blanco nieve" },
+          { detailTypeId: 2, detail: "Madera de pino" },
+        ],
+        quantity: 40,
+        rentPrice: 75,
+        rentTimeUnitId: 2,
+        replacementPrice: 900,
+        sellPrice: undefined,
+      });
+    });
+
+    it("404s a malformed id (nothing for the client to fix — the getProductById stance)", async () => {
+      await mockValidPrisma();
+      mockReq.body = validUpdateBody();
+      await runUpdate("abc");
+
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.NOT_FOUND);
+      expect(lastErrorKey()).toBe("products.updateProduct.validators.productNotFound");
+    });
+
+    it("404s an unknown or soft-deleted product", async () => {
+      const prisma = await mockValidPrisma();
+      prisma.product.findFirst.mockResolvedValue(null);
+      mockReq.body = validUpdateBody();
+      await runUpdate("999");
+
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.NOT_FOUND);
+      expect(lastErrorKey()).toBe("products.updateProduct.validators.productNotFound");
+    });
+
+    it("enforces the shared create rules (business type, pricing) on the NEW state", async () => {
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), businessTypeId: 999 };
+      await runUpdate();
+      expectRejected("invalidBusinessTypeId");
+
+      vi.clearAllMocks();
+      await mockValidPrisma();
+      // Switching to Venta must arrive in the Venta shape — rent leftovers are a mismatch.
+      mockReq.body = { ...validUpdateBody(), businessTypeId: BusinessTypeEnum.SELL, sellPrice: 10 };
+      await runUpdate();
+      expectRejected("pricingMismatch");
+    });
+
+    it("rejects a detail id that doesn't belong to the product", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validUpdateBody(),
+        productDetails: [{ id: 999, detailTypeId: 1, detail: "Blanco nieve" }],
+      };
+      await runUpdate();
+      expectUpdateRejected("invalidDetailId");
+    });
+
+    it("rejects a repeated detail id (one row can't be kept twice)", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validUpdateBody(),
+        productDetails: [
+          { id: 21, detailTypeId: 1, detail: "Blanco nieve" },
+          { id: 21, detailTypeId: 2, detail: "Madera de pino" },
+        ],
+      };
+      await runUpdate();
+      expectUpdateRejected("invalidDetailId");
+    });
+
+    it("still rejects a duplicate detail TYPE across kept + new rows", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validUpdateBody(),
+        productDetails: [
+          { id: 21, detailTypeId: 1, detail: "Blanco nieve" },
+          { detailTypeId: 1, detail: "Blanco perla" },
+        ],
+      };
+      await runUpdate();
+      expectRejected("duplicateDetailType");
+    });
+
+    it("rejects a gallery slot carrying BOTH id and key, or neither", async () => {
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), images: [{ id: 11, key: mintedKey(1) }] };
+      await runUpdate();
+      expectUpdateRejected("invalidImageEntry");
+
+      vi.clearAllMocks();
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), images: [{ isPrimary: true }] };
+      await runUpdate();
+      expectUpdateRejected("invalidImageEntry");
+    });
+
+    it("rejects an image id that doesn't belong to the product, and a repeated one", async () => {
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), images: [{ id: 999 }] };
+      await runUpdate();
+      expectUpdateRejected("invalidImageId");
+
+      vi.clearAllMocks();
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), images: [{ id: 11 }, { id: 11 }] };
+      await runUpdate();
+      expectUpdateRejected("invalidImageId");
+    });
+
+    it("applies the create-side key rules (shape, duplicates, cap, one primary)", async () => {
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), images: [{ key: "evil/../escape.webp" }] };
+      await runUpdate();
+      expectRejected("invalidImageKey");
+
+      vi.clearAllMocks();
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), images: [{ key: mintedKey(1) }, { key: mintedKey(1) }] };
+      await runUpdate();
+      expectRejected("duplicateImageKey");
+
+      vi.clearAllMocks();
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validUpdateBody(),
+        images: Array.from({ length: 9 }, (_, i) => ({ key: mintedKey(i) })),
+      };
+      await runUpdate();
+      expectRejected("tooManyImages");
+
+      vi.clearAllMocks();
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validUpdateBody(),
+        images: [
+          { id: 11, isPrimary: true },
+          { id: 12, isPrimary: true },
+        ],
+      };
+      await runUpdate();
+      expectRejected("multiplePrimaryImages");
+
+      vi.clearAllMocks();
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), images: "nope" };
+      await runUpdate();
+      expectRejected("invalidImages");
+    });
+
+    it("defaults the primary to the FIRST slot when none is flagged", async () => {
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), images: [{ id: 12 }, { id: 11 }] };
+      await runUpdate();
+
+      expect(mockNext).toHaveBeenCalled();
+      expect((mockReq.body as { images: unknown }).images).toEqual([
+        { id: 12, isPrimary: true },
+        { id: 11, isPrimary: false },
+      ]);
+    });
+
+    it("accepts an empty gallery and empty details (delete everything declaratively)", async () => {
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), images: [], productDetails: [] };
+      await runUpdate();
+
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.body).toMatchObject({ images: [], productDetails: [] });
+    });
+
+    it("validates the Venta shape end-to-end (sell only, no rent leftovers)", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validSellBody(),
+        images: [],
+        productDetails: [],
+      };
+      await runUpdate();
+
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.body).toMatchObject({
+        businessTypeId: BusinessTypeEnum.SELL,
+        sellPrice: 12.5,
+        rentPrice: undefined,
+        rentTimeUnitId: undefined,
+        replacementPrice: undefined,
+      });
+    });
+
+    it("maps an unexpected throw to a clean 500", async () => {
+      const { getPrismaClient } = await import("@/services/prisma.service.js");
+      (getPrismaClient as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("db down"));
+      mockReq.body = validUpdateBody();
+      await runUpdate();
+
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.INTERNAL_SERVER_ERROR);
+    });
+  });
+
+  describe("validateDeleteProduct", () => {
+    const runDelete = async (id: string) => {
+      mockReq.params = { id };
+      return validateDeleteProduct(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
+    };
+
+    it("passes an existing active product through", async () => {
+      await mockValidPrisma();
+      await runDelete("1");
+      expect(mockNext).toHaveBeenCalled();
+    });
+
+    it("404s malformed and unknown ids alike (nothing for the client to fix)", async () => {
+      await mockValidPrisma();
+      await runDelete("abc");
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.NOT_FOUND);
+      expect(lastErrorKey()).toBe("products.deleteProduct.validators.productNotFound");
+
+      vi.clearAllMocks();
+      const prisma = await mockValidPrisma();
+      prisma.product.findFirst.mockResolvedValue(null);
+      await runDelete("999");
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.NOT_FOUND);
+    });
+
+    it("maps an unexpected throw to a clean 500", async () => {
+      const { getPrismaClient } = await import("@/services/prisma.service.js");
+      (getPrismaClient as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("db down"));
+      await runDelete("1");
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.INTERNAL_SERVER_ERROR);
     });
   });
 });
