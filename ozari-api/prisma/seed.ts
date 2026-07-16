@@ -21,6 +21,109 @@ import {
  *
  * NOTE: only reference/lookup data lives here — no users, no secrets, no PII.
  */
+type SeedPrismaClient = Awaited<ReturnType<typeof getPrismaClient>>;
+
+// app_preferences — every operational "constant" is an admin preference (owner direction,
+// 2026-07-15; EPIC-2-ORDERS §2). CREATE-ONLY upserts (`update: {}`): re-seeding must NEVER
+// clobber a value the admin has since edited. Values are text, parsed per valueType.
+async function seedAppPreferences(prisma: SeedPrismaClient): Promise<void> {
+  const appPreferences = [
+    {
+      key: "orders.logisticsSpacingMinutes",
+      value: "60",
+      valueType: "int",
+      group: "orders",
+      description:
+        "Minutos mínimos entre dos eventos logísticos (entrega/recolección) de órdenes distintas",
+    },
+    {
+      key: "orders.turnaroundMinutes",
+      value: "120",
+      valueType: "int",
+      group: "orders",
+      description:
+        "Minutos estándar de limpieza tras la recolección antes del recordatorio de listo",
+    },
+    {
+      key: "orders.readyReminderIntervalMinutes",
+      value: "60",
+      valueType: "int",
+      group: "orders",
+      description:
+        "Cada cuántos minutos se recuerda presionar listo tras el tiempo de limpieza",
+    },
+    {
+      key: "orders.calendarPaddingMinutes",
+      value: "30",
+      valueType: "int",
+      group: "orders",
+      description:
+        "Minutos de holgura antes y después de cada evento en el calendario",
+    },
+    {
+      key: "orders.defaultEventMinLeadHours",
+      value: "24",
+      valueType: "int",
+      group: "orders",
+      description:
+        "Horas mínimas de anticipación por defecto para nuevos tipos de evento",
+    },
+    {
+      key: "orders.evidencePhotosRequired",
+      value: "true",
+      valueType: "bool",
+      group: "orders",
+      description:
+        "Si los pasos ENTREGADO/RECOLECTADO exigen evidencia fotográfica",
+    },
+    {
+      key: "orders.evidenceMaxPhotos",
+      value: "10",
+      valueType: "int",
+      group: "orders",
+      description: "Máximo de fotos de evidencia por paso",
+    },
+    {
+      key: "orders.stepAdvanceMode",
+      value: "tap",
+      valueType: "string",
+      group: "orders",
+      description:
+        "Cómo avanzan los pasos de una orden: confirmación manual (tap) o automática por tiempo (time)",
+    },
+    {
+      key: "notifications.digestFrequency",
+      value: "daily",
+      valueType: "string",
+      group: "notifications",
+      description:
+        "Frecuencia del resumen de próximas entregas (daily | weekly | off)",
+    },
+    {
+      key: "notifications.deliveryReminderMinutes",
+      value: "60",
+      valueType: "int",
+      group: "notifications",
+      description: "Minutos antes de una entrega para el recordatorio individual",
+    },
+    {
+      key: "products.defaultRentTimeUnitId",
+      value: "2",
+      valueType: "int",
+      group: "products",
+      description:
+        "Unidad de tiempo de alquiler por defecto en el formulario de productos (2 = Día)",
+    },
+  ];
+  for (const row of appPreferences) {
+    await prisma.appPreference.upsert({
+      where: { key: row.key },
+      update: {},
+      create: row,
+    });
+  }
+}
+
 async function main(): Promise<void> {
   const prisma = await getPrismaClient();
 
@@ -186,12 +289,14 @@ async function main(): Promise<void> {
     });
   }
 
-  // service_status
+  // service_status — ServiceStatusEnum: PENDING=1, CANCELLED=2, DELIVERED=3, COLLECTED=4,
+  // EN_ROUTE=5 (added for Epic-2 order tracking: LISTO → EN RUTA → ENTREGADO → RECOLECTADO).
   const serviceStatuses = [
     { id: 1, name: "Pendiente", description: "Servicio pendiente de entrega" },
     { id: 2, name: "Cancelado", description: "Servicio cancelado por el cliente o proveedor" },
     { id: 3, name: "Entregado", description: "Servicio entregado al cliente" },
     { id: 4, name: "Recolectado", description: "Servicio recolectado por el proveedor" },
+    { id: 5, name: "En ruta", description: "Servicio en ruta hacia el cliente" },
   ];
   for (const row of serviceStatuses) {
     await prisma.serviceStatus.upsert({
@@ -209,6 +314,50 @@ async function main(): Promise<void> {
   ];
   for (const row of paymentStatuses) {
     await prisma.paymentStatus.upsert({
+      where: { id: row.id },
+      update: { name: row.name, description: row.description },
+      create: row,
+    });
+  }
+
+  // event_types — the purpose of an order (owner taxonomy, 2026-07-16). `minLeadHours` (default
+  // 24, deliberately NOT updated on re-run — it's an admin-tunable knob) is the client-side rule:
+  // create only if delivery is ≥ that far away, edit/cancel only until that many hours before.
+  const eventTypes = [
+    {
+      id: 1,
+      name: "Evento familiar",
+      description: "Celebración familiar (cumpleaños, reunión, aniversario)",
+    },
+    {
+      id: 2,
+      name: "Evento social",
+      description: "Evento social o comunitario",
+    },
+    { id: 3, name: "Otro", description: "Otro tipo de evento" },
+  ];
+  for (const row of eventTypes) {
+    await prisma.eventType.upsert({
+      where: { id: row.id },
+      update: { name: row.name, description: row.description },
+      create: row,
+    });
+  }
+
+  // contact_types — channels for client-registry contacts (deliberately separate from
+  // user_phone_types: registry contacts include non-phone channels like email).
+  const contactTypes = [
+    { id: 1, name: "WhatsApp", description: "Número de WhatsApp" },
+    { id: 2, name: "Teléfono", description: "Número de teléfono" },
+    {
+      id: 3,
+      name: "Correo electrónico",
+      description: "Dirección de correo electrónico",
+    },
+    { id: 4, name: "Otro", description: "Otro medio de contacto" },
+  ];
+  for (const row of contactTypes) {
+    await prisma.contactType.upsert({
       where: { id: row.id },
       update: { name: row.name, description: row.description },
       create: row,
@@ -252,6 +401,8 @@ async function main(): Promise<void> {
     });
   }
 
+  await seedAppPreferences(prisma);
+
   // Because we upsert with explicit ids, the serial sequences are not advanced.
   // Reset each to MAX(id) so a fresh DB doesn't collide on the next app insert.
   // (Idempotent + harmless on the already-seeded staging DB. Table names are fixed
@@ -269,6 +420,8 @@ async function main(): Promise<void> {
     "product_category",
     "service_status",
     "payment_status",
+    "event_types",
+    "contact_types",
     "product_detail_types",
     "zones",
   ];
