@@ -37,7 +37,7 @@ const wrapperFor =
 /** Prime a cached infinite-list entry the way `useProducts` stores it. */
 const primeList = (client: QueryClient, products: Product[], filters: object = {}): void => {
   client.setQueryData([QueryKeys.PRODUCTS, filters], {
-    pages: [{ products, pagination: { page: 1, pageSize: 24, total: products.length, totalPages: 1 } }],
+    pages: [{ products, pagination: { page: 1, pageSize: 20, total: products.length, totalPages: 1 } }],
     pageParams: [1],
   });
 };

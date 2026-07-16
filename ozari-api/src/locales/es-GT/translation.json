@@ -402,6 +402,34 @@
       }
     }
   },
+  "orders": {
+    "getOrders": {
+      "ordersFetched": "Órdenes obtenidas exitosamente.",
+      "errorFetchingOrders": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "ordersFetched": "Órdenes obtenidas exitosamente, total de órdenes <{{-count}}>.",
+        "errorFetchingOrders": "Error al obtener órdenes: {{-error}}."
+      }
+    },
+    "getOrderById": {
+      "orderFetched": "Orden obtenida exitosamente.",
+      "orderNotFound": "La orden no existe o ya no está disponible.",
+      "errorFetchingOrder": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "orderFetched": "Orden <{{-id}}> obtenida exitosamente.",
+        "orderNotFound": "Orden no encontrada para el id <{{-id}}>.",
+        "errorFetchingOrder": "Error al obtener la orden: {{-error}}."
+      }
+    },
+    "catalog": {
+      "catalogFetched": "Catálogo de referencia obtenido exitosamente.",
+      "errorFetchingCatalog": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "catalogFetched": "Catálogo de referencia de órdenes obtenido exitosamente.",
+        "errorFetchingCatalog": "Error al obtener el catálogo de referencia de órdenes: {{-error}}."
+      }
+    }
+  },
   "products": {
     "getAllProducts": {
       "productsFetched": "Productos obtenidos exitosamente.",

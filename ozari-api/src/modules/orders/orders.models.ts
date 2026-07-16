@@ -128,6 +128,11 @@ export interface OrderListResponseModel {
   pagination: PaginationMeta;
 }
 
+/** The `GET /orders/:id` payload envelope (mirrors products' `{ product: … }` convention). */
+export interface OrderDetailEnvelopeModel {
+  order: OrderDetailResponseModel;
+}
+
 /** An event type as the order form's select consumes it — the lead-time rides along. */
 export interface EventTypeCatalogOptionModel extends CatalogOptionModel {
   minLeadHours: number;

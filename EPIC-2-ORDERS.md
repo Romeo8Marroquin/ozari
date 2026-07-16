@@ -5,15 +5,19 @@
 > ✅, still-open questions live in §9. Future sessions: read this FIRST. The §3 driver refactor is
 > implemented (branch `feat/rems`); **all schema-blocking questions (Q-D/Q-A/Q-E) were resolved
 > 2026-07-16 (§9)** — only Q-B (comms) and Q-C (dashboard window) remain, neither blocks the
-> schema. The §4 schema is AUTHORED + applied. **Step 2 (orders read slice) is IN PROGRESS**: the
-> `modules/orders/` SERVICE layer is built + tested (list/detail includes, `view=agenda|history`
-> split — history ⇔ `readyAt` set OR cancelled — clamp-never-reject query parse, Admin projections
-> with decrypted snapshots; `appConfig.defaultOrderPageSize`/`maxOrderPageSize`). **Not yet
-> mounted**: controller + route (`GET /orders`, `/orders/:id`, `/orders/catalog`, Admin-only) +
-> i18n keys + OpenAPI (same-commit rule) — that's the next session's first task, then the
-> UI decision: an **agenda-first ticket list** (day-grouped, segmented Agenda/Historial control),
-> NOT a product-style grid; detail page hero = the tracking stepper. Update this file as things
-> land.
+> schema. The §4 schema is AUTHORED + applied. **Step 2 (orders READ slice) is DONE (2026-07-16)**:
+> `modules/orders/` mounts `GET /orders` (paginated, **`view=agenda|history`** — history ⇔
+> `readyAt` set OR cancelled, agenda sorts soonest-first / history newest-first, optional
+> `statusId` filter, clamp-never-reject), `GET /orders/:id` (full detail: decrypted snapshots,
+> money breakdown, lines with `isRental`, extras, status audit trail; 404 on bad/unknown id) and
+> `GET /orders/catalog` (eventTypes+minLeadHours, statuses, paymentStatuses, contactTypes, zones) —
+> all **Admin-only** (widen ONLY together with Client/Driver row-scoping), authenticated rate tier,
+> OpenAPI + i18n + tests same-commit. Pagination is **congruent at 20 per page across products AND
+> orders** (owner, 2026-07-16 — `PRODUCTS_PAGE_SIZE`, `defaultProductPageSize`,
+> `defaultOrderPageSize`). **Next**: the frontend agenda (day-grouped ticket list + segmented
+> Agenda/Historial + empty states — infinite scroll like products, NO empty-day placeholders; the
+> month-with-empty-days visual belongs to the future §2 calendar/planning page), then
+> `POST /orders` + client registries. Update this file as things land.
 
 ## 1. The business, in one paragraph
 

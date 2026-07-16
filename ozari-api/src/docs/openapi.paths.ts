@@ -510,7 +510,7 @@ export const paths: OpenAPIV3.PathsObject = {
           in: "query",
           required: false,
           description: "Items per page (clamped to 1–50).",
-          schema: { type: "integer", minimum: 1, maximum: 50, default: 15 },
+          schema: { type: "integer", minimum: 1, maximum: 50, default: 20 },
         },
         {
           name: "search",
@@ -590,7 +590,7 @@ export const paths: OpenAPIV3.PathsObject = {
               isActive: true,
             },
           ],
-          pagination: { page: 1, pageSize: 15, total: 1, totalPages: 1 },
+          pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
         }, "Products fetched"),
         "401": unauthorized(STALE_TOKEN_401),
         "403": productsReadForbidden(),
@@ -917,6 +917,198 @@ export const paths: OpenAPIV3.PathsObject = {
         }, "Catalog fetched"),
         "401": unauthorized(STALE_TOKEN_401),
         "403": productsReadForbidden(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/orders": {
+    get: {
+      tags: ["Orders"],
+      summary: "List orders (agenda / history views)",
+      operationId: "getOrders",
+      description:
+        "Returns the paginated order list behind the panel's segmented control. **Admin only** " +
+        "(the Client own-orders and Driver assigned-orders slices arrive later with their own row " +
+        "scoping). `view=agenda` (default) = every order that is still WORK — upcoming, en route, " +
+        "delivered, or collected-awaiting-the-final-\"listo\" — soonest delivery first; " +
+        "`view=history` = finished (`readyAt` set) or cancelled orders, newest first. Pagination, " +
+        "`view` and the `statusId` filter are clamped or dropped (never rejected), so there is no " +
+        "400. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "page",
+          in: "query",
+          required: false,
+          description: "1-based page number (clamped to ≥ 1).",
+          schema: { type: "integer", minimum: 1, default: 1 },
+        },
+        {
+          name: "pageSize",
+          in: "query",
+          required: false,
+          description: "Items per page (clamped to 1–100).",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+        },
+        {
+          name: "view",
+          in: "query",
+          required: false,
+          description:
+            "Which slice of orders: `agenda` = still-work rows (schedule order), `history` = " +
+            "finished or cancelled rows (log order). An unknown value clamps to `agenda`.",
+          schema: { type: "string", enum: ["agenda", "history"], default: "agenda" },
+        },
+        {
+          name: "statusId",
+          in: "query",
+          required: false,
+          description:
+            "Filter by order status id within the view (see `GET /orders/catalog`). A " +
+            "non-positive or unknown id is ignored or matches nothing.",
+          schema: { type: "integer", minimum: 1 },
+        },
+      ],
+      responses: {
+        "200": dataResponse("One page of orders for the requested view.", "OrderListResponse", {
+          orders: [
+            {
+              id: 12,
+              clientName: "María López",
+              isRegistryClient: false,
+              eventType: { id: 1, name: "Evento familiar" },
+              status: { id: 1, name: "Pendiente" },
+              paymentStatus: { id: 1, name: "Pendiente" },
+              deliveryAt: "2026-08-01T14:00:00.000Z",
+              pickupAt: "2026-08-02T10:00:00.000Z",
+              itemCount: 25,
+              totalAmount: 450,
+              currency: { id: 1, name: EXAMPLE_CURRENCY_NAME, iso4217Code: "GTQ", symbol: "Q" },
+            },
+          ],
+          pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+        }, "Orders fetched"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/orders/catalog": {
+    get: {
+      tags: ["Orders"],
+      summary: "Order reference lookups (selects data)",
+      operationId: "getOrdersCatalog",
+      description:
+        "The seeded reference lists the orders section consumes — event types (with their client " +
+        "lead-times), order + payment statuses (filters/chips), and the contact types + zones the " +
+        "client-registry form needs (active rows, id order). **Admin only**, like every orders " +
+        "read today. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      responses: {
+        "200": dataResponse("The five reference lists.", "OrderCatalog", {
+          eventTypes: [
+            { id: 1, name: "Evento familiar", minLeadHours: 24 },
+            { id: 2, name: "Evento social", minLeadHours: 24 },
+            { id: 3, name: "Otro", minLeadHours: 24 },
+          ],
+          serviceStatuses: [
+            { id: 1, name: "Pendiente" },
+            { id: 5, name: "En ruta" },
+          ],
+          paymentStatuses: [
+            { id: 1, name: "Pendiente" },
+            { id: 2, name: "Pagado" },
+          ],
+          contactTypes: [
+            { id: 1, name: "WhatsApp" },
+            { id: 3, name: "Correo electrónico" },
+          ],
+          zones: [{ id: 1, name: "Zona 1" }],
+        }, "Catalog fetched"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/orders/{id}": {
+    get: {
+      tags: ["Orders"],
+      summary: "Get one order (full detail)",
+      operationId: "getOrderById",
+      description:
+        "One order with everything the detail page renders: the decrypted contact/address " +
+        "SNAPSHOTS captured at order time, the billed period, the money breakdown (delivery fee, " +
+        "deposit, discount, payment), the lines (with their rent-vs-sale snapshot), the extras, " +
+        "and the append-only status audit trail. **Admin only.** A malformed and an unknown id " +
+        "are both a plain `404`. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          description: "The order id.",
+          schema: { type: "integer", minimum: 1 },
+          example: 12,
+        },
+      ],
+      responses: {
+        "200": dataResponse("The full order.", "OrderDetailResponse", {
+          order: {
+            id: 12,
+            clientName: "María López",
+            isRegistryClient: false,
+            eventType: { id: 1, name: "Evento familiar" },
+            status: { id: 1, name: "Pendiente" },
+            paymentStatus: { id: 1, name: "Pendiente" },
+            deliveryAt: "2026-08-01T14:00:00.000Z",
+            pickupAt: "2026-08-02T10:00:00.000Z",
+            itemCount: 25,
+            totalAmount: 450,
+            currency: { id: 1, name: EXAMPLE_CURRENCY_NAME, iso4217Code: "GTQ", symbol: "Q" },
+            deliveryContact: "WhatsApp 5555-1234",
+            deliveryAddress: "Zona 10, 4a avenida 5-55",
+            serviceStart: "2026-08-01T14:00:00.000Z",
+            serviceEnd: "2026-08-02T10:00:00.000Z",
+            deliveryAmount: 50,
+            lines: [
+              {
+                id: 31,
+                productId: 3,
+                productName: "Silla plegable",
+                isRental: true,
+                quantity: 25,
+                unitaryPrice: 6,
+                parcialPrice: 150,
+              },
+            ],
+            extras: [],
+            statusHistory: [
+              {
+                id: 1,
+                to: { id: 1, name: "Pendiente" },
+                byUserName: "Romeo Marroquín",
+                at: "2026-07-16T12:00:00.000Z",
+              },
+            ],
+            createdAt: "2026-07-16T12:00:00.000Z",
+          },
+        }, "Order fetched"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse(
+          "The order does not exist (or the id is malformed).",
+          404,
+          "Order not found",
+        ),
         "429": rateLimited,
         "500": serverError,
       },

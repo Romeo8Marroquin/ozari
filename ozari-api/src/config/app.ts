@@ -121,8 +121,9 @@ export const appConfig = {
   maxGlobalQuantity: 5000,
 
   // Product list pagination: the grid's default page size and the hard upper bound a caller can
-  // request (so a single list call can never fetch an unbounded number of rows).
-  defaultProductPageSize: 15,
+  // request (so a single list call can never fetch an unbounded number of rows). 20 matches the
+  // frontend's infinite-scroll batch AND the orders default below (owner: keep them congruent).
+  defaultProductPageSize: 20,
   maxProductPageSize: 50,
   // Longest name-search string the list endpoint honours; longer input is truncated, not rejected
   // (the same clamp stance as the pagination params).

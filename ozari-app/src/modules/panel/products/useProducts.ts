@@ -12,7 +12,10 @@ import { toProductListParams, type ProductListSearch } from './productListSearch
  * default 15 so a typical catalog resolves in one or two fetches; the grid's 2–5 columns mean the
  * only ragged row is the true end of the list, which no page size avoids.
  */
-export const PRODUCTS_PAGE_SIZE = 24;
+// Matches the backend defaults (products AND orders both default to 20 — owner: keep the
+// pagination congruent across sections). A partially-filled last grid row at a batch boundary
+// self-heals when the next infinite-scroll batch appends.
+export const PRODUCTS_PAGE_SIZE = 20;
 
 /**
  * Reads the catalog from `GET /products` as an **infinite query** (the grid is a browse-first
