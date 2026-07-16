@@ -128,6 +128,11 @@ export const appConfig = {
   // (the same clamp stance as the pagination params).
   maxProductSearchLength: 100,
 
+  // Order list pagination: the agenda/history views' default page size and hard cap (same clamp
+  // stance as products — a single list call can never fetch an unbounded number of rows).
+  defaultOrderPageSize: 20,
+  maxOrderPageSize: 100,
+
   sensitiveKeys: ["password", "token", "secret", "creditCard", "cvv", "auth"],
   basePath: "/api",
 } as const;

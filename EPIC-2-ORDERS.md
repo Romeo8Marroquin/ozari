@@ -5,8 +5,15 @@
 > ✅, still-open questions live in §9. Future sessions: read this FIRST. The §3 driver refactor is
 > implemented (branch `feat/rems`); **all schema-blocking questions (Q-D/Q-A/Q-E) were resolved
 > 2026-07-16 (§9)** — only Q-B (comms) and Q-C (dashboard window) remain, neither blocks the
-> schema. Next session: set up migration tooling (shadow DB) + author the orders schema per §4.
-> Update this file as things land.
+> schema. The §4 schema is AUTHORED + applied. **Step 2 (orders read slice) is IN PROGRESS**: the
+> `modules/orders/` SERVICE layer is built + tested (list/detail includes, `view=agenda|history`
+> split — history ⇔ `readyAt` set OR cancelled — clamp-never-reject query parse, Admin projections
+> with decrypted snapshots; `appConfig.defaultOrderPageSize`/`maxOrderPageSize`). **Not yet
+> mounted**: controller + route (`GET /orders`, `/orders/:id`, `/orders/catalog`, Admin-only) +
+> i18n keys + OpenAPI (same-commit rule) — that's the next session's first task, then the
+> UI decision: an **agenda-first ticket list** (day-grouped, segmented Agenda/Historial control),
+> NOT a product-style grid; detail page hero = the tracking stepper. Update this file as things
+> land.
 
 ## 1. The business, in one paragraph
 

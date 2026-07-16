@@ -3,11 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const { post } = vi.hoisted(() => ({ post: vi.fn() }));
 vi.mock('@api/client', () => ({ api: { post } }));
 
-const { requestForcedLogout, resetForcedLogout } = vi.hoisted(() => ({
+const { markSessionProbeDone, requestForcedLogout, resetForcedLogout } = vi.hoisted(() => ({
+  markSessionProbeDone: vi.fn(),
   requestForcedLogout: vi.fn(),
   resetForcedLogout: vi.fn(),
 }));
-vi.mock('@utils/sessionLifecycle', () => ({ requestForcedLogout, resetForcedLogout }));
+vi.mock('@utils/sessionLifecycle', () => ({
+  markSessionProbeDone,
+  requestForcedLogout,
+  resetForcedLogout,
+}));
 
 const { warning } = vi.hoisted(() => ({ warning: vi.fn() }));
 vi.mock('@components/notifications/notify', () => ({ notify: { warning } }));
@@ -138,12 +143,15 @@ describe('helpers', () => {
     expect(getIsRefreshing()).toBe(false);
   });
 
-  it('clearAuthState wipes the token + CSRF', () => {
+  it('clearAuthState wipes the token + CSRF and consumes the /sesion probe gate', () => {
     Storage.set(StorageKeys.TOKEN, 'x');
     Storage.set(StorageKeys.CSRF, 'y');
     clearAuthState();
     expect(Storage.get(StorageKeys.TOKEN)).toBeNull();
     expect(Storage.get(StorageKeys.CSRF)).toBeNull();
+    // Teardown = "we KNOW there is no session": the login screen must not probe /auth/refresh
+    // for the session we just revoked (the 403-refresh-after-signout bug).
+    expect(markSessionProbeDone).toHaveBeenCalled();
   });
 
   it('setupRefreshTimer schedules for a valid token and no-ops for an invalid one', () => {

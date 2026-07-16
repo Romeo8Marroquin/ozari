@@ -4,16 +4,17 @@ import { createFileRoute, redirect } from '@tanstack/react-router';
 import { Storage } from '@utils/storage';
 import { isTokenValid } from '@utils/jwt';
 import { sanitizeLoginRedirect } from '@utils/loginRedirect';
+import { markSessionProbeDone, shouldSilentProbeSession } from '@utils/sessionLifecycle';
 import { refreshAccessToken } from '@utils/tokenRefresh';
 
 // One silent-refresh probe per tab. The access token lives in (per-tab) sessionStorage,
 // but the real session is the durable HttpOnly refresh cookie — so a brand-new tab or a
 // post-restart visit has an empty sessionStorage yet may still have a live session. We
-// must ask the server (the cookie is HttpOnly — JS can't peek). This flag is module-
-// scoped, so it's per-tab: we probe once on the tab's first visit to the auth screen and
-// then skip the round-trip on every later login<->register toggle (the cookie state can't
-// change between those), keeping the switch animation instant.
-let silentRefreshProbed = false;
+// must ask the server (the cookie is HttpOnly — JS can't peek). The gate lives in
+// `sessionLifecycle` (per-tab module state): we probe once on the tab's first visit to
+// the auth screen and skip the round-trip on every later login<->register toggle — AND
+// every teardown (`clearAuthState`) consumes the gate too, so arriving here right after
+// a logout never probes the session we just revoked.
 
 export const Route = createFileRoute('/sesion')({
   // `?redirect=` is the deep-link memory: the panel guard writes the intended destination here when
@@ -31,13 +32,13 @@ export const Route = createFileRoute('/sesion')({
     // No valid access token in this tab — but the refresh cookie may still hold a live
     // session (new tab / reopened browser). Probe it once before showing the login form,
     // so an existing session rehydrates straight into the panel instead of re-prompting.
-    if (!isLogged && !silentRefreshProbed) {
-      silentRefreshProbed = true;
+    if (!isLogged && shouldSilentProbeSession()) {
+      markSessionProbeDone();
       if (token) Storage.remove(StorageKeys.TOKEN);
       const refreshedToken = await refreshAccessToken({ silent: true });
       isLogged = isTokenValid(refreshedToken);
     } else if (token && !isLogged) {
-      // Stale token, and we've already probed this tab — just drop it.
+      // Stale token, and this tab's probe gate is already consumed — just drop it.
       Storage.remove(StorageKeys.TOKEN);
     }
 

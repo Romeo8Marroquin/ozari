@@ -7,9 +7,12 @@ vi.mock('@utils/tokenRefresh', () => ({ clearAuthState }));
 
 import {
   isForcedLogoutInFlight,
+  markSessionProbeDone,
   requestForcedLogout,
   resetForcedLogout,
+  resetSessionProbeForTests,
   setForcedLogoutHandler,
+  shouldSilentProbeSession,
 } from './sessionLifecycle';
 
 let unsubscribe: (() => void) | undefined;
@@ -33,6 +36,7 @@ afterEach(() => {
   unsubscribe?.();
   unsubscribe = undefined;
   resetForcedLogout();
+  resetSessionProbeForTests();
 });
 
 describe('sessionLifecycle', () => {
@@ -101,5 +105,18 @@ describe('sessionLifecycle', () => {
     requestForcedLogout();
     expect(b).toHaveBeenCalledTimes(1);
     expect(a).not.toHaveBeenCalled();
+  });
+});
+
+describe('session probe gate', () => {
+  it('starts armed: a fresh tab should silent-probe once', () => {
+    expect(shouldSilentProbeSession()).toBe(true);
+  });
+
+  it('consuming the gate stops further probes, one-way (idempotent)', () => {
+    markSessionProbeDone();
+    expect(shouldSilentProbeSession()).toBe(false);
+    markSessionProbeDone(); // a second teardown/probe changes nothing
+    expect(shouldSilentProbeSession()).toBe(false);
   });
 });

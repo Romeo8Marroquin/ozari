@@ -88,3 +88,36 @@ function fallback(): void {
     window.location.replace('/sesion/inicio');
   });
 }
+
+/**
+ * ONE-per-tab gate for the `/sesion` route's silent-refresh probe.
+ *
+ * The probe exists for a tab whose sessionStorage is empty but whose HttpOnly refresh cookie may
+ * still hold a live session (a brand-new tab, a reopened browser) — JS can't peek at the cookie,
+ * so the guard asks the server once. But "empty sessionStorage" is ALSO the state right after a
+ * logout, where the answer is already known: the session was just revoked (sign-out) or rejected
+ * (forced logout). Probing then is a guaranteed-to-fail `/auth/refresh` round-trip — the
+ * "403 refresh after signout" bug — so `clearAuthState` marks the gate done, covering every
+ * teardown path (manual logout, forced logout, and a failed guard probe itself, which also fixes
+ * the old double-probe on a dead-cookie visit to a bookmarked /panel URL).
+ *
+ * The gate is one-way per tab on purpose: after any probe or teardown, the login screen never
+ * auto-rehydrates again in that tab (logging out and being silently logged back in would be far
+ * worse than skipping a probe); a hard reload resets module state and probes fresh.
+ */
+let sessionProbeDone = false;
+
+/** Whether the `/sesion` guard should still fire its once-per-tab silent probe. */
+export function shouldSilentProbeSession(): boolean {
+  return !sessionProbeDone;
+}
+
+/** Consume the gate: a probe ran, or a teardown made its answer known ("no session"). */
+export function markSessionProbeDone(): void {
+  sessionProbeDone = true;
+}
+
+/** Test-only: re-arm the probe gate (module state persists across a test file otherwise). */
+export function resetSessionProbeForTests(): void {
+  sessionProbeDone = false;
+}

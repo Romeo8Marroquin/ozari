@@ -4,7 +4,7 @@ import { getTokenTimeRemaining, isTokenValid } from '@utils/jwt';
 import { api } from '@api/client';
 import { notify } from '@components/notifications/notify';
 import { getStatus, isAuthFailure, resolveApiErrorMessage } from '@utils/apiError';
-import { requestForcedLogout, resetForcedLogout } from '@utils/sessionLifecycle';
+import { markSessionProbeDone, requestForcedLogout, resetForcedLogout } from '@utils/sessionLifecycle';
 import axios from 'axios';
 import type { OzariSuccessResponse } from '../types/api.types';
 
@@ -29,6 +29,10 @@ export function clearAuthState(): void {
   // User-scoped work-in-progress: another user on this browser must never inherit a draft.
   Storage.remove(StorageKeys.PRODUCT_CREATE_DRAFT);
   clearRefreshTimer();
+
+  // Every teardown means "we KNOW there is no session" — the /sesion guard must not fire its
+  // silent rehydration probe at a session we just revoked (the 403-refresh-after-signout bug).
+  markSessionProbeDone();
 
   // 🔴 TODO: reset Zustand stores here when implemented (authStore/userStore .reset()).
 }
