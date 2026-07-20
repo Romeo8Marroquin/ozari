@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, type Mock } from "vite
 import type { Response } from "express";
 import { Prisma } from "@prisma/client";
 import {
+  createOrder,
   getOrderById,
   getOrders,
   getOrdersCatalog,
@@ -23,6 +24,11 @@ vi.mock("@/config/i18n.js", () => ({ i18next: { t: vi.fn((key: string) => key) }
 vi.mock("@/services/prisma.service.js", () => ({ getPrismaClient: vi.fn() }));
 vi.mock("@models/http/ozariSuccessModel.js", () => ({ sendOzariSuccess: vi.fn() }));
 vi.mock("@models/http/ozariErrorModel.js", () => ({ sendOzariError: vi.fn() }));
+vi.mock("@/config/auditLogger.js", () => ({
+  AuditAction: { ADMIN_ACTION: "ADMIN_ACTION" },
+  logAudit: vi.fn(),
+}));
+vi.mock("@/config/environment.js", () => ({ isDeployedEnvironment: vi.fn(() => false) }));
 
 const VALID_ENCRYPTION_KEY =
   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -233,6 +239,206 @@ describe("getOrderById", () => {
       expect.anything(),
       HttpEnum.INTERNAL_SERVER_ERROR,
       "orders.getOrderById.errorFetchingOrder",
+    );
+  });
+});
+
+// ── createOrder ──────────────────────────────────────────────────────────────────────────────────
+
+const txRentalProduct = {
+  id: 3,
+  name: "Silla plegable",
+  quantity: 40,
+  currencyId: 1,
+  productBusinessTypeId: 1,
+  rentTimeUnitId: 2,
+  rentPrice: new Prisma.Decimal("6.00"),
+  sellPrice: null,
+};
+const txSaleProduct = {
+  id: 4,
+  name: "Vasos desechables",
+  quantity: 15,
+  currencyId: 1,
+  productBusinessTypeId: 2,
+  rentTimeUnitId: null,
+  rentPrice: null,
+  sellPrice: new Prisma.Decimal("3.50"),
+};
+
+/** One rented-in-window grouped row, as `serviceDetail.groupBy` returns it. */
+const rentedRow = (productId: number, rented: number) => ({
+  productId,
+  _sum: { quantity: rented },
+});
+
+type TxOverrides = {
+  products?: unknown[];
+  rented?: ReturnType<typeof rentedRow>[];
+  spacingHit?: { id: number; deliveryAt: Date } | null;
+};
+
+function mockCreateTx(overrides: TxOverrides = {}) {
+  const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    product: {
+      findMany: vi.fn().mockResolvedValue(overrides.products ?? [txRentalProduct, txSaleProduct]),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    serviceDetail: { groupBy: vi.fn().mockResolvedValue(overrides.rented ?? []) },
+    appPreference: { findUnique: vi.fn().mockResolvedValue({ value: "60" }) },
+    service: {
+      findFirst: vi.fn().mockResolvedValue(overrides.spacingHit ?? null),
+      create: vi.fn().mockResolvedValue({ id: 12 }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue(makeRawRichOrder()),
+    },
+  };
+  (getPrismaClient as Mock).mockResolvedValue({
+    $transaction: vi.fn(async (callback: (t: typeof tx) => unknown) => callback(tx)),
+  });
+  return tx;
+}
+
+// 25h window → 2 billed days: rental 6 × 25 × 2 = 300; sale 3.50 × 10 = 35; +50 delivery = 385.
+const createBody = () => ({
+  clientRegistryId: 3,
+  eventTypeId: 1,
+  deliveryAt: new Date("2026-08-01T14:00:00.000Z"),
+  pickupAt: new Date("2026-08-02T15:00:00.000Z"),
+  deliveryName: "María López",
+  deliveryContact: "WhatsApp 5555-1234",
+  deliveryAddress: "Zona 10, 4a avenida 5-55",
+  description: undefined,
+  comment: undefined,
+  deliveryAmount: 50,
+  depositAmount: undefined,
+  lines: [
+    { productId: 3, quantity: 25 },
+    { productId: 4, quantity: 10 },
+  ],
+});
+
+const buildCreateReq = (body: ReturnType<typeof createBody>): CustomRequest =>
+  ({ body, query: {}, params: {}, user: { userRole: 2, userId: 1 } }) as unknown as CustomRequest;
+
+describe("createOrder", () => {
+  it("creates a confirmed mixed order: server-side pricing, encrypted snapshots, sale decrement, audit row", async () => {
+    const tx = mockCreateTx();
+    const body = createBody();
+    await createOrder(buildCreateReq(body), {} as Response);
+
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    const createArg = (tx.service.create as Mock).mock.calls[0]?.[0] as {
+      data: Record<string, unknown> & {
+        serviceDetails: { create: Array<Record<string, unknown>> };
+        statusHistory: { create: Record<string, unknown> };
+      };
+    };
+    expect(createArg.data).toMatchObject({
+      clientRegistryId: 3,
+      eventTypeId: 1,
+      totalAmount: 385,
+      deliveryAmount: 50,
+      serviceStatusId: 1,
+      paymentStatusId: 1,
+      deliveryAt: body.deliveryAt,
+      pickupAt: body.pickupAt,
+      serviceStart: body.deliveryAt,
+      serviceEnd: body.pickupAt,
+    });
+    // PII snapshots are encrypted at rest — never the plaintext.
+    expect(createArg.data["deliveryNameKms"]).toBeTruthy();
+    expect(createArg.data["deliveryNameKms"]).not.toBe(body.deliveryName);
+    expect(createArg.data.serviceDetails.create).toEqual([
+      { productId: 3, quantity: 25, isRental: true, unitaryPrice: 6, parcialPrice: 300, currencyId: 1 },
+      { productId: 4, quantity: 10, isRental: false, unitaryPrice: 3.5, parcialPrice: 35, currencyId: 1 },
+    ]);
+    expect(createArg.data.statusHistory.create).toEqual({ toStatusId: 1, byUserId: 1 });
+    // Only the SALE line consumes stock permanently.
+    expect(tx.product.update).toHaveBeenCalledTimes(1);
+    expect(tx.product.update).toHaveBeenCalledWith({
+      where: { id: 4 },
+      data: { quantity: { decrement: 10 } },
+    });
+    expect(sendOzariSuccess).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CREATED,
+      "orders.createOrder.orderCreated",
+      expect.objectContaining({ order: expect.objectContaining({ id: 12 }) }),
+    );
+  });
+
+  it("a purchase-only order never queries rental holds and bills a single day", async () => {
+    const tx = mockCreateTx();
+    const body = { ...createBody(), pickupAt: undefined, lines: [{ productId: 4, quantity: 10 }] };
+    await createOrder(buildCreateReq(body as ReturnType<typeof createBody>), {} as Response);
+
+    expect(tx.serviceDetail.groupBy).not.toHaveBeenCalled();
+    const createArg = (tx.service.create as Mock).mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(createArg.data).toMatchObject({
+      pickupAt: null,
+      serviceEnd: body.deliveryAt,
+      totalAmount: 85, // 35 + 50 delivery
+    });
+  });
+
+  it("rolls back to a STRUCTURED 409 when the window lacks stock (rental) or shelves lack units (sale)", async () => {
+    const tx = mockCreateTx({
+      products: [txRentalProduct, { ...txSaleProduct, quantity: 5 }],
+      rented: [rentedRow(3, 20)],
+    });
+    await createOrder(buildCreateReq(createBody()), {} as Response);
+
+    expect(tx.service.create).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.createOrder.stockConflict",
+      undefined,
+      {
+        conflicts: [
+          { productId: 3, productName: "Silla plegable", requested: 25, available: 20 },
+          { productId: 4, productName: "Vasos desechables", requested: 10, available: 5 },
+        ],
+      },
+    );
+  });
+
+  it("rolls back to a 409 when another order's logistics event is too close", async () => {
+    const tx = mockCreateTx({ spacingHit: { id: 9, deliveryAt: new Date("2026-08-01T14:30:00.000Z") } });
+    await createOrder(buildCreateReq(createBody()), {} as Response);
+
+    expect(tx.service.create).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.createOrder.spacingConflict",
+    );
+  });
+
+  it("a product that vanished between validation and the lock is a conflict, not a 500", async () => {
+    mockCreateTx({ products: [txRentalProduct] }); // the sale product is gone
+    await createOrder(buildCreateReq(createBody()), {} as Response);
+
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.createOrder.stockConflict",
+      undefined,
+      { conflicts: [{ productId: 4, productName: "#4", requested: 10, available: 0 }] },
+    );
+  });
+
+  it("responds 500 when the transaction fails for any other reason", async () => {
+    (getPrismaClient as Mock).mockResolvedValue({
+      $transaction: vi.fn().mockRejectedValue(new Error("db down")),
+    });
+    await createOrder(buildCreateReq(createBody()), {} as Response);
+
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      "orders.createOrder.errorCreatingOrder",
     );
   });
 });

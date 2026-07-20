@@ -133,6 +133,11 @@ export const appConfig = {
   // stance as products — a single list call can never fetch an unbounded number of rows).
   defaultOrderPageSize: 20,
   maxOrderPageSize: 100,
+  // Most distinct products one order can carry (a hard input bound, far above any real party).
+  maxOrderLines: 50,
+  // Fallback when the `orders.logisticsSpacingMinutes` app preference is missing/corrupt — the
+  // seeded default (single-vehicle rule: ≥1h between any two logistics events).
+  defaultLogisticsSpacingMinutes: 60,
 
   sensitiveKeys: ["password", "token", "secret", "creditCard", "cvv", "auth"],
   basePath: "/api",

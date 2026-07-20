@@ -40,6 +40,7 @@ vi.mock('../pageMotion', async (importOriginal) => ({
   staggerOut,
 }));
 
+import { PanelNavContext, type PanelNav } from '../PanelNavContext';
 import type { OrderListItem } from './order.types';
 import OrdersPage from './OrdersPage';
 
@@ -133,16 +134,42 @@ describe('OrdersPage', () => {
     expect(screen.getByRole('tablist')).toBeInTheDocument();
   });
 
+  it('the "Nuevo pedido" button navigates to the create page through the panel transition', async () => {
+    const user = userEvent.setup();
+    const navigateTo = vi.fn();
+    const nav: PanelNav = { navigateTo, pending: null };
+    setOrders({ data: paginated([order(1, todayAt(10))]) });
+    render(
+      <PanelNavContext.Provider value={nav}>
+        <OrdersPage />
+      </PanelNavContext.Provider>,
+    );
+    await user.click(screen.getByRole('button', { name: 'modules.panel.orders.newOrder' }));
+    expect(navigateTo).toHaveBeenCalledWith('/panel/pedidos/nuevo');
+  });
+
+  it('on mount the chrome rises (app-wide) while the body enters LATERALLY, even on first load/refresh', () => {
+    setOrders({ isLoading: true });
+    render(<OrdersPage />);
+
+    // The page frame (lead + switch) rises with the app-wide language…
+    expect(staggerIn).toHaveBeenCalledWith(expect.anything(), '.orders-chrome');
+    // …while the body content (the skeleton here) slides in from the side — never bottom-up.
+    expect(staggerIn).toHaveBeenCalledWith(expect.anything(), '.reveal-item', { from: 'right' });
+  });
+
   it('resolves the cold skeleton into content (sweep out → body in) and re-arms on a re-entered load', async () => {
     setOrders({ isLoading: true });
     const { rerender } = render(<OrdersPage />);
     expect(screen.getByRole('status')).toBeInTheDocument();
 
-    // The data lands: the skeleton sweeps out, then the tickets mount and stagger in.
+    // The data lands: the skeleton sweeps out LATERALLY (a plain cold load uses the forward
+    // direction — out to the left), then the tickets enter from the right.
     setOrders({ data: paginated([order(1, todayAt(10))]) });
     rerender(<OrdersPage />);
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
-    expect(staggerOut).toHaveBeenCalledWith(expect.anything(), '.orders-skel');
+    expect(staggerOut).toHaveBeenCalledWith(expect.anything(), '.orders-skel', { to: 'left' });
+    expect(staggerIn).toHaveBeenCalledWith(expect.anything(), '.reveal-item', { from: 'right' });
     expect(screen.getByText('Cliente 1')).toBeInTheDocument();
 
     // A re-entered cold load (cache gone) re-arms the skeleton.
@@ -306,6 +333,32 @@ describe('OrdersPage', () => {
     expect(screen.getByText('Cliente 1')).toBeInTheDocument();
   });
 
+  it('a BACKWARD uncached swap mirrors the lateral resolve (skeleton out right, content in from left)', async () => {
+    routerState.search = { view: 'historial' };
+    setOrders({ data: paginated([order(1, todayAt(10))]) });
+    const { rerender } = render(<OrdersPage />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+
+    routerState.search = {};
+    setOrdersByView({
+      historial: { data: paginated([order(1, todayAt(10))]) },
+      agenda: { isLoading: true },
+    });
+    rerender(<OrdersPage />);
+    await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument());
+
+    staggerIn.mockClear();
+    staggerOut.mockClear();
+    setOrdersByView({
+      historial: { data: paginated([order(1, todayAt(10))]) },
+      agenda: { data: paginated([]) },
+    });
+    rerender(<OrdersPage />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(staggerOut).toHaveBeenCalledWith(expect.anything(), '.orders-skel', { to: 'right' });
+    expect(staggerIn).toHaveBeenCalledWith(expect.anything(), '.reveal-item', { from: 'left' });
+  });
+
   it('flipping back mid-exit cancels the swap and settles the body from the current frame', async () => {
     setOrders({ data: paginated([order(1, todayAt(10))]) });
     const { rerender } = render(<OrdersPage />);
@@ -353,6 +406,20 @@ describe('OrdersPage', () => {
     await act(async () => releaseExit());
     expect(screen.getByRole('status')).toBeInTheDocument();
     expect(lastSentinelCall().disabled).toBe(true);
+
+    // The gesture keeps travelling: when the uncached view resolves, the skeleton sweeps out the
+    // way we were heading and the content enters from the swap's side — never a vertical snap.
+    staggerIn.mockClear();
+    staggerOut.mockClear();
+    setOrdersByView({
+      agenda: { data: paginated([order(1, todayAt(10))]) },
+      historial: { data: paginated([]) },
+    });
+    rerender(<OrdersPage />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(staggerOut).toHaveBeenCalledWith(expect.anything(), '.orders-skel', { to: 'left' });
+    expect(staggerIn).toHaveBeenCalledWith(expect.anything(), '.reveal-item', { from: 'right' });
+    expect(screen.getByText('modules.panel.orders.empty.history.title')).toBeInTheDocument();
   });
 
   it('a cold error renders the error panel and retries through refetch', async () => {

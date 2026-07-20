@@ -5,11 +5,17 @@ import { appConfig } from "@/config/app.js";
 import {
   ORDER_LIST_VIEWS,
   buildOrderListWhere,
+  buildRentedInWindowWhere,
+  buildSpacingConflictWhere,
+  computeBilledDays,
   orderListOrderBy,
   parseOrderListQuery,
+  parseSpacingMinutes,
+  priceOrderLine,
   projectOrderDetail,
   projectOrderListItem,
   type OrderListRow,
+  type OrderPricingProductModel,
   type RichOrder,
 } from "./orders.service.js";
 
@@ -209,6 +215,125 @@ describe("projectOrderListItem", () => {
 
   it("an order with no active lines counts zero items", () => {
     expect(projectOrderListItem(makeListRow({ serviceDetails: [] })).itemCount).toBe(0);
+  });
+});
+
+describe("computeBilledDays", () => {
+  it("bills one day for anything up to and INCLUDING exactly 24h", () => {
+    const start = new Date("2026-08-01T14:00:00Z");
+    expect(computeBilledDays(start, new Date("2026-08-01T16:00:00Z"))).toBe(1);
+    expect(computeBilledDays(start, new Date("2026-08-02T14:00:00Z"))).toBe(1);
+  });
+
+  it("a STARTED 24h block bills the next day (the pickup minute decides)", () => {
+    const start = new Date("2026-08-01T14:00:00Z");
+    expect(computeBilledDays(start, new Date("2026-08-02T14:01:00Z"))).toBe(2);
+    expect(computeBilledDays(start, new Date("2026-08-04T14:00:00Z"))).toBe(3);
+  });
+});
+
+describe("parseSpacingMinutes", () => {
+  it("parses a positive integer preference", () => {
+    expect(parseSpacingMinutes("90")).toBe(90);
+  });
+
+  it("falls back to the default on missing/corrupt/non-positive values", () => {
+    for (const value of [undefined, "0", "-5", "1.5", "abc", ""]) {
+      expect(parseSpacingMinutes(value)).toBe(appConfig.defaultLogisticsSpacingMinutes);
+    }
+  });
+});
+
+describe("buildRentedInWindowWhere", () => {
+  it("holds rental lines of out/en-route orders unconditionally and pending ones by window overlap", () => {
+    const start = new Date("2026-08-01T14:00:00Z");
+    const end = new Date("2026-08-02T10:00:00Z");
+    expect(buildRentedInWindowWhere([3, 4], start, end)).toEqual({
+      productId: { in: [3, 4] },
+      isActive: true,
+      isRental: true,
+      service: {
+        isActive: true,
+        cancelledAt: null,
+        OR: [
+          { serviceStatusId: 3 },
+          { serviceStatusId: 5 },
+          { serviceStatusId: 1, serviceStart: { lt: end }, serviceEnd: { gt: start } },
+        ],
+      },
+    });
+  });
+});
+
+describe("buildSpacingConflictWhere", () => {
+  it("builds an exclusive ±spacing range over BOTH event columns for every new event", () => {
+    const delivery = new Date("2026-08-01T14:00:00Z");
+    const where = buildSpacingConflictWhere([delivery], 60);
+    expect(where).toEqual({
+      isActive: true,
+      cancelledAt: null,
+      OR: [
+        { deliveryAt: { gt: new Date("2026-08-01T13:00:00Z"), lt: new Date("2026-08-01T15:00:00Z") } },
+        { pickupAt: { gt: new Date("2026-08-01T13:00:00Z"), lt: new Date("2026-08-01T15:00:00Z") } },
+      ],
+    });
+  });
+
+  it("a delivery + pickup pair produces four range conditions", () => {
+    const where = buildSpacingConflictWhere(
+      [new Date("2026-08-01T14:00:00Z"), new Date("2026-08-02T10:00:00Z")],
+      30,
+    );
+    expect((where.OR as unknown[]).length).toBe(4);
+  });
+});
+
+describe("priceOrderLine", () => {
+  const product = (overrides: Partial<OrderPricingProductModel> = {}): OrderPricingProductModel => ({
+    id: 3,
+    name: "Silla plegable",
+    productBusinessTypeId: 1, // Alquiler
+    rentTimeUnitId: 2, // Día
+    rentPrice: new Prisma.Decimal("6.00"),
+    sellPrice: null,
+    ...overrides,
+  });
+
+  it("a Día rental bills unitary × qty × billed days", () => {
+    expect(priceOrderLine(25, product(), 2)).toEqual({
+      productId: 3,
+      quantity: 25,
+      isRental: true,
+      unitaryPrice: 6,
+      parcialPrice: 300,
+    });
+  });
+
+  it("an Evento rental bills flat, duration-agnostic", () => {
+    expect(priceOrderLine(2, product({ rentTimeUnitId: 5, rentPrice: new Prisma.Decimal("150.00") }), 3)).toMatchObject({
+      isRental: true,
+      parcialPrice: 300,
+    });
+  });
+
+  it("a sale bills sellPrice × qty once, ignoring the days", () => {
+    expect(
+      priceOrderLine(
+        10,
+        product({ productBusinessTypeId: 2, rentPrice: null, sellPrice: new Prisma.Decimal("3.50") }),
+        4,
+      ),
+    ).toEqual({ productId: 3, quantity: 10, isRental: false, unitaryPrice: 3.5, parcialPrice: 35 });
+  });
+
+  it("rounds the final multiplication to cents", () => {
+    expect(
+      priceOrderLine(3, product({ rentPrice: new Prisma.Decimal("0.10") }), 1)?.parcialPrice,
+    ).toBe(0.3);
+  });
+
+  it("returns null when the product violates the conditional price rule", () => {
+    expect(priceOrderLine(1, product({ rentPrice: null }), 1)).toBeNull();
   });
 });
 

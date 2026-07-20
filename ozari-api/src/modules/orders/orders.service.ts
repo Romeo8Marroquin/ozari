@@ -1,11 +1,15 @@
 import { Prisma } from "@prisma/client";
 import { appConfig } from "@/config/app.js";
 import { decryptKms } from "@helpers/encryption.js";
+import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
+import { RentTimeUnitEnum } from "@models/enums/rentTimeUnitEnum.js";
+import { ServiceStatusEnum } from "@models/enums/serviceStatusEnum.js";
 import {
   type OrderDetailResponseModel,
   type OrderListItemResponseModel,
   type OrderListQueryModel,
   type OrderListViewModel,
+  type OrderStockConflictItemModel,
 } from "./orders.models.js";
 
 /**
@@ -238,6 +242,164 @@ export function projectOrderDetail(order: RichOrder): OrderDetailResponseModel {
       at: entry.createdAt,
     })),
     createdAt: order.createdAt,
+  };
+}
+
+// ── Order creation (the write slice) ─────────────────────────────────────────────────────────────
+
+/** The order's identity/timing/stock rules couldn't be met — thrown INSIDE the create transaction
+ *  (rolls it back) and mapped to a structured `409` (EPIC-2 §8: tell the admin exactly which lines
+ *  lack stock and the counts, so the form can re-offer). */
+export class OrderStockConflictError extends Error {
+  constructor(readonly conflicts: OrderStockConflictItemModel[]) {
+    super("order stock conflict");
+    this.name = "OrderStockConflictError";
+  }
+}
+
+/** Another confirmed order has a logistics event too close to this one (the single-vehicle
+ *  spacing rule) — also a `409`; the admin is blocked exactly like a client (owner decision). */
+export class OrderSpacingConflictError extends Error {
+  constructor(readonly conflictAt: Date) {
+    super("order spacing conflict");
+    this.name = "OrderSpacingConflictError";
+  }
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Billed days over the delivery→pickup window (owner rule, §2): billing is ALWAYS per day —
+ * `< 24h` = 1 day, then one more per **started** 24h block (the pickup time decides; exactly 24h
+ * is still one day). The validator guarantees `pickupAt > deliveryAt`.
+ */
+export function computeBilledDays(deliveryAt: Date, pickupAt: Date): number {
+  return Math.max(1, Math.ceil((pickupAt.getTime() - deliveryAt.getTime()) / DAY_MS));
+}
+
+/**
+ * The `orders.logisticsSpacingMinutes` app preference, parsed defensively: a missing row or a
+ * non-positive/corrupt value falls back to the seeded default. (Every operational "constant" is an
+ * admin preference — the code must read the DB value, never hardcode the hour.)
+ */
+export function parseSpacingMinutes(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0
+    ? parsed
+    : appConfig.defaultLogisticsSpacingMinutes;
+}
+
+/**
+ * The `service_details` filter selecting every RENTAL line that holds units against the requested
+ * `[windowStart, windowEnd]` window — the order-time twin of products' `buildRentedNowWhere`
+ * (EPIC-1 §5 obligation: validation runs the same rule against the EVENT's window, not `now`):
+ *
+ * - **DELIVERED** and **EN_ROUTE** hold unconditionally — the units are physically out (or on the
+ *   truck) until collected, however late;
+ * - **PENDING** holds only when its own billed window overlaps the requested one (half-open
+ *   overlap: a pickup at 10:00 doesn't collide with a delivery at 10:00 — the spacing rule, not
+ *   availability, governs that gap);
+ * - cancelled/collected/soft-deleted rows never hold, and SALE lines never hold (their stock was
+ *   decremented at creation).
+ */
+export function buildRentedInWindowWhere(
+  productIds: number[],
+  windowStart: Date,
+  windowEnd: Date,
+): Prisma.ServiceDetailWhereInput {
+  return {
+    productId: { in: productIds },
+    isActive: true,
+    isRental: true,
+    service: {
+      isActive: true,
+      cancelledAt: null,
+      OR: [
+        { serviceStatusId: ServiceStatusEnum.DELIVERED },
+        { serviceStatusId: ServiceStatusEnum.EN_ROUTE },
+        {
+          serviceStatusId: ServiceStatusEnum.PENDING,
+          serviceStart: { lt: windowEnd },
+          serviceEnd: { gt: windowStart },
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * The `services` filter selecting any order with a logistics event closer than `spacingMinutes` to
+ * ANY of the new order's events (its delivery, and its pickup when it has one) — the global
+ * single-vehicle rule (§2): the system must BLOCK the admin too. Exclusive bounds: exactly the
+ * spacing apart is allowed ("minimum 1 hour BETWEEN"). Cancelled orders don't block; completed
+ * ones need no exclusion — their events sit in the past, so time proximity filters them naturally.
+ */
+export function buildSpacingConflictWhere(
+  events: Date[],
+  spacingMinutes: number,
+): Prisma.ServiceWhereInput {
+  const delta = spacingMinutes * 60 * 1000;
+  const ranges = events.map((event) => ({
+    gt: new Date(event.getTime() - delta),
+    lt: new Date(event.getTime() + delta),
+  }));
+  return {
+    isActive: true,
+    cancelledAt: null,
+    OR: ranges.flatMap((range) => [{ deliveryAt: range }, { pickupAt: range }]),
+  };
+}
+
+/** A product row as the pricing needs it (fetched under the creation lock). */
+export interface OrderPricingProductModel {
+  id: number;
+  name: string;
+  productBusinessTypeId: number;
+  rentTimeUnitId: number | null;
+  rentPrice: Prisma.Decimal | null;
+  sellPrice: Prisma.Decimal | null;
+}
+
+/** One priced line, ready for the nested `service_details` create. */
+export interface PricedOrderLineModel {
+  productId: number;
+  quantity: number;
+  isRental: boolean;
+  unitaryPrice: number;
+  parcialPrice: number;
+}
+
+/** Round money HALF-UP to cents once, at the final multiplication. */
+const roundMoney = (value: number): number => Math.round(value * 100) / 100;
+
+/**
+ * Prices one requested line from ITS PRODUCT ROW — the single place order money is derived; a
+ * client-sent price is never trusted. Rental lines bill `rentPrice × qty × billedDays` when the
+ * unit is **Día** and flat `rentPrice × qty` for **Evento** (duration-agnostic by definition);
+ * sale lines bill `sellPrice × qty` once. Other rent units (Hora/Semana/Mes) are rejected upstream
+ * by the validator — the MVP billing engine is day-based (owner: day is THE norm; the hourly door
+ * stays open and gets real math when a product actually needs it, never silent wrong billing).
+ * `null` = the product violates the conditional price rule (defensive; the validator checked).
+ */
+export function priceOrderLine(
+  quantity: number,
+  product: OrderPricingProductModel,
+  billedDays: number,
+): PricedOrderLineModel | null {
+  const isRental = product.productBusinessTypeId === BusinessTypeEnum.RENT;
+  const unitPrice = isRental ? product.rentPrice : product.sellPrice;
+  if (unitPrice === null) {
+    return null;
+  }
+  const unitaryPrice = Number(unitPrice);
+  const multiplier =
+    isRental && product.rentTimeUnitId === RentTimeUnitEnum.Dia ? billedDays : 1;
+  return {
+    productId: product.id,
+    quantity,
+    isRental,
+    unitaryPrice,
+    parcialPrice: roundMoney(unitaryPrice * quantity * multiplier),
   };
 }
 

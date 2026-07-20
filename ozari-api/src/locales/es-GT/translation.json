@@ -402,6 +402,58 @@
       }
     }
   },
+  "clientRegistries": {
+    "getRegistries": {
+      "registriesFetched": "Clientes registrados obtenidos exitosamente.",
+      "errorFetchingRegistries": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "registriesFetched": "Registros de clientes obtenidos exitosamente, total <{{-count}}>.",
+        "errorFetchingRegistries": "Error al obtener los registros de clientes: {{-error}}."
+      }
+    },
+    "createRegistry": {
+      "registryCreated": "Cliente registrado exitosamente.",
+      "errorCreatingRegistry": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidName": "El nombre del cliente es requerido y debe ser válido.",
+        "invalidNotes": "Las notas del cliente deben ser válidas.",
+        "invalidContacts": "El cliente requiere al menos un medio de contacto.",
+        "tooManyContacts": "El cliente excede el número máximo de contactos.",
+        "invalidContactTypeId": "El tipo de un contacto no es válido.",
+        "invalidContactValue": "El valor de un contacto no es válido.",
+        "multiplePrincipalContacts": "Solo un contacto puede ser el principal.",
+        "invalidAddresses": "El cliente requiere al menos una dirección.",
+        "tooManyAddresses": "El cliente excede el número máximo de direcciones.",
+        "invalidZoneId": "La zona de una dirección no es válida.",
+        "invalidAddress": "Una dirección del cliente no es válida.",
+        "invalidInstructions": "Las instrucciones de una dirección no son válidas.",
+        "invalidDomicilePrice": "El precio de envío de una dirección no es válido.",
+        "multipleFavoriteAddresses": "Solo una dirección puede ser la favorita.",
+        "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+        "logs": {
+          "invalidName": "El nombre del registro <{{-name}}> no es válido.",
+          "invalidNotes": "Las notas del registro no son válidas.",
+          "invalidContacts": "La lista de contactos no es válida.",
+          "tooManyContacts": "El registro excede el máximo de contactos: <{{-count}}> de <{{-max}}>.",
+          "invalidContactTypeId": "El tipo de contacto <{{-contactTypeId}}> no es válido.",
+          "invalidContactValue": "El valor de contacto <{{-value}}> no es válido.",
+          "multiplePrincipalContacts": "Contactos principales duplicados: <{{-principalCount}}>.",
+          "invalidAddresses": "La lista de direcciones no es válida.",
+          "tooManyAddresses": "El registro excede el máximo de direcciones: <{{-count}}> de <{{-max}}>.",
+          "invalidZoneId": "La zona <{{-zoneId}}> no es válida.",
+          "invalidAddress": "La dirección <{{-address}}> no es válida.",
+          "invalidInstructions": "Las instrucciones de una dirección no son válidas.",
+          "invalidDomicilePrice": "El precio de envío <{{-domicilePrice}}> no es válido.",
+          "multipleFavoriteAddresses": "Direcciones favoritas duplicadas: <{{-favoriteCount}}>.",
+          "validationError": "Error validando la creación del registro de cliente: {{-error}}."
+        }
+      },
+      "logs": {
+        "registryCreated": "Registro de cliente <{{-id}}> creado exitosamente.",
+        "errorCreatingRegistry": "Error al crear el registro de cliente: {{-error}}."
+      }
+    }
+  },
   "orders": {
     "getOrders": {
       "ordersFetched": "Órdenes obtenidas exitosamente.",
@@ -427,6 +479,66 @@
       "logs": {
         "catalogFetched": "Catálogo de referencia de órdenes obtenido exitosamente.",
         "errorFetchingCatalog": "Error al obtener el catálogo de referencia de órdenes: {{-error}}."
+      }
+    },
+    "createOrder": {
+      "orderCreated": "Pedido creado exitosamente.",
+      "stockConflict": "Algunos productos no tienen disponibilidad para las fechas solicitadas.",
+      "spacingConflict": "Ya existe una entrega o recolección demasiado cerca de ese horario.",
+      "errorCreatingOrder": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidClientRegistryId": "El cliente del pedido es requerido y debe ser válido.",
+        "invalidEventTypeId": "El tipo de evento es requerido y debe ser válido.",
+        "invalidDeliveryAt": "La fecha y hora de entrega es requerida y debe ser válida.",
+        "invalidLines": "El pedido requiere al menos un producto.",
+        "tooManyLines": "El pedido excede el número máximo de productos.",
+        "invalidLineProduct": "Un producto del pedido no es válido.",
+        "duplicateLineProduct": "Un producto no puede repetirse en el pedido.",
+        "invalidLineQuantity": "La cantidad de un producto no es válida.",
+        "unknownLineProduct": "Un producto del pedido no existe o ya no está disponible.",
+        "unsupportedRentTimeUnit": "Un producto de alquiler tiene una unidad de tiempo aún no soportada para pedidos.",
+        "mixedCurrencies": "Todos los productos del pedido deben usar la misma moneda.",
+        "pickupRequiredForRental": "Un pedido con alquileres requiere fecha y hora de recolección.",
+        "pickupBeforeDelivery": "La recolección debe ser posterior a la entrega.",
+        "pickupForbiddenForPurchase": "Un pedido solo de compra no lleva recolección.",
+        "invalidDeliveryName": "El nombre de quien recibe es requerido y debe ser válido.",
+        "invalidDeliveryContact": "El contacto de entrega es requerido y debe ser válido.",
+        "invalidDeliveryAddress": "La dirección de entrega es requerida y debe ser válida.",
+        "invalidDescription": "La descripción del pedido debe ser válida.",
+        "invalidComment": "El comentario del pedido debe ser válido.",
+        "invalidDeliveryAmount": "El costo de envío no es válido.",
+        "invalidDepositAmount": "El anticipo no es válido.",
+        "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+        "logs": {
+          "invalidClientRegistryId": "El registro de cliente <{{-clientRegistryId}}> no es válido.",
+          "invalidEventTypeId": "El tipo de evento <{{-eventTypeId}}> no es válido.",
+          "invalidDeliveryAt": "La fecha de entrega <{{-deliveryAt}}> no es válida.",
+          "invalidLines": "La lista de productos del pedido no es válida.",
+          "tooManyLines": "El pedido excede el máximo de líneas: <{{-count}}> de <{{-max}}>.",
+          "invalidLineProduct": "El producto <{{-productId}}> no es válido.",
+          "duplicateLineProduct": "El producto <{{-productId}}> está repetido en el pedido.",
+          "invalidLineQuantity": "La cantidad <{{-quantity}}> del producto <{{-productId}}> no es válida.",
+          "unknownLineProduct": "El producto <{{-productId}}> no existe o está inactivo.",
+          "unsupportedRentTimeUnit": "El producto <{{-productId}}> usa la unidad de renta <{{-rentTimeUnitId}}>, no soportada por el motor de cobro diario.",
+          "mixedCurrencies": "El pedido mezcla monedas: <{{-currencyIds}}>.",
+          "pickupRequiredForRental": "Recolección faltante o inválida <{{-pickupAt}}> para un pedido con alquileres.",
+          "pickupBeforeDelivery": "La recolección <{{-pickupAt}}> no es posterior a la entrega <{{-deliveryAt}}>.",
+          "pickupForbiddenForPurchase": "Un pedido solo de compra incluyó recolección <{{-pickupAt}}>.",
+          "invalidDeliveryName": "El nombre de entrega <{{-deliveryName}}> no es válido.",
+          "invalidDeliveryContact": "El contacto de entrega <{{-deliveryContact}}> no es válido.",
+          "invalidDeliveryAddress": "La dirección de entrega no es válida.",
+          "invalidDescription": "La descripción del pedido no es válida.",
+          "invalidComment": "El comentario del pedido no es válido.",
+          "invalidDeliveryAmount": "El costo de envío <{{-deliveryAmount}}> no es válido.",
+          "invalidDepositAmount": "El anticipo <{{-depositAmount}}> no es válido.",
+          "validationError": "Error validando la creación del pedido: {{-error}}."
+        }
+      },
+      "logs": {
+        "orderCreated": "Pedido <{{-id}}> creado exitosamente.",
+        "stockConflict": "Conflicto de disponibilidad al crear pedido: {{-conflicts}}.",
+        "spacingConflict": "Conflicto de espaciado logístico al crear pedido, evento cercano en <{{-conflictAt}}>.",
+        "errorCreatingOrder": "Error al crear el pedido: {{-error}}."
       }
     }
   },

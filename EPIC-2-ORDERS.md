@@ -22,8 +22,35 @@
 > tabindex + arrow keys, URL-held `?view=historial`), per-view empty states, cold-error retry
 > panel, infinite scroll with append shimmer + `.order-appended` stagger, skeleton
 > sweep-out→body-stagger-in resolve, panel motion pair registered. Tickets are deliberately
-> **non-interactive** until the detail page lands. **Next**: `POST /orders` + client registries
-> (backend), then the admin order-create page, then the order detail page (tickets become links).
+> **non-interactive** until the detail page lands. **The WRITE slice is BUILT (2026-07-16)**:
+> `GET`/`POST /client-registries` (new `modules/clientRegistries/` — walk-in clients, encrypted
+> PII, ≥1 contact/address with exactly one principal/favorite, defaulted to the first) and
+> **`POST /orders`** — **STRICTLY Admin** (owner rule: no employee role ever inherits creation; a
+> future call-center role widens the guard only via a deliberate owner-approved commit). Identity =
+> `clientRegistryId` only for now — the platform-user `userId` variant is a documented door in the
+> SAME endpoint/model, never a second endpoint. Delivery snapshots arrive as TEXT (the form
+> prefills from the registry, or the admin types a one-off venue). Pricing is 100% server-side
+> (`priceOrderLine`: Día × billed days, Evento flat; Hora/Semana/Mes = a clean 400
+> `unsupportedRentTimeUnit` until the billing engine grows — never silent wrong billing). ONE
+> `$transaction`: `SELECT … FOR UPDATE` product locks → window availability
+> (`buildRentedInWindowWhere` — PENDING by overlap, DELIVERED/EN_ROUTE unconditional) → sale-stock
+> decrement → the spacing rule read from `app_preferences` → create as PENDING + the first
+> status-history row. Stock conflicts are a structured **409** (`data.conflicts` — the error
+> envelope gained an optional `data` field); spacing conflicts 409 too (phantom-insert race on
+> spacing accepted + documented; the product locks serialize the real stock race). **The admin
+> order-create FRONTEND is BUILT (2026-07-20)**: `/panel/pedidos/nuevo` (`OrderCreatePage` +
+> `OrderForm`, Admin-gated route + a "Nuevo pedido" button on the agenda). Flow: **mode fork**
+> (`OrderModeSelect` radiogroup — filters the product picker + drives pickup visibility) → **client
+> picker** with an inline **`ClientRegistryModal`** (v1 = ONE contact + ONE address, multi is a
+> documented fast-follow; seeds the picker cache + prefills the delivery snapshots) → **event +
+> window** (pickup shows only when a rental line exists) → **lines** (mode-filtered, dedup) →
+> **delivery snapshot** (prefilled, editable) → **money** with a **live estimate** (`orderEstimate.ts`
+> mirrors the backend `priceOrderLine` — labelled an estimate; backend total authoritative). A stock
+> **409 maps `data.conflicts` back onto each line's quantity field** with the real count; 400 →
+> banner; ambient → toast. Mirrored Zod (`SchemaCreateOrder`/`SchemaCreateRegistry`) + hooks. Also
+> fixed: the agenda's lateral view-swap carries through first load / refresh (body enters from the
+> side, chrome keeps the app-wide rise). **Next**: the **order DETAIL page** (tickets become links;
+> tracking-stepper hero), then the tracking flow + driver "Mis entregas" + the dashboard.
 > Update this file as things land.
 
 ## 1. The business, in one paragraph
@@ -242,6 +269,17 @@ role-management UI; camera-enforced evidence; client-visible availability calend
 **hourly billing** (rentTimeUnit stays functional); **damage/loss billing** (extras/adjustments);
 **refunds** (negative payments); **admin discounts/coupons**; the **admin preferences UI** over
 the seeded `app_preferences`; additional per-step "requestables" beyond photos.
+
+> **PENDING BINDING — the `config` form state → preferences (2026-07-20).** Both the order-create and
+> product-create/edit forms distinguish a real request failure (RETRY panel) from a **config** state
+> (every request succeeded but seeded reference/preference data is empty — event/contact types for
+> orders, categories/currencies/etc. for products). The config state renders `ProductsStatus`
+> `tone="config"` with the shared **`modules/panel/PreferencesCta.tsx`** button, which for now routes
+> to **Settings (`/panel/ajustes`)** as the placeholder home. **When the admin preferences UI lands
+> (door above), narrow `PreferencesCta`'s target** to the relevant preferences section (per-section
+> tabs or pages — owner's call) so a missing-reference-data state deep-links straight to where the
+> admin fixes it. No other change needed — the state detection + panel + i18n (`configMissing.*`,
+> `dataStatus.goToPreferences`) are already in place.
 
 ## 7. Reuse map (how it plugs into what exists)
 

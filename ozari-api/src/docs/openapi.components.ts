@@ -649,6 +649,152 @@ export const schemas: Record<string, Schema> = {
       zones: { type: "array", items: schemaRef("CatalogOption") },
     },
   },
+  CreateOrderRequest: {
+    type: "object",
+    required: [
+      "clientRegistryId",
+      "eventTypeId",
+      "deliveryAt",
+      "deliveryName",
+      "deliveryContact",
+      "deliveryAddress",
+      "lines",
+    ],
+    description:
+      "Creates an order on behalf of a WALK-IN client (identity = a client registry — the only " +
+      "variant mounted today; a platform-user variant is a planned door). `pickupAt` is REQUIRED " +
+      "when any line is a rental and FORBIDDEN on a purchase-only order. The delivery fields are " +
+      "SNAPSHOTS (text — prefilled from the registry or typed as a one-off venue). Prices are " +
+      "derived SERVER-SIDE from each product (rentals bill per started 24h day over the window; " +
+      "'Evento'-unit rentals bill flat) — the body never carries money except the admin-set " +
+      "delivery fee and optional deposit.",
+    properties: {
+      clientRegistryId: { type: "integer", example: 3 },
+      eventTypeId: { type: "integer", example: 1 },
+      deliveryAt: { type: "string", format: "date-time" },
+      pickupAt: { type: "string", format: "date-time", nullable: true },
+      deliveryName: { type: "string", minLength: 2, maxLength: 255, example: "María López" },
+      deliveryContact: { type: "string", minLength: 2, maxLength: 255, example: "WhatsApp 5555-1234" },
+      deliveryAddress: { type: "string", minLength: 5, maxLength: 500, example: "Zona 10, 4a avenida 5-55" },
+      description: { type: "string", nullable: true, maxLength: 500 },
+      comment: { type: "string", nullable: true, maxLength: 500 },
+      deliveryAmount: { type: "number", nullable: true, example: 50 },
+      depositAmount: { type: "number", nullable: true, example: 100 },
+      lines: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          required: ["productId", "quantity"],
+          properties: {
+            productId: { type: "integer", example: 3 },
+            quantity: { type: "integer", minimum: 1, example: 25 },
+          },
+        },
+      },
+    },
+  },
+  OrderStockConflictItem: {
+    type: "object",
+    description:
+      "One line the requested window cannot satisfy — carried in the creation 409's `data.conflicts` " +
+      "so the form can re-offer with the real numbers.",
+    properties: {
+      productId: { type: "integer", example: 3 },
+      productName: { type: "string", example: "Silla plegable" },
+      requested: { type: "integer", example: 25 },
+      available: { type: "integer", example: 10 },
+    },
+  },
+  ClientRegistryContact: {
+    type: "object",
+    properties: {
+      id: { type: "integer", example: 1 },
+      contactType: schemaRef("CatalogOption"),
+      value: { type: "string", example: "5555-1234" },
+      isPrincipal: { type: "boolean", example: true },
+    },
+  },
+  ClientRegistryAddress: {
+    type: "object",
+    properties: {
+      id: { type: "integer", example: 1 },
+      zone: { allOf: [schemaRef("CatalogOption")], nullable: true },
+      address: { type: "string", example: "Zona 10, 4a avenida 5-55" },
+      instructions: { type: "string", nullable: true },
+      domicilePrice: { type: "number", nullable: true, example: 50 },
+      isFavorite: { type: "boolean", example: true },
+    },
+  },
+  ClientRegistry: {
+    type: "object",
+    description:
+      "A WALK-IN client (the admin's WhatsApp/phone people): the responsible person, their contact " +
+      "methods, and their delivery addresses — all decrypted for the admin. Not a platform account.",
+    properties: {
+      id: { type: "integer", example: 3 },
+      name: { type: "string", example: "María López" },
+      notes: { type: "string", nullable: true },
+      contacts: { type: "array", items: schemaRef("ClientRegistryContact") },
+      addresses: { type: "array", items: schemaRef("ClientRegistryAddress") },
+      createdAt: { type: "string", format: "date-time" },
+    },
+  },
+  ClientRegistryListResponse: {
+    type: "object",
+    properties: {
+      registries: { type: "array", items: schemaRef("ClientRegistry") },
+      pagination: schemaRef("Pagination"),
+    },
+  },
+  ClientRegistryResponse: {
+    type: "object",
+    properties: {
+      registry: schemaRef("ClientRegistry"),
+    },
+  },
+  CreateClientRegistryRequest: {
+    type: "object",
+    required: ["name", "contacts", "addresses"],
+    description:
+      "Creates a walk-in client registry: a name (looser than the account full-name policy), " +
+      "optional notes, 1–10 contacts (at most one flagged principal — the first becomes principal " +
+      "when none is) and 1–10 addresses (optional seeded zone; same single-favorite rule).",
+    properties: {
+      name: { type: "string", minLength: 2, maxLength: 255, example: "María López" },
+      notes: { type: "string", nullable: true, maxLength: 500 },
+      contacts: {
+        type: "array",
+        minItems: 1,
+        maxItems: 10,
+        items: {
+          type: "object",
+          required: ["contactTypeId", "value"],
+          properties: {
+            contactTypeId: { type: "integer", example: 1 },
+            value: { type: "string", minLength: 2, maxLength: 255, example: "5555-1234" },
+            isPrincipal: { type: "boolean" },
+          },
+        },
+      },
+      addresses: {
+        type: "array",
+        minItems: 1,
+        maxItems: 10,
+        items: {
+          type: "object",
+          required: ["address"],
+          properties: {
+            zoneId: { type: "integer", nullable: true, example: 6 },
+            address: { type: "string", minLength: 5, maxLength: 500 },
+            instructions: { type: "string", nullable: true, maxLength: 500 },
+            domicilePrice: { type: "number", nullable: true },
+            isFavorite: { type: "boolean" },
+          },
+        },
+      },
+    },
+  },
   CreateProductRequest: {
     type: "object",
     required: ["businessTypeId", "categoryId", "currencyId", "name", "quantity"],

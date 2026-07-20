@@ -43,3 +43,17 @@ export const PRODUCT_MAX_QUANTITY = 5000;
 export const PRODUCT_IMAGE_MAX_COUNT = 8;
 export const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 export const PRODUCT_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];
+
+// ── Order + client-registry form policy — mirrors the backend order/registry validators ──────
+// (`ozari-api/src/modules/orders/orders.validator.ts` + `clientRegistries.validator.ts` +
+// `config/app.ts`). The backend is the security boundary; these are the UX mirror.
+export const ORDER_MAX_LINES = 50; // appConfig.maxOrderLines
+// A delivery/registry snapshot name & a contact value: 2–255 chars (looser than the account
+// full-name policy — a walk-in "name" can be anything the admin jots down). Free-text: any
+// non-control character (the backend only length-bounds these, so we match that).
+export const ORDER_TEXT_MIN_LENGTH = 2;
+export const ORDER_TEXT_MAX_LENGTH = 255;
+// A delivery/registry ADDRESS: 5–500 chars. Free-text notes/description/comment: up to 500.
+export const ORDER_ADDRESS_MIN_LENGTH = 5;
+export const ORDER_LONGTEXT_MAX_LENGTH = 500;
+// Money + per-line quantity reuse the product ceilings (`maxGlobalAmount` / `maxGlobalQuantity`).

@@ -150,3 +150,49 @@ export interface OrderCatalogResponseModel {
   contactTypes: CatalogOptionModel[];
   zones: CatalogOptionModel[];
 }
+
+/** One requested order line — the server derives EVERYTHING else (rent-vs-sale, prices) from the
+ *  product row at creation time; a client-sent price is never trusted. */
+export interface CreateOrderLineRequestModel {
+  productId: number;
+  quantity: number;
+}
+
+/**
+ * `POST /orders` — the admin's order-on-behalf creation (the WhatsApp/phone flow). Identity is a
+ * **client registry** (walk-in client) — the ONLY variant mounted today. The platform-user variant
+ * (`userId` instead of `clientRegistryId`, for the admin creating on behalf of a registered
+ * client, and later the client's own self-service flow) is a DOCUMENTED DOOR: it reuses this exact
+ * shape + machinery and only widens the identity validation — never a second endpoint.
+ *
+ * The delivery snapshot fields (`deliveryName`/`deliveryContact`/`deliveryAddress`) arrive as
+ * TEXT: the form prefills them from the chosen registry (or the admin types a one-off venue —
+ * parties rarely happen at the client's home address), and the order records what was actually
+ * agreed (the snapshot doctrine). Dates are parsed to `Date` by the validator.
+ */
+export interface CreateOrderRequestModel {
+  clientRegistryId: number;
+  eventTypeId: number;
+  deliveryAt: Date;
+  /** Required when the order carries ANY rental line; forbidden for a purchase-only order (Q-A). */
+  pickupAt: Date | undefined;
+  deliveryName: string;
+  deliveryContact: string;
+  deliveryAddress: string;
+  description: string | undefined;
+  comment: string | undefined;
+  /** Delivery fee actually charged — admin-set, distance-based (free inside Hacienda Real). */
+  deliveryAmount: number | undefined;
+  /** Anticipo (partial deposit) taken at creation, when any. */
+  depositAmount: number | undefined;
+  lines: CreateOrderLineRequestModel[];
+}
+
+/** One line the requested window cannot satisfy — the 409 payload the form renders (EPIC-2 §8). */
+export interface OrderStockConflictItemModel {
+  productId: number;
+  productName: string;
+  requested: number;
+  /** Units actually takeable for the requested window (rentals) or remaining stock (sales). */
+  available: number;
+}

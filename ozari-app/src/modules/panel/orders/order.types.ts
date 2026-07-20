@@ -49,3 +49,113 @@ export interface OrderListResponse {
   orders: OrderListItem[];
   pagination: OrderListPagination;
 }
+
+// ── Reference data (`GET /orders/catalog`) ───────────────────────────────────────────────────
+
+export interface CatalogOption {
+  id: number;
+  name: string;
+}
+
+/** An event type as the order form's select consumes it — the client lead-time rides along. */
+export interface EventTypeCatalogOption extends CatalogOption {
+  minLeadHours: number;
+}
+
+export interface OrderCatalog {
+  eventTypes: EventTypeCatalogOption[];
+  serviceStatuses: CatalogOption[];
+  paymentStatuses: CatalogOption[];
+  contactTypes: CatalogOption[];
+  zones: CatalogOption[];
+}
+
+// ── Client registries (the walk-in client picker; `GET`/`POST /client-registries`) ───────────
+
+export interface RegistryContact {
+  id: number;
+  contactType: CatalogOption;
+  value: string;
+  isPrincipal: boolean;
+}
+
+export interface RegistryAddress {
+  id: number;
+  zone?: CatalogOption;
+  address: string;
+  instructions?: string;
+  domicilePrice?: number;
+  isFavorite: boolean;
+}
+
+export interface ClientRegistry {
+  id: number;
+  name: string;
+  notes?: string;
+  contacts: RegistryContact[];
+  addresses: RegistryAddress[];
+  createdAt: string;
+}
+
+export interface ClientRegistryListResponse {
+  registries: ClientRegistry[];
+  pagination: OrderListPagination;
+}
+
+/** `POST /client-registries` response envelope. */
+export interface ClientRegistryEnvelope {
+  registry: ClientRegistry;
+}
+
+// ── Order detail (`GET /orders/{id}` and the `POST /orders` response) ─────────────────────────
+
+export interface OrderLine {
+  id: number;
+  productId: number;
+  productName: string;
+  isRental: boolean;
+  quantity: number;
+  unitaryPrice: number;
+  parcialPrice: number;
+}
+
+export interface OrderStatusChange {
+  id: number;
+  from?: OrderLookup;
+  to: OrderLookup;
+  byUserName: string;
+  at: string;
+}
+
+/** The full order the detail page and the create response share. */
+export interface OrderDetail extends OrderListItem {
+  deliveryContact: string;
+  deliveryAddress: string;
+  description?: string;
+  comment?: string;
+  assignedUser?: { id: number; name: string };
+  deliveryAmount?: number;
+  depositAmount?: number;
+  discountAmount?: number;
+  discountReason?: string;
+  paidAt?: string;
+  cancelReason?: string;
+  serviceStart: string;
+  serviceEnd: string;
+  lines: OrderLine[];
+  extras: unknown[];
+  statusHistory: OrderStatusChange[];
+  createdAt: string;
+}
+
+export interface OrderDetailEnvelope {
+  order: OrderDetail;
+}
+
+/** One line the requested window can't satisfy — the `data.conflicts` in the create 409. */
+export interface OrderStockConflictItem {
+  productId: number;
+  productName: string;
+  requested: number;
+  available: number;
+}

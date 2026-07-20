@@ -1,10 +1,11 @@
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { HiOutlineArrowPath } from 'react-icons/hi2';
+import { HiOutlineArrowPath, HiOutlinePlus } from 'react-icons/hi2';
 import Button from '@components/Button';
 import { useInfiniteScrollSentinel } from '@hooks/useInfiniteScrollSentinel';
 import { staggerIn, staggerOut } from '../pageMotion';
+import { usePanelNavigate } from '../PanelNavContext';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
 // Shared status panel (empty/error family). Promote to @components when a third section needs it.
 import ProductsStatus from '../products/ProductsStatus';
@@ -46,6 +47,7 @@ const SHIMMER = 'animate-pulse rounded bg-charcoal/10 motion-reduce:animate-none
  */
 const OrdersPage: React.FC = () => {
   const { t } = useTranslation();
+  const panelNavigate = usePanelNavigate();
   const search = useSearch({ from: '/panel/pedidos' }) as OrdersSearch;
   const navigate = useNavigate({ from: '/panel/pedidos' });
   // `view` is the URL INTENT (the pill follows it immediately); `displayedView` is what the body
@@ -92,29 +94,46 @@ const OrdersPage: React.FC = () => {
     if (loading) setShowSkeleton(true);
   }
 
-  // Loading resolved → sweep the skeleton out, THEN mount the real body (which staggers in below).
+  // The orders BODY always moves LATERALLY (owner preference — the two views live on a left/right
+  // axis, and the list shape reads sideways): a forward swap travels right-to-left, a backward one
+  // mirrors, and a plain cold load/reload uses the forward direction. This ref carries the side
+  // the NEXT body/skeleton entrance comes from (its exit heads the opposite way); swaps retarget
+  // it, resolves reset it to the forward default.
+  const lateralFrom = useRef<'left' | 'right'>('right');
+
+  // Loading resolved → sweep the skeleton out (continuing the travel), THEN mount the real body.
   useEffect(() => {
     if (loading || !showSkeleton) return;
-    void staggerOut(root.current, '.orders-skel').then(() => setShowSkeleton(false));
+    void staggerOut(root.current, '.orders-skel', {
+      to: lateralFrom.current === 'right' ? 'left' : 'right',
+    }).then(() => setShowSkeleton(false));
   }, [loading, showSkeleton]);
 
-  // The page-level entrance runs ONCE, on mount (whatever state it lands in). Every later
-  // transition is BODY-scoped — re-staggering the root would re-animate the chrome (the lead +
-  // the switch), the exact same-elements-re-entering glitch the header title fix killed.
+  // The page-level entrance runs ONCE, on mount: the chrome (lead + switch) rises with the
+  // app-wide language — it's the page frame — while the body content (skeleton, tickets, or an
+  // empty panel alike) slides in from the side, the page's own axis. Every later transition is
+  // BODY-scoped — re-staggering the root would re-animate the chrome (the same-elements
+  // re-entering glitch the header-title fix killed).
   const isMounted = useRef(false);
   useLayoutEffect(() => {
     /* v8 ignore next -- StrictMode-only double-invoke guard; an empty-deps effect runs once in prod/tests */
     if (isMounted.current) return;
     isMounted.current = true;
-    staggerIn(root.current, '.reveal-item');
+    staggerIn(root.current, '.orders-chrome');
+    staggerIn(body.current, '.reveal-item', { from: lateralFrom.current });
   }, []);
 
-  // Body entrance when the skeleton finished sweeping — the resolved content mounted this commit.
+  // Body entrance when the skeleton finished sweeping — the resolved content mounted this commit,
+  // entering from the travel's side; then the direction resets to the forward default.
   const prevShowSkeleton = useRef(showSkeleton);
   useLayoutEffect(() => {
     const was = prevShowSkeleton.current;
     prevShowSkeleton.current = showSkeleton;
-    if (was && !showSkeleton) staggerIn(body.current, '.reveal-item');
+    if (was && !showSkeleton) {
+      const from = lateralFrom.current;
+      lateralFrom.current = 'right';
+      staggerIn(body.current, '.reveal-item', { from });
+    }
   }, [showSkeleton]);
 
   // ── The view swap (a page transition in miniature) ────────────────────────────────────────────
@@ -124,7 +143,6 @@ const OrdersPage: React.FC = () => {
   // old body slides out LEFT and the new one enters FROM the right; moving back it mirrors —
   // the two views sit side by side, so the content travels the way the selection does.
   const swapLanded = useRef(false);
-  const swapEnterFrom = useRef<'left' | 'right'>('right');
   useLayoutEffect(() => {
     if (!switching) return;
     const target = view;
@@ -133,7 +151,7 @@ const OrdersPage: React.FC = () => {
     void staggerOut(body.current, '.reveal-item', { to: forward ? 'left' : 'right' }).then(() => {
       if (cancelled) return;
       swapLanded.current = true;
-      swapEnterFrom.current = forward ? 'right' : 'left';
+      lateralFrom.current = forward ? 'right' : 'left';
       setDisplayedView(target);
     });
     return () => {
@@ -150,13 +168,16 @@ const OrdersPage: React.FC = () => {
     const was = wasSwitching.current;
     wasSwitching.current = switching;
     if (!was || switching) return;
-    staggerIn(
-      body.current,
-      '.reveal-item',
-      swapLanded.current ? { from: swapEnterFrom.current } : { fromCurrent: true },
-    );
+    if (swapLanded.current) {
+      staggerIn(body.current, '.reveal-item', { from: lateralFrom.current });
+      // Landed on an uncached view: the skeleton's RESOLVE keeps travelling this way (the resolve
+      // effect resets the direction). Landed on cached content: the gesture is complete.
+      if (!loading) lateralFrom.current = 'right';
+    } else {
+      staggerIn(body.current, '.reveal-item', { fromCurrent: true });
+    }
     swapLanded.current = false;
-  }, [switching]);
+  }, [switching, loading]);
 
   // ── Infinite scroll ───────────────────────────────────────────────────────────────────────────
   // An appended page sweeps shimmer rows in under the list; when it lands, the rows past the
@@ -227,10 +248,21 @@ const OrdersPage: React.FC = () => {
   return (
     <div ref={root} className="flex flex-1 flex-col gap-6">
       {/* The chrome never leaves: the view switch must stay reachable in EVERY state (empty,
-          error, loading) — unlike products, where a truly-empty catalog stands alone. */}
-      <div className="reveal-item flex flex-wrap items-center justify-between gap-3">
+          error, loading) — unlike products, where a truly-empty catalog stands alone.
+          `orders-chrome` = the mount entrance's vertical-rise scope (the page frame);
+          `reveal-item` keeps it in the panel-level exit sweep. */}
+      <div className="reveal-item orders-chrome flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-charcoal/55">{t(`${KEY}.lead`)}</p>
-        <OrdersViewSwitch view={view} onChange={setView} />
+        <div className="flex flex-wrap items-center gap-3">
+          <OrdersViewSwitch view={view} onChange={setView} />
+          <Button
+            size="sm"
+            startIcon={<HiOutlinePlus className="size-4" />}
+            onClick={() => panelNavigate('/panel/pedidos/nuevo')}
+          >
+            {t(`${KEY}.newOrder`)}
+          </Button>
+        </div>
       </div>
       <div
         ref={body}

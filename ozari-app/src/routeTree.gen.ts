@@ -24,6 +24,7 @@ import { Route as PanelAjustesRouteImport } from './routes/panel/ajustes'
 import { Route as PanelSplatRouteImport } from './routes/panel/$'
 import { Route as PanelProductosNuevoRouteImport } from './routes/panel/productos_.nuevo'
 import { Route as PanelProductosProductIdRouteImport } from './routes/panel/productos_.$productId'
+import { Route as PanelPedidosNuevoRouteImport } from './routes/panel/pedidos_.nuevo'
 import { Route as PanelProductosProductIdEditarRouteImport } from './routes/panel/productos_.$productId_.editar'
 
 const SesionRoute = SesionRouteImport.update({
@@ -101,6 +102,11 @@ const PanelProductosProductIdRoute = PanelProductosProductIdRouteImport.update({
   path: '/productos/$productId',
   getParentRoute: () => PanelRoute,
 } as any)
+const PanelPedidosNuevoRoute = PanelPedidosNuevoRouteImport.update({
+  id: '/pedidos_/nuevo',
+  path: '/pedidos/nuevo',
+  getParentRoute: () => PanelRoute,
+} as any)
 const PanelProductosProductIdEditarRoute =
   PanelProductosProductIdEditarRouteImport.update({
     id: '/productos_/$productId_/editar',
@@ -122,6 +128,7 @@ export interface FileRoutesByFullPath {
   '/sesion/registro': typeof SesionRegistroRoute
   '/sesion/restablecer': typeof SesionRestablecerRoute
   '/panel/': typeof PanelIndexRoute
+  '/panel/pedidos/nuevo': typeof PanelPedidosNuevoRoute
   '/panel/productos/$productId': typeof PanelProductosProductIdRoute
   '/panel/productos/nuevo': typeof PanelProductosNuevoRoute
   '/panel/productos/$productId/editar': typeof PanelProductosProductIdEditarRoute
@@ -139,6 +146,7 @@ export interface FileRoutesByTo {
   '/sesion/registro': typeof SesionRegistroRoute
   '/sesion/restablecer': typeof SesionRestablecerRoute
   '/panel': typeof PanelIndexRoute
+  '/panel/pedidos/nuevo': typeof PanelPedidosNuevoRoute
   '/panel/productos/$productId': typeof PanelProductosProductIdRoute
   '/panel/productos/nuevo': typeof PanelProductosNuevoRoute
   '/panel/productos/$productId/editar': typeof PanelProductosProductIdEditarRoute
@@ -158,6 +166,7 @@ export interface FileRoutesById {
   '/sesion/registro': typeof SesionRegistroRoute
   '/sesion/restablecer': typeof SesionRestablecerRoute
   '/panel/': typeof PanelIndexRoute
+  '/panel/pedidos_/nuevo': typeof PanelPedidosNuevoRoute
   '/panel/productos_/$productId': typeof PanelProductosProductIdRoute
   '/panel/productos_/nuevo': typeof PanelProductosNuevoRoute
   '/panel/productos_/$productId_/editar': typeof PanelProductosProductIdEditarRoute
@@ -178,6 +187,7 @@ export interface FileRouteTypes {
     | '/sesion/registro'
     | '/sesion/restablecer'
     | '/panel/'
+    | '/panel/pedidos/nuevo'
     | '/panel/productos/$productId'
     | '/panel/productos/nuevo'
     | '/panel/productos/$productId/editar'
@@ -195,6 +205,7 @@ export interface FileRouteTypes {
     | '/sesion/registro'
     | '/sesion/restablecer'
     | '/panel'
+    | '/panel/pedidos/nuevo'
     | '/panel/productos/$productId'
     | '/panel/productos/nuevo'
     | '/panel/productos/$productId/editar'
@@ -213,6 +224,7 @@ export interface FileRouteTypes {
     | '/sesion/registro'
     | '/sesion/restablecer'
     | '/panel/'
+    | '/panel/pedidos_/nuevo'
     | '/panel/productos_/$productId'
     | '/panel/productos_/nuevo'
     | '/panel/productos_/$productId_/editar'
@@ -332,6 +344,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PanelProductosProductIdRouteImport
       parentRoute: typeof PanelRoute
     }
+    '/panel/pedidos_/nuevo': {
+      id: '/panel/pedidos_/nuevo'
+      path: '/pedidos/nuevo'
+      fullPath: '/panel/pedidos/nuevo'
+      preLoaderRoute: typeof PanelPedidosNuevoRouteImport
+      parentRoute: typeof PanelRoute
+    }
     '/panel/productos_/$productId_/editar': {
       id: '/panel/productos_/$productId_/editar'
       path: '/productos/$productId/editar'
@@ -348,6 +367,7 @@ interface PanelRouteChildren {
   PanelPedidosRoute: typeof PanelPedidosRoute
   PanelProductosRoute: typeof PanelProductosRoute
   PanelIndexRoute: typeof PanelIndexRoute
+  PanelPedidosNuevoRoute: typeof PanelPedidosNuevoRoute
   PanelProductosProductIdRoute: typeof PanelProductosProductIdRoute
   PanelProductosNuevoRoute: typeof PanelProductosNuevoRoute
   PanelProductosProductIdEditarRoute: typeof PanelProductosProductIdEditarRoute
@@ -359,6 +379,7 @@ const PanelRouteChildren: PanelRouteChildren = {
   PanelPedidosRoute: PanelPedidosRoute,
   PanelProductosRoute: PanelProductosRoute,
   PanelIndexRoute: PanelIndexRoute,
+  PanelPedidosNuevoRoute: PanelPedidosNuevoRoute,
   PanelProductosProductIdRoute: PanelProductosProductIdRoute,
   PanelProductosNuevoRoute: PanelProductosNuevoRoute,
   PanelProductosProductIdEditarRoute: PanelProductosProductIdEditarRoute,

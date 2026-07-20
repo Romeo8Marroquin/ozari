@@ -20,6 +20,7 @@ export type PanelPath =
   | `/panel/productos/${number}`
   | `/panel/productos/${number}/editar`
   | '/panel/pedidos'
+  | '/panel/pedidos/nuevo'
   | '/panel/ajustes';
 
 export interface PanelNavItem {

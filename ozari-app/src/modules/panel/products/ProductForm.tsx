@@ -21,6 +21,7 @@ import {
   staggerOut,
 } from '../pageMotion';
 import { usePanelNavigate } from '../PanelNavContext';
+import PreferencesCta from '../PreferencesCta';
 import type { CatalogOption, CurrencyCatalogOption, ProductCatalog } from './product.types';
 import {
   clearProductDraft,
@@ -82,7 +83,7 @@ const isCatalogUsable = (catalog: ProductCatalog | null | undefined): catalog is
       catalog.detailTypes.length > 0,
   );
 
-type FormView = 'form' | 'error';
+type FormView = 'form' | 'error' | 'config';
 
 /**
  * Decouples the TARGET view (form ↔ the catalog-error retry panel) from the RENDERED one so the
@@ -383,35 +384,48 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
     [],
   );
 
-  // The two whole-form views. ANY catalog failure shape targets the honest retry panel — a
-  // 4xx/5xx (isError), a null payload, or a "successful" response with empty lookup lists — and
-  // the swap between them SWEEPS via useViewSwap (never a hard replace). While a swap-to-error is
-  // in flight the form still shows its skeleton bodies (`!catalogReady`), so nothing empty flashes.
+  // Three whole-form views, each with the RIGHT affordance (the swap between them SWEEPS via
+  // useViewSwap, never a hard replace). While a swap is in flight the form keeps its skeleton
+  // bodies (`!catalogReady`), so nothing empty flashes.
+  //  - `error`  — the catalog REQUEST failed (4xx/5xx/network) → RETRY.
+  //  - `config` — the request SUCCEEDED but a required seeded lookup is empty (a null/empty payload)
+  //     → a setup gap, not a failure to retry → route to PREFERENCES (Settings for now).
+  //  - `form`   — otherwise.
   const catalogReady = isCatalogUsable(catalog);
-  const targetView: FormView = isError || (!isLoading && !catalogReady) ? 'error' : 'form';
+  const configMissing = !isLoading && !isError && !catalogReady;
+  const targetView: FormView = isError ? 'error' : configMissing ? 'config' : 'form';
   const renderedView = useViewSwap(targetView, viewRoot);
 
-  if (renderedView === 'error') {
+  if (renderedView === 'error' || renderedView === 'config') {
     return (
       <div ref={viewRoot} className="flex w-full flex-1 flex-col">
         <div className="reveal-block flex flex-1 flex-col">
-          <ProductsStatus
-            tone="error"
-            title={t(`${KEY}.catalogError.title`)}
-            description={t(`${KEY}.catalogError.description`)}
-            action={
-              <Button
-                variant="soft"
-                color={SECONDARY_COLOR}
-                size="sm"
-                loading={isFetching}
-                startIcon={<HiOutlineArrowPath className="size-4" />}
-                onClick={() => void refetch()}
-              >
-                {t(`${KEY}.catalogError.retry`)}
-              </Button>
-            }
-          />
+          {renderedView === 'error' ? (
+            <ProductsStatus
+              tone="error"
+              title={t(`${KEY}.catalogError.title`)}
+              description={t(`${KEY}.catalogError.description`)}
+              action={
+                <Button
+                  variant="soft"
+                  color={SECONDARY_COLOR}
+                  size="sm"
+                  loading={isFetching}
+                  startIcon={<HiOutlineArrowPath className="size-4" />}
+                  onClick={() => void refetch()}
+                >
+                  {t(`${KEY}.catalogError.retry`)}
+                </Button>
+              }
+            />
+          ) : (
+            <ProductsStatus
+              tone="config"
+              title={t(`${KEY}.configMissing.title`)}
+              description={t(`${KEY}.configMissing.description`)}
+              action={<PreferencesCta />}
+            />
+          )}
         </div>
       </div>
     );
