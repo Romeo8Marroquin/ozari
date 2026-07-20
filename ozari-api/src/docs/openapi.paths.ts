@@ -19,6 +19,17 @@ const EXAMPLE_EMAIL = "ana.garcia@example.com";
 const EXAMPLE_PRODUCT_NAME = "Mesa redonda";
 const EXAMPLE_PRODUCT_DESCRIPTION = "Mesa para 8 personas";
 const EXAMPLE_CURRENCY_NAME = "Quetzal Guatemalteco";
+// The illustrative walk-in order reused across every /orders and /client-registries example.
+const EXAMPLE_CLIENT_NAME = "María López";
+const EXAMPLE_ORDER_CONTACT = "WhatsApp 5555-1234";
+const EXAMPLE_ORDER_ADDRESS = "Zona 10, 4a avenida 5-55";
+const EXAMPLE_STATUS_PENDING = "Pendiente";
+const EXAMPLE_EVENT_TYPE = "Evento familiar";
+const EXAMPLE_LINE_PRODUCT_NAME = "Silla plegable";
+const EXAMPLE_ADMIN_NAME = "Romeo Marroquín";
+const EXAMPLE_DELIVERY_AT = "2026-08-01T14:00:00.000Z";
+const EXAMPLE_PICKUP_AT = "2026-08-02T10:00:00.000Z";
+const EXAMPLE_ORDER_CREATED_AT = "2026-07-16T12:00:00.000Z";
 
 const rateLimited: OpenAPIV3.ReferenceObject = {
   $ref: "#/components/responses/TooManyRequests",
@@ -510,7 +521,7 @@ export const paths: OpenAPIV3.PathsObject = {
           in: "query",
           required: false,
           description: "Items per page (clamped to 1–50).",
-          schema: { type: "integer", minimum: 1, maximum: 50, default: 15 },
+          schema: { type: "integer", minimum: 1, maximum: 50, default: 20 },
         },
         {
           name: "search",
@@ -590,7 +601,7 @@ export const paths: OpenAPIV3.PathsObject = {
               isActive: true,
             },
           ],
-          pagination: { page: 1, pageSize: 15, total: 1, totalPages: 1 },
+          pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
         }, "Products fetched"),
         "401": unauthorized(STALE_TOKEN_401),
         "403": productsReadForbidden(),
@@ -917,6 +928,390 @@ export const paths: OpenAPIV3.PathsObject = {
         }, "Catalog fetched"),
         "401": unauthorized(STALE_TOKEN_401),
         "403": productsReadForbidden(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/orders": {
+    get: {
+      tags: ["Orders"],
+      summary: "List orders (agenda / history views)",
+      operationId: "getOrders",
+      description:
+        "Returns the paginated order list behind the panel's segmented control. **Admin only** " +
+        "(the Client own-orders and Driver assigned-orders slices arrive later with their own row " +
+        "scoping). `view=agenda` (default) = every order that is still WORK — upcoming, en route, " +
+        "delivered, or collected-awaiting-the-final-\"listo\" — soonest delivery first; " +
+        "`view=history` = finished (`readyAt` set) or cancelled orders, newest first. Pagination, " +
+        "`view` and the `statusId` filter are clamped or dropped (never rejected), so there is no " +
+        "400. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "page",
+          in: "query",
+          required: false,
+          description: "1-based page number (clamped to ≥ 1).",
+          schema: { type: "integer", minimum: 1, default: 1 },
+        },
+        {
+          name: "pageSize",
+          in: "query",
+          required: false,
+          description: "Items per page (clamped to 1–100).",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+        },
+        {
+          name: "view",
+          in: "query",
+          required: false,
+          description:
+            "Which slice of orders: `agenda` = still-work rows (schedule order), `history` = " +
+            "finished or cancelled rows (log order). An unknown value clamps to `agenda`.",
+          schema: { type: "string", enum: ["agenda", "history"], default: "agenda" },
+        },
+        {
+          name: "statusId",
+          in: "query",
+          required: false,
+          description:
+            "Filter by order status id within the view (see `GET /orders/catalog`). A " +
+            "non-positive or unknown id is ignored or matches nothing.",
+          schema: { type: "integer", minimum: 1 },
+        },
+      ],
+      responses: {
+        "200": dataResponse("One page of orders for the requested view.", "OrderListResponse", {
+          orders: [
+            {
+              id: 12,
+              clientName: EXAMPLE_CLIENT_NAME,
+              isRegistryClient: false,
+              eventType: { id: 1, name: EXAMPLE_EVENT_TYPE },
+              status: { id: 1, name: EXAMPLE_STATUS_PENDING },
+              paymentStatus: { id: 1, name: EXAMPLE_STATUS_PENDING },
+              deliveryAt: EXAMPLE_DELIVERY_AT,
+              pickupAt: EXAMPLE_PICKUP_AT,
+              itemCount: 25,
+              totalAmount: 450,
+              currency: { id: 1, name: EXAMPLE_CURRENCY_NAME, iso4217Code: "GTQ", symbol: "Q" },
+            },
+          ],
+          pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+        }, "Orders fetched"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    post: {
+      tags: ["Orders"],
+      summary: "Create an order (admin, walk-in client)",
+      operationId: "createOrder",
+      description:
+        "**STRICTLY Admin** (owner rule: only the admin creates orders — no employee role " +
+        "inherits this). Creates a CONFIRMED order (stock freezes immediately — no reservation " +
+        "step) for a walk-in client registry. Everything racy runs in ONE transaction under " +
+        "product row locks: rental availability against the order's WINDOW, sale stock (which is " +
+        "decremented permanently), and the single-vehicle spacing rule (an admin preference, " +
+        "≥1h between any two logistics events — the admin is blocked too). Money is derived " +
+        "server-side from the product rows. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      requestBody: bodyRef("CreateOrderRequest", {
+        clientRegistryId: 3,
+        eventTypeId: 1,
+        deliveryAt: EXAMPLE_DELIVERY_AT,
+        pickupAt: EXAMPLE_PICKUP_AT,
+        deliveryName: EXAMPLE_CLIENT_NAME,
+        deliveryContact: EXAMPLE_ORDER_CONTACT,
+        deliveryAddress: EXAMPLE_ORDER_ADDRESS,
+        deliveryAmount: 50,
+        lines: [{ productId: 3, quantity: 25 }],
+      }),
+      responses: {
+        "201": dataResponse("The created order (the same detail shape as `GET /orders/{id}`).", "OrderDetailResponse", {
+          order: {
+            id: 12,
+            clientName: EXAMPLE_CLIENT_NAME,
+            isRegistryClient: true,
+            eventType: { id: 1, name: EXAMPLE_EVENT_TYPE },
+            status: { id: 1, name: EXAMPLE_STATUS_PENDING },
+            paymentStatus: { id: 1, name: EXAMPLE_STATUS_PENDING },
+            deliveryAt: EXAMPLE_DELIVERY_AT,
+            pickupAt: EXAMPLE_PICKUP_AT,
+            itemCount: 25,
+            totalAmount: 200,
+            currency: { id: 1, name: EXAMPLE_CURRENCY_NAME, iso4217Code: "GTQ", symbol: "Q" },
+            deliveryContact: EXAMPLE_ORDER_CONTACT,
+            deliveryAddress: EXAMPLE_ORDER_ADDRESS,
+            serviceStart: EXAMPLE_DELIVERY_AT,
+            serviceEnd: EXAMPLE_PICKUP_AT,
+            deliveryAmount: 50,
+            lines: [
+              {
+                id: 31,
+                productId: 3,
+                productName: EXAMPLE_LINE_PRODUCT_NAME,
+                isRental: true,
+                quantity: 25,
+                unitaryPrice: 6,
+                parcialPrice: 150,
+              },
+            ],
+            extras: [],
+            statusHistory: [
+              {
+                id: 1,
+                to: { id: 1, name: EXAMPLE_STATUS_PENDING },
+                byUserName: EXAMPLE_ADMIN_NAME,
+                at: EXAMPLE_ORDER_CREATED_AT,
+              },
+            ],
+            createdAt: EXAMPLE_ORDER_CREATED_AT,
+          },
+        }, "Order created"),
+        "400": errorResponse(
+          "Validation failed (unknown registry/event type/product, incoherent pickup for the " +
+            "order's mode, bad snapshot fields, unsupported rent unit, mixed currencies…).",
+          400,
+          "An order with rentals requires a pickup time",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "409": errorResponse(
+          "The window cannot be satisfied: either some lines lack stock (the error's `data.conflicts` " +
+            "lists each `OrderStockConflictItem` — see that schema) or another order has a logistics " +
+            "event closer than the configured spacing.",
+          409,
+          "Some products are not available for the requested dates",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/orders/catalog": {
+    get: {
+      tags: ["Orders"],
+      summary: "Order reference lookups (selects data)",
+      operationId: "getOrdersCatalog",
+      description:
+        "The seeded reference lists the orders section consumes — event types (with their client " +
+        "lead-times), order + payment statuses (filters/chips), and the contact types + zones the " +
+        "client-registry form needs (active rows, id order). **Admin only**, like every orders " +
+        "read today. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      responses: {
+        "200": dataResponse("The five reference lists.", "OrderCatalog", {
+          eventTypes: [
+            { id: 1, name: "Evento familiar", minLeadHours: 24 },
+            { id: 2, name: "Evento social", minLeadHours: 24 },
+            { id: 3, name: "Otro", minLeadHours: 24 },
+          ],
+          serviceStatuses: [
+            { id: 1, name: EXAMPLE_STATUS_PENDING },
+            { id: 5, name: "En ruta" },
+          ],
+          paymentStatuses: [
+            { id: 1, name: EXAMPLE_STATUS_PENDING },
+            { id: 2, name: "Pagado" },
+          ],
+          contactTypes: [
+            { id: 1, name: "WhatsApp" },
+            { id: 3, name: "Correo electrónico" },
+          ],
+          zones: [{ id: 1, name: "Zona 1" }],
+        }, "Catalog fetched"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/orders/{id}": {
+    get: {
+      tags: ["Orders"],
+      summary: "Get one order (full detail)",
+      operationId: "getOrderById",
+      description:
+        "One order with everything the detail page renders: the decrypted contact/address " +
+        "SNAPSHOTS captured at order time, the billed period, the money breakdown (delivery fee, " +
+        "deposit, discount, payment), the lines (with their rent-vs-sale snapshot), the extras, " +
+        "and the append-only status audit trail. **Admin only.** A malformed and an unknown id " +
+        "are both a plain `404`. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          description: "The order id.",
+          schema: { type: "integer", minimum: 1 },
+          example: 12,
+        },
+      ],
+      responses: {
+        "200": dataResponse("The full order.", "OrderDetailResponse", {
+          order: {
+            id: 12,
+            clientName: EXAMPLE_CLIENT_NAME,
+            isRegistryClient: false,
+            eventType: { id: 1, name: EXAMPLE_EVENT_TYPE },
+            status: { id: 1, name: EXAMPLE_STATUS_PENDING },
+            paymentStatus: { id: 1, name: EXAMPLE_STATUS_PENDING },
+            deliveryAt: EXAMPLE_DELIVERY_AT,
+            pickupAt: EXAMPLE_PICKUP_AT,
+            itemCount: 25,
+            totalAmount: 450,
+            currency: { id: 1, name: EXAMPLE_CURRENCY_NAME, iso4217Code: "GTQ", symbol: "Q" },
+            deliveryContact: EXAMPLE_ORDER_CONTACT,
+            deliveryAddress: EXAMPLE_ORDER_ADDRESS,
+            serviceStart: EXAMPLE_DELIVERY_AT,
+            serviceEnd: EXAMPLE_PICKUP_AT,
+            deliveryAmount: 50,
+            lines: [
+              {
+                id: 31,
+                productId: 3,
+                productName: EXAMPLE_LINE_PRODUCT_NAME,
+                isRental: true,
+                quantity: 25,
+                unitaryPrice: 6,
+                parcialPrice: 150,
+              },
+            ],
+            extras: [],
+            statusHistory: [
+              {
+                id: 1,
+                to: { id: 1, name: EXAMPLE_STATUS_PENDING },
+                byUserName: EXAMPLE_ADMIN_NAME,
+                at: EXAMPLE_ORDER_CREATED_AT,
+              },
+            ],
+            createdAt: EXAMPLE_ORDER_CREATED_AT,
+          },
+        }, "Order fetched"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse(
+          "The order does not exist (or the id is malformed).",
+          404,
+          "Order not found",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/client-registries": {
+    get: {
+      tags: ["Orders"],
+      summary: "List walk-in client registries",
+      operationId: "getClientRegistries",
+      description:
+        "The admin's walk-in clients (the WhatsApp/phone people) — the order form's client " +
+        "picker. **STRICTLY Admin** (third-party PII no other role reads). Active rows only, " +
+        "newest first, decrypted. Names are encrypted at rest, so there is no server-side " +
+        "search — filter client-side. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "page",
+          in: "query",
+          required: false,
+          description: "1-based page number (clamped to ≥ 1).",
+          schema: { type: "integer", minimum: 1, default: 1 },
+        },
+        {
+          name: "pageSize",
+          in: "query",
+          required: false,
+          description: "Items per page (clamped to 1–100).",
+          schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
+        },
+      ],
+      responses: {
+        "200": dataResponse("One page of registries.", "ClientRegistryListResponse", {
+          registries: [
+            {
+              id: 3,
+              name: EXAMPLE_CLIENT_NAME,
+              contacts: [
+                { id: 1, contactType: { id: 1, name: "WhatsApp" }, value: "5555-1234", isPrincipal: true },
+              ],
+              addresses: [
+                {
+                  id: 1,
+                  zone: { id: 6, name: "Zona 10" },
+                  address: EXAMPLE_ORDER_ADDRESS,
+                  isFavorite: true,
+                },
+              ],
+              createdAt: EXAMPLE_ORDER_CREATED_AT,
+            },
+          ],
+          pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
+        }, "Registries fetched"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    post: {
+      tags: ["Orders"],
+      summary: "Create a walk-in client registry",
+      operationId: "createClientRegistry",
+      description:
+        "**STRICTLY Admin.** Registers a walk-in client: the responsible person, 1–10 contact " +
+        "methods (exactly one principal — defaulted to the first) and 1–10 delivery addresses " +
+        "(optional seeded zone; exactly one favorite, same defaulting). All PII encrypted at " +
+        "rest. When this person later registers a platform account, the admin deletes the " +
+        "registry (soft only while orders reference it) — orders keep their snapshots. " +
+        "Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      requestBody: bodyRef("CreateClientRegistryRequest", {
+        name: EXAMPLE_CLIENT_NAME,
+        contacts: [{ contactTypeId: 1, value: "5555-1234", isPrincipal: true }],
+        addresses: [
+          { zoneId: 6, address: EXAMPLE_ORDER_ADDRESS, isFavorite: true },
+        ],
+      }),
+      responses: {
+        "201": dataResponse("The created registry (the list's shape).", "ClientRegistryResponse", {
+          registry: {
+            id: 3,
+            name: EXAMPLE_CLIENT_NAME,
+            contacts: [
+              { id: 1, contactType: { id: 1, name: "WhatsApp" }, value: "5555-1234", isPrincipal: true },
+            ],
+            addresses: [
+              {
+                id: 1,
+                zone: { id: 6, name: "Zona 10" },
+                address: EXAMPLE_ORDER_ADDRESS,
+                isFavorite: true,
+              },
+            ],
+            createdAt: EXAMPLE_ORDER_CREATED_AT,
+          },
+        }, "Registry created"),
+        "400": errorResponse(
+          "Validation failed (bad name/notes, missing or invalid contacts/addresses, unknown " +
+            "contact type or zone, duplicate principal/favorite flags).",
+          400,
+          "The client requires at least one contact method",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
         "429": rateLimited,
         "500": serverError,
       },

@@ -204,6 +204,202 @@
         "customers": "Clientes",
         "settings": "Ajustes"
       },
+      "dataStatus": {
+        "goToPreferences": "Ir a preferencias"
+      },
+      "orders": {
+        "lead": "Tu agenda de entregas y recolecciones, y el historial de pedidos.",
+        "newOrder": "Nuevo pedido",
+        "views": {
+          "label": "Vista de pedidos",
+          "agenda": "Agenda",
+          "history": "Historial"
+        },
+        "loading": "Cargando pedidos",
+        "day": {
+          "today": "Hoy",
+          "tomorrow": "Mañana",
+          "yesterday": "Ayer"
+        },
+        "ticket": {
+          "items_one": "{{count}} artículo",
+          "items_other": "{{count}} artículos",
+          "purchaseOnly": "Solo entrega"
+        },
+        "empty": {
+          "agenda": {
+            "title": "Sin entregas próximas",
+            "description": "Cuando exista un pedido confirmado, su entrega y recolección aparecerán aquí."
+          },
+          "history": {
+            "title": "Aún no hay historial",
+            "description": "Los pedidos finalizados o cancelados aparecerán aquí."
+          }
+        },
+        "error": {
+          "title": "No pudimos cargar los pedidos",
+          "description": "Ha ocurrido un error al obtener los pedidos. Verifica tu conexión e intenta de nuevo.",
+          "retry": "Reintentar"
+        },
+        "nextPage": {
+          "error": "No pudimos cargar más pedidos.",
+          "retry": "Reintentar"
+        },
+        "count": {
+          "partial": "Mostrando {{shown}} de {{total}} pedidos",
+          "all_one": "{{count}} pedido",
+          "all_other": "{{count}} pedidos"
+        },
+        "create": {
+          "back": "Volver a pedidos",
+          "title": "Nuevo pedido",
+          "lead": "Crea un pedido para un cliente. Selecciona el modo, el cliente, las fechas y los productos.",
+          "loading": "Cargando datos del formulario",
+          "loadError": {
+            "title": "No pudimos cargar el formulario",
+            "description": "Ocurrió un error al obtener los datos. Verifica tu conexión e intenta de nuevo.",
+            "retry": "Reintentar"
+          },
+          "configMissing": {
+            "title": "Falta configuración",
+            "description": "No hay tipos de evento o de contacto configurados. Configúralos en preferencias para poder crear pedidos."
+          },
+          "emptyProducts": {
+            "title": "Aún no tienes productos",
+            "description": "Para crear un pedido primero necesitas al menos un producto en tu catálogo.",
+            "action": "Crear producto"
+          },
+          "mode": {
+            "label": "¿Qué necesita el cliente?",
+            "rent": "Alquiler",
+            "buy": "Compra",
+            "both": "Ambos"
+          },
+          "sections": {
+            "mode": {
+              "title": "Tipo de pedido",
+              "description": "¿El cliente quiere alquilar, comprar, o ambas cosas?"
+            },
+            "client": {
+              "title": "Cliente",
+              "description": "Elige un cliente registrado o crea uno nuevo para este pedido."
+            },
+            "event": {
+              "title": "Evento y fechas",
+              "description": "El tipo de evento y la fecha y hora de entrega (y de recolección para alquileres)."
+            },
+            "lines": {
+              "title": "Productos",
+              "description": "Agrega los productos y las cantidades del pedido."
+            },
+            "delivery": {
+              "title": "Entrega",
+              "description": "Quién recibe, cómo contactarlo y a dónde llevar el pedido. Se rellena desde el cliente; puedes editarlo para una ubicación puntual."
+            },
+            "money": {
+              "title": "Cobro",
+              "description": "El costo de envío y el anticipo, si aplican."
+            }
+          },
+          "fields": {
+            "clientLabel": "Cliente",
+            "clientPlaceholder": "Selecciona un cliente",
+            "clientEmpty": "No hay clientes registrados aún",
+            "eventTypeLabel": "Tipo de evento",
+            "eventTypePlaceholder": "Selecciona un tipo de evento",
+            "deliveryAtLabel": "Entrega",
+            "pickupAtLabel": "Recolección",
+            "lineProductLabel": "Producto",
+            "lineProductPlaceholder": "Selecciona un producto",
+            "lineQuantityLabel": "Cantidad",
+            "deliveryNameLabel": "Nombre de quien recibe",
+            "deliveryNamePlaceholder": "Nombre del responsable",
+            "deliveryContactLabel": "Contacto",
+            "deliveryContactPlaceholder": "Teléfono, WhatsApp o correo",
+            "deliveryAddressLabel": "Dirección de entrega",
+            "deliveryAddressPlaceholder": "Dirección completa del evento",
+            "commentLabel": "Comentario",
+            "commentPlaceholder": "Notas internas sobre el pedido",
+            "deliveryAmountLabel": "Costo de envío",
+            "deliveryAmountHint": "Sin costo dentro de Hacienda Real; el resto según la distancia.",
+            "depositAmountLabel": "Anticipo",
+            "moneyPlaceholder": "0.00"
+          },
+          "lines": {
+            "empty": "Agrega al menos un producto al pedido."
+          },
+          "estimate": {
+            "label": "Total estimado",
+            "note": "Estimado según los precios y las fechas. El total definitivo se confirma al crear el pedido."
+          },
+          "actions": {
+            "newClient": "Nuevo cliente",
+            "addLine": "Agregar producto",
+            "removeLine": "Quitar producto",
+            "cancel": "Cancelar",
+            "submit": "Crear pedido"
+          },
+          "successTitle": "Pedido creado",
+          "successToast": "El pedido se creó correctamente.",
+          "errors": {
+            "requiredClient": "El cliente es requerido.",
+            "requiredEventType": "El tipo de evento es requerido.",
+            "requiredDeliveryAt": "La fecha y hora de entrega es requerida.",
+            "invalidDeliveryAt": "La fecha y hora de entrega no es válida.",
+            "requiredPickupAt": "La fecha y hora de recolección es requerida.",
+            "invalidPickupAt": "La fecha y hora de recolección no es válida.",
+            "pickupBeforeDelivery": "La recolección debe ser posterior a la entrega.",
+            "requiredLines": "Agrega al menos un producto.",
+            "tooManyLines": "El pedido tiene demasiados productos.",
+            "requiredLineProduct": "Selecciona un producto.",
+            "duplicateLineProduct": "Este producto ya está en el pedido.",
+            "invalidLineQuantity": "Cantidad no válida.",
+            "lineUnavailable": "Solo hay {{available}} disponibles para estas fechas.",
+            "requiredDeliveryName": "El nombre de quien recibe es requerido.",
+            "invalidDeliveryName": "El nombre no es válido.",
+            "requiredDeliveryContact": "El contacto es requerido.",
+            "invalidDeliveryContact": "El contacto no es válido.",
+            "requiredDeliveryAddress": "La dirección es requerida.",
+            "invalidDeliveryAddress": "La dirección no es válida.",
+            "invalidDescription": "La descripción no es válida.",
+            "invalidComment": "El comentario no es válido.",
+            "invalidDeliveryAmount": "El costo de envío no es válido.",
+            "invalidDepositAmount": "El anticipo no es válido.",
+            "submitFallback": "No pudimos crear el pedido. Revisa los datos e intenta de nuevo."
+          }
+        },
+        "registry": {
+          "title": "Nuevo cliente",
+          "description": "Registra un cliente para tus pedidos por teléfono o WhatsApp.",
+          "cancel": "Cancelar",
+          "submit": "Guardar cliente",
+          "successTitle": "Cliente registrado",
+          "successToast": "El cliente se registró correctamente.",
+          "fields": {
+            "nameLabel": "Nombre del cliente",
+            "namePlaceholder": "Nombre del responsable",
+            "contactTypeLabel": "Tipo de contacto",
+            "contactTypePlaceholder": "Tipo",
+            "contactValueLabel": "Contacto",
+            "contactValuePlaceholder": "Número o correo",
+            "addressLabel": "Dirección",
+            "addressPlaceholder": "Dirección de entrega",
+            "zoneLabel": "Zona",
+            "zonePlaceholder": "Sin zona",
+            "zoneHint": "Opcional. Útil para clientes dentro de las zonas de la ciudad."
+          },
+          "errors": {
+            "requiredName": "El nombre es requerido.",
+            "invalidName": "El nombre no es válido.",
+            "requiredContactType": "El tipo de contacto es requerido.",
+            "requiredContactValue": "El contacto es requerido.",
+            "invalidContactValue": "El contacto no es válido.",
+            "requiredAddress": "La dirección es requerida.",
+            "invalidAddress": "La dirección no es válida.",
+            "submitFallback": "No pudimos registrar al cliente. Revisa los datos e intenta de nuevo."
+          }
+        }
+      },
       "actions": {
         "openMenu": "Abrir menú",
         "closeMenu": "Cerrar menú",
@@ -352,6 +548,10 @@
             "title": "No pudimos cargar el formulario",
             "description": "Ocurrió un problema al cargar los datos de referencia. Vuelve a intentarlo.",
             "retry": "Reintentar"
+          },
+          "configMissing": {
+            "title": "Falta configuración",
+            "description": "No hay datos de referencia configurados (categorías, monedas u otros). Configúralos en preferencias para poder crear productos."
           },
           "draft": {
             "restored": "Restauramos un borrador guardado de este formulario.",

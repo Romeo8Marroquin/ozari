@@ -1,5 +1,9 @@
 import type { IconType } from 'react-icons';
-import { HiOutlineCube, HiOutlineCog6Tooth } from 'react-icons/hi2';
+import {
+  HiOutlineClipboardDocumentList,
+  HiOutlineCog6Tooth,
+  HiOutlineCube,
+} from 'react-icons/hi2';
 import { Role } from '@constants/Roles';
 
 /**
@@ -15,6 +19,8 @@ export type PanelPath =
   | '/panel/productos/nuevo'
   | `/panel/productos/${number}`
   | `/panel/productos/${number}/editar`
+  | '/panel/pedidos'
+  | '/panel/pedidos/nuevo'
   | '/panel/ajustes';
 
 export interface PanelNavItem {
@@ -38,12 +44,20 @@ export interface PanelNavItem {
  */
 export const PRODUCTS_ROLES: readonly Role[] = [Role.Admin, Role.Client];
 
-// The nav shows ONLY built modules. Now that Settings is real we start "seriously": Products +
-// Settings (the placeholder Inicio/Pedidos/Clientes tabs were removed). A dashboard lands later;
-// until then `/panel` defaults to `/panel/productos` (a Driver, who can't see products, lands on
-// `/panel/ajustes` — see `panelHomeFor`).
+/**
+ * The roles allowed into the orders section — **Admin only** while the backend reads are (Epic-2
+ * step 2): a Client gets "mis pedidos" and a Driver "mis entregas" only when their row-scoped
+ * backend slices land; widening here before then would just surface 403s. Single source for the
+ * nav tab AND the `/panel/pedidos` route guard, like `PRODUCTS_ROLES`.
+ */
+export const ORDERS_ROLES: readonly Role[] = [Role.Admin];
+
+// The nav shows ONLY built modules: Products + Orders (the agenda, Admin-only) + Settings. A
+// dashboard lands later; until then `/panel` defaults to the first tab the role can see —
+// products for Admin/Client, settings for a Driver (see `panelHomeFor`).
 export const PANEL_NAV: PanelNavItem[] = [
   { to: '/panel/productos', icon: HiOutlineCube, labelKey: 'products', roles: PRODUCTS_ROLES },
+  { to: '/panel/pedidos', icon: HiOutlineClipboardDocumentList, labelKey: 'orders', roles: ORDERS_ROLES },
   { to: '/panel/ajustes', icon: HiOutlineCog6Tooth, labelKey: 'settings' },
 ];
 
@@ -65,4 +79,15 @@ export function panelHomeFor(role: Role | null): PanelPath {
  */
 export function filterNavByRole(items: PanelNavItem[], role: Role | null): PanelNavItem[] {
   return items.filter((item) => !item.roles || (role !== null && item.roles.includes(role)));
+}
+
+/**
+ * The nav SECTION a panel path belongs to — the tab whose `to` prefixes it (the sidebar's
+ * `startsWith` matching, shared): `/panel/productos/7/editar` → `/panel/productos`. This is the
+ * identity the chrome animates BY: the header title and the sidebar pill/tint only move when the
+ * section changes — navigating within one section (grid → detail → edit) must never animate the
+ * same title out and back in, or fade the same tab's tint. `null` for a path outside every tab.
+ */
+export function panelSectionFor(path: string): PanelPath | null {
+  return PANEL_NAV.find((item) => path.startsWith(item.to))?.to ?? null;
 }

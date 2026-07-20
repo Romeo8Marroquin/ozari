@@ -121,12 +121,23 @@ export const appConfig = {
   maxGlobalQuantity: 5000,
 
   // Product list pagination: the grid's default page size and the hard upper bound a caller can
-  // request (so a single list call can never fetch an unbounded number of rows).
-  defaultProductPageSize: 15,
+  // request (so a single list call can never fetch an unbounded number of rows). 20 matches the
+  // frontend's infinite-scroll batch AND the orders default below (owner: keep them congruent).
+  defaultProductPageSize: 20,
   maxProductPageSize: 50,
   // Longest name-search string the list endpoint honours; longer input is truncated, not rejected
   // (the same clamp stance as the pagination params).
   maxProductSearchLength: 100,
+
+  // Order list pagination: the agenda/history views' default page size and hard cap (same clamp
+  // stance as products — a single list call can never fetch an unbounded number of rows).
+  defaultOrderPageSize: 20,
+  maxOrderPageSize: 100,
+  // Most distinct products one order can carry (a hard input bound, far above any real party).
+  maxOrderLines: 50,
+  // Fallback when the `orders.logisticsSpacingMinutes` app preference is missing/corrupt — the
+  // seeded default (single-vehicle rule: ≥1h between any two logistics events).
+  defaultLogisticsSpacingMinutes: 60,
 
   sensitiveKeys: ["password", "token", "secret", "creditCard", "cvv", "auth"],
   basePath: "/api",

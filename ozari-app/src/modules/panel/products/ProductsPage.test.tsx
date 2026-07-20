@@ -110,7 +110,7 @@ const setProducts = (state: State) => {
 const withProducts = (products: Product[], total = products.length) => ({
   data: {
     products,
-    pagination: { page: 1, pageSize: 24, total, totalPages: Math.max(1, Math.ceil(total / 24)) },
+    pagination: { page: 1, pageSize: 20, total, totalPages: Math.max(1, Math.ceil(total / 20)) },
   },
 });
 
@@ -504,7 +504,7 @@ describe('ProductsPage', () => {
       isFetching: true,
     });
     renderPage();
-    expect(document.querySelectorAll('.append-skel')).toHaveLength(24);
+    expect(document.querySelectorAll('.append-skel')).toHaveLength(20);
   });
 
   it('replays the pairwise hand-off when a filter change resolves (skeletons crossfade to the new cards)', async () => {

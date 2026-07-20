@@ -103,7 +103,7 @@ describe("getProducts", () => {
     const data = successData();
     expect(data.products).toHaveLength(1);
     expect(data.products[0]).toMatchObject({ id: 7, available: 40, total: 40, replacementPrice: 900, inStock: true, isActive: true });
-    expect(data.pagination).toEqual({ page: 1, pageSize: 15, total: 1, totalPages: 1 });
+    expect(data.pagination).toEqual({ page: 1, pageSize: 20, total: 1, totalPages: 1 });
   });
 
   it("subtracts the units out on active rentals from `available` (fleet `total` untouched)", async () => {

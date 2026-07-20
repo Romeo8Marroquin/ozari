@@ -110,10 +110,14 @@ describe('Sidebar (inline, desktop/tablet)', () => {
     renderSidebar();
 
     expect(screen.getByRole('link', { name: 'modules.panel.brand' })).toBeInTheDocument();
-    expect(screen.getAllByRole('link')).toHaveLength(3); // brand + 2 nav items (products, settings)
+    // brand + the Admin's 3 nav items (products, orders, settings)
+    expect(screen.getAllByRole('link')).toHaveLength(4);
 
     const active = screen.getByRole('link', { name: 'modules.panel.nav.products' });
     expect(active).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'modules.panel.nav.orders' })).not.toHaveAttribute(
+      'aria-current',
+    );
     const inactive = screen.getByRole('link', { name: 'modules.panel.nav.settings' });
     expect(inactive).not.toHaveAttribute('aria-current');
 

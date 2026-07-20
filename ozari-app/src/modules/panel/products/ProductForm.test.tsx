@@ -164,24 +164,27 @@ describe('ProductForm — reference data states', () => {
     expect(refetch).toHaveBeenCalled();
   });
 
-  it('treats an empty payload like a failure (the form never renders empty selects)', () => {
+  // A "successful" 200 with a null/empty payload (wiped/unseeded DB) is NOT a failure to retry —
+  // it's a config gap (missing seeded reference data) → the preferences state, not the error panel.
+  it('treats an empty payload as a config state (preferences), not a retry', async () => {
     setCatalog({ data: null });
-    renderForm();
-    expect(screen.getByRole('heading', { name: `${KEY}.catalogError.title` })).toBeInTheDocument();
+    const { navigate } = renderForm();
+    expect(screen.getByRole('heading', { name: `${KEY}.configMissing.title` })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `${KEY}.catalogError.retry` })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'modules.panel.dataStatus.goToPreferences' }));
+    expect(navigate).toHaveBeenCalledWith('/panel/ajustes');
   });
 
-  // A "successful" 200 whose lookup lists are empty (wiped/unseeded DB) is just as unusable as a
-  // failed fetch — selects with nothing to pick would let the user fill a form they can't submit.
   it.each([
     'businessTypes',
     'categories',
     'currencies',
     'rentTimeUnits',
     'detailTypes',
-  ] as const)('treats a catalog with an empty %s list as a failure', (list) => {
+  ] as const)('treats a catalog with an empty %s list as a config state', (list) => {
     setCatalog({ data: { ...catalog, [list]: [] } });
     renderForm();
-    expect(screen.getByRole('heading', { name: `${KEY}.catalogError.title` })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: `${KEY}.configMissing.title` })).toBeInTheDocument();
   });
 
   it('SWEEPS between the form and the retry panel (and back after a successful retry)', async () => {

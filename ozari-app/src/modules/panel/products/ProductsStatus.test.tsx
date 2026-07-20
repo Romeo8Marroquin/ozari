@@ -26,4 +26,18 @@ describe('ProductsStatus', () => {
     expect(container.querySelector('svg')).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
+
+  it('renders the config tone (setup state) with its own icon and an action', () => {
+    const { container } = render(
+      <ProductsStatus
+        tone="config"
+        title="Falta configuración"
+        description="Configúralo en preferencias"
+        action={<button type="button">prefs</button>}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: 'Falta configuración' })).toBeInTheDocument();
+    expect(container.querySelector('svg')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'prefs' })).toBeInTheDocument();
+  });
 });

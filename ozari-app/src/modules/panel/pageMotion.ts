@@ -30,7 +30,30 @@ export interface EnterOptions {
   /** Resume from wherever the elements currently are (a cancelled exit) instead of the canonical
    *  off-screen start — the motion continues from the current frame, it never snaps back. */
   fromCurrent?: boolean;
+  /** Where a canonical entrance starts: `bottom` (the app-wide default rise) or a SIDE, reserved
+   *  for genuinely LATERAL moves (the orders agenda⇄historial swap enters from the side the
+   *  motion is travelling from, mirroring the segmented control's pill). Ignored with
+   *  `fromCurrent` (a resume has no canonical start). */
+  from?: 'bottom' | 'left' | 'right';
 }
+
+export interface ExitOptions {
+  /** Where the exit heads: `top` (the app-wide default lift) or a SIDE for lateral swaps. */
+  to?: 'top' | 'left' | 'right';
+}
+
+// The canonical off-screen states per direction. Both axes are always written (x AND y) so an
+// interrupted lateral tween can never strand a vertical offset, and vice versa.
+const ENTER_FROM = {
+  bottom: { x: 0, y: 16 },
+  left: { x: -20, y: 0 },
+  right: { x: 20, y: 0 },
+} as const;
+const EXIT_TO = {
+  top: { x: 0, y: -12 },
+  left: { x: -16, y: 0 },
+  right: { x: 16, y: 0 },
+} as const;
 
 /**
  * Distribute a stagger BUDGET across the items as a row/column WAVE instead of one long DOM-order
@@ -92,18 +115,19 @@ export function gridCellRevealDelay(el: HTMLElement): number {
   return max > 0 ? (distance / max) * PAGE_ENTER_STAGGER : 0;
 }
 
-/** Staggered entrance for a page's marked items — a gentle fade + rise + faint settle, cascading
- *  as a row/column wave (see {@link waveDelays}). */
+/** Staggered entrance for a page's marked items — a gentle fade + settle (a rise by default, or a
+ *  lateral slide via `from`), cascading as a row/column wave (see {@link waveDelays}). */
 export function staggerIn(scope: HTMLElement | null, selector: string, options?: EnterOptions): void {
   if (!scope) return;
   const items = gsap.utils.selector(scope)(selector) as HTMLElement[];
   if (items.length === 0) return;
   if (prefersReducedMotion()) {
-    gsap.set(items, { autoAlpha: 1, y: 0, scale: 1, clearProps: 'transform' });
+    gsap.set(items, { autoAlpha: 1, x: 0, y: 0, scale: 1, clearProps: 'transform' });
     return;
   }
   const delays = waveDelays(items, PAGE_ENTER_STAGGER);
   const to = {
+    x: 0,
     y: 0,
     autoAlpha: 1,
     scale: 1,
@@ -117,12 +141,16 @@ export function staggerIn(scope: HTMLElement | null, selector: string, options?:
     gsap.to(items, to);
     return;
   }
-  gsap.fromTo(items, { y: 16, autoAlpha: 0, scale: 0.98 }, to);
+  gsap.fromTo(items, { ...ENTER_FROM[options?.from ?? 'bottom'], autoAlpha: 0, scale: 0.98 }, to);
 }
 
-/** Staggered exit — every marked item lifts and fades, quick and accelerating, the same wave
- *  direction as the entrance (top-left leaves first) on a tighter budget. */
-export function staggerOut(scope: HTMLElement | null, selector: string): Promise<void> {
+/** Staggered exit — every marked item fades away (a lift by default, or a lateral slide via `to`),
+ *  quick and accelerating, the same wave direction as the entrance on a tighter budget. */
+export function staggerOut(
+  scope: HTMLElement | null,
+  selector: string,
+  options?: ExitOptions,
+): Promise<void> {
   return new Promise((resolve) => {
     if (!scope) {
       resolve();
@@ -135,7 +163,7 @@ export function staggerOut(scope: HTMLElement | null, selector: string): Promise
     }
     const delays = waveDelays(items, PAGE_EXIT_STAGGER);
     gsap.to(items, {
-      y: -12,
+      ...EXIT_TO[options?.to ?? 'top'],
       autoAlpha: 0,
       scale: 0.98,
       duration: PAGE_EXIT.duration,

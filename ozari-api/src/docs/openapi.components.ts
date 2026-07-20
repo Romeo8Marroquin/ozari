@@ -408,7 +408,7 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     properties: {
       page: { type: "integer", example: 1 },
-      pageSize: { type: "integer", example: 15 },
+      pageSize: { type: "integer", example: 20 },
       total: { type: "integer", example: 1 },
       totalPages: { type: "integer", example: 1 },
     },
@@ -456,6 +456,343 @@ export const schemas: Record<string, Schema> = {
       },
       detailTypes: { type: "array", items: schemaRef("CatalogOption") },
       rentTimeUnits: { type: "array", items: schemaRef("CatalogOption") },
+    },
+  },
+  OrderLookup: {
+    type: "object",
+    description: "A lookup pair as projected on an order (id + display name).",
+    properties: {
+      id: { type: "integer", example: 1 },
+      name: { type: "string", example: "Pendiente" },
+    },
+  },
+  OrderListItem: {
+    type: "object",
+    description:
+      "An order as the agenda/history list renders it — deliberately lean: who, what kind of " +
+      "event, where it stands, when, how big, how much. The PII-heavier snapshots (contact, " +
+      "address) and the money breakdown live on the detail response only. `pickupAt` is absent " +
+      "on purchase-only orders; the tracking timestamps appear as their steps are confirmed.",
+    properties: {
+      id: { type: "integer", example: 12 },
+      clientName: {
+        type: "string",
+        description: "Decrypted snapshot of the responsible person captured at order time.",
+        example: "María López",
+      },
+      isRegistryClient: {
+        type: "boolean",
+        description:
+          "True when the order belongs to a walk-in client registry rather than a platform user.",
+        example: false,
+      },
+      eventType: schemaRef("OrderLookup"),
+      status: schemaRef("OrderLookup"),
+      paymentStatus: schemaRef("OrderLookup"),
+      deliveryAt: { type: "string", format: "date-time" },
+      pickupAt: { type: "string", format: "date-time", nullable: true },
+      deliveredAt: { type: "string", format: "date-time", nullable: true },
+      collectedAt: { type: "string", format: "date-time", nullable: true },
+      readyAt: {
+        type: "string",
+        format: "date-time",
+        nullable: true,
+        description: "The explicit final \"listo\" press that returned the units to the fleet.",
+      },
+      cancelledAt: { type: "string", format: "date-time", nullable: true },
+      itemCount: {
+        type: "integer",
+        description: "Total units across the order's active lines.",
+        example: 25,
+      },
+      totalAmount: { type: "number", example: 450 },
+      currency: {
+        type: "object",
+        properties: {
+          id: { type: "integer", example: 1 },
+          name: { type: "string", example: "Quetzal Guatemalteco" },
+          iso4217Code: { type: "string", example: "GTQ" },
+          symbol: { type: "string", example: "Q" },
+        },
+      },
+    },
+  },
+  OrderListResponse: {
+    type: "object",
+    properties: {
+      orders: { type: "array", items: schemaRef("OrderListItem") },
+      pagination: schemaRef("Pagination"),
+    },
+  },
+  OrderLine: {
+    type: "object",
+    description:
+      "One order line. `isRental` is the line's rent-vs-sale SNAPSHOT (how it was ordered, " +
+      "immune to later product edits): rental lines bill per billed day and get picked up; sale " +
+      "lines bill once and permanently decrement stock.",
+    properties: {
+      id: { type: "integer", example: 31 },
+      productId: { type: "integer", example: 3 },
+      productName: { type: "string", example: "Silla plegable" },
+      isRental: { type: "boolean", example: true },
+      quantity: { type: "integer", example: 25 },
+      unitaryPrice: { type: "number", example: 6 },
+      parcialPrice: { type: "number", example: 150 },
+    },
+  },
+  OrderExtra: {
+    type: "object",
+    description: "An ad-hoc extra charged on the order — every money field may be absent.",
+    properties: {
+      id: { type: "integer", example: 1 },
+      name: { type: "string", example: "Instalación" },
+      description: { type: "string", nullable: true },
+      quantity: { type: "integer", nullable: true },
+      unitaryPrice: { type: "number", nullable: true },
+      parcialPrice: { type: "number", nullable: true },
+    },
+  },
+  OrderStatusChange: {
+    type: "object",
+    description:
+      "One transition from the order's append-only status audit trail. `from` is absent on the " +
+      "creation row.",
+    properties: {
+      id: { type: "integer", example: 1 },
+      // 3.0 has no nullable-$ref shorthand — the standard allOf wrapper carries the nullability.
+      from: { allOf: [schemaRef("OrderLookup")], nullable: true },
+      to: schemaRef("OrderLookup"),
+      byUserName: { type: "string", example: "Romeo Marroquín" },
+      at: { type: "string", format: "date-time" },
+    },
+  },
+  OrderDetail: {
+    description:
+      "The full order: the list-item fields plus the decrypted contact/address SNAPSHOTS " +
+      "(captured at order time — never live registry/user data), the billed period, the money " +
+      "breakdown, the lines/extras, and the status audit trail.",
+    allOf: [
+      schemaRef("OrderListItem"),
+      {
+        type: "object",
+        properties: {
+          deliveryContact: { type: "string", example: "WhatsApp 5555-1234" },
+          deliveryAddress: { type: "string", example: "Zona 10, 4a avenida 5-55" },
+          description: { type: "string", nullable: true },
+          comment: { type: "string", nullable: true },
+          assignedUser: {
+            type: "object",
+            nullable: true,
+            description: "The assigned driver; absent while unassigned.",
+            properties: {
+              id: { type: "integer", example: 2 },
+              name: { type: "string", example: "Romeo Marroquín" },
+            },
+          },
+          deliveryAmount: {
+            type: "number",
+            nullable: true,
+            description: "Delivery fee actually charged (admin-set, distance-based).",
+          },
+          depositAmount: { type: "number", nullable: true, description: "Anticipo recorded so far." },
+          discountAmount: { type: "number", nullable: true },
+          discountReason: { type: "string", nullable: true },
+          paidAt: { type: "string", format: "date-time", nullable: true },
+          cancelReason: { type: "string", nullable: true },
+          serviceStart: {
+            type: "string",
+            format: "date-time",
+            description: "Start of the BILLED period (whole days over the delivery→pickup window).",
+          },
+          serviceEnd: { type: "string", format: "date-time" },
+          lines: { type: "array", items: schemaRef("OrderLine") },
+          extras: { type: "array", items: schemaRef("OrderExtra") },
+          statusHistory: { type: "array", items: schemaRef("OrderStatusChange") },
+          createdAt: { type: "string", format: "date-time" },
+        },
+      },
+    ],
+  },
+  OrderDetailResponse: {
+    type: "object",
+    properties: {
+      order: schemaRef("OrderDetail"),
+    },
+  },
+  OrderCatalog: {
+    type: "object",
+    description:
+      "The reference lists the orders section consumes: event types (with their client " +
+      "lead-times), the status vocabularies, and the contact types + zones the client-registry " +
+      "form needs. Active rows, id order.",
+    properties: {
+      eventTypes: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "integer", example: 1 },
+            name: { type: "string", example: "Evento familiar" },
+            minLeadHours: {
+              type: "integer",
+              description:
+                "Client-side rule: clients create orders only this many hours ahead, and " +
+                "edit/cancel only until this many hours before delivery. Admins are unrestricted.",
+              example: 24,
+            },
+          },
+        },
+      },
+      serviceStatuses: { type: "array", items: schemaRef("CatalogOption") },
+      paymentStatuses: { type: "array", items: schemaRef("CatalogOption") },
+      contactTypes: { type: "array", items: schemaRef("CatalogOption") },
+      zones: { type: "array", items: schemaRef("CatalogOption") },
+    },
+  },
+  CreateOrderRequest: {
+    type: "object",
+    required: [
+      "clientRegistryId",
+      "eventTypeId",
+      "deliveryAt",
+      "deliveryName",
+      "deliveryContact",
+      "deliveryAddress",
+      "lines",
+    ],
+    description:
+      "Creates an order on behalf of a WALK-IN client (identity = a client registry — the only " +
+      "variant mounted today; a platform-user variant is a planned door). `pickupAt` is REQUIRED " +
+      "when any line is a rental and FORBIDDEN on a purchase-only order. The delivery fields are " +
+      "SNAPSHOTS (text — prefilled from the registry or typed as a one-off venue). Prices are " +
+      "derived SERVER-SIDE from each product (rentals bill per started 24h day over the window; " +
+      "'Evento'-unit rentals bill flat) — the body never carries money except the admin-set " +
+      "delivery fee and optional deposit.",
+    properties: {
+      clientRegistryId: { type: "integer", example: 3 },
+      eventTypeId: { type: "integer", example: 1 },
+      deliveryAt: { type: "string", format: "date-time" },
+      pickupAt: { type: "string", format: "date-time", nullable: true },
+      deliveryName: { type: "string", minLength: 2, maxLength: 255, example: "María López" },
+      deliveryContact: { type: "string", minLength: 2, maxLength: 255, example: "WhatsApp 5555-1234" },
+      deliveryAddress: { type: "string", minLength: 5, maxLength: 500, example: "Zona 10, 4a avenida 5-55" },
+      description: { type: "string", nullable: true, maxLength: 500 },
+      comment: { type: "string", nullable: true, maxLength: 500 },
+      deliveryAmount: { type: "number", nullable: true, example: 50 },
+      depositAmount: { type: "number", nullable: true, example: 100 },
+      lines: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          required: ["productId", "quantity"],
+          properties: {
+            productId: { type: "integer", example: 3 },
+            quantity: { type: "integer", minimum: 1, example: 25 },
+          },
+        },
+      },
+    },
+  },
+  OrderStockConflictItem: {
+    type: "object",
+    description:
+      "One line the requested window cannot satisfy — carried in the creation 409's `data.conflicts` " +
+      "so the form can re-offer with the real numbers.",
+    properties: {
+      productId: { type: "integer", example: 3 },
+      productName: { type: "string", example: "Silla plegable" },
+      requested: { type: "integer", example: 25 },
+      available: { type: "integer", example: 10 },
+    },
+  },
+  ClientRegistryContact: {
+    type: "object",
+    properties: {
+      id: { type: "integer", example: 1 },
+      contactType: schemaRef("CatalogOption"),
+      value: { type: "string", example: "5555-1234" },
+      isPrincipal: { type: "boolean", example: true },
+    },
+  },
+  ClientRegistryAddress: {
+    type: "object",
+    properties: {
+      id: { type: "integer", example: 1 },
+      zone: { allOf: [schemaRef("CatalogOption")], nullable: true },
+      address: { type: "string", example: "Zona 10, 4a avenida 5-55" },
+      instructions: { type: "string", nullable: true },
+      domicilePrice: { type: "number", nullable: true, example: 50 },
+      isFavorite: { type: "boolean", example: true },
+    },
+  },
+  ClientRegistry: {
+    type: "object",
+    description:
+      "A WALK-IN client (the admin's WhatsApp/phone people): the responsible person, their contact " +
+      "methods, and their delivery addresses — all decrypted for the admin. Not a platform account.",
+    properties: {
+      id: { type: "integer", example: 3 },
+      name: { type: "string", example: "María López" },
+      notes: { type: "string", nullable: true },
+      contacts: { type: "array", items: schemaRef("ClientRegistryContact") },
+      addresses: { type: "array", items: schemaRef("ClientRegistryAddress") },
+      createdAt: { type: "string", format: "date-time" },
+    },
+  },
+  ClientRegistryListResponse: {
+    type: "object",
+    properties: {
+      registries: { type: "array", items: schemaRef("ClientRegistry") },
+      pagination: schemaRef("Pagination"),
+    },
+  },
+  ClientRegistryResponse: {
+    type: "object",
+    properties: {
+      registry: schemaRef("ClientRegistry"),
+    },
+  },
+  CreateClientRegistryRequest: {
+    type: "object",
+    required: ["name", "contacts", "addresses"],
+    description:
+      "Creates a walk-in client registry: a name (looser than the account full-name policy), " +
+      "optional notes, 1–10 contacts (at most one flagged principal — the first becomes principal " +
+      "when none is) and 1–10 addresses (optional seeded zone; same single-favorite rule).",
+    properties: {
+      name: { type: "string", minLength: 2, maxLength: 255, example: "María López" },
+      notes: { type: "string", nullable: true, maxLength: 500 },
+      contacts: {
+        type: "array",
+        minItems: 1,
+        maxItems: 10,
+        items: {
+          type: "object",
+          required: ["contactTypeId", "value"],
+          properties: {
+            contactTypeId: { type: "integer", example: 1 },
+            value: { type: "string", minLength: 2, maxLength: 255, example: "5555-1234" },
+            isPrincipal: { type: "boolean" },
+          },
+        },
+      },
+      addresses: {
+        type: "array",
+        minItems: 1,
+        maxItems: 10,
+        items: {
+          type: "object",
+          required: ["address"],
+          properties: {
+            zoneId: { type: "integer", nullable: true, example: 6 },
+            address: { type: "string", minLength: 5, maxLength: 500 },
+            instructions: { type: "string", nullable: true, maxLength: 500 },
+            domicilePrice: { type: "number", nullable: true },
+            isFavorite: { type: "boolean" },
+          },
+        },
+      },
     },
   },
   CreateProductRequest: {

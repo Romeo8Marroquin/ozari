@@ -74,6 +74,9 @@ const Harness: React.FC = () => {
       <button type="button" onClick={() => nav.navigateTo(OTHER)}>
         nav-otros
       </button>
+      <button type="button" onClick={() => nav.navigateTo('/panel/productos/nuevo')}>
+        nav-nuevo
+      </button>
     </div>
   );
 };
@@ -198,6 +201,28 @@ describe('PanelLayout - with animations', () => {
     const { container } = render(<PanelLayout />);
     flushGsap();
     expect(container.querySelector('.panel-root')).toBeInTheDocument();
+  });
+
+  it('holds the header title on a same-section move; a cross-section retarget takes it out late', async () => {
+    const { container } = render(<PanelLayout />);
+    flushGsap();
+    const title = container.querySelector<HTMLElement>('.panel-header-title') as HTMLElement;
+
+    // Grid → create form: same products section — the title must not be tweened at all.
+    await userEvent.click(screen.getByRole('button', { name: 'nav-nuevo' }));
+    flushGsap(0.05); // mid-exit
+    expect(title.style.opacity === '' || Number(title.style.opacity) === 1).toBe(true);
+
+    // Retarget the running exit to ANOTHER section: the title exits now (late, in step).
+    await userEvent.click(screen.getByRole('button', { name: 'nav-ajustes' }));
+    flushGsap(0.05);
+    expect(Number(title.style.opacity)).toBeLessThan(1);
+
+    flushGsap();
+    await waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith({ to: '/panel/ajustes', viewTransition: false }),
+    );
+    expect(navigate).toHaveBeenCalledTimes(1);
   });
 
   it('plays the content + header-title exit, publishes pending, then navigates once', async () => {

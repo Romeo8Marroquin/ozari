@@ -61,6 +61,7 @@ export const openApiDocument: OpenAPIV3.Document = {
     { name: "Two-Factor Authentication", description: "TOTP setup/enable/disable and the 2FA login step." },
     { name: "Account", description: "The signed-in user's own profile and password." },
     { name: "Products", description: "The product catalog (role-projected reads)." },
+    { name: "Orders", description: "Orders — the agenda/history reads (Admin-only for now)." },
     { name: "Admin", description: "Administrative endpoints (role-gated)." },
     { name: "System", description: "Operational endpoints such as health checks." },
   ],
