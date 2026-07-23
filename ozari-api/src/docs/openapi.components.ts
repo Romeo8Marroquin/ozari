@@ -434,6 +434,17 @@ export const schemas: Record<string, Schema> = {
       name: { type: "string", example: "Alquiler" },
     },
   },
+  ZoneOption: {
+    type: "object",
+    description:
+      "A zone lookup carrying its default delivery fee (zones drive fee pricing). `deliveryFee` is " +
+      "absent when the zone has no configured fee (distinct from 0 = free).",
+    properties: {
+      id: { type: "integer", example: 6 },
+      name: { type: "string", example: "Zona 10" },
+      deliveryFee: { type: "number", example: 50 },
+    },
+  },
   ProductCatalog: {
     type: "object",
     description:
@@ -595,6 +606,11 @@ export const schemas: Record<string, Schema> = {
             description: "Delivery fee actually charged (admin-set, distance-based).",
           },
           depositAmount: { type: "number", nullable: true, description: "Anticipo recorded so far." },
+          paymentMethod: {
+            allOf: [schemaRef("CatalogOption")],
+            nullable: true,
+            description: "How the order is paid (Efectivo / Transferencia); absent until chosen.",
+          },
           discountAmount: { type: "number", nullable: true },
           discountReason: { type: "string", nullable: true },
           paidAt: { type: "string", format: "date-time", nullable: true },
@@ -645,8 +661,9 @@ export const schemas: Record<string, Schema> = {
       },
       serviceStatuses: { type: "array", items: schemaRef("CatalogOption") },
       paymentStatuses: { type: "array", items: schemaRef("CatalogOption") },
+      paymentMethods: { type: "array", items: schemaRef("CatalogOption") },
       contactTypes: { type: "array", items: schemaRef("CatalogOption") },
-      zones: { type: "array", items: schemaRef("CatalogOption") },
+      zones: { type: "array", items: schemaRef("ZoneOption") },
     },
   },
   CreateOrderRequest: {
@@ -680,6 +697,12 @@ export const schemas: Record<string, Schema> = {
       comment: { type: "string", nullable: true, maxLength: 500 },
       deliveryAmount: { type: "number", nullable: true, example: 50 },
       depositAmount: { type: "number", nullable: true, example: 100 },
+      paymentMethodId: {
+        type: "integer",
+        nullable: true,
+        description: "How it will be paid (an active seeded method); optional — payment can settle later.",
+        example: 1,
+      },
       lines: {
         type: "array",
         minItems: 1,
@@ -719,7 +742,7 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     properties: {
       id: { type: "integer", example: 1 },
-      zone: { allOf: [schemaRef("CatalogOption")], nullable: true },
+      zone: { allOf: [schemaRef("ZoneOption")], nullable: true },
       address: { type: "string", example: "Zona 10, 4a avenida 5-55" },
       instructions: { type: "string", nullable: true },
       domicilePrice: { type: "number", nullable: true, example: 50 },
@@ -730,13 +753,15 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     description:
       "A WALK-IN client (the admin's WhatsApp/phone people): the responsible person, their contact " +
-      "methods, and their delivery addresses — all decrypted for the admin. Not a platform account.",
+      "methods, their delivery addresses, and an optional preferred payment method — all decrypted " +
+      "for the admin. Not a platform account.",
     properties: {
       id: { type: "integer", example: 3 },
       name: { type: "string", example: "María López" },
       notes: { type: "string", nullable: true },
       contacts: { type: "array", items: schemaRef("ClientRegistryContact") },
       addresses: { type: "array", items: schemaRef("ClientRegistryAddress") },
+      preferredPaymentMethod: { allOf: [schemaRef("CatalogOption")], nullable: true },
       createdAt: { type: "string", format: "date-time" },
     },
   },
@@ -755,11 +780,12 @@ export const schemas: Record<string, Schema> = {
   },
   CreateClientRegistryRequest: {
     type: "object",
-    required: ["name", "contacts", "addresses"],
+    required: ["name", "contacts"],
     description:
       "Creates a walk-in client registry: a name (looser than the account full-name policy), " +
       "optional notes, 1–10 contacts (at most one flagged principal — the first becomes principal " +
-      "when none is) and 1–10 addresses (optional seeded zone; same single-favorite rule).",
+      "when none is), 0–10 addresses (optional seeded zone; same single-favorite rule; a walk-in " +
+      "may have none and type one per order) and an optional preferred payment method.",
     properties: {
       name: { type: "string", minLength: 2, maxLength: 255, example: "María López" },
       notes: { type: "string", nullable: true, maxLength: 500 },
@@ -779,7 +805,7 @@ export const schemas: Record<string, Schema> = {
       },
       addresses: {
         type: "array",
-        minItems: 1,
+        minItems: 0,
         maxItems: 10,
         items: {
           type: "object",
@@ -792,6 +818,12 @@ export const schemas: Record<string, Schema> = {
             isFavorite: { type: "boolean" },
           },
         },
+      },
+      preferredPaymentMethodId: {
+        type: "integer",
+        nullable: true,
+        description: "The client's default payment method (pre-selects the order's method); optional.",
+        example: 1,
       },
     },
   },

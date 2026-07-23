@@ -323,7 +323,12 @@
             "deliveryAmountLabel": "Costo de envío",
             "deliveryAmountHint": "Sin costo dentro de Hacienda Real; el resto según la distancia.",
             "depositAmountLabel": "Anticipo",
-            "moneyPlaceholder": "0.00"
+            "moneyPlaceholder": "0.00",
+            "paymentMethodLabel": "Método de pago",
+            "paymentMethodPlaceholder": "Sin especificar",
+            "savedContactLabel": "Contacto guardado",
+            "savedAddressLabel": "Dirección guardada",
+            "savedCustom": "Personalizado"
           },
           "lines": {
             "empty": "Agrega al menos un producto al pedido."
@@ -378,22 +383,38 @@
           "fields": {
             "nameLabel": "Nombre del cliente",
             "namePlaceholder": "Nombre del responsable",
+            "contactsLabel": "Contactos",
             "contactTypeLabel": "Tipo de contacto",
             "contactTypePlaceholder": "Tipo",
             "contactValueLabel": "Contacto",
             "contactValuePlaceholder": "Número o correo",
+            "principalContact": "Principal",
+            "addressesLabel": "Direcciones",
+            "addressesEmpty": "Sin direcciones guardadas. Puedes agregar una o escribirla en cada pedido.",
+            "favoriteAddress": "Favorita",
             "addressLabel": "Dirección",
             "addressPlaceholder": "Dirección de entrega",
             "zoneLabel": "Zona",
             "zonePlaceholder": "Sin zona",
-            "zoneHint": "Opcional. Útil para clientes dentro de las zonas de la ciudad."
+            "zoneHint": "Opcional. Útil para clientes dentro de las zonas de la ciudad.",
+            "preferredPaymentLabel": "Método de pago preferido",
+            "preferredPaymentPlaceholder": "Sin preferencia"
+          },
+          "actions": {
+            "addContact": "Agregar contacto",
+            "removeContact": "Quitar contacto",
+            "addAddress": "Agregar dirección",
+            "removeAddress": "Quitar dirección"
           },
           "errors": {
             "requiredName": "El nombre es requerido.",
             "invalidName": "El nombre no es válido.",
+            "requiredContacts": "Agrega al menos un contacto.",
+            "tooManyContacts": "Demasiados contactos.",
             "requiredContactType": "El tipo de contacto es requerido.",
             "requiredContactValue": "El contacto es requerido.",
             "invalidContactValue": "El contacto no es válido.",
+            "tooManyAddresses": "Demasiadas direcciones.",
             "requiredAddress": "La dirección es requerida.",
             "invalidAddress": "La dirección no es válida.",
             "submitFallback": "No pudimos registrar al cliente. Revisa los datos e intenta de nuevo."

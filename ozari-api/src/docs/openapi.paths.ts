@@ -1029,6 +1029,7 @@ export const paths: OpenAPIV3.PathsObject = {
         deliveryContact: EXAMPLE_ORDER_CONTACT,
         deliveryAddress: EXAMPLE_ORDER_ADDRESS,
         deliveryAmount: 50,
+        paymentMethodId: 1,
         lines: [{ productId: 3, quantity: 25 }],
       }),
       responses: {
@@ -1284,6 +1285,7 @@ export const paths: OpenAPIV3.PathsObject = {
         addresses: [
           { zoneId: 6, address: EXAMPLE_ORDER_ADDRESS, isFavorite: true },
         ],
+        preferredPaymentMethodId: 1,
       }),
       responses: {
         "201": dataResponse("The created registry (the list's shape).", "ClientRegistryResponse", {

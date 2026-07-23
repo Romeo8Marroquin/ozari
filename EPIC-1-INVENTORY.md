@@ -196,6 +196,20 @@ is role-gated + documented; both packages green at 100%; the nav shows only buil
 as the default landing.
 
 ## 5. Pending — verify before "functionality complete" / production cutover
+- **RE-RUN `pnpm db:seed` AFTER ANY MIGRATION THAT ADDS SEEDED REFERENCE TABLES — per environment,
+  right after `prisma:migrate:deploy` (a REQUIRED deploy step, not optional).** Migrations create
+  the *structure* (empty tables); the seed fills the *reference data*, and it runs SEPARATELY (never
+  part of `migrate deploy`, by design so a deploy never touches data). **Concrete case (Epic-2,
+  2026-07-16 migration `20260716120000_epic2_orders_schema`):** it added `event_types`,
+  `contact_types`, and `app_preferences` — the order-create form's `/orders/catalog` returns them,
+  and an empty `event_types`/`contact_types` makes the form show the "Falta configuración →
+  preferencias" state (correct behavior, but it means unusable until seeded). Dev hit this on
+  2026-07-20 (migration applied, seed not re-run → empty `eventTypes`/`contactTypes` while
+  `serviceStatuses` were already populated from an older seed run). The seed is idempotent (upserts;
+  `app_preferences` is create-only so it never clobbers admin edits) — safe to re-run anytime.
+  **Staging/prod: after the Epic-2 migration deploys, run `pnpm db:seed` against that DB once**
+  (same as the Repartidor rename was seeded). Login/register already require this on any fresh DB
+  (`user_roles`/`token_types`); order creation now does too (`event_types`/`contact_types`).
 - ✅ **R2 ↔ DB orphan reconcile script — BUILT (2026-07-15)**: `ozari-api/scripts/reconcile-product-images.ts`,
   run locally with `pnpm reconcile:images` (report-only dry run; `-- --fix` applies; `--grace-hours=N`
   widens the 24h in-flight-upload safety window). English-only local telemetry; NEVER deployed (lives

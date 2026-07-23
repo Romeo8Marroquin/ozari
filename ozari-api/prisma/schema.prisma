@@ -383,6 +383,10 @@ model Zone {
   name           String
   municipalityId Int       @map("municipality_id")
   description    String?
+  // The DEFAULT delivery fee for orders whose address is in this zone (owner 2026-07-23: zones drive
+  // fee pricing for now). NULL = not configured yet (distinct from 0 = free); a per-address
+  // `domicilePrice` overrides it. The order snapshots what was actually charged in `deliveryAmount`.
+  deliveryFee    Decimal?  @map("delivery_fee") @db.Decimal(15, 2)
   isActive       Boolean   @default(true) @map("is_active")
   updatedAt      DateTime? @updatedAt @map("updated_at")
   createdAt      DateTime  @default(now()) @map("created_at")
@@ -454,16 +458,20 @@ model ContactType {
 // hard-deletes otherwise; its contacts/addresses ALWAYS hard-delete — orders SNAPSHOT what they
 // used (see Service), so nothing here is load-bearing history.
 model ClientRegistry {
-  id        Int       @id @default(autoincrement())
-  nameKms   String    @map("name_kms")
-  notesKms  String?   @map("notes_kms")
-  isActive  Boolean   @default(true) @map("is_active")
-  updatedAt DateTime? @updatedAt @map("updated_at")
-  createdAt DateTime  @default(now()) @map("created_at")
+  id                       Int       @id @default(autoincrement())
+  nameKms                  String    @map("name_kms")
+  notesKms                 String?   @map("notes_kms")
+  // The client's DEFAULT payment method (owner 2026-07-23): pre-selects the order's method; the
+  // order snapshots its own choice. Nullable — a client may have no stated preference.
+  preferredPaymentMethodId Int?      @map("preferred_payment_method_id")
+  isActive                 Boolean   @default(true) @map("is_active")
+  updatedAt                DateTime? @updatedAt @map("updated_at")
+  createdAt                DateTime  @default(now()) @map("created_at")
 
-  contacts  ClientRegistryContact[]
-  addresses ClientRegistryAddress[]
-  services  Service[]
+  preferredPaymentMethod PaymentMethod?          @relation(fields: [preferredPaymentMethodId], references: [id])
+  contacts               ClientRegistryContact[]
+  addresses              ClientRegistryAddress[]
+  services               Service[]
 
   @@map("client_registries")
 }
@@ -540,6 +548,24 @@ model PaymentStatus {
   @@map("payment_status")
 }
 
+// HOW an order is paid (owner 2026-07-23): Efectivo / Transferencia for now — the card door stays
+// open (add a seed row, no schema change). Chosen per order (a nullable snapshot FK on `services`,
+// left NULL until known — payment is a state that can happen later) and optionally the client's
+// preferred default on `client_registries`. `isActive` is the seeded-lookup publication flag.
+model PaymentMethod {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  isActive    Boolean   @default(true) @map("is_active")
+  updatedAt   DateTime? @updatedAt @map("updated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  services          Service[]
+  clientRegistries  ClientRegistry[]
+
+  @@map("payment_methods")
+}
+
 // An ORDER (the business term; "service" is the historical table name). Identity is EITHER a
 // platform user (`userId`) OR a walk-in registry (`clientRegistryId`) — exactly ONE, enforced at
 // the application layer (the migration SQL must stay engine-written, so no hand-added CHECK
@@ -595,6 +621,10 @@ model Service {
   currencyId       Int       @map("currency_id")
   serviceStatusId  Int       @map("service_status_id")
   paymentStatusId  Int       @map("payment_status_id")
+  // HOW it was paid — a nullable snapshot FK to the seeded lookup, left NULL until known (payment is
+  // a state that can happen later). Unlike the PII delivery snapshots this is a live FK: the lookup
+  // is stable and never deleted.
+  paymentMethodId  Int?      @map("payment_method_id")
   comment          String?
   invoiceNumberKms String?   @map("invoice_number_kms")
   isActive         Boolean   @default(true) @map("is_active")
@@ -608,6 +638,7 @@ model Service {
   currency       Currency               @relation(fields: [currencyId], references: [id])
   serviceStatus  ServiceStatus          @relation(fields: [serviceStatusId], references: [id])
   paymentStatus  PaymentStatus          @relation(fields: [paymentStatusId], references: [id])
+  paymentMethod  PaymentMethod?         @relation(fields: [paymentMethodId], references: [id])
   serviceDetails ServiceDetail[]
   serviceExtras  ServiceExtra[]
   statusHistory  ServiceStatusHistory[]

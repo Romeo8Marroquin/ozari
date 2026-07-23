@@ -90,6 +90,39 @@ describe('CustomInput', () => {
     expect(input).toHaveAttribute('type', 'password'); // unchanged — the disabled guard returns early
   });
 
+  it('hides a native date/time picker format hint until focus/value, then shows the value', () => {
+    const classesOf = (c: HTMLElement) =>
+      ((c.querySelector('input') as HTMLInputElement).className ?? '').split(/\s+/);
+    const { container, rerender } = render(
+      <CustomInput id="d" label="Entrega" type="datetime-local" value="" onChange={() => {}} />,
+    );
+    // Empty → the format text is transparent (unfocused) and a soft gray on focus (placeholder-like).
+    expect(classesOf(container)).toContain('text-transparent');
+    expect(classesOf(container)).toContain('focus:text-charcoal/45');
+    // Filled → the value shows in the normal color (no transparent).
+    rerender(
+      <CustomInput id="d" label="Entrega" type="datetime-local" value="2026-08-01T14:00" onChange={() => {}} />,
+    );
+    expect(classesOf(container)).not.toContain('text-transparent');
+  });
+
+  it('a native picker in error keeps the hint hidden but reveals it red on focus', () => {
+    const input = (
+      render(<CustomInput id="d" label="Entrega" type="datetime-local" value="" error onChange={() => {}} />)
+        .container.querySelector('input') as HTMLInputElement
+    ).className;
+    expect(input.split(/\s+/)).toContain('text-transparent');
+    expect(input).toContain('focus:text-red-600');
+  });
+
+  it('leaves a plain text input untouched (no transparent-text trick)', () => {
+    const input = (
+      render(<CustomInput id="t" label="Nombre" type="text" value="" onChange={() => {}} />)
+        .container.querySelector('input') as HTMLInputElement
+    ).className;
+    expect(input.split(/\s+/)).not.toContain('text-transparent');
+  });
+
   it('drops the floating label when a controlled value is RESET to empty (discard-draft path)', () => {
     const isLabelFloated = (container: HTMLElement): boolean =>
       (container.querySelector('label')?.className ?? '').split(/\s+/).includes('-translate-y-6');

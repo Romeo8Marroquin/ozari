@@ -115,6 +115,7 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
     eventType: { findMany: lookupFindMany },
     serviceStatus: { findMany: lookupFindMany },
     paymentStatus: { findMany: lookupFindMany },
+    paymentMethod: { findMany: lookupFindMany },
     contactType: { findMany: lookupFindMany },
     zone: { findMany: lookupFindMany },
     ...overrides,
@@ -324,7 +325,7 @@ const buildCreateReq = (body: ReturnType<typeof createBody>): CustomRequest =>
 describe("createOrder", () => {
   it("creates a confirmed mixed order: server-side pricing, encrypted snapshots, sale decrement, audit row", async () => {
     const tx = mockCreateTx();
-    const body = createBody();
+    const body = { ...createBody(), paymentMethodId: 2 };
     await createOrder(buildCreateReq(body), {} as Response);
 
     expect(tx.$queryRaw).toHaveBeenCalled();
@@ -339,6 +340,7 @@ describe("createOrder", () => {
       eventTypeId: 1,
       totalAmount: 385,
       deliveryAmount: 50,
+      paymentMethodId: 2,
       serviceStatusId: 1,
       paymentStatusId: 1,
       deliveryAt: body.deliveryAt,
@@ -444,15 +446,22 @@ describe("createOrder", () => {
 });
 
 describe("getOrdersCatalog", () => {
-  it("returns the five active reference lists (event types carry minLeadHours)", async () => {
+  it("returns the six active reference lists (event types carry minLeadHours; zones carry the fee)", async () => {
     const eventTypes = [{ id: 1, name: "Evento familiar", minLeadHours: 24 }];
     const statuses = [{ id: 1, name: "Pendiente" }];
+    const methods = [{ id: 1, name: "Efectivo" }];
+    // One zone with a configured fee (Decimal → number), one without (null → omitted).
+    const zoneRows = [
+      { id: 6, name: "Zona 10", deliveryFee: 50 },
+      { id: 1, name: "Zona 1", deliveryFee: null },
+    ];
     mockPrisma({
       eventType: { findMany: vi.fn().mockResolvedValue(eventTypes) },
       serviceStatus: { findMany: vi.fn().mockResolvedValue(statuses) },
       paymentStatus: { findMany: vi.fn().mockResolvedValue(statuses) },
+      paymentMethod: { findMany: vi.fn().mockResolvedValue(methods) },
       contactType: { findMany: vi.fn().mockResolvedValue([{ id: 1, name: "WhatsApp" }]) },
-      zone: { findMany: vi.fn().mockResolvedValue([{ id: 1, name: "Zona 1" }]) },
+      zone: { findMany: vi.fn().mockResolvedValue(zoneRows) },
     });
     await getOrdersCatalog(buildReq(), {} as Response);
 
@@ -461,8 +470,12 @@ describe("getOrdersCatalog", () => {
       eventTypes,
       serviceStatuses: statuses,
       paymentStatuses: statuses,
+      paymentMethods: methods,
       contactTypes: [{ id: 1, name: "WhatsApp" }],
-      zones: [{ id: 1, name: "Zona 1" }],
+      zones: [
+        { id: 6, name: "Zona 10", deliveryFee: 50 },
+        { id: 1, name: "Zona 1" },
+      ],
     });
   });
 
@@ -470,8 +483,8 @@ describe("getOrdersCatalog", () => {
     const { lookupFindMany } = mockPrisma();
     await getOrdersCatalog(buildReq(), {} as Response);
 
-    // 5 lookups; each call carries the active-only filter and id order.
-    expect(lookupFindMany).toHaveBeenCalledTimes(5);
+    // 6 lookups; each call carries the active-only filter and id order.
+    expect(lookupFindMany).toHaveBeenCalledTimes(6);
     for (const call of lookupFindMany.mock.calls) {
       expect(call[0]).toMatchObject({ where: { isActive: true }, orderBy: { id: "asc" } });
     }

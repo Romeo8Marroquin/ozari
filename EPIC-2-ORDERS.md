@@ -52,6 +52,26 @@
 > side, chrome keeps the app-wide rise). **Next**: the **order DETAIL page** (tickets become links;
 > tracking-stepper hero), then the tracking flow + driver "Mis entregas" + the dashboard.
 > Update this file as things land.
+>
+> **CLIENT-REGISTRY + ZONES + PAYMENTS slice DONE (2026-07-23; migration
+> `20260723000000_epic2_zone_fee_payment_methods` — additive/nullable, must be APPLIED +
+> re-seeded per env before use):** (1) all **22 Guatemala City zones** seeded (numbers 1–25 except
+> 20/22/23; ids 1–9 preserved, 10–22 appended) with a nullable per-zone **`deliveryFee`** (NULL = not
+> configured; the zone drives the order form's fee suggestion, a per-address `domicilePrice`
+> overrides). (2) A seeded **`payment_methods`** lookup (Efectivo/Transferencia; card door open) —
+> `services.paymentMethodId?` snapshots the order's method (nullable, settle-later), and
+> `client_registries.preferredPaymentMethodId?` is the client default. `GET /orders/catalog` now
+> returns `paymentMethods` + zones-with-`deliveryFee`; `POST /orders` accepts an optional
+> `paymentMethodId`; the detail projection exposes `paymentMethod`. (3) Registries went **multi**:
+> **≥1 contact** (one principal) + **0..many addresses** (one favorite; a walk-in may have none and
+> type the venue per order) + an optional preferred method — the modal is now field-array rows with
+> principal/favorite radios; the validator relaxed addresses to 0..MAX. (4) The order form:
+> **receiver name defaults to the client name**, the favorite address's zone fee **autofills the
+> delivery fee**, the preferred method **pre-selects the payment select**, and **saved-data quick-fill
+> pickers** (derived value — no convergent effect) let the admin swap to another saved contact/address.
+> OpenAPI + i18n + tests same-commit; both suites green at 100% coverage. Per-address **instructions**
+> stay a documented fast-follow (the modal collects zone + address text only). The **searchable
+> combobox (§10.A)** and the **live availability annotation (§10.D)** remain unbuilt.
 
 ## 1. The business, in one paragraph
 
@@ -357,3 +377,150 @@ conflict pattern from product updates applies (someone else confirmed first → 
   door); which events notify whom.
 - **Q-C Dashboard week window**: exact shape (current week vs ±3 days vs 6 ahead) — decide by
   design feel, owner has no strong preference.
+
+## 10. Product-selection UX & availability confidentiality (PLANNED, not built — 2026-07-20)
+
+**Not a new epic — these are Epic-2 refinements** (they reuse the order form + backend + the client
+self-service flow already deferred in §9). Recorded now so we build them intentionally when the pain
+justifies it. Three layers, smallest-first:
+
+### 10.A The line picker (near-term, small) — owner asked "dropdown w/ search, or one GET of all?"
+- **Data: ONE GET of the whole active catalog is correct** at this scale. A party-rentals catalog is
+  dozens, maybe ~100 items; the current `GET /products?pageSize=50` (`useOrderProducts`) is fine.
+  Do NOT build server-side search/pagination for the picker unless the catalog outgrows ~a few
+  hundred — premature. (If it ever does: a typeahead endpoint, not a bigger dump.)
+- **UI: upgrade the per-line native `<select>` to a searchable COMBOBOX** (typeahead filter over the
+  in-memory list, keyboard-navigable, ARIA `combobox`/`listbox`). This is THE best-practice fix for
+  "not too many but tedious to scroll" — cheap, high-value, reuses the single GET, keeps the existing
+  dedup (`optionsFor` hides already-picked products) + the max-lines cap. **Recommended first
+  improvement.** (Today's native select already dedups + caps + is accessible; the combobox is a
+  polish, not a correctness fix.)
+
+### 10.B The "cart" flow (medium-term) — owner's idea for speed
+- **Shape**: an admin adds products (+ qty) from the catalog grid/detail into a client-side **cart**
+  (zustand or sessionStorage, per-admin-session), then "Ir al pedido" opens `/panel/pedidos/nuevo`
+  **pre-filled** with those lines; the cart clears on successful create.
+- **Reconcile with Q-E (no product-first flow for CLIENTS).** Q-E removed per-product CTAs for the
+  CLIENT catalog to avoid teaching a product-first order flow. The cart is **ADMIN-only productivity**
+  — the admin already knows the flow, so a cart doesn't "confuse"; it's a faster way to populate lines,
+  not a competing entry point. So: cart = admin tool; the client catalog stays a showcase (window-first
+  ordering per §9). If a generic "Iniciar pedido" ever lands on the client grid it stays generic (Q-E).
+- **Availability timing (the tricky part the owner flagged).** The cart holds products BEFORE a window
+  exists, so it CANNOT validate rental availability at add-time. That's fine: availability is validated
+  where it always is — at order **submit**, inside the transaction (the existing structured **409 →
+  per-line "solo N disponibles"** mapping). Optionally, once the admin sets the window on the pre-filled
+  form, a **live availability probe** can annotate each rental line (admin is trusted — see 10.C) so the
+  admin isn't surprised at submit. Sale lines never need a window (stock is stock).
+
+### 10.C Availability confidentiality vs UX (the deep one) — REVEAL only what the actor is ordering
+The owner's rule (Guatemala business norm): **never expose the fleet's full availability**, but don't
+make the user blind-guess either. The resolution is an ACTOR + SCOPE split:
+
+- **Admin (current + cart flow): reveal freely.** The admin runs the business — showing them real
+  availability for a chosen window is not a leak. So a live per-line availability annotation on the
+  admin form (once dates are set) is allowed and improves UX. The submit-time 409 already does this
+  minimally ("solo N disponibles" for the exact products they're ordering).
+- **Client self-service (future, §9): the window-first + capped-quantity contract.** Already decided in
+  §9 — the client sets delivery→pickup FIRST, then sees ONLY products with ≥1 available for THAT window,
+  qty **capped** at that window's availability. The confidentiality guarantees to enforce when built:
+  1. The availability endpoint answers **per requested window** only (never "all windows"), and only for
+     the products **currently in view** (paginated) — never a bulk fleet-availability dump.
+  2. It returns a **capped orderable quantity** ("you can take up to N"), NOT the raw fleet total nor the
+     count already booked. A devtools user learns only "≤N takeable for the window I committed to" —
+     inherent to letting them order, and nothing about fleet size, other windows, or unviewed products.
+  3. On a conflict, the message names WHICH line is short and by how much **relative to their request**
+     (the same `409 data.conflicts` shape) — enough to fix it without trial-and-error, revealing only the
+     product they already chose.
+- **The principle, one line:** *reveal whether THIS actor's THIS request (their products, their window)
+  can be fulfilled and by how much it's short — never the fleet's shape beyond that.*
+
+### 10.D Build order when the time comes
+1. Combobox picker (10.A) — small, do first if the dropdown annoys in practice.
+2. Live admin availability annotation on the form once dates are set (10.C admin half) — needs a small
+   `POST /orders/availability` (products + window → per-product takeable count, **Admin-only**).
+3. The cart (10.B) — reuses everything above.
+4. The client self-service flow (§9) — the window-first + capped endpoint (10.C client half); the
+   confidentiality contract above is its spec.
+
+## 11. Admin vs Client order flows — shared/separate architecture (PLANNED, not built — 2026-07-20)
+
+The order-creation surface will serve TWO actors: the **Admin** (built now — trusted, sees everything)
+and the future **Client** self-service (§9 — untrusted, tight confidentiality). This section fixes how
+they relate so we build the ADMIN pieces reuse-friendly and never have to rewrite. **Governing
+principle: shared CORE, role-projected EDGES, separate FRONTEND FLOWS, shared SUB-COMPONENTS.** (Both
+actors can order for a THIRD-PARTY recipient — the delivery snapshot is decoupled from identity, which
+is exactly why the snapshot columns exist. A Client's *identity* is always their own account; a Client
+never touches client-registries — those are an admin-only tool.)
+
+### 11.A `POST /orders` — ONE endpoint, role-branched (NOT two endpoints)
+The core (atomic stock check + 1h spacing + snapshot + server-side pricing + freeze) is IDENTICAL for
+both actors — duplicating it would drift. So widen the SAME endpoint (today it's Admin-only), branching
+only at the edges:
+- **Guard** → `[Admin, Client]`.
+- **Identity (server-resolved — NEVER trust the body for a Client):**
+  - Client → `userId = req.user.userId`, FORCED; reject any `clientRegistryId`/foreign `userId` in the
+    body (a client must never order "as" someone else).
+  - Admin → `clientRegistryId` (walk-in) XOR a chosen `userId` (registered client — the platform-user
+    door; keep the validator/controller shaped to add this branch WITHOUT a rewrite).
+- **Time rules:** Client → enforce the event type's `minLeadHours` (create only ≥ that far ahead;
+  edit/cancel only until that many hours before delivery). Admin → NONE (only stock+spacing).
+- **Delivery snapshot:** both capture a responsible-person snapshot (name/contact/address — may be a
+  third party). Same columns, same validation.
+- **Role-projected RESPONSE / errors (the confidentiality edge):**
+  - Stock **409** — Admin: exact `{ requested, available }` per line (trusted). Client: SOFT — product
+    names only or a generic "algunos productos ya no están disponibles, actualiza", **NO counts** (a
+    client must not be able to probe fleet numbers by submitting orders; the window-first picker already
+    caps qty, so a client 409 is only a rare race → "re-check", not a number).
+  - Spacing **409** — Admin: which/when. Client: "ese horario no está disponible, elige otro" (never
+    *why* — don't leak that another order sits there).
+  - Success payload — role-project like the reads (Client sees their order without internal fields).
+
+### 11.B Availability read — a NEW endpoint, NOT `GET /products` (see §10.C)
+`GET /products` stays the catalog BROWSE (role-projected fields; Client sees no stock). Window-scoped
+availability is a SEPARATE, tightly-scoped concern so the confidentiality contract is explicit + auditable:
+- Client window-first browse: `GET /orders/available-products?deliveryAt&pickupAt&page` → only products
+  with ≥1 available for THAT window, each with a **capped orderable qty** (never the fleet total).
+- Line annotation (admin live check / client cart re-check): `POST /orders/availability` (productIds +
+  window → per-product cap). Admin: exact; Client: capped-only.
+- Never a bulk fleet-availability dump; per-window + per-viewed-products only (§10.C).
+
+### 11.C Frontend — SEPARATE flows, SHARED sub-components
+The STEP ORDER differs, so a single mega-form with role-branches everywhere would rot — build two pages,
+share the pieces:
+- **Admin (built):** mode → client (registry) → dates → all-products lines → snapshot → money (admin sets
+  the delivery fee) → estimate → confirm.
+- **Client (future):** mode → **dates FIRST (window)** → window-filtered, qty-capped products → delivery
+  snapshot (self or third party) → **total to pay** (client does NOT set the delivery fee, does not see
+  internal pricing/fleet) → confirm. No registry picker (identity = their account).
+- **Reuse (keep these dependency-light NOW so extraction is trivial later):** `OrderModeSelect`, the
+  datetime `CustomInput`, the delivery-snapshot field group, the estimate/total display, the product-line
+  row, and `SchemaCreateOrder`'s field helpers + `toCreateOrderBody` (the client body is a SUBSET — it
+  omits identity; the server fills `userId`). Don't pre-extract, but don't couple them to admin-only
+  context either.
+
+### 11.D Role-awareness doctrine — the "consciousness" for every new surface
+Bake this in from now so nothing leaks by omission (fail-CLOSED — show the LEAST until a role grants more):
+- **Endpoint** → declares its role guard AND a role-projected response (the `projectProductForRole` /
+  `projectOrderListItem` pattern — the projection is the single source of field visibility). A Client
+  read is a NEW tier on the projection, never a widening of the Admin one.
+- **Page/route** → declares its `getStoredRole` guard; the backend 403 is the real boundary (the guard is
+  UX only).
+- **Component** → shows role-sensitive data only via `RoleGate`/`useHasRole` or a role-projected PROP;
+  never re-derives the role or trusts client-passed identity.
+- **Errors** → may carry MORE detail for Admin than Client (see 11.A) — decide the projection when the
+  Client can first reach the code path.
+
+### 11.E Awareness NOW so we don't regret it later
+- Order read projections (`projectOrderListItem`/`projectOrderDetail`) are Admin-only today → ADD a Client
+  tier when "mis pedidos" lands; don't widen Admin's.
+- `POST /orders` identity is `clientRegistryId`-only today → the `userId` branch (admin-for-registered +
+  client-self) is the SAME endpoint; keep it structured to add without a rewrite.
+- The 409 conflict payload is Admin-detail today → project it (soft) the moment a Client can hit it.
+- Do NOT overload `GET /products` with availability — separate endpoint by design.
+
+### 11.F Scope decision (owner asked: separate flows, or shared?)
+**Not a new epic, and not "forget the client."** The Client flow is a deferred Epic-2 slice (§9); this
+doc is its spec. For NOW: finish the ADMIN flow (agenda + creation exist; next is order detail + tracking),
+building the shared sub-components reuse-friendly per 11.C, and keeping the endpoint/projection doors open
+per 11.A/11.E. When the Client flow lands it's a separate page + a widened `POST /orders` + the two
+availability endpoints — no rewrite of what exists.

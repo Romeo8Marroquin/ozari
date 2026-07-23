@@ -62,12 +62,19 @@ export interface EventTypeCatalogOption extends CatalogOption {
   minLeadHours: number;
 }
 
+/** A zone carrying its default delivery fee (zones drive fee pricing; `deliveryFee` absent = not
+ *  configured, distinct from 0 = free). */
+export interface ZoneOption extends CatalogOption {
+  deliveryFee?: number;
+}
+
 export interface OrderCatalog {
   eventTypes: EventTypeCatalogOption[];
   serviceStatuses: CatalogOption[];
   paymentStatuses: CatalogOption[];
+  paymentMethods: CatalogOption[];
   contactTypes: CatalogOption[];
-  zones: CatalogOption[];
+  zones: ZoneOption[];
 }
 
 // ── Client registries (the walk-in client picker; `GET`/`POST /client-registries`) ───────────
@@ -81,7 +88,7 @@ export interface RegistryContact {
 
 export interface RegistryAddress {
   id: number;
-  zone?: CatalogOption;
+  zone?: ZoneOption;
   address: string;
   instructions?: string;
   domicilePrice?: number;
@@ -94,6 +101,8 @@ export interface ClientRegistry {
   notes?: string;
   contacts: RegistryContact[];
   addresses: RegistryAddress[];
+  /** The client's default payment method — pre-selects the order's method. */
+  preferredPaymentMethod?: CatalogOption;
   createdAt: string;
 }
 
@@ -136,6 +145,7 @@ export interface OrderDetail extends OrderListItem {
   assignedUser?: { id: number; name: string };
   deliveryAmount?: number;
   depositAmount?: number;
+  paymentMethod?: OrderLookup;
   discountAmount?: number;
   discountReason?: string;
   paidAt?: string;

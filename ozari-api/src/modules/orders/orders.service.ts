@@ -42,6 +42,7 @@ export const richOrderInclude = {
   eventType: { select: { id: true, name: true } },
   serviceStatus: { select: { id: true, name: true } },
   paymentStatus: { select: { id: true, name: true } },
+  paymentMethod: { select: { id: true, name: true } },
   currency: {
     select: { id: true, iso4217Code: true, name: true, symbol: true },
   },
@@ -211,6 +212,7 @@ export function projectOrderDetail(order: RichOrder): OrderDetailResponseModel {
       : undefined,
     deliveryAmount: toMoney(order.deliveryAmount),
     depositAmount: toMoney(order.depositAmount),
+    paymentMethod: order.paymentMethod ?? undefined,
     discountAmount: toMoney(order.discountAmount),
     discountReason: order.discountReason ?? undefined,
     paidAt: order.paidAt ?? undefined,

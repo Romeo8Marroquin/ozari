@@ -47,8 +47,9 @@ const sanitizeText = (value: unknown, min: number, max: number): string | null =
  * `POST /client-registries` — the walk-in client record's contract: a name (2–255; deliberately
  * looser than the account `fullName` policy — "Doña María la del canasto" is a perfectly good
  * registry name), optional notes, 1–10 contacts (active contact types, exactly one principal —
- * defaulted to the first when none is flagged) and 1–10 addresses (optional ACTIVE zone, 5–500
- * address text, exactly one favorite — same defaulting). The sanitized body replaces `req.body`.
+ * defaulted to the first when none is flagged), 0–10 addresses (optional ACTIVE zone, 5–500 address
+ * text, exactly one favorite — same defaulting; a walk-in may have none and type one per order) and
+ * an optional preferred payment method. The sanitized body replaces `req.body`.
  */
 export const validateCreateClientRegistry = async (
   req: Request,
@@ -117,9 +118,10 @@ export const validateCreateClientRegistry = async (
       contacts[0].isPrincipal = true;
     }
 
-    // Addresses: 1..MAX, optional active zone, 5–500 text, at most one explicit favorite.
-    const rawAddresses = body["addresses"];
-    if (!Array.isArray(rawAddresses) || rawAddresses.length === 0) {
+    // Addresses: 0..MAX (a walk-in may have NO saved venue — each order types one), optional active
+    // zone, 5–500 text, at most one explicit favorite.
+    const rawAddresses = body["addresses"] ?? [];
+    if (!Array.isArray(rawAddresses)) {
       rejectCreate(res, "invalidAddresses", { addresses: rawAddresses });
       return;
     }
@@ -193,11 +195,30 @@ export const validateCreateClientRegistry = async (
       addresses[0].isFavorite = true;
     }
 
+    // Preferred payment method (optional): when present it must be an ACTIVE seeded method.
+    let preferredPaymentMethodId: number | undefined;
+    const rawPreferred = body["preferredPaymentMethodId"];
+    if (rawPreferred !== undefined && rawPreferred !== null) {
+      const activePaymentMethods = await prismaClient.paymentMethod.findMany({
+        where: { isActive: true },
+        select: { id: true },
+      });
+      const paymentMethodIds = new Set(activePaymentMethods.map((method) => method.id));
+      if (typeof rawPreferred !== "number" || !paymentMethodIds.has(rawPreferred)) {
+        rejectCreate(res, "invalidPreferredPaymentMethodId", {
+          preferredPaymentMethodId: rawPreferred,
+        });
+        return;
+      }
+      preferredPaymentMethodId = rawPreferred;
+    }
+
     const validatedBody: CreateClientRegistryRequestModel = {
       name,
       notes,
       contacts,
       addresses,
+      preferredPaymentMethodId,
     };
     req.body = validatedBody;
     next();

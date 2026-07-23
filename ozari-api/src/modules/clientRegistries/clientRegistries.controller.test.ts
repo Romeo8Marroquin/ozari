@@ -34,11 +34,13 @@ beforeAll(() => {
   process.env["ENCRYPTION_KEY"] = VALID_ENCRYPTION_KEY;
 });
 
-/** A raw registry row as `richRegistryInclude` fetches it (encrypted PII). */
+/** A raw registry row as `richRegistryInclude` fetches it (encrypted PII): a priced zone + a
+ *  preferred payment method (the "everything present" projection branch). */
 const makeRawRegistry = () => ({
   id: 3,
   nameKms: encryptKms("María López"),
   notesKms: null,
+  preferredPaymentMethodId: 1,
   isActive: true,
   updatedAt: null,
   createdAt: new Date("2026-07-16T12:00:00.000Z"),
@@ -57,9 +59,37 @@ const makeRawRegistry = () => ({
       instructionsKms: encryptKms("Portón negro"),
       domicilePrice: new Prisma.Decimal("50.00"),
       isFavorite: true,
-      zone: { id: 6, name: "Zona 10" },
+      zone: { id: 6, name: "Zona 10", deliveryFee: new Prisma.Decimal("50.00") },
     },
   ],
+  preferredPaymentMethod: { id: 1, name: "Efectivo" },
+});
+
+/** The other projection branches: an address with NO zone, a zone with NO fee, and NO preferred
+ *  payment method (nullable everything). */
+const makeRawRegistryNullables = () => ({
+  ...makeRawRegistry(),
+  notesKms: encryptKms("cliente de siempre"),
+  preferredPaymentMethodId: null,
+  addresses: [
+    {
+      id: 1,
+      addressKms: encryptKms("Casa en Hacienda Real, lote 5"),
+      instructionsKms: null,
+      domicilePrice: null,
+      isFavorite: true,
+      zone: null,
+    },
+    {
+      id: 2,
+      addressKms: encryptKms("Zona 15, 2a calle 3-33"),
+      instructionsKms: null,
+      domicilePrice: null,
+      isFavorite: false,
+      zone: { id: 8, name: "Zona 15", deliveryFee: null },
+    },
+  ],
+  preferredPaymentMethod: null,
 });
 
 function mockPrisma(overrides: Record<string, unknown> = {}) {
@@ -99,13 +129,14 @@ describe("getClientRegistries", () => {
       addresses: [
         {
           id: 1,
-          zone: { id: 6, name: "Zona 10" },
+          zone: { id: 6, name: "Zona 10", deliveryFee: 50 },
           address: "Zona 10, 4a avenida 5-55",
           instructions: "Portón negro",
           domicilePrice: 50,
           isFavorite: true,
         },
       ],
+      preferredPaymentMethod: { id: 1, name: "Efectivo" },
     });
     expect(data.pagination).toEqual({ page: 1, pageSize: 20, total: 1, totalPages: 1 });
     expect(findMany).toHaveBeenCalledWith(
@@ -146,6 +177,7 @@ describe("createClientRegistry", () => {
       { zoneId: 6, address: "Zona 10, 4a avenida 5-55", isFavorite: true },
       { address: "Casa en Hacienda Real, lote 5", isFavorite: false },
     ],
+    preferredPaymentMethodId: 1,
   });
 
   it("encrypts every PII field into a nested create and answers with the projected registry", async () => {
@@ -167,6 +199,7 @@ describe("createClientRegistry", () => {
     // An address without a zone persists NULL (outside the seeded zones — e.g. Hacienda Real).
     expect(arg.data.addresses.create[0]).toMatchObject({ zoneId: 6, isFavorite: true });
     expect(arg.data.addresses.create[1]).toMatchObject({ zoneId: null, isFavorite: false });
+    expect((arg.data as { preferredPaymentMethodId: number }).preferredPaymentMethodId).toBe(1);
 
     expect(sendOzariSuccess).toHaveBeenCalledWith(
       expect.anything(),
@@ -175,6 +208,23 @@ describe("createClientRegistry", () => {
       expect.anything(),
     );
     expect(successData<ClientRegistryEnvelopeModel>().registry.name).toBe("María López");
+  });
+
+  it("defaults an absent preferred method to NULL and projects the nullable branches", async () => {
+    const create = vi.fn().mockResolvedValue(makeRawRegistryNullables());
+    mockPrisma({ clientRegistry: { create } });
+    const { preferredPaymentMethodId: _drop, ...bodyWithoutPreferred } = validatedBody();
+    await createClientRegistry(buildReq({}, bodyWithoutPreferred), {} as Response);
+
+    const arg = (create as Mock).mock.calls[0]?.[0] as { data: { preferredPaymentMethodId: null } };
+    expect(arg.data.preferredPaymentMethodId).toBeNull();
+
+    const registry = successData<ClientRegistryEnvelopeModel>().registry;
+    expect(registry.notes).toBe("cliente de siempre");
+    expect(registry.preferredPaymentMethod).toBeUndefined();
+    // address[0]: no zone; address[1]: a zone without a configured fee.
+    expect(registry.addresses[0]?.zone).toBeUndefined();
+    expect(registry.addresses[1]?.zone).toEqual({ id: 8, name: "Zona 15" });
   });
 
   it("responds 500 when the create fails", async () => {

@@ -10,42 +10,67 @@ import { z } from 'zod';
 
 const KEY = 'modules.panel.orders.registry.errors';
 
+/** Hard bounds mirroring the backend (`clientRegistries.validator.ts`): ≥1 contact, 0..many
+ *  addresses (a walk-in may type one per order), capped so a stuck row can't grow unboundedly. */
+export const REGISTRY_MAX_CONTACTS = 10;
+export const REGISTRY_MAX_ADDRESSES = 10;
+
+const registryText = (min: number, max: number, requiredMessage: string, invalidMessage: string) =>
+  z
+    .string()
+    .trim()
+    .nonempty(requiredMessage)
+    .refine((value) => value.length >= min && value.length <= max, invalidMessage);
+
+const registryContactSchema = z.object({
+  contactTypeId: z.number({ error: t(`${KEY}.requiredContactType`) }),
+  value: registryText(
+    ORDER_TEXT_MIN_LENGTH,
+    ORDER_TEXT_MAX_LENGTH,
+    t(`${KEY}.requiredContactValue`),
+    t(`${KEY}.invalidContactValue`),
+  ),
+});
+
+const registryAddressSchema = z.object({
+  // `null` = the empty-selection sentinel: a zone is OPTIONAL (walk-ins are often outside the
+  // seeded city zones — Hacienda Real). The encrypted address text carries the truth; the zone,
+  // when set, drives the order form's delivery-fee suggestion.
+  zoneId: z.number().nullable(),
+  address: registryText(
+    ORDER_ADDRESS_MIN_LENGTH,
+    ORDER_LONGTEXT_MAX_LENGTH,
+    t(`${KEY}.requiredAddress`),
+    t(`${KEY}.invalidAddress`),
+  ),
+});
+
 /**
- * Mirrors the backend create-client-registry validator. **First-version scope:** ONE contact and
- * ONE address (the common walk-in: a phone and a place) — the backend accepts 1–10 of each and
- * defaults the first to principal/favorite, so this sends arrays of one. Multiple contacts/
- * addresses are a documented fast-follow (the model + API already support them). A registry "name"
- * is deliberately loose (any 2–255 chars — "Doña María la del canasto" is valid).
+ * Mirrors the backend create-client-registry validator. The registry holds the responsible person
+ * (loose 2–255 name — "Doña María la del canasto" is valid), ≥1 contact (exactly one principal),
+ * 0..many addresses (exactly one favorite when any; a walk-in may have none and type the venue on
+ * each order — Q-D), and an optional preferred payment method. "Exactly one principal/favorite" is a
+ * UI invariant: a single selected INDEX per list, mapped to `isPrincipal`/`isFavorite` on submit
+ * (the backend defaults the first if none is flagged).
  */
 const baseCreateRegistrySchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .nonempty(t(`${KEY}.requiredName`))
-    .refine(
-      (v) => v.length >= ORDER_TEXT_MIN_LENGTH && v.length <= ORDER_TEXT_MAX_LENGTH,
-      t(`${KEY}.invalidName`),
-    ),
-  contactTypeId: z.number({ error: t(`${KEY}.requiredContactType`) }),
-  contactValue: z
-    .string()
-    .trim()
-    .nonempty(t(`${KEY}.requiredContactValue`))
-    .refine(
-      (v) => v.length >= ORDER_TEXT_MIN_LENGTH && v.length <= ORDER_TEXT_MAX_LENGTH,
-      t(`${KEY}.invalidContactValue`),
-    ),
-  // `null` = the empty-selection sentinel: a zone is OPTIONAL (walk-ins are often outside the
-  // seeded city zones — Hacienda Real). The encrypted address text carries the truth.
-  zoneId: z.number().nullable().optional(),
-  address: z
-    .string()
-    .trim()
-    .nonempty(t(`${KEY}.requiredAddress`))
-    .refine(
-      (v) => v.length >= ORDER_ADDRESS_MIN_LENGTH && v.length <= ORDER_LONGTEXT_MAX_LENGTH,
-      t(`${KEY}.invalidAddress`),
-    ),
+  name: registryText(
+    ORDER_TEXT_MIN_LENGTH,
+    ORDER_TEXT_MAX_LENGTH,
+    t(`${KEY}.requiredName`),
+    t(`${KEY}.invalidName`),
+  ),
+  contacts: z
+    .array(registryContactSchema)
+    .min(1, t(`${KEY}.requiredContacts`))
+    .max(REGISTRY_MAX_CONTACTS, t(`${KEY}.tooManyContacts`)),
+  addresses: z.array(registryAddressSchema).max(REGISTRY_MAX_ADDRESSES, t(`${KEY}.tooManyAddresses`)),
+  // The chosen principal contact / favorite address (a radio index). Out-of-range is harmless — the
+  // backend defaults the first when nothing is flagged.
+  principalContactIndex: z.number(),
+  favoriteAddressIndex: z.number(),
+  // `null` = no preference (the order's payment select then falls back to its own default).
+  preferredPaymentMethodId: z.number().nullable(),
 });
 
 export const createRegistrySchema = baseCreateRegistrySchema;
@@ -54,30 +79,39 @@ export type CreateRegistryFormType = z.infer<typeof createRegistrySchema>;
 
 export const createRegistryDefaultValues: CreateRegistryFormType = {
   name: '',
-  contactTypeId: null as unknown as number,
-  contactValue: '',
-  zoneId: null,
-  address: '',
+  // Start with ONE empty contact (≥1 required) and ONE empty address (the common walk-in has a
+  // venue; the admin can remove it for an address-less client).
+  contacts: [{ contactTypeId: null as unknown as number, value: '' }],
+  addresses: [{ zoneId: null, address: '' }],
+  principalContactIndex: 0,
+  favoriteAddressIndex: 0,
+  preferredPaymentMethodId: null,
 };
 
-/** The `POST /client-registries` body — the single contact/address wrapped as arrays of one. */
+/** The `POST /client-registries` body — contacts/addresses with the chosen principal/favorite flags. */
 export interface CreateRegistryBody {
   name: string;
   contacts: { contactTypeId: number; value: string; isPrincipal: boolean }[];
   addresses: { zoneId?: number; address: string; isFavorite: boolean }[];
+  preferredPaymentMethodId?: number;
 }
 
 export function toCreateRegistryBody(data: CreateRegistryFormType): CreateRegistryBody {
   return {
     name: data.name.trim(),
-    contacts: [{ contactTypeId: data.contactTypeId, value: data.contactValue.trim(), isPrincipal: true }],
-    addresses: [
-      {
-        ...(data.zoneId != null && { zoneId: data.zoneId }),
-        address: data.address.trim(),
-        isFavorite: true,
-      },
-    ],
+    contacts: data.contacts.map((contact, index) => ({
+      contactTypeId: contact.contactTypeId,
+      value: contact.value.trim(),
+      isPrincipal: index === data.principalContactIndex,
+    })),
+    addresses: data.addresses.map((address, index) => ({
+      ...(address.zoneId != null && { zoneId: address.zoneId }),
+      address: address.address.trim(),
+      isFavorite: index === data.favoriteAddressIndex,
+    })),
+    ...(data.preferredPaymentMethodId != null && {
+      preferredPaymentMethodId: data.preferredPaymentMethodId,
+    }),
   };
 }
 

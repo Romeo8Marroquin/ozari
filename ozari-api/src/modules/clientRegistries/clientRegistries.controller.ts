@@ -102,6 +102,7 @@ export const createClientRegistry = async (
       data: {
         nameKms: encryptKms(body.name),
         notesKms: body.notes !== undefined ? encryptKms(body.notes) : null,
+        preferredPaymentMethodId: body.preferredPaymentMethodId ?? null,
         contacts: {
           create: body.contacts.map((contact) => ({
             contactTypeId: contact.contactTypeId,

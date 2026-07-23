@@ -80,8 +80,16 @@ const saleProduct: Product = {
 const registry: ClientRegistry = {
   id: 3,
   name: 'María López',
-  contacts: [{ id: 1, contactType: { id: 1, name: 'WhatsApp' }, value: '5555-1234', isPrincipal: true }],
-  addresses: [{ id: 1, address: 'Zona 10, 4a avenida 5-55', isFavorite: true }],
+  contacts: [
+    { id: 1, contactType: { id: 1, name: 'WhatsApp' }, value: '5555-1234', isPrincipal: true },
+    { id: 2, contactType: { id: 2, name: 'Teléfono' }, value: '2222-3333', isPrincipal: false },
+  ],
+  addresses: [
+    // The favorite address's zone carries a fee (autofilled); the second has no zone/fee.
+    { id: 1, zone: { id: 6, name: 'Zona 10', deliveryFee: 50 }, address: 'Zona 10, 4a avenida 5-55', isFavorite: true },
+    { id: 2, address: 'Hacienda Real lote 5', isFavorite: false },
+  ],
+  preferredPaymentMethod: { id: 1, name: 'Efectivo' },
   createdAt: 'x',
 };
 
@@ -89,8 +97,9 @@ const catalog: OrderCatalog = {
   eventTypes: [{ id: 1, name: 'Evento familiar', minLeadHours: 24 }],
   serviceStatuses: [],
   paymentStatuses: [],
+  paymentMethods: [{ id: 1, name: 'Efectivo' }, { id: 2, name: 'Transferencia' }],
   contactTypes: [{ id: 1, name: 'WhatsApp' }],
-  zones: [{ id: 6, name: 'Zona 10' }],
+  zones: [{ id: 6, name: 'Zona 10', deliveryFee: 50 }],
 };
 
 type QueryState<T> = { data?: T; isLoading?: boolean; isError?: boolean; refetch?: () => void };
@@ -279,6 +288,57 @@ describe('OrderForm', () => {
       expect((byId(container, 'order-delivery-name') as HTMLInputElement).value).toBe('María López'),
     );
     expect((byId(container, 'order-delivery-contact') as HTMLInputElement).value).toBe('5555-1234');
+  });
+
+  it('autofills the delivery fee + preferred payment from the client and shows the saved-data pickers', async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await user.selectOptions(byId(container, 'order-client'), '3');
+    await waitFor(() =>
+      expect((byId(container, 'order-delivery-amount') as HTMLInputElement).value).toBe('50'),
+    );
+    // Preferred payment method pre-selected.
+    expect((byId(container, 'order-payment-method') as HTMLSelectElement).value).toBe('1');
+    // The saved-data quick-fill pickers appear (the client has contacts + addresses).
+    expect(byId(container, 'order-saved-contact')).toBeInTheDocument();
+    expect(byId(container, 'order-saved-address')).toBeInTheDocument();
+  });
+
+  it('the saved-data pickers fill the snapshot from another saved contact/address; a placeholder pick is a no-op', async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await user.selectOptions(byId(container, 'order-client'), '3');
+    await waitFor(() =>
+      expect((byId(container, 'order-delivery-contact') as HTMLInputElement).value).toBe('5555-1234'),
+    );
+
+    // Pick the second saved contact → fills the contact field.
+    await user.selectOptions(byId(container, 'order-saved-contact'), '2');
+    expect((byId(container, 'order-delivery-contact') as HTMLInputElement).value).toBe('2222-3333');
+
+    // Pick the second saved address (no zone fee) → fills the address, leaves the fee untouched.
+    await user.selectOptions(byId(container, 'order-saved-address'), '2');
+    expect((byId(container, 'order-delivery-address') as HTMLTextAreaElement).value).toBe('Hacienda Real lote 5');
+    expect((byId(container, 'order-delivery-amount') as HTMLInputElement).value).toBe('50');
+
+    // Pick the first saved address (zone fee 50) → refills the fee.
+    await user.selectOptions(byId(container, 'order-saved-address'), '1');
+    expect((byId(container, 'order-delivery-amount') as HTMLInputElement).value).toBe('50');
+
+    // Selecting the placeholder option on either picker is a no-op (nothing to fill).
+    await user.selectOptions(byId(container, 'order-saved-contact'), '');
+    expect((byId(container, 'order-delivery-contact') as HTMLInputElement).value).toBe('2222-3333');
+    await user.selectOptions(byId(container, 'order-saved-address'), '');
+    expect((byId(container, 'order-delivery-address') as HTMLTextAreaElement).value).toBe('Zona 10, 4a avenida 5-55');
+  });
+
+  it('lets the admin change the payment method, sending it on submit', async () => {
+    const { container } = renderForm();
+    await fillValid(container);
+    await userEvent.selectOptions(byId(container, 'order-payment-method'), '2');
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createOrder).toHaveBeenCalled());
+    expect(createOrder.mock.calls[0][0].paymentMethodId).toBe(2);
   });
 
   it('creating a client through the modal seeds the picker cache (prepending the new client) and selects it', async () => {
