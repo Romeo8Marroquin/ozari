@@ -14,6 +14,7 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
   (getPrismaClient as Mock).mockResolvedValue({
     contactType: { findMany: vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }]) },
     zone: { findMany: vi.fn().mockResolvedValue([{ id: 6 }]) },
+    paymentMethod: { findMany: vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }]) },
     ...overrides,
   });
 }
@@ -71,19 +72,25 @@ describe("validateCreateClientRegistry", () => {
         { contactTypeId: 2, value: "maria@example.com", isPrincipal: true },
       ],
       addresses: [
-        { address: "Casa en Hacienda Real, lote 5", domicilePrice: 0.999, isFavorite: true },
+        {
+          address: "Casa en Hacienda Real, lote 5",
+          instructions: "  Portón negro  ",
+          domicilePrice: 0.999,
+          isFavorite: true,
+        },
       ],
     });
     expect(next).toHaveBeenCalled();
     const body = req.body as {
       notes: string;
       contacts: Array<{ isPrincipal: boolean }>;
-      addresses: Array<{ isFavorite: boolean; domicilePrice?: number; zoneId?: number }>;
+      addresses: Array<{ isFavorite: boolean; domicilePrice?: number; zoneId?: number; instructions?: string }>;
     };
     expect(body.notes).toBe("cliente de siempre");
     expect(body.contacts[0]?.isPrincipal).toBe(false);
     expect(body.contacts[1]?.isPrincipal).toBe(true);
     expect(body.addresses[0]).toMatchObject({ isFavorite: true, domicilePrice: 0.99 });
+    expect(body.addresses[0]?.instructions).toBe("Portón negro");
     expect(body.addresses[0]?.zoneId).toBeUndefined();
   });
 
@@ -102,7 +109,7 @@ describe("validateCreateClientRegistry", () => {
         ],
       },
     ],
-    ["invalidAddresses", { addresses: [] }],
+    ["invalidAddresses", { addresses: 42 }],
     ["invalidZoneId", { addresses: [{ zoneId: 99, address: "Zona 10, 4a avenida" }] }],
     ["invalidAddress", { addresses: [{ address: "abc" }] }],
     ["invalidInstructions", { addresses: [{ address: "Zona 10, 4a avenida", instructions: 42 }] }],
@@ -116,10 +123,27 @@ describe("validateCreateClientRegistry", () => {
         ],
       },
     ],
+    ["invalidPreferredPaymentMethodId", { preferredPaymentMethodId: 99 }],
   ])("rejects %s", async (key, patch) => {
     const { next } = await run({ ...validBody(), ...patch });
     expect(next).not.toHaveBeenCalled();
     expectRejected(key);
+  });
+
+  it("allows a registry with NO addresses (a walk-in types one per order) and a preferred method", async () => {
+    // `addresses` omitted entirely — the validator treats a missing array as empty.
+    const { req, next } = await run({
+      name: "María López",
+      contacts: [{ contactTypeId: 1, value: "5555-1234" }],
+      preferredPaymentMethodId: 1,
+    });
+    expect(next).toHaveBeenCalled();
+    const body = req.body as {
+      addresses: unknown[];
+      preferredPaymentMethodId: number | undefined;
+    };
+    expect(body.addresses).toHaveLength(0);
+    expect(body.preferredPaymentMethodId).toBe(1);
   });
 
   it("caps the contact and address counts", async () => {

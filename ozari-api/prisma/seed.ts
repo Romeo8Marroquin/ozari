@@ -23,6 +23,46 @@ import {
  */
 type SeedPrismaClient = Awaited<ReturnType<typeof getPrismaClient>>;
 
+// zones — the 22 zones of the Ciudad de Guatemala (numbers 1–25 EXCEPT 20/22/23, which fell into
+// neighbouring municipalities). Ids 1–9 are the ORIGINAL insert order (1,2,4,5,9,10,14,15,16) and
+// MUST NOT be renumbered — `client_registry_addresses.zone_id` / `addresses.zone_id` reference
+// them. The remaining 13 zones are appended with new ids 10–22. `deliveryFee` is deliberately NOT
+// in the upsert (stays NULL = "not configured"; re-seeding must never clobber an admin-set fee).
+async function seedZones(prisma: SeedPrismaClient): Promise<void> {
+  const zones = [
+    { id: 1, name: "Zona 1" },
+    { id: 2, name: "Zona 2" },
+    { id: 3, name: "Zona 4" },
+    { id: 4, name: "Zona 5" },
+    { id: 5, name: "Zona 9" },
+    { id: 6, name: "Zona 10" },
+    { id: 7, name: "Zona 14" },
+    { id: 8, name: "Zona 15" },
+    { id: 9, name: "Zona 16" },
+    { id: 10, name: "Zona 3" },
+    { id: 11, name: "Zona 6" },
+    { id: 12, name: "Zona 7" },
+    { id: 13, name: "Zona 8" },
+    { id: 14, name: "Zona 11" },
+    { id: 15, name: "Zona 12" },
+    { id: 16, name: "Zona 13" },
+    { id: 17, name: "Zona 17" },
+    { id: 18, name: "Zona 18" },
+    { id: 19, name: "Zona 19" },
+    { id: 20, name: "Zona 21" },
+    { id: 21, name: "Zona 24" },
+    { id: 22, name: "Zona 25" },
+  ];
+  for (const row of zones) {
+    const description = `${row.name} de la Ciudad de Guatemala`;
+    await prisma.zone.upsert({
+      where: { id: row.id },
+      update: { name: row.name, municipalityId: 1, description },
+      create: { id: row.id, name: row.name, municipalityId: 1, description },
+    });
+  }
+}
+
 // app_preferences — every operational "constant" is an admin preference (owner direction,
 // 2026-07-15; EPIC-2-ORDERS §2). CREATE-ONLY upserts (`update: {}`): re-seeding must NEVER
 // clobber a value the admin has since edited. Values are text, parsed per valueType.
@@ -320,6 +360,20 @@ async function main(): Promise<void> {
     });
   }
 
+  // payment_methods — HOW an order is paid (owner 2026-07-23). Efectivo / Transferencia for now;
+  // the card door stays open (add a row, no schema change).
+  const paymentMethods = [
+    { id: 1, name: "Efectivo", description: "Pago en efectivo" },
+    { id: 2, name: "Transferencia", description: "Transferencia bancaria" },
+  ];
+  for (const row of paymentMethods) {
+    await prisma.paymentMethod.upsert({
+      where: { id: row.id },
+      update: { name: row.name, description: row.description },
+      create: row,
+    });
+  }
+
   // event_types — the purpose of an order (owner taxonomy, 2026-07-16). `minLeadHours` (default
   // 24, deliberately NOT updated on re-run — it's an admin-tunable knob) is the client-side rule:
   // create only if delivery is ≥ that far away, edit/cancel only until that many hours before.
@@ -380,26 +434,7 @@ async function main(): Promise<void> {
     });
   }
 
-  // zones (ids follow the original insert order: 1,2,4,5,9,10,14,15,16)
-  const zones = [
-    { id: 1, name: "Zona 1" },
-    { id: 2, name: "Zona 2" },
-    { id: 3, name: "Zona 4" },
-    { id: 4, name: "Zona 5" },
-    { id: 5, name: "Zona 9" },
-    { id: 6, name: "Zona 10" },
-    { id: 7, name: "Zona 14" },
-    { id: 8, name: "Zona 15" },
-    { id: 9, name: "Zona 16" },
-  ];
-  for (const row of zones) {
-    const description = `${row.name} de la Ciudad de Guatemala`;
-    await prisma.zone.upsert({
-      where: { id: row.id },
-      update: { name: row.name, municipalityId: 1, description },
-      create: { id: row.id, name: row.name, municipalityId: 1, description },
-    });
-  }
+  await seedZones(prisma);
 
   await seedAppPreferences(prisma);
 
@@ -420,6 +455,7 @@ async function main(): Promise<void> {
     "product_category",
     "service_status",
     "payment_status",
+    "payment_methods",
     "event_types",
     "contact_types",
     "product_detail_types",

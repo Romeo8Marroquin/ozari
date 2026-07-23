@@ -34,6 +34,7 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
   (getPrismaClient as Mock).mockResolvedValue({
     clientRegistry: { findFirst: vi.fn().mockResolvedValue({ id: 3 }) },
     eventType: { findFirst: vi.fn().mockResolvedValue({ id: 1 }) },
+    paymentMethod: { findFirst: vi.fn().mockResolvedValue({ id: 1 }) },
     product: { findMany: vi.fn().mockResolvedValue([rentalProduct, saleProduct]) },
     ...overrides,
   });
@@ -75,12 +76,19 @@ beforeEach(() => {
 
 describe("validateCreateOrder", () => {
   it("passes a coherent mixed order through, parsing dates and trimming snapshots", async () => {
-    const { req, next } = await run({ ...validBody(), deliveryName: "  María López  " });
+    const { req, next } = await run({
+      ...validBody(),
+      deliveryName: "  María López  ",
+      description: "  Mesas y sillas para jardín  ",
+      comment: "  Llamar al llegar  ",
+    });
     expect(next).toHaveBeenCalled();
     const body = req.body as Record<string, unknown>;
     expect(body["deliveryAt"]).toBeInstanceOf(Date);
     expect(body["pickupAt"]).toBeInstanceOf(Date);
     expect(body["deliveryName"]).toBe("María López");
+    expect(body["description"]).toBe("Mesas y sillas para jardín");
+    expect(body["comment"]).toBe("Llamar al llegar");
     expect(body["deliveryAmount"]).toBeUndefined();
   });
 
@@ -99,6 +107,7 @@ describe("validateCreateOrder", () => {
 
   it.each([
     ["invalidClientRegistryId", { clientRegistryId: "x" }],
+    ["invalidEventTypeId", { eventTypeId: "x" }],
     ["invalidDeliveryAt", { deliveryAt: "not-a-date" }],
     ["invalidLines", { lines: [] }],
     ["invalidLineQuantity", { lines: [{ productId: 3, quantity: 0 }] }],
@@ -112,10 +121,23 @@ describe("validateCreateOrder", () => {
     ["invalidComment", { comment: 42 }],
     ["invalidDeliveryAmount", { deliveryAmount: -1 }],
     ["invalidDepositAmount", { depositAmount: "x" }],
+    ["invalidPaymentMethodId", { paymentMethodId: "x" }],
   ])("rejects %s", async (key, patch) => {
     const { next } = await run({ ...validBody(), ...patch });
     expect(next).not.toHaveBeenCalled();
     expectRejected(key);
+  });
+
+  it("accepts an order with a valid payment method and puts it on the body", async () => {
+    const { req, next } = await run({ ...validBody(), paymentMethodId: 1 });
+    expect(next).toHaveBeenCalled();
+    expect((req.body as Record<string, unknown>)["paymentMethodId"]).toBe(1);
+  });
+
+  it("rejects an unknown/inactive payment method via the DB", async () => {
+    mockPrisma({ paymentMethod: { findFirst: vi.fn().mockResolvedValue(null) } });
+    await run({ ...validBody(), paymentMethodId: 99 });
+    expectRejected("invalidPaymentMethodId");
   });
 
   it("rejects an unknown/inactive registry and event type via the DB", async () => {

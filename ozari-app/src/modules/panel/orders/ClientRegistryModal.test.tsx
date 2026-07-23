@@ -15,6 +15,7 @@ import ClientRegistryModal from './ClientRegistryModal';
 const KEY = 'modules.panel.orders.registry';
 const contactTypes = [{ id: 1, name: 'WhatsApp' }, { id: 2, name: 'Teléfono' }];
 const zones = [{ id: 6, name: 'Zona 10' }];
+const paymentMethods = [{ id: 1, name: 'Efectivo' }, { id: 2, name: 'Transferencia' }];
 
 type Handlers = { onSuccess: (r: unknown) => void; onError: (e: unknown) => void };
 
@@ -26,15 +27,23 @@ const renderModal = (onCreated = vi.fn(), onClose = vi.fn()) => {
       onCreated={onCreated}
       contactTypes={contactTypes}
       zones={zones}
+      paymentMethods={paymentMethods}
     />,
   );
   return { onCreated, onClose };
 };
 
+const principalRadios = () => screen.getAllByRole('radio', { name: `${KEY}.fields.principalContact` });
+// queryAll — addresses can be reduced to zero, leaving no favorite radios.
+const favoriteRadios = () => screen.queryAllByRole('radio', { name: `${KEY}.fields.favoriteAddress` });
+const removeContactButtons = () => screen.queryAllByRole('button', { name: `${KEY}.actions.removeContact` });
+const removeAddressButtons = () => screen.queryAllByRole('button', { name: `${KEY}.actions.removeAddress` });
+
+/** Fill the default (one contact + one address) into a submittable state and return the handlers. */
 const fillValid = async (): Promise<Handlers> => {
   await userEvent.type(screen.getByPlaceholderText(`${KEY}.fields.namePlaceholder`), 'María López');
   const selects = screen.getAllByRole('combobox');
-  await userEvent.selectOptions(selects[0] as HTMLElement, '1'); // contact type
+  await userEvent.selectOptions(selects[0] as HTMLElement, '1'); // first contact type
   await userEvent.type(screen.getByPlaceholderText(`${KEY}.fields.contactValuePlaceholder`), '5555-1234');
   await userEvent.type(screen.getByPlaceholderText(`${KEY}.fields.addressPlaceholder`), 'Zona 10, 4a avenida 5-55');
   await userEvent.click(screen.getByRole('button', { name: `${KEY}.submit` }));
@@ -56,12 +65,12 @@ afterEach(() => vi.restoreAllMocks());
 describe('ClientRegistryModal', () => {
   it('renders nothing when closed', () => {
     render(
-      <ClientRegistryModal open={false} onClose={vi.fn()} onCreated={vi.fn()} contactTypes={contactTypes} zones={zones} />,
+      <ClientRegistryModal open={false} onClose={vi.fn()} onCreated={vi.fn()} contactTypes={contactTypes} zones={zones} paymentMethods={paymentMethods} />,
     );
     expect(screen.queryByText(`${KEY}.title`)).not.toBeInTheDocument();
   });
 
-  it('submits the single contact/address as arrays and, on success, hands back the registry + closes', async () => {
+  it('submits the default single contact/address as arrays and, on success, hands back the registry + closes', async () => {
     const { onCreated, onClose } = renderModal();
     const handlers = await fillValid();
 
@@ -79,6 +88,93 @@ describe('ClientRegistryModal', () => {
     expect(success).toHaveBeenCalledWith(`${KEY}.successToast`, { title: `${KEY}.successTitle` });
     expect(onCreated).toHaveBeenCalledWith(registry);
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('captures multiple contacts/addresses with the chosen principal/favorite and a preferred method', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderModal();
+    await user.type(screen.getByPlaceholderText(`${KEY}.fields.namePlaceholder`), 'María López');
+
+    // First contact.
+    let selects = screen.getAllByRole('combobox');
+    await user.selectOptions(selects[0] as HTMLElement, '1');
+    const contactValues = screen.getAllByPlaceholderText(`${KEY}.fields.contactValuePlaceholder`);
+    await user.type(contactValues[0] as HTMLElement, '5555-1234');
+    // Add a second contact and mark it principal.
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addContact` }));
+    selects = screen.getAllByRole('combobox');
+    await user.selectOptions(selects[1] as HTMLElement, '2');
+    const contactValues2 = screen.getAllByPlaceholderText(`${KEY}.fields.contactValuePlaceholder`);
+    await user.type(contactValues2[1] as HTMLElement, '4444-5678');
+    await user.click(principalRadios()[1]);
+
+    // First address.
+    const addr1 = screen.getAllByPlaceholderText(`${KEY}.fields.addressPlaceholder`)[0];
+    await user.type(addr1 as HTMLElement, 'Zona 10, 4a avenida 5-55');
+    // Add a second address and mark it favorite.
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addAddress` }));
+    const addr2 = screen.getAllByPlaceholderText(`${KEY}.fields.addressPlaceholder`)[1];
+    await user.type(addr2 as HTMLElement, 'Hacienda Real lote 5');
+    await user.click(favoriteRadios()[1]);
+
+    // Preferred payment method (the last combobox).
+    const allSelects = screen.getAllByRole('combobox');
+    await user.selectOptions(allSelects[allSelects.length - 1] as HTMLElement, '2');
+
+    await user.click(screen.getByRole('button', { name: `${KEY}.submit` }));
+    await waitFor(() => expect(createRegistry).toHaveBeenCalled());
+    expect(createRegistry.mock.calls[0][0]).toEqual({
+      name: 'María López',
+      contacts: [
+        { contactTypeId: 1, value: '5555-1234', isPrincipal: false },
+        { contactTypeId: 2, value: '4444-5678', isPrincipal: true },
+      ],
+      addresses: [
+        { address: 'Zona 10, 4a avenida 5-55', isFavorite: false },
+        { address: 'Hacienda Real lote 5', isFavorite: true },
+      ],
+      preferredPaymentMethodId: 2,
+    });
+  }, 20000);
+
+  it('keeps the principal valid when removing a later, the selected, or an earlier contact', async () => {
+    const user = userEvent.setup({ delay: null });
+    const addContact = () => user.click(screen.getByRole('button', { name: `${KEY}.actions.addContact` }));
+    renderModal();
+    await addContact();
+    await addContact(); // 3 contacts, principal defaults to 0
+
+    // (a) current < index: remove a LATER contact → the principal (0) is untouched.
+    await user.click(removeContactButtons()[2]);
+    expect(principalRadios()[0]).toBeChecked();
+    // (b) current === index: remove the selected contact (0) → falls back to 0.
+    await user.click(removeContactButtons()[0]);
+    expect(principalRadios()[0]).toBeChecked();
+    // (c) current > index: select index 1, remove the earlier index 0 → shifts down to 0.
+    await addContact(); // back to 2 contacts
+    await user.click(principalRadios()[1]);
+    await user.click(removeContactButtons()[0]);
+    expect(principalRadios()[0]).toBeChecked();
+  });
+
+  it('keeps the favorite valid across removals and shows the empty note when all addresses are gone', async () => {
+    const user = userEvent.setup({ delay: null });
+    const addAddress = () => user.click(screen.getByRole('button', { name: `${KEY}.actions.addAddress` }));
+    renderModal(); // 1 address, favorite 0
+    await addAddress(); // 2 addresses
+
+    // (a) current < index: remove a LATER address → favorite (0) untouched.
+    await user.click(removeAddressButtons()[1]);
+    expect(favoriteRadios()[0]).toBeChecked();
+    // (b) current > index: add one, select index 1, remove the earlier index 0 → shifts to 0.
+    await addAddress();
+    await user.click(favoriteRadios()[1]);
+    await user.click(removeAddressButtons()[0]);
+    expect(favoriteRadios()[0]).toBeChecked();
+    // (c) current === index: remove the last (selected) address → the empty note appears.
+    await user.click(removeAddressButtons()[0]);
+    expect(screen.getByText(`${KEY}.fields.addressesEmpty`)).toBeInTheDocument();
+    expect(favoriteRadios()).toHaveLength(0);
   });
 
   it('surfaces a 400 inline and a 500 as a toast', async () => {

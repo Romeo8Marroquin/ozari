@@ -429,6 +429,7 @@
         "invalidInstructions": "Las instrucciones de una dirección no son válidas.",
         "invalidDomicilePrice": "El precio de envío de una dirección no es válido.",
         "multipleFavoriteAddresses": "Solo una dirección puede ser la favorita.",
+        "invalidPreferredPaymentMethodId": "El método de pago preferido no es válido.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
           "invalidName": "El nombre del registro <{{-name}}> no es válido.",
@@ -445,6 +446,7 @@
           "invalidInstructions": "Las instrucciones de una dirección no son válidas.",
           "invalidDomicilePrice": "El precio de envío <{{-domicilePrice}}> no es válido.",
           "multipleFavoriteAddresses": "Direcciones favoritas duplicadas: <{{-favoriteCount}}>.",
+          "invalidPreferredPaymentMethodId": "El método de pago preferido <{{-preferredPaymentMethodId}}> no es válido.",
           "validationError": "Error validando la creación del registro de cliente: {{-error}}."
         }
       },
@@ -508,6 +510,7 @@
         "invalidComment": "El comentario del pedido debe ser válido.",
         "invalidDeliveryAmount": "El costo de envío no es válido.",
         "invalidDepositAmount": "El anticipo no es válido.",
+        "invalidPaymentMethodId": "El método de pago no es válido.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
           "invalidClientRegistryId": "El registro de cliente <{{-clientRegistryId}}> no es válido.",
@@ -531,6 +534,7 @@
           "invalidComment": "El comentario del pedido no es válido.",
           "invalidDeliveryAmount": "El costo de envío <{{-deliveryAmount}}> no es válido.",
           "invalidDepositAmount": "El anticipo <{{-depositAmount}}> no es válido.",
+          "invalidPaymentMethodId": "El método de pago <{{-paymentMethodId}}> no es válido.",
           "validationError": "Error validando la creación del pedido: {{-error}}."
         }
       },

@@ -25,9 +25,12 @@ export const richRegistryInclude = {
       instructionsKms: true,
       domicilePrice: true,
       isFavorite: true,
-      zone: { select: { id: true, name: true } },
+      // `deliveryFee` = the zone's DEFAULT fee the order form suggests (a per-address
+      // `domicilePrice` overrides it).
+      zone: { select: { id: true, name: true, deliveryFee: true } },
     },
   },
+  preferredPaymentMethod: { select: { id: true, name: true } },
 } satisfies Prisma.ClientRegistryInclude;
 
 /** A registry row fetched with `richRegistryInclude` — the projection's input. */
@@ -54,13 +57,23 @@ export function projectClientRegistry(
     })),
     addresses: registry.addresses.map((address) => ({
       id: address.id,
-      zone: address.zone ?? undefined,
+      zone:
+        address.zone !== null
+          ? {
+              id: address.zone.id,
+              name: address.zone.name,
+              ...(address.zone.deliveryFee !== null && {
+                deliveryFee: Number(address.zone.deliveryFee),
+              }),
+            }
+          : undefined,
       address: decryptKms(address.addressKms),
       instructions:
         address.instructionsKms !== null ? decryptKms(address.instructionsKms) : undefined,
       domicilePrice: address.domicilePrice !== null ? Number(address.domicilePrice) : undefined,
       isFavorite: address.isFavorite,
     })),
+    preferredPaymentMethod: registry.preferredPaymentMethod ?? undefined,
     createdAt: registry.createdAt,
   };
 }

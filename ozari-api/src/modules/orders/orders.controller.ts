@@ -313,6 +313,7 @@ export const createOrder = async (
           totalAmount,
           deliveryAmount: body.deliveryAmount ?? null,
           depositAmount: body.depositAmount ?? null,
+          paymentMethodId: body.paymentMethodId ?? null,
           currencyId,
           serviceStatusId: ServiceStatusEnum.PENDING,
           paymentStatusId: PaymentStatusEnum.PENDING,
@@ -414,7 +415,7 @@ export const getOrdersCatalog = async (
       orderBy: { id: "asc" },
       select: { id: true, name: true },
     } as const;
-    const [eventTypes, serviceStatuses, paymentStatuses, contactTypes, zones] =
+    const [eventTypes, serviceStatuses, paymentStatuses, paymentMethods, contactTypes, zoneRows] =
       await Promise.all([
         prismaClient.eventType.findMany({
           ...option,
@@ -422,16 +423,26 @@ export const getOrdersCatalog = async (
         }),
         prismaClient.serviceStatus.findMany(option),
         prismaClient.paymentStatus.findMany(option),
+        prismaClient.paymentMethod.findMany(option),
         prismaClient.contactType.findMany(option),
-        prismaClient.zone.findMany(option),
+        prismaClient.zone.findMany({
+          ...option,
+          select: { id: true, name: true, deliveryFee: true },
+        }),
       ]);
 
     const response: OrderCatalogResponseModel = {
       eventTypes,
       serviceStatuses,
       paymentStatuses,
+      paymentMethods,
       contactTypes,
-      zones,
+      // Decimal → number, dropping NULL (not configured) so the form only autofills a real fee.
+      zones: zoneRows.map((zone) => ({
+        id: zone.id,
+        name: zone.name,
+        ...(zone.deliveryFee !== null && { deliveryFee: Number(zone.deliveryFee) }),
+      })),
     };
 
     logger.info(i18next.t("orders.catalog.logs.catalogFetched"));

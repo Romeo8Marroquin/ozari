@@ -102,6 +102,22 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
     const isFilled = props.value !== undefined ? Boolean(props.value) : isFilledOnChange;
     const isInteractive = type === 'password' || enablePointerEvents || Boolean(onIconClick);
 
+    // Native picker inputs (date/time/…) render their FORMAT hint ("dd/mm/aaaa --:--") always —
+    // unlike a text input's `placeholder`, which we keep hidden until focus. Left unstyled it
+    // collides with the floating label. So mirror the text-input behavior: while EMPTY, the field's
+    // text is transparent when unfocused (label sits centered over a clean line) and a soft gray on
+    // focus (the format shows as a placeholder-like hint, no value), then normal color once filled.
+    // `color: transparent` hides only the edit text — the native calendar/spinner control keeps its
+    // own appearance, so the picker stays operable. Works across Blink/WebKit/Gecko + iOS Safari.
+    const isNativePicker =
+      type !== undefined && ['date', 'datetime-local', 'time', 'month', 'week'].includes(type);
+    const nativePickerText =
+      isNativePicker && !isFilled
+        ? error
+          ? 'text-transparent focus:text-red-600'
+          : 'text-transparent focus:text-charcoal/45'
+        : '';
+
     return (
       <div className="relative flex items-center justify-center w-full" ref={containerRef}>
         <input
@@ -117,7 +133,7 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
             `peer w-full py-2 pr-4 bg-transparent placeholder:opacity-0 placeholder:transition-color placeholder:duration-300 focus:placeholder:opacity-100 text-md placeholder-gray focus:outline-none transition-all duration-300 border-b
             disabled:text-gray-disabled disabled:placeholder-gray-disabled
             ${error ? 'border-red-600 text-red-600' : 'text-black border-black disabled:border-gray-disabled'}
-            ${!icon && type !== 'password' ? 'pl-2' : 'pl-10'} ${focusTextClass[focusColor]}`,
+            ${!icon && type !== 'password' ? 'pl-2' : 'pl-10'} ${focusTextClass[focusColor]} ${nativePickerText}`,
             className,
           )}
         />

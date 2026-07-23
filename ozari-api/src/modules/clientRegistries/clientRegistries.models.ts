@@ -1,6 +1,7 @@
 import type {
   CatalogOptionModel,
   PaginationMeta,
+  ZoneCatalogOptionModel,
 } from "../products/products.models.js";
 
 /** One contact method of a registry as the create body carries it. */
@@ -26,7 +27,8 @@ export interface CreateRegistryAddressRequestModel {
 /**
  * `POST /client-registries` — a WALK-IN client record (owner decision 2026-07-16, EPIC-2-ORDERS
  * §9): the responsible person the admin's WhatsApp/phone orders belong to. Requires ≥1 contact and
- * ≥1 address (exactly one principal/favorite each — defaulted, never ambiguous). Deliberately NOT
+ * allows 0..many addresses (exactly one principal/favorite each — defaulted, never ambiguous; a
+ * walk-in may have no saved venue and type one per order). Deliberately NOT
  * a user account: if this person later registers on the platform, the admin deletes the registry
  * (conditional NO-TRASH — orders keep their snapshots) and the client keeps ordering informally or
  * through their account, whichever they prefer.
@@ -36,6 +38,8 @@ export interface CreateClientRegistryRequestModel {
   notes: string | undefined;
   contacts: CreateRegistryContactRequestModel[];
   addresses: CreateRegistryAddressRequestModel[];
+  /** The client's DEFAULT payment method (pre-selects the order's method); optional. */
+  preferredPaymentMethodId: number | undefined;
 }
 
 export interface RegistryContactResponseModel {
@@ -47,7 +51,7 @@ export interface RegistryContactResponseModel {
 
 export interface RegistryAddressResponseModel {
   id: number;
-  zone: CatalogOptionModel | undefined;
+  zone: ZoneCatalogOptionModel | undefined;
   address: string;
   instructions: string | undefined;
   domicilePrice: number | undefined;
@@ -61,6 +65,8 @@ export interface ClientRegistryResponseModel {
   notes: string | undefined;
   contacts: RegistryContactResponseModel[];
   addresses: RegistryAddressResponseModel[];
+  /** The client's default payment method (pre-selects the order's method); `undefined` if unset. */
+  preferredPaymentMethod: CatalogOptionModel | undefined;
   createdAt: Date;
 }
 

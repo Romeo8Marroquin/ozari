@@ -22,6 +22,7 @@ const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFor
   comment: '',
   deliveryAmount: '',
   depositAmount: '',
+  paymentMethodId: null,
   lines: [{ productId: 3, quantity: '25', isRental: true }],
   ...overrides,
 });
@@ -160,6 +161,11 @@ describe('toCreateOrderBody', () => {
     expect(body.comment).toBe('llamar al llegar');
   });
 
+  it('includes the payment method when chosen and omits it otherwise', () => {
+    expect(toCreateOrderBody(validForm({ paymentMethodId: 2 })).paymentMethodId).toBe(2);
+    expect(toCreateOrderBody(validForm({ paymentMethodId: null })).paymentMethodId).toBeUndefined();
+  });
+
   it('omits empty optional text/money fields', () => {
     const body = toCreateOrderBody(validForm({ description: '', comment: '', deliveryAmount: '', depositAmount: '' }));
     expect(body.description).toBeUndefined();
@@ -171,5 +177,6 @@ describe('toCreateOrderBody', () => {
   it('has sane defaults', () => {
     expect(createOrderDefaultValues.lines).toEqual([]);
     expect(createOrderDefaultValues.deliveryAt).toBe('');
+    expect(createOrderDefaultValues.paymentMethodId).toBeNull();
   });
 });

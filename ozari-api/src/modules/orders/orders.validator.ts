@@ -276,6 +276,27 @@ export const validateCreateOrder = async (
       return;
     }
 
+    // Payment method (optional — payment can be settled later): when present it must be an ACTIVE
+    // seeded method.
+    let paymentMethodId: number | undefined;
+    const rawPaymentMethodId = body["paymentMethodId"];
+    if (rawPaymentMethodId !== undefined && rawPaymentMethodId !== null) {
+      const paymentMethod =
+        typeof rawPaymentMethodId === "number" &&
+        Number.isInteger(rawPaymentMethodId) &&
+        rawPaymentMethodId >= 1
+          ? await prismaClient.paymentMethod.findFirst({
+              where: { id: rawPaymentMethodId, isActive: true },
+              select: { id: true },
+            })
+          : null;
+      if (!paymentMethod) {
+        rejectCreate(res, "invalidPaymentMethodId", { paymentMethodId: rawPaymentMethodId });
+        return;
+      }
+      paymentMethodId = rawPaymentMethodId as number;
+    }
+
     const validatedBody: CreateOrderRequestModel = {
       clientRegistryId: clientRegistryId as number,
       eventTypeId: eventTypeId as number,
@@ -288,6 +309,7 @@ export const validateCreateOrder = async (
       comment: comment.value,
       deliveryAmount: deliveryAmount.value,
       depositAmount: depositAmount.value,
+      paymentMethodId,
       lines,
     };
     req.body = validatedBody;

@@ -12,6 +12,7 @@ import {
 import axios from 'axios';
 import Button from '@components/Button';
 import CustomInputForm from '@components/CustomInputForm';
+import CustomSelect from '@components/CustomSelect';
 import CustomSelectForm from '@components/CustomSelectForm';
 import CustomTextareaForm from '@components/CustomTextareaForm';
 import FormError from '@components/FormError';
@@ -19,7 +20,7 @@ import { notify } from '@components/notifications/notify';
 import { QueryKeys } from '@constants/QueryKeys';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { getStatus, toFormError } from '@utils/apiError';
-import { SECTION_REVEAL_STEP, staggerIn, staggerOut } from '../pageMotion';
+import { detailRowIn, detailRowOut, SECTION_REVEAL_STEP, staggerIn, staggerOut } from '../pageMotion';
 import { usePanelNavigate } from '../PanelNavContext';
 import PreferencesCta from '../PreferencesCta';
 import type { Product } from '../products/product.types';
@@ -71,6 +72,33 @@ const Section: React.FC<{ title: string; description: string; children: React.Re
 const isReady = (
   catalog: { eventTypes: unknown[]; contactTypes: unknown[] } | null | undefined,
 ): boolean => Boolean(catalog && catalog.eventTypes.length > 0 && catalog.contactTypes.length > 0);
+
+/**
+ * One product line: registers its element (so removal can tween it out) and grows in from the left
+ * like a list entry on mount — the exact `detailRowIn`/`detailRowOut` language as the product form's
+ * detail sub-editor. Every line is user-added post-reveal (this create form has no draft/initial
+ * rows), so every mount animates in; `detailRowIn` no-ops under reduced motion.
+ */
+const LineRow: React.FC<{
+  onRegister: (el: HTMLDivElement | null) => void;
+  children: React.ReactNode;
+}> = ({ onRegister, children }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    detailRowIn(ref.current);
+  }, []);
+  return (
+    <div
+      ref={(el) => {
+        ref.current = el;
+        onRegister(el);
+      }}
+      className="flex items-start gap-3"
+    >
+      {children}
+    </div>
+  );
+};
 
 const SKELETON = 'animate-pulse rounded bg-charcoal/10 motion-reduce:animate-none';
 
@@ -158,12 +186,31 @@ const OrderForm: React.FC = () => {
   const { handleSubmit, control, setValue, getValues, setError } = methods;
   const lines = useFieldArray({ control, name: 'lines' });
 
+  // A removed line tweens OUT before RHF drops it (`detailRowOut`), so the list shrinks smoothly.
+  // A ref-mirror of the fields gives the exit handler the LIVE index at completion (indices may
+  // shift meanwhile); the `index !== -1` check makes a double-remove a safe no-op, so no guard.
+  const lineRowRefs = useRef(new Map<string, HTMLDivElement>());
+  const latestLineFields = useRef(lines.fields);
+  useEffect(() => {
+    latestLineFields.current = lines.fields;
+  }, [lines.fields]);
+  const removeLine = (id: string): void => {
+    /* v8 ignore next -- `?? null`: a rendered row always has its element registered */
+    void detailRowOut(lineRowRefs.current.get(id) ?? null).then(() => {
+      const index = latestLineFields.current.findIndex((row) => row.id === id);
+      /* v8 ignore next -- defensive: only reachable if the row already left (a raced double-remove) */
+      if (index !== -1) lines.remove(index);
+    });
+  };
+
   // Live line values drive the mode filter, the per-line isRental sync, the pickup rule, and the
   // estimate. `useWatch` (not `watch()`) keeps the React Compiler able to memoize this component.
   const lineValues = useWatch({ control, name: 'lines' });
   const deliveryAt = useWatch({ control, name: 'deliveryAt' });
   const pickupAt = useWatch({ control, name: 'pickupAt' });
   const deliveryAmountRaw = useWatch({ control, name: 'deliveryAmount' });
+  const deliveryContactValue = useWatch({ control, name: 'deliveryContact' });
+  const deliveryAddressValue = useWatch({ control, name: 'deliveryAddress' });
 
   // Keep each line's isRental flag in sync with its picked product (the schema's pickup rule reads
   // it). Converges — only writes when the flag actually differs, so it never loops.
@@ -200,6 +247,12 @@ const OrderForm: React.FC = () => {
     setValue('deliveryName', registry.name, { shouldValidate: true });
     if (contact) setValue('deliveryContact', contact.value, { shouldValidate: true });
     if (address) setValue('deliveryAddress', address.address, { shouldValidate: true });
+    // Delivery fee: suggest the favorite address's explicit price, else its zone's default fee —
+    // clear when neither exists so a prior client's fee never lingers. Editable afterwards.
+    const fee = address?.domicilePrice ?? address?.zone?.deliveryFee;
+    setValue('deliveryAmount', fee != null ? String(fee) : '', { shouldValidate: true });
+    // Payment method: pre-select the client's preferred (null = clear to "unspecified").
+    setValue('paymentMethodId', registry.preferredPaymentMethod?.id ?? null);
   }, [clientRegistryId, registriesById, setValue]);
 
   // Only ever called by the mode fork with a DIFFERENT mode (OrderModeSelect no-ops on the current
@@ -312,6 +365,25 @@ const OrderForm: React.FC = () => {
     anyRental ? parseDateTime(pickupAt) : null,
     parseMoney(deliveryAmountRaw) ?? 0,
   );
+
+  // Saved-data quick-fill: the selected client's contacts/addresses become picker options that fill
+  // the (always-editable) snapshot fields. The picker's value is DERIVED from the current text —
+  // matching a saved row shows it, editing to a one-off shows the placeholder — so there's no
+  // convergent effect to keep in sync.
+  const selectedRegistry = clientRegistryId != null ? registriesById.get(clientRegistryId) : undefined;
+  const savedContactId = selectedRegistry?.contacts.find((c) => c.value === deliveryContactValue)?.id;
+  const savedAddressId = selectedRegistry?.addresses.find((a) => a.address === deliveryAddressValue)?.id;
+  const pickSavedContact = (value: string): void => {
+    const contact = selectedRegistry?.contacts.find((c) => String(c.id) === value);
+    if (contact) setValue('deliveryContact', contact.value, { shouldValidate: true });
+  };
+  const pickSavedAddress = (value: string): void => {
+    const address = selectedRegistry?.addresses.find((a) => String(a.id) === value);
+    if (!address) return;
+    setValue('deliveryAddress', address.address, { shouldValidate: true });
+    const fee = address.domicilePrice ?? address.zone?.deliveryFee;
+    if (fee != null) setValue('deliveryAmount', String(fee), { shouldValidate: true });
+  };
 
   const usedProductIds = new Set(
     lineValues.map((line) => line.productId).filter((id): id is number => id != null),
@@ -473,7 +545,13 @@ const OrderForm: React.FC = () => {
                       <p className="text-sm text-charcoal/45">{t(`${KEY}.lines.empty`)}</p>
                     )}
                     {lines.fields.map((row, index) => (
-                      <div key={row.id} className="flex items-start gap-3">
+                      <LineRow
+                        key={row.id}
+                        onRegister={(el) => {
+                          if (el) lineRowRefs.current.set(row.id, el);
+                          else lineRowRefs.current.delete(row.id);
+                        }}
+                      >
                         <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,130px)]">
                           <CustomSelectForm<CreateOrderFormType>
                             id={`order-line-product-${index}`}
@@ -495,13 +573,13 @@ const OrderForm: React.FC = () => {
                         </div>
                         <button
                           type="button"
-                          onClick={() => lines.remove(index)}
+                          onClick={() => removeLine(row.id)}
                           aria-label={t(`${KEY}.actions.removeLine`)}
                           className="mt-1.5 grid size-9 shrink-0 cursor-pointer place-items-center rounded-chip text-charcoal/45 transition-[color,background-color,box-shadow] duration-200 hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
                         >
                           <HiOutlineTrash aria-hidden className="size-4.5" />
                         </button>
-                      </div>
+                      </LineRow>
                     ))}
                     <div className="self-start">
                       <Button
@@ -528,6 +606,22 @@ const OrderForm: React.FC = () => {
               <Section title={t(`${KEY}.sections.delivery.title`)} description={t(`${KEY}.sections.delivery.description`)}>
                 <SectionReveal loading={revealing} delaySeconds={SECTION_REVEAL_STEP * 4} skeleton={<BodySkeleton rows={3} />}>
                   <div className="flex flex-col gap-5">
+                    {selectedRegistry && selectedRegistry.contacts.length > 0 && (
+                      <div className="reveal-item">
+                        <CustomSelect
+                          id="order-saved-contact"
+                          optionalLabel
+                          label={t(`${KEY}.fields.savedContactLabel`)}
+                          placeholderOption={t(`${KEY}.fields.savedCustom`)}
+                          value={savedContactId ?? ''}
+                          onChange={(e) => pickSavedContact(e.target.value)}
+                          options={selectedRegistry.contacts.map((c) => ({
+                            value: c.id,
+                            label: `${c.contactType.name}: ${c.value}`,
+                          }))}
+                        />
+                      </div>
+                    )}
                     <div className="reveal-item grid gap-5 sm:grid-cols-2">
                       <CustomInputForm<CreateOrderFormType>
                         id="order-delivery-name"
@@ -546,6 +640,22 @@ const OrderForm: React.FC = () => {
                         aria-label={t(`${KEY}.fields.deliveryContactLabel`)}
                       />
                     </div>
+                    {selectedRegistry && selectedRegistry.addresses.length > 0 && (
+                      <div className="reveal-item">
+                        <CustomSelect
+                          id="order-saved-address"
+                          optionalLabel
+                          label={t(`${KEY}.fields.savedAddressLabel`)}
+                          placeholderOption={t(`${KEY}.fields.savedCustom`)}
+                          value={savedAddressId ?? ''}
+                          onChange={(e) => pickSavedAddress(e.target.value)}
+                          options={selectedRegistry.addresses.map((a) => ({
+                            value: a.id,
+                            label: a.address,
+                          }))}
+                        />
+                      </div>
+                    )}
                     <div className="reveal-item">
                       <CustomTextareaForm<CreateOrderFormType>
                         id="order-delivery-address"
@@ -602,6 +712,16 @@ const OrderForm: React.FC = () => {
                         aria-label={t(`${KEY}.fields.depositAmountLabel`)}
                       />
                     </div>
+                    <div className="reveal-item">
+                      <CustomSelectForm<CreateOrderFormType>
+                        id="order-payment-method"
+                        name="paymentMethodId"
+                        optionalLabel
+                        label={t(`${KEY}.fields.paymentMethodLabel`)}
+                        placeholderOption={t(`${KEY}.fields.paymentMethodPlaceholder`)}
+                        options={(catalog?.paymentMethods ?? []).map((m) => ({ value: m.id, label: m.name }))}
+                      />
+                    </div>
                     <div className="reveal-item flex items-center justify-between rounded-control bg-charcoal/[0.03] px-4 py-3">
                       <span className="text-sm font-medium text-charcoal/70">{t(`${KEY}.estimate.label`)}</span>
                       <span aria-live="polite" className="text-lg font-bold tabular-nums text-charcoal">
@@ -650,6 +770,7 @@ const OrderForm: React.FC = () => {
         onCreated={onRegistryCreated}
         contactTypes={catalog?.contactTypes ?? []}
         zones={catalog?.zones ?? []}
+        paymentMethods={catalog?.paymentMethods ?? []}
       />
     </div>
   );

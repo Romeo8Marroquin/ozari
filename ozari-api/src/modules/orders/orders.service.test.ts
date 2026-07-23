@@ -75,6 +75,7 @@ const makeListRow = (overrides: Partial<OrderListRow> = {}): OrderListRow => ({
 const makeRichOrder = (overrides: Partial<RichOrder> = {}): RichOrder => ({
   ...makeListRow(),
   assignedUser: null,
+  paymentMethod: null,
   serviceDetails: [
     {
       id: 11,
@@ -383,11 +384,13 @@ describe("projectOrderDetail", () => {
         paidAt,
         description: "Cumpleaños en el jardín",
         comment: "Llamar al llegar",
+        paymentMethod: { id: 1, name: "Efectivo" },
       }),
     );
     expect(detail.assignedUser).toEqual({ id: 2, name: "Romeo Marroquín" });
     expect(detail.deliveryAmount).toBe(50);
     expect(detail.depositAmount).toBe(100);
+    expect(detail.paymentMethod).toEqual({ id: 1, name: "Efectivo" });
     expect(detail.discountAmount).toBe(25);
     expect(detail.discountReason).toBe("Cliente recurrente");
     expect(detail.paidAt).toBe(paidAt);

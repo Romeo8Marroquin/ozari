@@ -211,6 +211,12 @@ export interface CurrencyCatalogOptionModel extends CatalogOptionModel {
   symbol: string;
 }
 
+/** A zone lookup carrying its DEFAULT delivery fee (owner 2026-07-23 — zones drive fee pricing).
+ *  `deliveryFee` is `undefined` when the zone has no configured fee (distinct from 0 = free). */
+export interface ZoneCatalogOptionModel extends CatalogOptionModel {
+  deliveryFee?: number;
+}
+
 /**
  * The reference data the product create/edit form needs (`GET /products/catalog`): every ACTIVE row
  * of the five seeded lookups, id + display name only. Admin + Client (like every products read —

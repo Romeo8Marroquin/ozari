@@ -2,6 +2,7 @@ import type { CurrencyModel } from "@/models/common/currencyModel.js";
 import type {
   CatalogOptionModel,
   PaginationMeta,
+  ZoneCatalogOptionModel,
 } from "../products/products.models.js";
 
 /**
@@ -110,6 +111,8 @@ export interface OrderDetailResponseModel extends OrderListItemResponseModel {
   deliveryAmount: number | undefined;
   /** Anticipo (partial deposit) recorded so far. */
   depositAmount: number | undefined;
+  /** How the order is paid (Efectivo / Transferencia); absent until chosen. */
+  paymentMethod: OrderLookupModel | undefined;
   discountAmount: number | undefined;
   discountReason: string | undefined;
   paidAt: Date | undefined;
@@ -147,8 +150,11 @@ export interface OrderCatalogResponseModel {
   eventTypes: EventTypeCatalogOptionModel[];
   serviceStatuses: CatalogOptionModel[];
   paymentStatuses: CatalogOptionModel[];
+  /** How an order is paid — Efectivo / Transferencia (owner 2026-07-23; card door open). */
+  paymentMethods: CatalogOptionModel[];
   contactTypes: CatalogOptionModel[];
-  zones: CatalogOptionModel[];
+  /** Each zone carries its default `deliveryFee` (the order form's fee suggestion). */
+  zones: ZoneCatalogOptionModel[];
 }
 
 /** One requested order line — the server derives EVERYTHING else (rent-vs-sale, prices) from the
@@ -185,6 +191,8 @@ export interface CreateOrderRequestModel {
   deliveryAmount: number | undefined;
   /** Anticipo (partial deposit) taken at creation, when any. */
   depositAmount: number | undefined;
+  /** How it will be paid (an active seeded method); optional — payment can be settled later. */
+  paymentMethodId: number | undefined;
   lines: CreateOrderLineRequestModel[];
 }
 

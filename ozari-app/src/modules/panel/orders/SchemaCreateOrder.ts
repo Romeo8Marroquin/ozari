@@ -107,6 +107,9 @@ const baseCreateOrderSchema = z.object({
     .refine((v) => v.trim().length <= ORDER_LONGTEXT_MAX_LENGTH, t(`${KEY}.invalidComment`)),
   deliveryAmount: moneyField(t(`${KEY}.invalidDeliveryAmount`)),
   depositAmount: moneyField(t(`${KEY}.invalidDepositAmount`)),
+  // `null` = the empty-selection sentinel: how it's paid is OPTIONAL (payment can settle later);
+  // the select pre-fills from the client's preferred method. Never required.
+  paymentMethodId: z.number().nullable(),
   lines: z
     .array(
       z.object({
@@ -165,6 +168,7 @@ export const createOrderDefaultValues: CreateOrderFormType = {
   comment: '',
   deliveryAmount: '',
   depositAmount: '',
+  paymentMethodId: null,
   lines: [],
 };
 
@@ -181,6 +185,7 @@ export interface CreateOrderBody {
   comment?: string;
   deliveryAmount?: number;
   depositAmount?: number;
+  paymentMethodId?: number;
   lines: { productId: number; quantity: number }[];
 }
 
@@ -208,6 +213,7 @@ export function toCreateOrderBody(data: CreateOrderFormType): CreateOrderBody {
     ...(comment && { comment }),
     ...(money(data.deliveryAmount) !== undefined && { deliveryAmount: money(data.deliveryAmount) }),
     ...(money(data.depositAmount) !== undefined && { depositAmount: money(data.depositAmount) }),
+    ...(data.paymentMethodId != null && { paymentMethodId: data.paymentMethodId }),
     lines: data.lines.map((line) => ({
       productId: line.productId,
       /* v8 ignore next -- parseLineQuantity is guaranteed non-null by the schema */
