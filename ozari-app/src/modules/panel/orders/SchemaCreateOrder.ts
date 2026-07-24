@@ -13,16 +13,6 @@ import { z } from 'zod';
 
 const KEY = 'modules.panel.orders.create.errors';
 
-/**
- * The order-creation MODE the fork asks first ("¿Rentar, comprar o ambos?"): it filters the
- * product picker and, together with which lines are actually rentals, decides whether a pickup
- * exists (Q-A). It is pure UI state — never sent; the backend derives everything from the lines.
- */
-export type OrderMode = 'rent' | 'buy' | 'both';
-
-/** The mode fork's option order (also the radiogroup's arrow-key order). */
-export const ORDER_MODES: readonly OrderMode[] = ['rent', 'buy', 'both'];
-
 /** Parses a MONEY text input: `''` = absent; else a non-negative number within the ceiling; `null`
  *  when present-but-invalid (the schema turns `null` into a field error). Mirrors the product form. */
 export const parseMoney = (value: string): number | undefined | null => {
@@ -93,6 +83,11 @@ const baseCreateOrderSchema = z.object({
     t(`${KEY}.requiredDeliveryContact`),
     t(`${KEY}.invalidDeliveryContact`),
   ),
+  // FORM-ONLY (never sent): the delivery contact's channel drives the leading icon + keyboard, and
+  // the delivery zone drives the fee SUGGESTION. Both default from the chosen client but are freely
+  // editable; the snapshot the API stores is the contact TEXT + the (editable) delivery fee.
+  deliveryContactTypeId: z.number().nullable(),
+  deliveryZoneId: z.number().nullable(),
   deliveryAddress: requiredText(
     ORDER_ADDRESS_MIN_LENGTH,
     ORDER_LONGTEXT_MAX_LENGTH,
@@ -163,6 +158,8 @@ export const createOrderDefaultValues: CreateOrderFormType = {
   pickupAt: '',
   deliveryName: '',
   deliveryContact: '',
+  deliveryContactTypeId: null,
+  deliveryZoneId: null,
   deliveryAddress: '',
   description: '',
   comment: '',

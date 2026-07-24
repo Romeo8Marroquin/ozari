@@ -71,7 +71,21 @@
 > pickers** (derived value — no convergent effect) let the admin swap to another saved contact/address.
 > OpenAPI + i18n + tests same-commit; both suites green at 100% coverage. Per-address **instructions**
 > stay a documented fast-follow (the modal collects zone + address text only). The **searchable
-> combobox (§10.A)** and the **live availability annotation (§10.D)** remain unbuilt.
+> combobox (§10.A)** remains unbuilt.
+>
+> **MODE-FORK REMOVED + LIVE AVAILABILITY DONE (2026-07-23):** (1) the **rent/sell/both fork
+> (`OrderModeSelect`) is GONE** — the order's kind is DERIVED from the picked products (any rental
+> line ⇒ a pickup is required, else purchase-only). Both dates show ALWAYS (no abrupt toggle); pickup
+> is required only with a rental and simply not sent otherwise (Q-A now handled at submit, not via an
+> upfront fork). The picker offers ALL products. (2) The **`§10.D` live availability annotation is
+> BUILT**: new **`POST /orders/availability`** (Admin-only; per-window per-product takeable amount —
+> rentals = fleet minus held-in-window via `buildRentedInWindowWhere`, `null` until a pickup exists;
+> sales = stock; exact counts for the admin, a future Client tier caps instead per §11.A) + the
+> order form's debounced fetch on window change: it **annotates the picker** with amounts and
+> **reconciles picked lines** with the owner-chosen **adjust-to-available + notify** rule (reduce to
+> what's takeable, remove when none, toast the summary; lines with unknown availability untouched).
+> Still ADVISORY — the create path re-checks under the product lock (the 409 stays the real guard).
+> The delivery-fee hint is now generic (zone/distance), not "free in Hacienda Real". Both suites 100%.
 
 ## 1. The business, in one paragraph
 

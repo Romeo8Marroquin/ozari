@@ -9,29 +9,28 @@ const TRACK_INSET_PX = 4;
 /** The thumb never shrinks below this, however long the content (stays grabbable). */
 const MIN_THUMB_PX = 36;
 
-interface PanelScrollbarProps {
-  /** The scroll container this bar mirrors (the panel `main`, its native bar hidden). */
+interface OverlayScrollbarProps {
+  /** The scroll container this bar mirrors (its native bar hidden via `.no-native-scrollbar`). */
   target: React.RefObject<HTMLElement | null>;
 }
 
 /**
- * The panel's OVERLAY scrollbar. The native bar is hidden on `main.panel-main` (it occupies layout
- * space, so content jumped sideways every time a page stopped/started overflowing — skeleton grid
- * → three products, filters collapsing, page changes). This bar floats OVER the content instead:
- * zero layout space, so the page never shifts; it fades in while scrolling or when the pointer
- * approaches the right edge, widens under the pointer, drags like the real thing, and fades away
- * when idle. Purely visual + a drag affordance — wheel/keyboard/touch scrolling is still the
- * native element's (hiding a scrollbar changes nothing about scrollability), which is also why
- * scroll restoration (`productsScroll`) keeps working untouched.
+ * THE app's single scrollbar — a floating OVERLAY bar shared by every scroll area (the panel main,
+ * modal bodies, any inner scroll region). The native bar is hidden on the target (it occupies layout
+ * space, so content jumped sideways whenever overflow appeared/disappeared); this bar floats OVER the
+ * content instead: zero layout space, so nothing shifts. It fades in while scrolling or when the
+ * pointer approaches the right edge, widens (with a pointer cursor) under the pointer, drags like the
+ * real thing, and fades away when idle. Purely visual + a drag affordance — wheel/keyboard/touch
+ * scrolling is still the native element's (hiding a scrollbar changes nothing about scrollability).
  *
- * Layering: it sits INSIDE the content column (absolute, after `main` in the DOM) — above the
- * page's static content, but every floating layer (menus, drawers, modals, notifications) is
- * portaled to `<body>` on the `--z-float-*`/`--z-modal` scale, so they all paint over it. Content
- * only, exactly per the stacking doctrine.
+ * Usage: give the scroll container `.no-native-scrollbar` + `position: relative` on a wrapper that
+ * holds BOTH the scroll container and this bar as siblings, then `<OverlayScrollbar target={ref} />`.
  *
- * `aria-hidden`: assistive tech already has the scrollable region; this is a redundant visual.
+ * Layering: it sits inside its own content column (absolute), above static content; every floating
+ * layer (menus, drawers, modals, notifications) is portaled to `<body>` on the `--z-*` scale, so they
+ * all paint over it. `aria-hidden`: assistive tech already has the scrollable region.
  */
-const PanelScrollbar: React.FC<PanelScrollbarProps> = ({ target }) => {
+const OverlayScrollbar: React.FC<OverlayScrollbarProps> = ({ target }) => {
   // null = no overflow (nothing to show); otherwise the thumb's geometry within the track.
   const [thumb, setThumb] = useState<{ top: number; height: number } | null>(null);
   // "Engaged" = recently scrolled or pointer near the edge → the thumb is visible.
@@ -141,7 +140,7 @@ const PanelScrollbar: React.FC<PanelScrollbarProps> = ({ target }) => {
     <div aria-hidden className="pointer-events-none absolute inset-y-0 right-1 w-3">
       {thumb && (
         <div
-          data-testid="panel-scrollbar-thumb"
+          data-testid="overlay-scrollbar-thumb"
           onPointerDown={onThumbPointerDown}
           onPointerEnter={() => {
             hoveringThumb.current = true;
@@ -161,4 +160,4 @@ const PanelScrollbar: React.FC<PanelScrollbarProps> = ({ target }) => {
   );
 };
 
-export default PanelScrollbar;
+export default OverlayScrollbar;

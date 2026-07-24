@@ -7,6 +7,7 @@ import { AuditAction, logAudit } from "@/config/auditLogger.js";
 import { isDeployedEnvironment } from "@/config/environment.js";
 import { encryptKms } from "@helpers/encryption.js";
 import { type CustomRequest } from "@models/common/customRequestModel.js";
+import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
 import { PaymentStatusEnum } from "@models/enums/paymentStatusEnum.js";
 import { ServiceStatusEnum } from "@models/enums/serviceStatusEnum.js";
@@ -15,10 +16,13 @@ import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { buildPaginationMeta } from "../products/products.service.js";
 import {
   type CreateOrderRequestModel,
+  type OrderAvailabilityRequestModel,
+  type OrderAvailabilityResponseModel,
   type OrderCatalogResponseModel,
   type OrderDetailEnvelopeModel,
   type OrderListResponseModel,
   type OrderStockConflictItemModel,
+  type ProductAvailabilityModel,
 } from "./orders.models.js";
 import {
   OrderSpacingConflictError,
@@ -404,6 +408,10 @@ export const createOrder = async (
  * types + zones the client-registry form needs. Active rows, id order, id + name only (plus
  * `minLeadHours` on event types). **Admin only**, like every orders read today.
  */
+/** The numeric zone from a "Zona N" name, for sorting the picker 1 → 25 (the seeded ids are not in
+ *  zone order). Non-numeric names sort first (0). */
+const zoneNumber = (name: string): number => Number.parseInt(name.replace(/\D/g, ""), 10) || 0;
+
 export const getOrdersCatalog = async (
   _req: CustomRequest,
   res: Response,
@@ -437,12 +445,16 @@ export const getOrdersCatalog = async (
       paymentStatuses,
       paymentMethods,
       contactTypes,
+      // Ordered by the ZONE NUMBER (Zona 1 → 25), not by id (the seeded ids don't run in zone order).
       // Decimal → number, dropping NULL (not configured) so the form only autofills a real fee.
-      zones: zoneRows.map((zone) => ({
-        id: zone.id,
-        name: zone.name,
-        ...(zone.deliveryFee !== null && { deliveryFee: Number(zone.deliveryFee) }),
-      })),
+      zones: zoneRows
+        .slice()
+        .sort((a, b) => zoneNumber(a.name) - zoneNumber(b.name))
+        .map((zone) => ({
+          id: zone.id,
+          name: zone.name,
+          ...(zone.deliveryFee !== null && { deliveryFee: Number(zone.deliveryFee) }),
+        })),
     };
 
     logger.info(i18next.t("orders.catalog.logs.catalogFetched"));
@@ -460,6 +472,64 @@ export const getOrdersCatalog = async (
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
       i18next.t("orders.catalog.errorFetchingCatalog"),
+    );
+  }
+};
+
+/**
+ * `POST /orders/availability` — the admin's live per-window availability probe (EPIC-2 §10.C): for
+ * the requested products + window, return each product's takeable amount so the order form can
+ * annotate the picker and reconcile picked lines. Rentals are fleet minus what's held in the window
+ * (only computable once a pickup exists → `null` otherwise); sales are current stock (window-
+ * independent). Exact counts — the ADMIN runs the business (§11.A); a Client tier would cap instead.
+ * A pure read (no lock): a create still re-checks under the product lock, so this is advisory.
+ */
+export const getOrderAvailability = async (
+  req: CustomRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const body = req.body as OrderAvailabilityRequestModel;
+    const prismaClient = await getPrismaClient();
+    const products = await prismaClient.product.findMany({
+      where: { id: { in: body.productIds }, isActive: true },
+      select: { id: true, quantity: true, productBusinessTypeId: true },
+    });
+    const rentalIds = products
+      .filter((product) => product.productBusinessTypeId === BusinessTypeEnum.RENT)
+      .map((product) => product.id);
+    const rentedRows =
+      rentalIds.length > 0 && body.pickupAt
+        ? await prismaClient.serviceDetail.groupBy({
+            by: ["productId"],
+            where: buildRentedInWindowWhere(rentalIds, body.deliveryAt, body.pickupAt),
+            _sum: { quantity: true },
+          })
+        : [];
+    const rentedByProduct = new Map(rentedRows.map((row) => [row.productId, row._sum.quantity ?? 0]));
+
+    const availability: ProductAvailabilityModel[] = products.map((product) => {
+      const isRental = product.productBusinessTypeId === BusinessTypeEnum.RENT;
+      let available: number | null;
+      if (!isRental) {
+        available = product.quantity;
+      } else if (body.pickupAt) {
+        available = Math.max(0, product.quantity - (rentedByProduct.get(product.id) ?? 0));
+      } else {
+        available = null;
+      }
+      return { productId: product.id, available };
+    });
+
+    const response: OrderAvailabilityResponseModel = { availability };
+    logger.info(i18next.t("orders.availability.logs.computed", { count: availability.length }));
+    sendOzariSuccess(res, HttpEnum.OK, i18next.t("orders.availability.computed"), response);
+  } catch (error) {
+    logger.error(i18next.t("orders.availability.logs.error", { error }));
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("orders.availability.error"),
     );
   }
 };

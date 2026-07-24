@@ -169,3 +169,23 @@ export interface OrderStockConflictItem {
   requested: number;
   available: number;
 }
+
+// ── Live availability (`POST /orders/availability`) ──────────────────────────────────────────────
+
+/** The availability probe body — a delivery datetime, optional pickup, and the product ids to check. */
+export interface OrderAvailabilityBody {
+  deliveryAt: string;
+  pickupAt?: string;
+  productIds: number[];
+}
+
+/** One product's availability for the window: rentals = fleet minus held, sales = stock, `null` = a
+ *  rental with no pickup window yet. */
+export interface ProductAvailability {
+  productId: number;
+  available: number | null;
+}
+
+export interface OrderAvailabilityResponse {
+  availability: ProductAvailability[];
+}

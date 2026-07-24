@@ -27,6 +27,7 @@ const EXPECTED_OPERATIONS: ReadonlyArray<readonly [string, string]> = [
   ["/products/images/upload-url", "post"],
   ["/orders", "get"],
   ["/orders", "post"],
+  ["/orders/availability", "post"],
   ["/orders/{id}", "get"],
   ["/orders/catalog", "get"],
   ["/client-registries", "get"],

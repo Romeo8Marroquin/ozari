@@ -3,6 +3,7 @@ import type { Response } from "express";
 import { Prisma } from "@prisma/client";
 import {
   createOrder,
+  getOrderAvailability,
   getOrderById,
   getOrders,
   getOrdersCatalog,
@@ -14,6 +15,7 @@ import { HttpEnum } from "@models/enums/httpEnum.js";
 import { encryptKms } from "@helpers/encryption.js";
 import { type CustomRequest } from "@models/common/customRequestModel.js";
 import {
+  type OrderAvailabilityResponseModel,
   type OrderCatalogResponseModel,
   type OrderDetailEnvelopeModel,
   type OrderListResponseModel,
@@ -450,7 +452,8 @@ describe("getOrdersCatalog", () => {
     const eventTypes = [{ id: 1, name: "Evento familiar", minLeadHours: 24 }];
     const statuses = [{ id: 1, name: "Pendiente" }];
     const methods = [{ id: 1, name: "Efectivo" }];
-    // One zone with a configured fee (Decimal → number), one without (null → omitted).
+    // One zone with a configured fee (Decimal → number), one without (null → omitted). Returned by
+    // the DB in id order; the controller re-sorts by ZONE NUMBER (Zona 1 before Zona 10).
     const zoneRows = [
       { id: 6, name: "Zona 10", deliveryFee: 50 },
       { id: 1, name: "Zona 1", deliveryFee: null },
@@ -473,8 +476,8 @@ describe("getOrdersCatalog", () => {
       paymentMethods: methods,
       contactTypes: [{ id: 1, name: "WhatsApp" }],
       zones: [
-        { id: 6, name: "Zona 10", deliveryFee: 50 },
         { id: 1, name: "Zona 1" },
+        { id: 6, name: "Zona 10", deliveryFee: 50 },
       ],
     });
   });
@@ -498,6 +501,64 @@ describe("getOrdersCatalog", () => {
       expect.anything(),
       HttpEnum.INTERNAL_SERVER_ERROR,
       "orders.catalog.errorFetchingCatalog",
+    );
+  });
+});
+
+describe("getOrderAvailability", () => {
+  const availabilityReq = (body: Record<string, unknown>): CustomRequest =>
+    ({ body, query: {}, params: {}, user: { userRole: 2, userId: 1 } }) as unknown as CustomRequest;
+  const window = { deliveryAt: new Date("2026-08-01T14:00:00.000Z"), pickupAt: new Date("2026-08-02T10:00:00.000Z") };
+
+  it("computes availability: sale = stock; rental = fleet minus what's held in the window", async () => {
+    const groupBy = vi.fn().mockResolvedValue([
+      { productId: 3, _sum: { quantity: 20 } }, // 30 - 20 = 10
+      { productId: 6, _sum: { quantity: null } }, // null sum → 8 - 0 = 8
+    ]);
+    (getPrismaClient as Mock).mockResolvedValue({
+      product: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 3, quantity: 30, productBusinessTypeId: 1 }, // rental, held
+          { id: 5, quantity: 15, productBusinessTypeId: 1 }, // rental, none held → 15
+          { id: 6, quantity: 8, productBusinessTypeId: 1 }, // rental, null-sum row → 8
+          { id: 4, quantity: 120, productBusinessTypeId: 2 }, // sale → stock
+        ]),
+      },
+      serviceDetail: { groupBy },
+    });
+    await getOrderAvailability(availabilityReq({ ...window, productIds: [3, 5, 6, 4] }), {} as Response);
+
+    expect(groupBy).toHaveBeenCalled();
+    expect(successData<OrderAvailabilityResponseModel>().availability).toEqual([
+      { productId: 3, available: 10 },
+      { productId: 5, available: 15 },
+      { productId: 6, available: 8 },
+      { productId: 4, available: 120 },
+    ]);
+  });
+
+  it("returns null for rentals when there is NO pickup window (skips the groupBy query)", async () => {
+    const groupBy = vi.fn();
+    (getPrismaClient as Mock).mockResolvedValue({
+      product: { findMany: vi.fn().mockResolvedValue([{ id: 3, quantity: 30, productBusinessTypeId: 1 }]) },
+      serviceDetail: { groupBy },
+    });
+    await getOrderAvailability(availabilityReq({ deliveryAt: window.deliveryAt, pickupAt: undefined, productIds: [3] }), {} as Response);
+
+    expect(groupBy).not.toHaveBeenCalled();
+    expect(successData<OrderAvailabilityResponseModel>().availability).toEqual([{ productId: 3, available: null }]);
+  });
+
+  it("responds 500 when the query fails", async () => {
+    (getPrismaClient as Mock).mockResolvedValue({
+      product: { findMany: vi.fn().mockRejectedValue(new Error("db down")) },
+    });
+    await getOrderAvailability(availabilityReq({ ...window, productIds: [3] }), {} as Response);
+
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      "orders.availability.error",
     );
   });
 });

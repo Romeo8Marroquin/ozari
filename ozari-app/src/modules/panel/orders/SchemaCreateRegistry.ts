@@ -1,4 +1,7 @@
 import {
+  CONTACT_EMAIL_REGEX,
+  contactChannelKind,
+  isValidContactPhone,
   ORDER_ADDRESS_MIN_LENGTH,
   ORDER_LONGTEXT_MAX_LENGTH,
   ORDER_TEXT_MAX_LENGTH,
@@ -73,7 +76,20 @@ const baseCreateRegistrySchema = z.object({
   preferredPaymentMethodId: z.number().nullable(),
 });
 
-export const createRegistrySchema = baseCreateRegistrySchema;
+// Per-channel value shape: EMAIL must look like an email, WHATSAPP/PHONE like a phone number, OTHER
+// is length-only (the base check). Mirrors the backend `clientRegistries.validator.ts`.
+export const createRegistrySchema = baseCreateRegistrySchema.superRefine((data, ctx) => {
+  data.contacts.forEach((contact, index) => {
+    const value = contact.value.trim();
+    if (value === '') return; // the base non-empty check already flags this
+    const kind = contactChannelKind(contact.contactTypeId);
+    if (kind === 'email' && !CONTACT_EMAIL_REGEX.test(value)) {
+      ctx.addIssue({ code: 'custom', path: ['contacts', index, 'value'], message: t(`${KEY}.invalidEmail`) });
+    } else if ((kind === 'whatsapp' || kind === 'phone') && !isValidContactPhone(value)) {
+      ctx.addIssue({ code: 'custom', path: ['contacts', index, 'value'], message: t(`${KEY}.invalidPhone`) });
+    }
+  });
+});
 
 export type CreateRegistryFormType = z.infer<typeof createRegistrySchema>;
 

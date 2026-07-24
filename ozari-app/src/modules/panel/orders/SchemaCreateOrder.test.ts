@@ -17,6 +17,8 @@ const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFor
   pickupAt: '2026-08-02T10:00',
   deliveryName: 'María López',
   deliveryContact: '5555-1234',
+  deliveryContactTypeId: null,
+  deliveryZoneId: null,
   deliveryAddress: 'Zona 10, 4a avenida 5-55',
   description: '',
   comment: '',

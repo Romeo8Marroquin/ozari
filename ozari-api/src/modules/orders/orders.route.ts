@@ -4,11 +4,12 @@ import { isGrantedRoles } from "@middlewares/role.middleware.js";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
 import {
   createOrder,
+  getOrderAvailability,
   getOrderById,
   getOrders,
   getOrdersCatalog,
 } from "./orders.controller.js";
-import { validateCreateOrder } from "./orders.validator.js";
+import { validateCreateOrder, validateOrderAvailability } from "./orders.validator.js";
 
 const router: RouterType = Router();
 
@@ -32,6 +33,16 @@ router.post(
   isGrantedRoles([RolesEnum.Admin]),
   validateCreateOrder,
   createOrder,
+);
+
+// Region: Live availability probe — **Admin only** (exact counts; a Client tier would cap instead,
+// see EPIC-2 §11.A). Read-only + advisory: the create path re-checks under the product lock.
+router.post(
+  "/availability",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  validateOrderAvailability,
+  getOrderAvailability,
 );
 
 export default router;

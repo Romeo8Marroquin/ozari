@@ -1,5 +1,5 @@
 import type { Product } from '../products/product.types';
-import { parseDateTime, parseLineQuantity, type OrderMode } from './SchemaCreateOrder';
+import { parseDateTime, parseLineQuantity } from './SchemaCreateOrder';
 
 /** Seeded lookup ids mirrored from the backend enums (stable). */
 export const BUSINESS_TYPE_RENT = 1;
@@ -8,20 +8,9 @@ export const RENT_UNIT_DAY = 2;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Whether a product is a rental (drives the mode filter, the pickup rule, and the pricing). */
+/** Whether a product is a rental (drives the pickup rule and the pricing). */
 export const isRentalProduct = (product: Product): boolean =>
   product.businessTypeId === BUSINESS_TYPE_RENT;
-
-/**
- * The products a given MODE lets the picker offer: `rent` → rentals, `buy` → sales, `both` → all.
- * (Filtering by business type, not availability — the admin sees everything; the backend's 409
- * re-offer is the availability guard, EPIC-2 §8.)
- */
-export function productsForMode(products: Product[], mode: OrderMode): Product[] {
-  if (mode === 'both') return products;
-  const wantRental = mode === 'rent';
-  return products.filter((product) => isRentalProduct(product) === wantRental);
-}
 
 /**
  * Billed days over the delivery→pickup window — mirrors the backend `computeBilledDays`: billing is
@@ -42,6 +31,12 @@ export function estimateLineSubtotal(product: Product, quantity: number, billedD
   if (unit === undefined) return 0;
   const multiplier = isRental && product.rentTimeUnitId === RENT_UNIT_DAY ? billedDays : 1;
   return Math.round(unit * quantity * multiplier * 100) / 100;
+}
+
+/** One line's UNIT price from its product row (rent vs sale); 0 when it has no applicable price. */
+export function lineUnitPrice(product: Product): number {
+  const unit = isRentalProduct(product) ? product.rentPrice : product.sellPrice;
+  return unit ?? 0;
 }
 
 export interface EstimateLine {

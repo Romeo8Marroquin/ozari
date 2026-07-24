@@ -6,6 +6,8 @@ import { getPrismaClient } from "@/services/prisma.service.js";
 import { logger } from "@/config/logger.js";
 import { appConfig } from "@/config/app.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
+import { ContactTypeEnum } from "@models/enums/contactTypeEnum.js";
+import { emailRegex, isValidContactPhone } from "@helpers/regex.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import {
   type CreateClientRegistryRequestModel,
@@ -102,6 +104,20 @@ export const validateCreateClientRegistry = async (
       const value = sanitizeText(rawContact["value"], 2, 255);
       if (value === null) {
         rejectCreate(res, "invalidContactValue", { value: rawContact["value"] });
+        return;
+      }
+      // Per-channel shape: email must look like an email, WhatsApp/phone like a phone number
+      // (mirrors the frontend). OTHER is length-only.
+      if (contactTypeId === ContactTypeEnum.CORREO && !emailRegex.test(value)) {
+        rejectCreate(res, "invalidContactEmail", { value });
+        return;
+      }
+      if (
+        (contactTypeId === ContactTypeEnum.WHATSAPP ||
+          contactTypeId === ContactTypeEnum.TELEFONO) &&
+        !isValidContactPhone(value)
+      ) {
+        rejectCreate(res, "invalidContactPhone", { value });
         return;
       }
       const isPrincipal = rawContact["isPrincipal"] === true;

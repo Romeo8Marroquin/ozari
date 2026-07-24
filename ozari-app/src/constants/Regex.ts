@@ -57,3 +57,50 @@ export const ORDER_TEXT_MAX_LENGTH = 255;
 export const ORDER_ADDRESS_MIN_LENGTH = 5;
 export const ORDER_LONGTEXT_MAX_LENGTH = 500;
 // Money + per-line quantity reuse the product ceilings (`maxGlobalAmount` / `maxGlobalQuantity`).
+
+// ── Contact-channel validation (registry contacts) — mirrors the backend `ContactTypeEnum` +
+// `clientRegistries.validator.ts`. The seeded contact-type ids are the stable contract; the value's
+// shape is validated per channel: EMAIL → email regex; WHATSAPP/PHONE → a lenient phone; OTHER →
+// length only. The keyboard + leading icon in the modal key off the SAME kinds.
+export const CONTACT_TYPE_WHATSAPP_ID = 1;
+export const CONTACT_TYPE_PHONE_ID = 2;
+export const CONTACT_TYPE_EMAIL_ID = 3;
+export const CONTACT_TYPE_OTHER_ID = 4;
+
+/** Mirrors the backend `emailRegex`. */
+export const CONTACT_EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+/** Allowed phone characters (digits + the usual separators); digit COUNT is checked separately. */
+export const CONTACT_PHONE_CHARS_REGEX = /^[+\d\s()-]+$/;
+export const CONTACT_PHONE_MIN_DIGITS = 7;
+export const CONTACT_PHONE_MAX_DIGITS = 15; // E.164 upper bound
+
+export type ContactChannelKind = 'whatsapp' | 'phone' | 'email' | 'other';
+
+/** The mobile keyboard per channel (drives `inputMode` on a contact value input). */
+export const CHANNEL_INPUT_MODE: Record<ContactChannelKind, 'email' | 'tel' | 'text'> = {
+  whatsapp: 'tel',
+  phone: 'tel',
+  email: 'email',
+  other: 'text',
+};
+
+/** The channel kind for a seeded contact-type id (drives validation, keyboard, and the icon). */
+export const contactChannelKind = (contactTypeId: number | null | undefined): ContactChannelKind => {
+  switch (contactTypeId) {
+    case CONTACT_TYPE_WHATSAPP_ID:
+      return 'whatsapp';
+    case CONTACT_TYPE_PHONE_ID:
+      return 'phone';
+    case CONTACT_TYPE_EMAIL_ID:
+      return 'email';
+    default:
+      return 'other';
+  }
+};
+
+/** A valid phone value: only allowed characters and a digit count within `[MIN, MAX]`. */
+export const isValidContactPhone = (value: string): boolean => {
+  if (!CONTACT_PHONE_CHARS_REGEX.test(value)) return false;
+  const digits = value.replace(/\D/g, '').length;
+  return digits >= CONTACT_PHONE_MIN_DIGITS && digits <= CONTACT_PHONE_MAX_DIGITS;
+};

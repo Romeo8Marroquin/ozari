@@ -276,11 +276,19 @@ html.vt-panel-skip::view-transition-new(root) {
   animation: none;
 }
 
-/* Cross-browser thin, on-brand scrollbar for the panel nav (and any panel scroll area). Firefox
-   uses the standard `scrollbar-width`/`scrollbar-color` properties; WebKit & Blink (Safari, Chrome,
-   Edge) use the `::-webkit-scrollbar` pseudo-elements. Declaring both means the sidebar scroll looks
-   the same everywhere instead of falling back to each OS's chunky native bar. The thumb is a low-
-   opacity charcoal so it reads as a hint, not a hard edge. */
+/* SCROLLBARS — the app has ONE bar: the floating `OverlayScrollbar` component (fades when idle,
+   grows + pointer-cursor on hover, drags). Give a scroll area `.no-native-scrollbar` + a relative
+   wrapper holding the scroller and `<OverlayScrollbar target={ref} />` as siblings (see PanelLayout
+   / Modal). `.no-native-scrollbar` hides the OS bar cross-browser so only the overlay shows. */
+.no-native-scrollbar {
+  scrollbar-width: none; /* Firefox */
+}
+.no-native-scrollbar::-webkit-scrollbar {
+  display: none; /* WebKit & Blink */
+}
+
+/* The thin STYLED native bar — a lightweight fallback for chrome that can't host the overlay wrapper
+   (currently the sidebar drawer). Prefer `.no-native-scrollbar` + OverlayScrollbar for new areas. */
 .panel-scroll {
   scrollbar-width: thin;
   scrollbar-color: rgba(38, 38, 38, 0.22) transparent;

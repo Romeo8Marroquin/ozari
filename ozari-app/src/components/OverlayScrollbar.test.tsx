@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import PanelScrollbar, { SCROLLBAR_IDLE_HIDE_MS } from './PanelScrollbar';
+import OverlayScrollbar, { SCROLLBAR_IDLE_HIDE_MS } from './OverlayScrollbar';
 
 /** A stand-in scroll container with controllable metrics (jsdom has no real layout). */
 const makeScroller = (options: { scrollHeight: number; clientHeight: number }): HTMLElement => {
@@ -25,12 +25,12 @@ const advance = (ms: number): void => {
 const renderBar = (element: HTMLElement) => {
   const target = createRef<HTMLElement>();
   (target as { current: HTMLElement }).current = element;
-  const utils = render(<PanelScrollbar target={target} />);
+  const utils = render(<OverlayScrollbar target={target} />);
   advance(16); // flush the initial requestAnimationFrame measure
   return utils;
 };
 
-const thumb = (): HTMLElement => screen.getByTestId('panel-scrollbar-thumb');
+const thumb = (): HTMLElement => screen.getByTestId('overlay-scrollbar-thumb');
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
@@ -38,10 +38,10 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-describe('PanelScrollbar', () => {
+describe('OverlayScrollbar', () => {
   it('renders NO thumb when the content does not overflow (nothing to scroll)', () => {
     renderBar(makeScroller({ scrollHeight: 500, clientHeight: 500 }));
-    expect(screen.queryByTestId('panel-scrollbar-thumb')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('overlay-scrollbar-thumb')).not.toBeInTheDocument();
   });
 
   it('shows a proportional thumb on scroll and fades it after the idle delay', () => {
@@ -125,12 +125,12 @@ describe('PanelScrollbar', () => {
 
     try {
       renderBar(element);
-      expect(screen.getByTestId('panel-scrollbar-thumb')).toBeInTheDocument();
+      expect(screen.getByTestId('overlay-scrollbar-thumb')).toBeInTheDocument();
 
       // The content shrank below the fold — the thumb dissolves instead of a native bar popping out.
       Object.defineProperty(element, 'scrollHeight', { value: 400, configurable: true });
       act(() => trigger!());
-      expect(screen.queryByTestId('panel-scrollbar-thumb')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('overlay-scrollbar-thumb')).not.toBeInTheDocument();
     } finally {
       window.ResizeObserver = realObserver;
     }
@@ -138,6 +138,6 @@ describe('PanelScrollbar', () => {
 
   it('tolerates a missing target (nothing mounted yet)', () => {
     const target = createRef<HTMLElement>();
-    expect(() => render(<PanelScrollbar target={target} />)).not.toThrow();
+    expect(() => render(<OverlayScrollbar target={target} />)).not.toThrow();
   });
 });

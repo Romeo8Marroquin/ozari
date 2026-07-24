@@ -321,6 +321,17 @@ export function detailRowIn(row: HTMLElement | null): void {
   );
 }
 
+/** Swap an inline icon with a soft vertical "blink" (the password-eye motion): collapse to a line,
+ *  run `swap` at the midpoint, expand back. Instant under reduced motion. */
+export function iconSwapBlink(el: HTMLElement | null, swap: () => void): void {
+  if (!el || prefersReducedMotion()) {
+    swap();
+    return;
+  }
+  const timeline = gsap.timeline({ defaults: { duration: 0.18, ease: 'power1.inOut' } });
+  timeline.to(el, { scaleY: 0 }).add(swap).to(el, { scaleY: 1 });
+}
+
 /** A removed row slides out to the right while its space eases closed; resolves when done. */
 export function detailRowOut(row: HTMLElement | null): Promise<void> {
   if (!row || prefersReducedMotion()) return Promise.resolve();

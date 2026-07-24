@@ -421,6 +421,8 @@
         "tooManyContacts": "El cliente excede el número máximo de contactos.",
         "invalidContactTypeId": "El tipo de un contacto no es válido.",
         "invalidContactValue": "El valor de un contacto no es válido.",
+        "invalidContactEmail": "El correo electrónico de un contacto no es válido.",
+        "invalidContactPhone": "El número de teléfono de un contacto no es válido.",
         "multiplePrincipalContacts": "Solo un contacto puede ser el principal.",
         "invalidAddresses": "El cliente requiere al menos una dirección.",
         "tooManyAddresses": "El cliente excede el número máximo de direcciones.",
@@ -438,6 +440,8 @@
           "tooManyContacts": "El registro excede el máximo de contactos: <{{-count}}> de <{{-max}}>.",
           "invalidContactTypeId": "El tipo de contacto <{{-contactTypeId}}> no es válido.",
           "invalidContactValue": "El valor de contacto <{{-value}}> no es válido.",
+          "invalidContactEmail": "El correo de contacto <{{-value}}> no es válido.",
+          "invalidContactPhone": "El teléfono de contacto <{{-value}}> no es válido.",
           "multiplePrincipalContacts": "Contactos principales duplicados: <{{-principalCount}}>.",
           "invalidAddresses": "La lista de direcciones no es válida.",
           "tooManyAddresses": "El registro excede el máximo de direcciones: <{{-count}}> de <{{-max}}>.",
@@ -481,6 +485,30 @@
       "logs": {
         "catalogFetched": "Catálogo de referencia de órdenes obtenido exitosamente.",
         "errorFetchingCatalog": "Error al obtener el catálogo de referencia de órdenes: {{-error}}."
+      }
+    },
+    "availability": {
+      "computed": "Disponibilidad calculada exitosamente.",
+      "error": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidDeliveryAt": "La fecha y hora de entrega no es válida.",
+        "invalidPickupAt": "La fecha y hora de recolección no es válida.",
+        "pickupBeforeDelivery": "La recolección debe ser posterior a la entrega.",
+        "invalidProductIds": "Los productos consultados no son válidos.",
+        "tooManyProductIds": "Se consultaron demasiados productos.",
+        "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+        "logs": {
+          "invalidDeliveryAt": "Entrega inválida en la consulta de disponibilidad: <{{-deliveryAt}}>.",
+          "invalidPickupAt": "Recolección inválida en la consulta de disponibilidad: <{{-pickupAt}}>.",
+          "pickupBeforeDelivery": "Recolección <{{-pickupAt}}> no posterior a la entrega <{{-deliveryAt}}>.",
+          "invalidProductIds": "Ids de productos inválidos en la consulta de disponibilidad.",
+          "tooManyProductIds": "Demasiados productos (<{{-count}}>) en la consulta de disponibilidad.",
+          "validationError": "Error validando la consulta de disponibilidad: {{-error}}."
+        }
+      },
+      "logs": {
+        "computed": "Disponibilidad calculada para <{{-count}}> productos.",
+        "error": "Error al calcular disponibilidad: {{-error}}."
       }
     },
     "createOrder": {

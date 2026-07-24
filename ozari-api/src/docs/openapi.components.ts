@@ -729,6 +729,39 @@ export const schemas: Record<string, Schema> = {
       available: { type: "integer", example: 10 },
     },
   },
+  OrderAvailabilityRequest: {
+    type: "object",
+    required: ["deliveryAt", "productIds"],
+    description:
+      "The live availability probe: a delivery datetime, an OPTIONAL pickup (after delivery when " +
+      "present — omit it when no rental window exists yet), and 1–200 product ids.",
+    properties: {
+      deliveryAt: { type: "string", format: "date-time" },
+      pickupAt: { type: "string", format: "date-time", nullable: true },
+      productIds: {
+        type: "array",
+        minItems: 1,
+        maxItems: 200,
+        items: { type: "integer", example: 3 },
+      },
+    },
+  },
+  ProductAvailability: {
+    type: "object",
+    description:
+      "One product's availability for the window. `available` is fleet-minus-held for rentals, " +
+      "current stock for sales, and `null` for a rental with no pickup window yet.",
+    properties: {
+      productId: { type: "integer", example: 3 },
+      available: { type: "integer", nullable: true, example: 10 },
+    },
+  },
+  OrderAvailabilityResponse: {
+    type: "object",
+    properties: {
+      availability: { type: "array", items: schemaRef("ProductAvailability") },
+    },
+  },
   ClientRegistryContact: {
     type: "object",
     properties: {

@@ -269,17 +269,7 @@
             "description": "Para crear un pedido primero necesitas al menos un producto en tu catálogo.",
             "action": "Crear producto"
           },
-          "mode": {
-            "label": "¿Qué necesita el cliente?",
-            "rent": "Alquiler",
-            "buy": "Compra",
-            "both": "Ambos"
-          },
           "sections": {
-            "mode": {
-              "title": "Tipo de pedido",
-              "description": "¿El cliente quiere alquilar, comprar, o ambas cosas?"
-            },
             "client": {
               "title": "Cliente",
               "description": "Elige un cliente registrado o crea uno nuevo para este pedido."
@@ -309,19 +299,27 @@
             "eventTypePlaceholder": "Selecciona un tipo de evento",
             "deliveryAtLabel": "Entrega",
             "pickupAtLabel": "Recolección",
+            "pickupAtHint": "Requerida solo si el pedido incluye alquiler.",
             "lineProductLabel": "Producto",
             "lineProductPlaceholder": "Selecciona un producto",
             "lineQuantityLabel": "Cantidad",
             "deliveryNameLabel": "Nombre de quien recibe",
             "deliveryNamePlaceholder": "Nombre del responsable",
+            "deliveryContactTypeLabel": "Tipo de contacto",
+            "deliveryContactTypePlaceholder": "Tipo",
             "deliveryContactLabel": "Contacto",
             "deliveryContactPlaceholder": "Teléfono, WhatsApp o correo",
             "deliveryAddressLabel": "Dirección de entrega",
             "deliveryAddressPlaceholder": "Dirección completa del evento",
+            "deliveryZoneLabel": "Zona de entrega",
+            "deliveryZonePlaceholder": "Sin zona",
+            "deliveryZoneHint": "Opcional. Define el costo de envío sugerido según la zona.",
+            "lineUnitEach": "c/u",
+            "lineSubtotal": "Subtotal",
             "commentLabel": "Comentario",
             "commentPlaceholder": "Notas internas sobre el pedido",
             "deliveryAmountLabel": "Costo de envío",
-            "deliveryAmountHint": "Sin costo dentro de Hacienda Real; el resto según la distancia.",
+            "deliveryAmountHint": "El costo depende de la zona o la distancia.",
             "depositAmountLabel": "Anticipo",
             "moneyPlaceholder": "0.00",
             "paymentMethodLabel": "Método de pago",
@@ -334,8 +332,17 @@
             "empty": "Agrega al menos un producto al pedido."
           },
           "estimate": {
+            "productsSubtotal": "Subtotal productos",
+            "deliveryFee": "Envío",
             "label": "Total estimado",
             "note": "Estimado según los precios y las fechas. El total definitivo se confirma al crear el pedido."
+          },
+          "availability": {
+            "count": "{{count}} disponibles",
+            "soldOut": "Agotado",
+            "reconciledTitle": "Productos ajustados",
+            "adjustedList": "Ajustados por disponibilidad en las nuevas fechas: {{items}}.",
+            "removedList": "Eliminados sin disponibilidad: {{items}}."
           },
           "actions": {
             "newClient": "Nuevo cliente",
@@ -414,6 +421,8 @@
             "requiredContactType": "El tipo de contacto es requerido.",
             "requiredContactValue": "El contacto es requerido.",
             "invalidContactValue": "El contacto no es válido.",
+            "invalidEmail": "El correo electrónico no es válido.",
+            "invalidPhone": "El número de teléfono no es válido.",
             "tooManyAddresses": "Demasiadas direcciones.",
             "requiredAddress": "La dirección es requerida.",
             "invalidAddress": "La dirección no es válida.",

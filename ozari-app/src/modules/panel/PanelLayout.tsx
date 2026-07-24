@@ -3,8 +3,8 @@ import { Outlet, useLocation, useNavigate, useRouter } from '@tanstack/react-rou
 import gsap from 'gsap';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { prefersReducedMotion } from '@utils/motion';
+import OverlayScrollbar from '@components/OverlayScrollbar';
 import Header from './components/Header';
-import PanelScrollbar from './components/PanelScrollbar';
 import Sidebar from './components/Sidebar';
 import ForcedLogoutListener from './ForcedLogoutListener';
 import { panelSectionFor, type PanelPath } from './navConfig';
@@ -256,7 +256,7 @@ const PanelShell: React.FC = () => {
                 <PanelScrollMemory target={main} />
                 <main
                   ref={main}
-                  className="panel-main h-full overflow-y-auto bg-gradient-to-b from-[#f8f5f8] to-[#f0ecf1] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  className="panel-main no-native-scrollbar h-full overflow-y-auto bg-gradient-to-b from-[#f8f5f8] to-[#f0ecf1]"
                 >
                   {/* The gradient fills the full viewport width, but the content itself is clamped and
                       centered so it stays readable on ultrawide monitors (chrome edge-to-edge, content
@@ -269,7 +269,7 @@ const PanelShell: React.FC = () => {
                     <Outlet />
                   </div>
                 </main>
-                <PanelScrollbar target={main} />
+                <OverlayScrollbar target={main} />
               </div>
             </div>
           </div>

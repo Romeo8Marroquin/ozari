@@ -323,3 +323,72 @@ export const validateCreateOrder = async (
     );
   }
 };
+
+/** Log the availability validator warning for `key` and send its standard 400. */
+const rejectAvailability = (res: Response, key: string, logParams: Record<string, unknown>): void => {
+  logger.warn(i18next.t(`orders.availability.validators.logs.${key}`, logParams));
+  sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(`orders.availability.validators.${key}`));
+};
+
+/** Sensible cap for a per-window availability probe — far above any real catalog page. */
+const MAX_AVAILABILITY_PRODUCTS = 200;
+
+/**
+ * `POST /orders/availability` — validates the live availability probe: a delivery datetime, an
+ * OPTIONAL pickup (after delivery when present — omitting it means "no rental window yet"), and 1..N
+ * product ids. Read-only, so no DB lookups here; the controller reads the products.
+ */
+export const validateOrderAvailability = (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const body = req.body as Record<string, unknown>;
+
+    const deliveryAt = parseDate(body["deliveryAt"]);
+    if (!deliveryAt) {
+      rejectAvailability(res, "invalidDeliveryAt", { deliveryAt: body["deliveryAt"] });
+      return;
+    }
+
+    let pickupAt: Date | undefined;
+    const rawPickupAt = body["pickupAt"];
+    if (rawPickupAt !== undefined && rawPickupAt !== null && rawPickupAt !== "") {
+      const parsed = parseDate(rawPickupAt);
+      if (!parsed) {
+        rejectAvailability(res, "invalidPickupAt", { pickupAt: rawPickupAt });
+        return;
+      }
+      if (parsed.getTime() <= deliveryAt.getTime()) {
+        rejectAvailability(res, "pickupBeforeDelivery", { deliveryAt, pickupAt: parsed });
+        return;
+      }
+      pickupAt = parsed;
+    }
+
+    const rawIds = body["productIds"];
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      rejectAvailability(res, "invalidProductIds", { productIds: rawIds });
+      return;
+    }
+    if (rawIds.length > MAX_AVAILABILITY_PRODUCTS) {
+      rejectAvailability(res, "tooManyProductIds", { count: rawIds.length });
+      return;
+    }
+    const productIds: number[] = [];
+    for (const id of rawIds) {
+      if (typeof id !== "number" || !Number.isInteger(id) || id < 1) {
+        rejectAvailability(res, "invalidProductIds", { productIds: rawIds });
+        return;
+      }
+      productIds.push(id);
+    }
+
+    req.body = { deliveryAt, pickupAt, productIds };
+    next();
+  } catch (error) {
+    logger.error(i18next.t("orders.availability.validators.logs.validationError", { error }));
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("orders.availability.validators.validationError"),
+    );
+  }
+};

@@ -1095,6 +1095,45 @@ export const paths: OpenAPIV3.PathsObject = {
     },
   },
 
+  "/orders/availability": {
+    post: {
+      tags: ["Orders"],
+      summary: "Live per-window product availability (admin)",
+      operationId: "getOrderAvailability",
+      description:
+        "**Admin only.** The order form's live availability probe: for the requested products + " +
+        "window, returns each product's takeable amount so the picker can annotate amounts and " +
+        "reconcile picked lines. Rentals = fleet minus what's held in the window (`null` until a " +
+        "pickup is set); sales = current stock. Exact counts (the admin runs the business). Read-" +
+        "only + ADVISORY — the create path re-checks under the product lock. Authenticated limiter " +
+        "(100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      requestBody: bodyRef("OrderAvailabilityRequest", {
+        deliveryAt: EXAMPLE_DELIVERY_AT,
+        pickupAt: EXAMPLE_PICKUP_AT,
+        productIds: [3, 4],
+      }),
+      responses: {
+        "200": dataResponse("Per-product availability for the window.", "OrderAvailabilityResponse", {
+          availability: [
+            { productId: 3, available: 10 },
+            { productId: 4, available: 120 },
+          ],
+        }),
+        "400": errorResponse(
+          "Validation failed (bad delivery/pickup datetime, pickup not after delivery, empty or " +
+            "invalid product ids).",
+          400,
+          "The requested products are not valid",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
   "/orders/catalog": {
     get: {
       tags: ["Orders"],

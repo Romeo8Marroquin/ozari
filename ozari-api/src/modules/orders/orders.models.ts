@@ -204,3 +204,28 @@ export interface OrderStockConflictItemModel {
   /** Units actually takeable for the requested window (rentals) or remaining stock (sales). */
   available: number;
 }
+
+/**
+ * `POST /orders/availability` — the ADMIN's live per-window availability probe (EPIC-2 §10.C/§11.B):
+ * the order form calls it when the delivery/pickup window is set so the product picker can annotate
+ * each product's takeable amount and reconcile already-picked lines. Admin gets EXACT counts (they
+ * run the business — see §11.A); a future CLIENT tier returns only a capped orderable amount.
+ */
+export interface OrderAvailabilityRequestModel {
+  deliveryAt: Date;
+  /** Absent = no rental window yet — rentals return `null` (unknown until a pickup is set). */
+  pickupAt: Date | undefined;
+  productIds: number[];
+}
+
+/** One product's availability for the requested window. */
+export interface ProductAvailabilityModel {
+  productId: number;
+  /** Rentals: fleet minus what's held in the window; sales: current stock. `null` = a rental with
+   *  no pickup window yet (can't be computed until a pickup is chosen). */
+  available: number | null;
+}
+
+export interface OrderAvailabilityResponseModel {
+  availability: ProductAvailabilityModel[];
+}
