@@ -1,14 +1,17 @@
 /**
- * Seeded `service_status` rows (see `prisma/seed.ts` — ids are fixed by the seed). The order
- * lifecycle: PENDING (booked/confirmed, holds its units only during the event window) → EN_ROUTE
- * (loaded on the vehicle, on the way — Epic-2 tracking) → DELIVERED (units physically out — they
- * stay out until collected, however late) → COLLECTED (back in the warehouse; the explicit final
- * "listo" press, `services.ready_at`, returns the units to the fleet). CANCELLED never holds
- * inventory.
+ * **SEED ANCHORS ONLY — never branch on these at runtime.** Since the order lifecycle became a
+ * data-driven machine (EPIC-2 order lifecycle, 2026-07-27) the `service_status` ROWS declare their
+ * own behavior (pipeline position, inventory hold, evidence rule, tracked actual, mode, colour) and
+ * the admin may rename, recolor, reorder or add steps at will. Runtime logic must therefore read
+ * those FLAGS through the lifecycle engine (`modules/orders/lifecycle/`), never a literal id.
  *
- * NOTE (Epic-2 step 2, order tracking): `buildRentedNowWhere` in products.service.ts MUST count
- * EN_ROUTE as holding unconditionally (like DELIVERED) — the units are on the truck. Update it in
- * the same slice that starts writing EN_ROUTE.
+ * These constants exist so the SEED and the TESTS can name the default rows, and so the historical
+ * ids stay documented:
+ *   pipeline  PENDING(1) → EN_ROUTE(5) → DELIVERED(3) → COLLECTED(4) → READY(6)
+ *   off-ramp  CANCELLED(2) — disruptive, reachable from any step
+ *
+ * (READY is the explicit "listo" press that ends the washing period and returns the units to the
+ * fleet; COLLECTED still holds them because they are back but not yet clean.)
  */
 export enum ServiceStatusEnum {
   PENDING = 1,
@@ -16,4 +19,5 @@ export enum ServiceStatusEnum {
   DELIVERED,
   COLLECTED,
   EN_ROUTE,
+  READY,
 }

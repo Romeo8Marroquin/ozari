@@ -3,7 +3,20 @@ import { appConfig } from "@/config/app.js";
 import { decryptKms } from "@helpers/encryption.js";
 import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { RentTimeUnitEnum } from "@models/enums/rentTimeUnitEnum.js";
-import { ServiceStatusEnum } from "@models/enums/serviceStatusEnum.js";
+import { RolesEnum } from "@models/enums/rolesEnum.js";
+import {
+  describeActions,
+  getEvidenceBounds,
+  getStatusCatalog,
+  nextStatus,
+  statusById,
+} from "./lifecycle/lifecycle.service.js";
+import type {
+  ActorContextModel,
+  EvidenceBoundsModel,
+  LifecycleOrderModel,
+  StatusDefinitionModel,
+} from "./lifecycle/lifecycle.models.js";
 import {
   type OrderDetailResponseModel,
   type OrderListItemResponseModel,
@@ -24,7 +37,15 @@ export const orderListInclude = {
   currency: {
     select: { id: true, iso4217Code: true, name: true, symbol: true },
   },
-  serviceDetails: { where: { isActive: true }, select: { quantity: true } },
+  // The assigned driver (the admin is also a driver) — drives the list item's `assignee` + `isMine`
+  // so the agenda can group MINE vs the rest and gate the per-order quick action to my own orders.
+  assignedUser: { select: { id: true, fullNameKms: true } },
+  // `isRental` rides along with the quantities: it is the order's MODE (any rental line ⇒ a rental
+  // order), which decides which pipeline steps apply — the lifecycle projection needs it per row.
+  serviceDetails: {
+    where: { isActive: true },
+    select: { quantity: true, isRental: true },
+  },
 } satisfies Prisma.ServiceInclude;
 
 /** An order row fetched with `orderListInclude` — the list projection's input. */
@@ -91,6 +112,16 @@ export type RichOrder = Prisma.ServiceGetPayload<{
 const toMoney = (value: Prisma.Decimal | null): number | undefined =>
   value !== null ? Number(value) : undefined;
 
+/**
+ * The roles an order can be ASSIGNED to — the "deliverable" staff (the Admin also drives). This is
+ * the SINGLE source: the `/orders/catalog` "Asignar a" options and the create validator both read it,
+ * so widening it (an office runner, a dedicated delivery role, …) opens assignment everywhere at once.
+ */
+export const ASSIGNABLE_ROLES: readonly RolesEnum[] = [
+  RolesEnum.Admin,
+  RolesEnum.Driver,
+];
+
 /** Every accepted `view` value — the parse allowlist (anything else clamps to the default). */
 export const ORDER_LIST_VIEWS: readonly OrderListViewModel[] = [
   "agenda",
@@ -129,6 +160,7 @@ export function parseOrderListQuery(query: unknown): OrderListQueryModel {
  */
 export function buildOrderListWhere(
   query: OrderListQueryModel,
+  scopeUserId?: number,
 ): Prisma.ServiceWhereInput {
   const viewPredicate: Prisma.ServiceWhereInput =
     query.view === "history"
@@ -137,10 +169,70 @@ export function buildOrderListWhere(
   return {
     isActive: true,
     ...viewPredicate,
+    // Row scoping: a Driver sees ONLY orders assigned to them (`scopeUserId` = their id); Admin gets
+    // every order (`scopeUserId` undefined → no assignee filter). The route guard keeps Clients out.
+    ...(scopeUserId !== undefined ? { assignedUserId: scopeUserId } : {}),
     ...(query.statusId !== undefined
       ? { serviceStatusId: query.statusId }
       : {}),
   };
+}
+
+/** The scalar shape `computeNextActionAt`/`sortAgendaRows` need — every field is a plain `Service`
+ *  column, so both a lean list row and a rich detail row satisfy it. */
+export interface AgendaSortableOrder {
+  id: number;
+  assignedUserId: number | null;
+  deliveryAt: Date;
+  pickupAt: Date | null;
+  deliveredAt: Date | null;
+  collectedAt: Date | null;
+}
+
+/**
+ * The moment of an order's NEXT logistics action — the sort key that makes the agenda read as "what
+ * do I touch next", not "what was created/delivered first" (owner rule). Derived from the tracked
+ * ACTUALS, never from a status id (EPIC-2 order lifecycle): the statuses that stamp them are
+ * admin-configurable, but "it has been collected" / "it has been delivered" are facts.
+ *
+ * - collected ⇒ its collection moment (it's waiting out the washing period for the "listo" press);
+ * - delivered ⇒ its PICKUP (a purchase-only order has none → its delivery moment stands in);
+ * - otherwise ⇒ its DELIVERY.
+ *
+ * So an order delivered early but picked up in an hour sorts AHEAD of one merely delivering in six.
+ * Cancelled/finished rows live in history, never here.
+ */
+export function computeNextActionAt(order: AgendaSortableOrder): Date {
+  if (order.collectedAt !== null) {
+    return order.collectedAt;
+  }
+  if (order.deliveredAt !== null) {
+    return order.pickupAt ?? order.deliveredAt;
+  }
+  return order.deliveryAt;
+}
+
+/**
+ * Orders the AGENDA the way the worker reads it: **MINE first** (assigned to `currentUserId`), then
+ * the rest; within each, soonest {@link computeNextActionAt} first, `id` breaking ties so pages never
+ * shuffle. Pure (sorts a copy). For a Driver every row is theirs, so it collapses to a pure
+ * next-action ordering; for the Admin it floats their own assignments to the top. The active set is
+ * small (single-vehicle logistics), so sorting it in memory is cheaper than a per-row SQL expression.
+ */
+export function sortAgendaRows<T extends AgendaSortableOrder>(
+  rows: T[],
+  currentUserId: number,
+): T[] {
+  return [...rows].sort((a, b) => {
+    const aMine = a.assignedUserId === currentUserId ? 0 : 1;
+    const bMine = b.assignedUserId === currentUserId ? 0 : 1;
+    if (aMine !== bMine) {
+      return aMine - bMine;
+    }
+    const byAction =
+      computeNextActionAt(a).getTime() - computeNextActionAt(b).getTime();
+    return byAction !== 0 ? byAction : a.id - b.id;
+  });
 }
 
 /**
@@ -156,20 +248,79 @@ export function orderListOrderBy(
 }
 
 /**
- * Projects an order row to the LIST item shape. This is the **Admin** projection — the only role
- * the orders routes mount today. When the Client (own orders) and Driver (assigned logistics)
- * slices arrive, grow this into the role-tiered single source (`projectServiceForRole` doctrine,
- * EPIC-2 §7) — extend HERE, never fork per endpoint.
+ * The lifecycle context a projection needs: the cached status catalog, WHO is asking (the actor
+ * whose permitted actions get projected), and the global evidence bounds. Built ONCE per request
+ * (`loadOrderProjectionContext`) and threaded into every row — projections stay query-free.
+ */
+export interface OrderProjectionContextModel {
+  catalog: StatusDefinitionModel[];
+  actor: ActorContextModel;
+  evidence: EvidenceBoundsModel;
+}
+
+/** The order-shaped input the lifecycle engine reasons about, derived from a fetched row: its
+ *  current status, its assignee (the driver scope check) and whether ANY line is a rental (the
+ *  mode that decides which pipeline steps apply). */
+export function toLifecycleOrder(order: {
+  serviceStatusId: number;
+  assignedUserId: number | null;
+  cancelledAt: Date | null;
+  serviceDetails: ReadonlyArray<{ isRental: boolean }>;
+}): LifecycleOrderModel {
+  return {
+    serviceStatusId: order.serviceStatusId,
+    assignedUserId: order.assignedUserId,
+    cancelledAt: order.cancelledAt,
+    isRental: order.serviceDetails.some((line) => line.isRental),
+  };
+}
+
+/**
+ * Loads everything the projections need from the lifecycle machine — once per request, not per row.
+ * The catalog is memoized in-process (admin edits invalidate it), so this is normally free.
+ */
+export async function loadOrderProjectionContext(
+  actor: ActorContextModel,
+): Promise<OrderProjectionContextModel> {
+  const [catalog, evidence] = await Promise.all([
+    getStatusCatalog(),
+    getEvidenceBounds(),
+  ]);
+  return { catalog, actor, evidence };
+}
+
+/**
+ * Projects an order row to the LIST item shape. This is the **Admin/Driver** projection — the roles
+ * the orders routes mount today; the row's `actions` are already narrowed to what THIS actor may do
+ * (the engine's permission matrix), so a driver never receives a move they can't make. When the
+ * Client (own orders) slice arrives, grow this into the role-tiered single source
+ * (`projectServiceForRole` doctrine, EPIC-2 §7) — extend HERE, never fork per endpoint.
  */
 export function projectOrderListItem(
   order: OrderListRow,
+  context: OrderProjectionContextModel,
 ): OrderListItemResponseModel {
+  const currentUserId = context.actor.userId;
+  const lifecycleOrder = toLifecycleOrder(order);
+  const next = nextStatus(context.catalog, lifecycleOrder);
   return {
     id: order.id,
     clientName: decryptKms(order.deliveryNameKms),
     isRegistryClient: order.clientRegistryId !== null,
     eventType: order.eventType,
-    status: order.serviceStatus,
+    status: {
+      ...order.serviceStatus,
+      colorKey:
+        statusById(context.catalog, order.serviceStatusId)?.colorKey ??
+        undefined,
+    },
+    nextStatus: next ? { id: next.id, name: next.name } : undefined,
+    actions: describeActions(
+      context.catalog,
+      lifecycleOrder,
+      context.actor,
+      context.evidence,
+    ),
     paymentStatus: order.paymentStatus,
     deliveryAt: order.deliveryAt,
     pickupAt: order.pickupAt ?? undefined,
@@ -177,6 +328,13 @@ export function projectOrderListItem(
     collectedAt: order.collectedAt ?? undefined,
     readyAt: order.readyAt ?? undefined,
     cancelledAt: order.cancelledAt ?? undefined,
+    // The assigned driver + whether it's the viewer's own: the agenda groups MINE vs the rest and
+    // shows the quick action only on `isMine` rows (a Driver's rows are all theirs; an unassigned
+    // order is never anyone's). `assignee` is absent while unassigned ("Sin asignar").
+    assignee: order.assignedUser
+      ? { id: order.assignedUser.id, name: decryptKms(order.assignedUser.fullNameKms) }
+      : undefined,
+    isMine: order.assignedUserId === currentUserId,
     itemCount: order.serviceDetails.reduce(
       (sum, line) => sum + line.quantity,
       0,
@@ -197,19 +355,18 @@ export function projectOrderListItem(
  * money breakdown, lines/extras, and the status audit trail. Same Admin-projection stance (and
  * future role-tier home) as {@link projectOrderListItem}.
  */
-export function projectOrderDetail(order: RichOrder): OrderDetailResponseModel {
+export function projectOrderDetail(
+  order: RichOrder,
+  context: OrderProjectionContextModel,
+): OrderDetailResponseModel {
   return {
-    ...projectOrderListItem(order),
+    // The list item already projects the assigned driver as `assignee` (+ `isMine`) — the detail
+    // inherits it, so there is no separate `assignedUser` field to keep in sync.
+    ...projectOrderListItem(order, context),
     deliveryContact: decryptKms(order.deliveryContactKms),
     deliveryAddress: decryptKms(order.deliveryAddressKms),
     description: order.description ?? undefined,
     comment: order.comment ?? undefined,
-    assignedUser: order.assignedUser
-      ? {
-          id: order.assignedUser.id,
-          name: decryptKms(order.assignedUser.fullNameKms),
-        }
-      : undefined,
     deliveryAmount: toMoney(order.deliveryAmount),
     depositAmount: toMoney(order.depositAmount),
     paymentMethod: order.paymentMethod ?? undefined,
@@ -294,20 +451,22 @@ export function parseSpacingMinutes(value: string | undefined): number {
 /**
  * The `service_details` filter selecting every RENTAL line that holds units against the requested
  * `[windowStart, windowEnd]` window — the order-time twin of products' `buildRentedNowWhere`
- * (EPIC-1 §5 obligation: validation runs the same rule against the EVENT's window, not `now`):
+ * (EPIC-1 §5 obligation: validation runs the same rule against the EVENT's window, not `now`), and
+ * likewise driven by the lifecycle flags rather than hardcoded ids:
  *
- * - **DELIVERED** and **EN_ROUTE** hold unconditionally — the units are physically out (or on the
- *   truck) until collected, however late;
- * - **PENDING** holds only when its own billed window overlaps the requested one (half-open
+ * - `inventoryHold = OUT` statuses hold unconditionally — the units are on the truck, at the event,
+ *   or back but still being washed, so they can't be promised to anyone whatever the window;
+ * - `WINDOW` statuses hold only when their own billed period overlaps the requested one (half-open
  *   overlap: a pickup at 10:00 doesn't collide with a delivery at 10:00 — the spacing rule, not
  *   availability, governs that gap);
- * - cancelled/collected/soft-deleted rows never hold, and SALE lines never hold (their stock was
+ * - `NONE` statuses and soft-deleted rows never hold, and SALE lines never hold (their stock was
  *   decremented at creation).
  */
 export function buildRentedInWindowWhere(
   productIds: number[],
   windowStart: Date,
   windowEnd: Date,
+  holding: { out: number[]; window: number[] },
 ): Prisma.ServiceDetailWhereInput {
   return {
     productId: { in: productIds },
@@ -317,10 +476,9 @@ export function buildRentedInWindowWhere(
       isActive: true,
       cancelledAt: null,
       OR: [
-        { serviceStatusId: ServiceStatusEnum.DELIVERED },
-        { serviceStatusId: ServiceStatusEnum.EN_ROUTE },
+        { serviceStatusId: { in: holding.out } },
         {
-          serviceStatusId: ServiceStatusEnum.PENDING,
+          serviceStatusId: { in: holding.window },
           serviceStart: { lt: windowEnd },
           serviceEnd: { gt: windowStart },
         },

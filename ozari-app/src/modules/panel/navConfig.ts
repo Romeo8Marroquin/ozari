@@ -45,16 +45,16 @@ export interface PanelNavItem {
 export const PRODUCTS_ROLES: readonly Role[] = [Role.Admin, Role.Client];
 
 /**
- * The roles allowed into the orders section — **Admin only** while the backend reads are (Epic-2
- * step 2): a Client gets "mis pedidos" and a Driver "mis entregas" only when their row-scoped
- * backend slices land; widening here before then would just surface 403s. Single source for the
- * nav tab AND the `/panel/pedidos` route guard, like `PRODUCTS_ROLES`.
+ * The roles allowed into the orders section — **Admin + Driver**: the backend list is now row-scoped
+ * (an Admin sees every order — grouped MINE vs the rest — a Driver only their assigned deliveries),
+ * so the tab + guard widened together with that scoping. A Client's "mis pedidos" tier is still
+ * future. Single source for the nav tab AND the `/panel/pedidos` route guard, like `PRODUCTS_ROLES`.
  */
-export const ORDERS_ROLES: readonly Role[] = [Role.Admin];
+export const ORDERS_ROLES: readonly Role[] = [Role.Admin, Role.Driver];
 
-// The nav shows ONLY built modules: Products + Orders (the agenda, Admin-only) + Settings. A
-// dashboard lands later; until then `/panel` defaults to the first tab the role can see —
-// products for Admin/Client, settings for a Driver (see `panelHomeFor`).
+// The nav shows ONLY built modules: Products + Orders (the agenda) + Settings. A dashboard lands
+// later; until then `/panel` defaults to the first tab the role can see — products for Admin/Client,
+// the orders agenda for a Driver (deliveries are their whole job; see `panelHomeFor`).
 export const PANEL_NAV: PanelNavItem[] = [
   { to: '/panel/productos', icon: HiOutlineCube, labelKey: 'products', roles: PRODUCTS_ROLES },
   { to: '/panel/pedidos', icon: HiOutlineClipboardDocumentList, labelKey: 'orders', roles: ORDERS_ROLES },
@@ -63,9 +63,9 @@ export const PANEL_NAV: PanelNavItem[] = [
 
 /**
  * Where bare `/panel` lands for `role`: the first nav tab the role is allowed to see (products for
- * Admin/Client, settings for a Driver), falling back to settings if the role somehow matches
- * nothing. Keeps the default-landing rule derived from the SAME role-visibility source as the
- * sidebar, so the two can never disagree.
+ * Admin/Client, the orders agenda for a Driver), falling back to settings if the role somehow
+ * matches nothing. Keeps the default-landing rule derived from the SAME role-visibility source as
+ * the sidebar, so the two can never disagree.
  */
 export function panelHomeFor(role: Role | null): PanelPath {
   /* v8 ignore next -- defensive `??`: the settings tab is unrestricted, so the list is never empty */

@@ -124,13 +124,15 @@ describe('Sidebar (inline, desktop/tablet)', () => {
     expect(screen.getByRole('button', { name: 'modules.panel.actions.collapse' })).toBeInTheDocument();
   });
 
-  it('hides the products tab from a Driver — their nav is settings only (Epic-2A)', () => {
+  it('hides the products tab from a Driver — their nav is orders + settings (Epic-2A)', () => {
     setViewport('desktop');
     useRole.mockReturnValue(Role.Driver);
     renderSidebar();
 
-    expect(screen.getAllByRole('link')).toHaveLength(2); // brand + settings
+    expect(screen.getAllByRole('link')).toHaveLength(3); // brand + orders + settings
     expect(screen.queryByRole('link', { name: 'modules.panel.nav.products' })).not.toBeInTheDocument();
+    // A Driver DOES get the orders agenda (their assigned deliveries) + settings.
+    expect(screen.getByRole('link', { name: 'modules.panel.nav.orders' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'modules.panel.nav.settings' })).toBeInTheDocument();
   });
 

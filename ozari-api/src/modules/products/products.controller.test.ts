@@ -20,6 +20,10 @@ import { HttpEnum } from "@models/enums/httpEnum.js";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
 import { type CustomRequest } from "@models/common/customRequestModel.js";
 import {
+  SEEDED_HOLDING_IDS,
+  SEEDED_STATUS_CATALOG,
+} from "@/tests/fixtures/lifecycleCatalog.js";
+import {
   type ProductCatalogResponseModel,
   type ProductListItemResponseModel,
   type ProductListResponseModel,
@@ -38,6 +42,12 @@ vi.mock("@/config/environment.js", () => ({ isDeployedEnvironment: vi.fn(() => f
 vi.mock("@helpers/storage.js", () => ({
   getStorage: vi.fn(),
   StorageValidationError: class StorageValidationError extends Error {},
+}));
+// Availability now asks the LIFECYCLE machine which statuses hold units (`inventory_hold`), so the
+// engine stands in with the seeded catalog — its own derivations are covered by lifecycle.service.test.
+vi.mock("../orders/lifecycle/lifecycle.service.js", () => ({
+  getStatusCatalog: vi.fn(async () => SEEDED_STATUS_CATALOG),
+  holdingStatusIds: vi.fn(() => SEEDED_HOLDING_IDS),
 }));
 
 const rawProduct = {

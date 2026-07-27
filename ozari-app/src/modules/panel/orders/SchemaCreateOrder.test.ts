@@ -1,14 +1,24 @@
-import { describe, expect, it } from 'vitest';
+import type { ResolverResult } from 'react-hook-form';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  appendLineAvailabilityErrors,
   createOrderDefaultValues,
   createOrderRequiredPatterns,
   createOrderSchema,
+  nowDateTimeLocal,
   parseDateTime,
   parseLineQuantity,
   parseMoney,
+  takeableFor,
   toCreateOrderBody,
   type CreateOrderFormType,
 } from './SchemaCreateOrder';
+
+// Freeze "now" well before the fixtures' 2026-08 dates so the not-in-past delivery refine is
+// deterministic (and the hardcoded future fixtures never go stale as the wall clock advances).
+const FROZEN_NOW = new Date('2026-07-15T12:00:00').getTime();
+beforeAll(() => vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW));
+afterAll(() => vi.restoreAllMocks());
 
 const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFormType => ({
   clientRegistryId: 3,
@@ -25,6 +35,7 @@ const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFor
   deliveryAmount: '',
   depositAmount: '',
   paymentMethodId: null,
+  assignedUserId: 2,
   lines: [{ productId: 3, quantity: '25', isRental: true }],
   ...overrides,
 });
@@ -51,6 +62,12 @@ describe('parse helpers', () => {
     expect(parseDateTime('2026-08-01T14:00')).toBeInstanceOf(Date);
     expect(parseDateTime('')).toBeNull();
     expect(parseDateTime('not-a-date')).toBeNull();
+  });
+
+  it('nowDateTimeLocal: the current instant as a datetime-local value', () => {
+    // Frozen to 2026-07-15T12:00 → the picker `min` reflects "now" in the local datetime-local shape.
+    expect(nowDateTimeLocal()).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+    expect(nowDateTimeLocal()).toBe('2026-07-15T12:00');
   });
 });
 
@@ -94,6 +111,17 @@ describe('createOrderSchema', () => {
     expect(result.error?.issues.some((i) => i.path.join('.') === 'pickupAt')).toBe(false);
   });
 
+  it('rejects a delivery scheduled in the past', () => {
+    const result = parse(validForm({ deliveryAt: '2020-01-01T00:00' }));
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.some((i) => i.path.join('.') === 'deliveryAt')).toBe(true);
+  });
+
+  it('accepts a delivery at the current minute (the picker minimum, within the grace)', () => {
+    const result = parse(validForm({ deliveryAt: nowDateTimeLocal(), pickupAt: '2026-08-02T10:00' }));
+    expect(result.success).toBe(true);
+  });
+
   it('rejects a duplicate product across lines', () => {
     const result = parse(
       validForm({
@@ -110,6 +138,7 @@ describe('createOrderSchema', () => {
   it('requires at least one line, a client, an event type, and the snapshots', () => {
     expect(parse(validForm({ lines: [] })).success).toBe(false);
     expect(parse(validForm({ clientRegistryId: null as unknown as number })).success).toBe(false);
+    expect(parse(validForm({ assignedUserId: null as unknown as number })).success).toBe(false);
     expect(parse(validForm({ eventTypeId: null as unknown as number })).success).toBe(false);
     expect(parse(validForm({ deliveryAt: '' })).success).toBe(false);
     expect(parse(validForm({ deliveryName: 'x' })).success).toBe(false);
@@ -142,6 +171,7 @@ describe('toCreateOrderBody', () => {
       deliveryAmount: 50.99,
       depositAmount: 100,
       description: 'nota',
+      assignedUserId: 2,
       lines: [{ productId: 3, quantity: 25 }],
     });
     expect(body.deliveryAt).toMatch(/^2026-08-01T/);
@@ -180,5 +210,83 @@ describe('toCreateOrderBody', () => {
     expect(createOrderDefaultValues.lines).toEqual([]);
     expect(createOrderDefaultValues.deliveryAt).toBe('');
     expect(createOrderDefaultValues.paymentMethodId).toBeNull();
+  });
+});
+
+describe('takeableFor', () => {
+  it('prefers the fetched window amount, else the product baseline, else undefined', () => {
+    const windowAvail = new Map<number, number | null>([
+      [3, 4],
+      [4, null], // a rental with no pickup yet → fall back to the baseline
+    ]);
+    const products = new Map<number, { available?: number }>([
+      [3, { available: 10 }],
+      [4, { available: 8 }],
+      [5, {}], // no baseline
+    ]);
+    expect(takeableFor(3, windowAvail, products)).toBe(4); // window amount wins
+    expect(takeableFor(4, windowAvail, products)).toBe(8); // window null → baseline
+    expect(takeableFor(5, new Map(), products)).toBeUndefined(); // no window, no baseline
+    expect(takeableFor(9, new Map(), products)).toBeUndefined(); // unknown product
+  });
+});
+
+describe('appendLineAvailabilityErrors', () => {
+  const message = (available: number) => `max ${available}`;
+  const ok = (form: CreateOrderFormType): ResolverResult<CreateOrderFormType> => ({ values: form, errors: {} });
+  type LineErrors = ({ quantity?: { message?: string }; productId?: { message?: string } } | undefined)[];
+  const lineErrorsOf = (result: ResolverResult<CreateOrderFormType>): LineErrors | undefined =>
+    (result.errors as { lines?: LineErrors }).lines;
+
+  it('leaves a within-cap order untouched (returns the same result)', () => {
+    const form = validForm({ lines: [{ productId: 3, quantity: '4', isRental: true }] });
+    const result = ok(form);
+    expect(appendLineAvailabilityErrors(form, result, () => 10, message)).toBe(result);
+  });
+
+  it('flags a line over its cap, leaves a within-cap sibling clean, and marks the form invalid', () => {
+    const form = validForm({
+      lines: [
+        { productId: 3, quantity: '25', isRental: true }, // over cap → error
+        { productId: 4, quantity: '2', isRental: false }, // within cap → stays clean
+      ],
+    });
+    const out = appendLineAvailabilityErrors(form, ok(form), (id) => (id === 3 ? 4 : 10), message);
+    expect(out.values).toEqual({});
+    expect(lineErrorsOf(out)?.[0]?.quantity?.message).toBe('max 4');
+    expect(lineErrorsOf(out)?.[1]).toBeUndefined();
+  });
+
+  it('never overwrites a schema error already on a quantity, and skips null-product / unknown-cap lines', () => {
+    const form = validForm({
+      lines: [
+        { productId: 3, quantity: '25', isRental: true }, // valid + over cap, but a schema error owns it
+        { productId: null as unknown as number, quantity: '5', isRental: false }, // no product → skipped
+        { productId: 5, quantity: '99', isRental: false }, // unknown cap → left to the server
+      ],
+    });
+    const base: ResolverResult<CreateOrderFormType> = {
+      values: {},
+      errors: { lines: [{ quantity: { type: 'too_small', message: 'schema' } }, undefined, undefined] } as never,
+    };
+    const capFor = (id: number) => (id === 5 ? undefined : 1);
+    // Nothing new added anywhere → the original result is returned unchanged.
+    expect(appendLineAvailabilityErrors(form, base, capFor, message)).toBe(base);
+  });
+
+  it('adds an availability error while preserving a base error on another line', () => {
+    const form = validForm({
+      lines: [
+        { productId: 3, quantity: '25', isRental: true }, // over cap → availability error added
+        { productId: 4, quantity: '2', isRental: false }, // a base productId error must survive
+      ],
+    });
+    const base: ResolverResult<CreateOrderFormType> = {
+      values: {},
+      errors: { lines: [undefined, { productId: { type: 'x', message: 'dup' } }] } as never,
+    };
+    const out = appendLineAvailabilityErrors(form, base, () => 4, message);
+    expect(lineErrorsOf(out)?.[0]?.quantity?.message).toBe('max 4');
+    expect(lineErrorsOf(out)?.[1]?.productId?.message).toBe('dup');
   });
 });

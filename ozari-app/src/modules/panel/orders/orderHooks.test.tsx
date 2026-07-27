@@ -85,7 +85,7 @@ describe('useCreateOrder', () => {
   it('posts the body with skipErrorNotification', async () => {
     post.mockResolvedValue({ data: { data: { order: { id: 12 } } } });
     const { result } = renderHook(() => useCreateOrder(), { wrapper: createQueryWrapper() });
-    const body = { clientRegistryId: 3, eventTypeId: 1, deliveryAt: 'x', deliveryName: 'a', deliveryContact: 'b', deliveryAddress: 'ccccc', lines: [] };
+    const body = { clientRegistryId: 3, eventTypeId: 1, deliveryAt: 'x', deliveryName: 'a', deliveryContact: 'b', deliveryAddress: 'ccccc', assignedUserId: 1, lines: [] };
     result.current.createOrder(body);
     await waitFor(() => expect(post).toHaveBeenCalled());
     expect(post).toHaveBeenCalledWith('/orders', body, { skipErrorNotification: true });

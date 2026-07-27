@@ -23,6 +23,10 @@ vi.mock('./useOrderAvailability', () => ({ useOrderAvailability }));
 const { success, error, warning } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
 vi.mock('@components/notifications/notify', () => ({ notify: { success, error, warning } }));
 
+// The form defaults the "Asignar a" select to the current admin's id (from the token).
+const { getStoredUserId } = vi.hoisted(() => ({ getStoredUserId: vi.fn(() => 1) }));
+vi.mock('@hooks/useRole', () => ({ getStoredUserId }));
+
 // Stub the registry modal — its own suite covers it; here we only need the create hand-off.
 const { newRegistry } = vi.hoisted(() => ({
   newRegistry: {
@@ -52,6 +56,7 @@ import { PanelNavContext, type PanelNav } from '../PanelNavContext';
 import type { Product } from '../products/product.types';
 import type { ClientRegistry, OrderCatalog } from './order.types';
 import OrderForm from './OrderForm';
+import { reconcileToastDuration } from './SchemaCreateOrder';
 
 const KEY = 'modules.panel.orders.create';
 
@@ -105,6 +110,11 @@ const catalog: OrderCatalog = {
   paymentMethods: [{ id: 1, name: 'Efectivo' }, { id: 2, name: 'Transferencia' }],
   contactTypes: [{ id: 1, name: 'WhatsApp' }, { id: 2, name: 'Teléfono' }],
   zones: [{ id: 6, name: 'Zona 10', deliveryFee: 50 }],
+  // The deliverable staff the "Asignar a" select offers (id 1 = the current admin, the default).
+  assignableUsers: [
+    { id: 1, name: 'Romeo Marroquín', role: 'Administrador' },
+    { id: 5, name: 'Ana Díaz', role: 'Repartidor' },
+  ],
 };
 
 type QueryState<T> = { data?: T; isLoading?: boolean; isError?: boolean; refetch?: () => void };
@@ -168,8 +178,13 @@ const fillAndSubmit = async (container: HTMLElement): Promise<Handlers> => {
   return createOrder.mock.calls[0][1] as Handlers;
 };
 
+// Freeze "now" before the fixtures' 2026-08 dates so the delivery's not-in-past rule stays satisfied
+// (and the hardcoded future dates don't go stale as the wall clock advances). Restored in afterEach.
+const FROZEN_NOW = new Date('2026-07-15T12:00:00').getTime();
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW);
   useCreateOrder.mockReturnValue({ createOrder, isPending: false });
   useOrderAvailability.mockReturnValue({ checkAvailability });
   setReady();
@@ -394,6 +409,18 @@ describe('OrderForm', () => {
     expect(createOrder.mock.calls[0][0].paymentMethodId).toBe(2);
   });
 
+  it('defaults the assignee to the current admin and lets it be reassigned to a driver', async () => {
+    const { container } = renderForm();
+    await fillValid(container);
+    // The "Asignar a" select defaults to the creating admin (id 1) — never unassigned.
+    expect((byId(container, 'order-assigned-user') as HTMLSelectElement).value).toBe('1');
+    // Reassigning to another deliverable staff member sends that id.
+    await userEvent.selectOptions(byId(container, 'order-assigned-user'), '5');
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createOrder).toHaveBeenCalled());
+    expect(createOrder.mock.calls[0][0].assignedUserId).toBe(5);
+  });
+
   it('creating a client through the modal seeds the picker cache (prepending the new client) and selects it', async () => {
     const user = userEvent.setup();
     const { setData } = renderForm();
@@ -479,11 +506,22 @@ describe('OrderForm', () => {
     expect((byId(container, 'order-line-quantity-0') as HTMLInputElement).value).toBe('4');
     expect(byId(container, 'order-line-product-1')).toBeNull(); // product 4 line removed
     expect(warning).toHaveBeenCalled();
+    // The toast lists each change on its OWN line (adjusted heading + item, removed heading + item),
+    // and lingers longer the more it carries (two changes here).
+    const [message, options] = warning.mock.calls[warning.mock.calls.length - 1];
+    expect(message).toContain(`${KEY}.availability.adjustedHeading`);
+    expect(message).toContain(`${KEY}.availability.adjustedItem`);
+    expect(message).toContain(`${KEY}.availability.removedHeading`);
+    expect(message).toContain('\n'); // one item per row, not a single joined line
+    expect(options).toMatchObject({ title: `${KEY}.availability.reconciledTitle`, duration: reconcileToastDuration(2) });
 
-    // The picker is annotated: the kept product shows a count; a re-addable one shows sold-out.
-    expect(within(byId(container, 'order-line-product-0')).queryByRole('option', { name: /availability\.count/ })).toBeInTheDocument();
+    // The takeable amount now surfaces as a quiet hint UNDER each line's quantity (the dropdown shows
+    // only the product name). The kept line shows its count; a re-added sold-out product shows "Agotado".
+    expect(await screen.findByText(`${KEY}.availability.count`)).toBeInTheDocument();
+    expect(within(byId(container, 'order-line-product-0')).queryByRole('option', { name: /availability/ })).toBeNull();
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    expect(within(byId(container, 'order-line-product-1')).queryByRole('option', { name: /availability\.soldOut/ })).toBeInTheDocument();
+    await user.selectOptions(byId(container, 'order-line-product-1'), '4');
+    expect(await screen.findByText(`${KEY}.availability.soldOut`)).toBeInTheDocument();
   }, 20000);
 
   it('handles adjust-only, remove-only, and empty availability payloads', async () => {
@@ -535,6 +573,8 @@ describe('OrderForm', () => {
       clientRegistryId: 3,
       eventTypeId: 1,
       deliveryName: 'María López',
+      // Defaulted to the creating admin (id 1) — never unassigned.
+      assignedUserId: 1,
       lines: [{ productId: 3, quantity: 25 }],
     });
     expect(body.pickupAt).toBeTruthy();
@@ -622,4 +662,31 @@ describe('OrderForm', () => {
     await user.click(screen.getByRole('button', { name: 'stub-registry-close' }));
     expect(screen.queryByRole('button', { name: 'stub-registry-close' })).not.toBeInTheDocument();
   });
+
+  it('scales the reconciliation toast duration with the number of changes (capped)', () => {
+    expect(reconcileToastDuration(1)).toBe(7600); // base 6000 + one 1600 step
+    expect(reconcileToastDuration(3)).toBe(10800); // base + three steps
+    expect(reconcileToastDuration(50)).toBe(15000); // capped, never overstays
+  });
+
+  it('caps a line quantity at the product availability and blocks an over-stock submit', async () => {
+    const user = userEvent.setup({ delay: null });
+    // A product carrying an Admin availability baseline — the cap exists even before a window is set.
+    useOrderProducts.mockReturnValue(q({ data: [{ ...rentalProduct, available: 5 }] }));
+    const { container } = renderForm();
+    await user.selectOptions(byId(container, 'order-client'), '3');
+    await user.selectOptions(byId(container, 'order-event-type'), '1');
+    setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    // The input advertises the takeable ceiling as its native max.
+    expect(byId(container, 'order-line-quantity-0')).toHaveAttribute('max', '5');
+    // Typing over the baseline + submitting is blocked with the per-line "only N available" message.
+    await user.type(byId(container, 'order-line-quantity-0'), '9');
+    await waitFor(() => expect(byId(container, 'order-pickup-at')).toBeInTheDocument());
+    setDateTime(byId(container, 'order-pickup-at'), '2026-08-02T15:00');
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    expect(await screen.findByText(`${KEY}.errors.lineUnavailable`)).toBeInTheDocument();
+    expect(createOrder).not.toHaveBeenCalled();
+  }, 20000);
 });

@@ -106,6 +106,8 @@ export const appConfig = {
     // Key namespace per asset kind (keeps the bucket organized; lets a lifecycle policy target a prefix).
     keyPrefixes: {
       product: "products",
+      // Order tracking evidence (the photos a step demands before it can be entered).
+      orderEvidence: "orders/evidence",
     },
   },
 
@@ -138,6 +140,11 @@ export const appConfig = {
   // Fallback when the `orders.logisticsSpacingMinutes` app preference is missing/corrupt — the
   // seeded default (single-vehicle rule: ≥1h between any two logistics events).
   defaultLogisticsSpacingMinutes: 60,
+  // Fallbacks when the `orders.evidenceMinPhotos` / `orders.evidenceMaxPhotos` preferences are
+  // missing or corrupt. These are the GLOBAL bounds: a status that leaves its own `minEvidence`/
+  // `maxEvidence` unset inherits them, and a per-status count may never fall outside them.
+  defaultEvidenceMinPhotos: 1,
+  defaultEvidenceMaxPhotos: 10,
 
   sensitiveKeys: ["password", "token", "secret", "creditCard", "cvv", "auth"],
   basePath: "/api",

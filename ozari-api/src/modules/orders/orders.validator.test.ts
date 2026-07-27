@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, type Mock } from "vitest";
 import type { NextFunction, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import { validateCreateOrder, validateOrderAvailability } from "./orders.validator.js";
@@ -36,9 +36,17 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
     eventType: { findFirst: vi.fn().mockResolvedValue({ id: 1 }) },
     paymentMethod: { findFirst: vi.fn().mockResolvedValue({ id: 1 }) },
     product: { findMany: vi.fn().mockResolvedValue([rentalProduct, saleProduct]) },
+    // The assignable-staff check: an active deliverable user by default.
+    user: { findFirst: vi.fn().mockResolvedValue({ id: 5 }) },
     ...overrides,
   });
 }
+
+// Freeze "now" well before the fixtures' 2026-08 dates so the not-in-past delivery guard is
+// deterministic (and the hardcoded future fixtures never become stale as the wall clock advances).
+const FROZEN_NOW = new Date("2026-07-15T12:00:00.000Z").getTime();
+beforeAll(() => vi.spyOn(Date, "now").mockReturnValue(FROZEN_NOW));
+afterAll(() => vi.restoreAllMocks());
 
 const validBody = () => ({
   clientRegistryId: 3,
@@ -109,6 +117,7 @@ describe("validateCreateOrder", () => {
     ["invalidClientRegistryId", { clientRegistryId: "x" }],
     ["invalidEventTypeId", { eventTypeId: "x" }],
     ["invalidDeliveryAt", { deliveryAt: "not-a-date" }],
+    ["deliveryInPast", { deliveryAt: "2020-01-01T00:00:00.000Z" }],
     ["invalidLines", { lines: [] }],
     ["invalidLineQuantity", { lines: [{ productId: 3, quantity: 0 }] }],
     ["duplicateLineProduct", { lines: [{ productId: 3, quantity: 1 }, { productId: 3, quantity: 2 }] }],
@@ -138,6 +147,29 @@ describe("validateCreateOrder", () => {
     mockPrisma({ paymentMethod: { findFirst: vi.fn().mockResolvedValue(null) } });
     await run({ ...validBody(), paymentMethodId: 99 });
     expectRejected("invalidPaymentMethodId");
+  });
+
+  it("leaves the assignee undefined when absent (the controller defaults it to the creator)", async () => {
+    const { req, next } = await run(validBody());
+    expect(next).toHaveBeenCalled();
+    expect((req.body as Record<string, unknown>)["assignedUserId"]).toBeUndefined();
+  });
+
+  it("accepts a valid deliverable assignee and puts it on the body", async () => {
+    const { req, next } = await run({ ...validBody(), assignedUserId: 5 });
+    expect(next).toHaveBeenCalled();
+    expect((req.body as Record<string, unknown>)["assignedUserId"]).toBe(5);
+  });
+
+  it("rejects an assignee who is not an active deliverable user (Admin/Driver) via the DB", async () => {
+    mockPrisma({ user: { findFirst: vi.fn().mockResolvedValue(null) } });
+    await run({ ...validBody(), assignedUserId: 99 });
+    expectRejected("invalidAssignedUserId");
+  });
+
+  it("rejects a malformed assignee id without a DB lookup", async () => {
+    await run({ ...validBody(), assignedUserId: "x" });
+    expectRejected("invalidAssignedUserId");
   });
 
   it("rejects an unknown/inactive registry and event type via the DB", async () => {

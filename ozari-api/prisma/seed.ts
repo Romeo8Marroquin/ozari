@@ -3,6 +3,11 @@
 import "dotenv/config";
 import { logger } from "../src/config/logger.js";
 import {
+  InventoryHoldEnum,
+  StatusAppliesToEnum,
+  TrackedEventEnum,
+} from "../src/models/enums/serviceLifecycleEnum.js";
+import {
   disconnectPrisma,
   getPrismaClient,
 } from "../src/services/prisma.service.js";
@@ -63,6 +68,183 @@ async function seedZones(prisma: SeedPrismaClient): Promise<void> {
   }
 }
 
+// service_status — THE ORDER LIFECYCLE MACHINE, seeded as the business's real flow (EPIC-2 order
+// lifecycle, 2026-07-27). Every row DECLARES its own behavior, so the admin can rename/recolor/
+// reorder/add steps without a deploy:
+//   pipeline  Pendiente(1) → En ruta(2) → Entregado(3) → Recolectado(4) → Listo(5)
+//   off-ramp  Cancelado (sortOrder NULL, `isDisruptive` — reachable from any step)
+// Ids are the historical seed anchors (`ServiceStatusEnum`); **Listo (id 6) is the only new row** —
+// the washing period between collection and the fleet getting its units back (owner, 2026-07-27),
+// which is why Recolectado still holds inventory (`OUT`) and only Listo releases it (`NONE`).
+const SERVICE_STATUS_SEED = [
+  {
+    id: 1,
+    name: "Pendiente",
+    description: "Pedido confirmado, pendiente de entrega",
+    sortOrder: 1,
+    isInitial: true,
+    isDisruptive: false,
+    inventoryHold: InventoryHoldEnum.WINDOW,
+    requiresEvidence: false,
+    minEvidence: null,
+    maxEvidence: null,
+    appliesTo: StatusAppliesToEnum.ALL,
+    tracksEvent: null,
+    colorKey: "amber",
+  },
+  {
+    id: 5,
+    name: "En ruta",
+    description: "Pedido cargado y en camino hacia el cliente",
+    sortOrder: 2,
+    isInitial: false,
+    isDisruptive: false,
+    inventoryHold: InventoryHoldEnum.OUT,
+    requiresEvidence: false,
+    minEvidence: null,
+    maxEvidence: null,
+    appliesTo: StatusAppliesToEnum.ALL,
+    tracksEvent: null,
+    colorKey: "indigo",
+  },
+  {
+    id: 3,
+    name: "Entregado",
+    description: "Pedido entregado al cliente",
+    sortOrder: 3,
+    isInitial: false,
+    isDisruptive: false,
+    inventoryHold: InventoryHoldEnum.OUT,
+    requiresEvidence: true,
+    minEvidence: null,
+    maxEvidence: null,
+    appliesTo: StatusAppliesToEnum.ALL,
+    tracksEvent: TrackedEventEnum.DELIVERY,
+    colorKey: "emerald",
+  },
+  {
+    id: 4,
+    name: "Recolectado",
+    description:
+      "Pedido recolectado; en proceso de limpieza (las unidades aún no vuelven a la flota)",
+    sortOrder: 4,
+    isInitial: false,
+    isDisruptive: false,
+    inventoryHold: InventoryHoldEnum.OUT,
+    requiresEvidence: true,
+    minEvidence: null,
+    maxEvidence: null,
+    appliesTo: StatusAppliesToEnum.RENTAL,
+    tracksEvent: TrackedEventEnum.COLLECTION,
+    colorKey: "sky",
+  },
+  {
+    id: 6,
+    name: "Listo",
+    description: "Pedido finalizado: unidades limpias y de vuelta en la flota",
+    sortOrder: 5,
+    isInitial: false,
+    isDisruptive: false,
+    inventoryHold: InventoryHoldEnum.NONE,
+    requiresEvidence: false,
+    minEvidence: null,
+    maxEvidence: null,
+    appliesTo: StatusAppliesToEnum.RENTAL,
+    tracksEvent: null,
+    colorKey: "violet",
+  },
+  {
+    id: 2,
+    name: "Cancelado",
+    description: "Pedido cancelado por el cliente o por el proveedor",
+    sortOrder: null,
+    isInitial: false,
+    isDisruptive: true,
+    inventoryHold: InventoryHoldEnum.NONE,
+    requiresEvidence: false,
+    minEvidence: null,
+    maxEvidence: null,
+    appliesTo: StatusAppliesToEnum.ALL,
+    tracksEvent: null,
+    colorKey: "red",
+  },
+];
+
+/** `pnpm db:seed:force` (i.e. `prisma db seed -- --force`) — the explicit opt-in that RESTORES the
+ *  seeded lifecycle defaults over admin edits (owner decision 2026-07-27). Plain `pnpm db:seed`
+ *  never touches an edited status. */
+const forceSeed = (): boolean => process.argv.includes("--force");
+
+/**
+ * Writes the seeded lifecycle defaults onto the seeded rows. `sort_order` is UNIQUE, so every
+ * pipeline slot is freed first — assigning targets in place would collide with whatever holds them
+ * (a previous admin reorder). Admin-created steps keep their relative order, renumbered after the
+ * seeded ones, so restoring the defaults never strands a custom step.
+ */
+async function applyLifecycleDefaults(
+  prisma: SeedPrismaClient,
+  force: boolean,
+): Promise<void> {
+  const pipelineRows = await prisma.serviceStatus.findMany({
+    where: { sortOrder: { not: null } },
+    select: { id: true },
+    orderBy: { sortOrder: "asc" },
+  });
+  await prisma.serviceStatus.updateMany({
+    where: { sortOrder: { not: null } },
+    data: { sortOrder: null },
+  });
+
+  for (const { id, name, description, ...machine } of SERVICE_STATUS_SEED) {
+    await prisma.serviceStatus.update({
+      where: { id },
+      // A backfill fixes only the MACHINE columns (the admin never chose an empty configuration);
+      // `--force` additionally restores the seeded name/description and re-publishes the row.
+      data: force
+        ? { ...machine, name, description, isActive: true }
+        : machine,
+    });
+  }
+
+  const seededIds = new Set(SERVICE_STATUS_SEED.map((row) => row.id));
+  let nextSlot =
+    SERVICE_STATUS_SEED.filter((row) => row.sortOrder !== null).length + 1;
+  for (const row of pipelineRows.filter((row) => !seededIds.has(row.id))) {
+    await prisma.serviceStatus.update({
+      where: { id: row.id },
+      data: { sortOrder: nextSlot },
+    });
+    nextSlot += 1;
+  }
+}
+
+/**
+ * Seeds the lifecycle statuses. Rows are CREATE-ONLY on re-run (the `app_preferences` stance): once
+ * the admin renames, recolors or re-flags a status, re-seeding must never undo it. Two exceptions:
+ *   - a DB seeded BEFORE the machine existed has all-default flag columns — that is a MISSING
+ *     configuration, not an admin choice, so the defaults are backfilled exactly once (detected
+ *     globally: any configured row ⇒ hands off);
+ *   - `--force` deliberately restores everything.
+ */
+async function seedServiceStatuses(
+  prisma: SeedPrismaClient,
+  force: boolean,
+): Promise<void> {
+  const configuredBefore = await prisma.serviceStatus.count({
+    where: { OR: [{ sortOrder: { not: null } }, { isInitial: true }] },
+  });
+  for (const row of SERVICE_STATUS_SEED) {
+    await prisma.serviceStatus.upsert({
+      where: { id: row.id },
+      update: {},
+      create: row,
+    });
+  }
+  if (force || configuredBefore === 0) {
+    await applyLifecycleDefaults(prisma, force);
+  }
+}
+
 // app_preferences — every operational "constant" is an admin preference (owner direction,
 // 2026-07-15; EPIC-2-ORDERS §2). CREATE-ONLY upserts (`update: {}`): re-seeding must NEVER
 // clobber a value the admin has since edited. Values are text, parsed per valueType.
@@ -108,20 +290,25 @@ async function seedAppPreferences(prisma: SeedPrismaClient): Promise<void> {
       description:
         "Horas mínimas de anticipación por defecto para nuevos tipos de evento",
     },
+    // The GLOBAL evidence bounds — the range a per-status count may be chosen from, and the
+    // fallback when a status leaves `min_evidence`/`max_evidence` NULL (owner decision 2026-07-27).
+    // WHETHER a step demands photos is the per-status `requires_evidence` flag, not a preference
+    // (which is why the old global `orders.evidencePhotosRequired` switch is gone from this seed).
     {
-      key: "orders.evidencePhotosRequired",
-      value: "true",
-      valueType: "bool",
+      key: "orders.evidenceMinPhotos",
+      value: "1",
+      valueType: "int",
       group: "orders",
       description:
-        "Si los pasos ENTREGADO/RECOLECTADO exigen evidencia fotográfica",
+        "Mínimo global de fotos de evidencia por paso (y mínimo permitido al configurar un estado)",
     },
     {
       key: "orders.evidenceMaxPhotos",
       value: "10",
       valueType: "int",
       group: "orders",
-      description: "Máximo de fotos de evidencia por paso",
+      description:
+        "Máximo global de fotos de evidencia por paso (y máximo permitido al configurar un estado)",
     },
     {
       key: "orders.stepAdvanceMode",
@@ -329,22 +516,7 @@ async function main(): Promise<void> {
     });
   }
 
-  // service_status — ServiceStatusEnum: PENDING=1, CANCELLED=2, DELIVERED=3, COLLECTED=4,
-  // EN_ROUTE=5 (added for Epic-2 order tracking: LISTO → EN RUTA → ENTREGADO → RECOLECTADO).
-  const serviceStatuses = [
-    { id: 1, name: "Pendiente", description: "Servicio pendiente de entrega" },
-    { id: 2, name: "Cancelado", description: "Servicio cancelado por el cliente o proveedor" },
-    { id: 3, name: "Entregado", description: "Servicio entregado al cliente" },
-    { id: 4, name: "Recolectado", description: "Servicio recolectado por el proveedor" },
-    { id: 5, name: "En ruta", description: "Servicio en ruta hacia el cliente" },
-  ];
-  for (const row of serviceStatuses) {
-    await prisma.serviceStatus.upsert({
-      where: { id: row.id },
-      update: { name: row.name, description: row.description },
-      create: row,
-    });
-  }
+  await seedServiceStatuses(prisma, forceSeed());
 
   // payment_status
   const paymentStatuses = [

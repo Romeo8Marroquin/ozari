@@ -221,10 +221,41 @@
           "tomorrow": "Mañana",
           "yesterday": "Ayer"
         },
+        "owner": {
+          "mine": "Mis pedidos",
+          "rest": "El resto"
+        },
         "ticket": {
           "items_one": "{{count}} artículo",
           "items_other": "{{count}} artículos",
-          "purchaseOnly": "Solo entrega"
+          "deliveryLabel": "Entrega",
+          "pickupLabel": "Recolección",
+          "purchaseOnly": "Solo entrega",
+          "unassigned": "Sin asignar",
+          "nextStepAria": "Avanzar: {{step}}",
+          "nextStep": "Marcar {{status}}"
+        },
+        "advance": {
+          "title": "Marcar {{status}}",
+          "description": "El pedido de {{client}} pasará a «{{status}}».",
+          "rewindTitle": "Regresar a {{status}}",
+          "rewindDescription": "El pedido de {{client}} volverá a «{{status}}». Se borrará la marca de tiempo del paso que se deshace.",
+          "cancelTitle": "Cancelar pedido",
+          "cancelDescription": "El pedido de {{client}} se cancelará y sus unidades volverán a estar disponibles. Esta acción no se puede deshacer.",
+          "evidenceLabel": "Fotos de evidencia",
+          "evidenceCount": "{{count}} de {{min}}–{{max}}",
+          "addPhotos": "Agregar fotos",
+          "removePhoto": "Quitar la foto {{name}}",
+          "reasonLabel": "Motivo",
+          "reasonPlaceholder": "¿Por qué se cancela el pedido?",
+          "confirm": "Confirmar",
+          "cancelAction": "Cancelar",
+          "successTitle": "Pedido actualizado",
+          "successToast": "El pedido pasó a «{{status}}».",
+          "errors": {
+            "fallback": "No se pudo actualizar el estado del pedido.",
+            "upload": "No se pudieron subir las fotos. Intente de nuevo."
+          }
         },
         "empty": {
           "agenda": {
@@ -303,6 +334,9 @@
             "lineProductLabel": "Producto",
             "lineProductPlaceholder": "Selecciona un producto",
             "lineQuantityLabel": "Cantidad",
+            "assignToLabel": "Asignar a",
+            "assignToPlaceholder": "Selecciona un responsable",
+            "assignToHint": "Responsable de la entrega. Por defecto, tú; puedes asignar a otro repartidor.",
             "deliveryNameLabel": "Nombre de quien recibe",
             "deliveryNamePlaceholder": "Nombre del responsable",
             "deliveryContactTypeLabel": "Tipo de contacto",
@@ -341,8 +375,10 @@
             "count": "{{count}} disponibles",
             "soldOut": "Agotado",
             "reconciledTitle": "Productos ajustados",
-            "adjustedList": "Ajustados por disponibilidad en las nuevas fechas: {{items}}.",
-            "removedList": "Eliminados sin disponibilidad: {{items}}."
+            "adjustedHeading": "Ajustes por disponibilidad:",
+            "adjustedItem": "• {{name}} ({{from}} → {{to}})",
+            "removedHeading": "Sin disponibilidad:",
+            "removedItem": "• {{name}}"
           },
           "actions": {
             "newClient": "Nuevo cliente",
@@ -355,9 +391,11 @@
           "successToast": "El pedido se creó correctamente.",
           "errors": {
             "requiredClient": "El cliente es requerido.",
+            "requiredAssignee": "El responsable es requerido.",
             "requiredEventType": "El tipo de evento es requerido.",
             "requiredDeliveryAt": "La fecha y hora de entrega es requerida.",
             "invalidDeliveryAt": "La fecha y hora de entrega no es válida.",
+            "deliveryInPast": "La fecha y hora de entrega no puede estar en el pasado.",
             "requiredPickupAt": "La fecha y hora de recolección es requerida.",
             "invalidPickupAt": "La fecha y hora de recolección no es válida.",
             "pickupBeforeDelivery": "La recolección debe ser posterior a la entrega.",

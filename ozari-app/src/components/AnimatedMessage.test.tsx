@@ -30,4 +30,13 @@ describe('AnimatedMessage', () => {
     render(<AnimatedMessage instructions="Opcional" focusColor="midnight" />);
     expect(screen.getByRole('alert')).toHaveClass('text-midnight');
   });
+
+  it('updates when the instructions change (a dynamic hint), not only on an error toggle', async () => {
+    const { rerender } = render(<AnimatedMessage instructions="5 disponibles" />);
+    const alert = screen.getByRole('alert');
+    await waitFor(() => expect(alert).toHaveTextContent('5 disponibles'), { timeout: 3000 });
+    // The error is unchanged (still none) but the instructions text changes → it must re-sync.
+    rerender(<AnimatedMessage instructions="2 disponibles" />);
+    await waitFor(() => expect(alert).toHaveTextContent('2 disponibles'), { timeout: 3000 });
+  });
 });

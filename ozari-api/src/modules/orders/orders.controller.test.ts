@@ -15,6 +15,11 @@ import { HttpEnum } from "@models/enums/httpEnum.js";
 import { encryptKms } from "@helpers/encryption.js";
 import { type CustomRequest } from "@models/common/customRequestModel.js";
 import {
+  DEFAULT_EVIDENCE_BOUNDS,
+  SEEDED_STATUS_CATALOG,
+} from "@/tests/fixtures/lifecycleCatalog.js";
+import { getStatusCatalog } from "./lifecycle/lifecycle.service.js";
+import {
   type OrderAvailabilityResponseModel,
   type OrderCatalogResponseModel,
   type OrderDetailEnvelopeModel,
@@ -31,6 +36,13 @@ vi.mock("@/config/auditLogger.js", () => ({
   logAudit: vi.fn(),
 }));
 vi.mock("@/config/environment.js", () => ({ isDeployedEnvironment: vi.fn(() => false) }));
+// The lifecycle machine: only its two DB readers are stubbed (with the SEEDED catalog + bounds) —
+// every derivation, permission and projection below runs the real engine.
+vi.mock("./lifecycle/lifecycle.service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./lifecycle/lifecycle.service.js")>()),
+  getStatusCatalog: vi.fn(async () => SEEDED_STATUS_CATALOG),
+  getEvidenceBounds: vi.fn(async () => DEFAULT_EVIDENCE_BOUNDS),
+}));
 
 const VALID_ENCRYPTION_KEY =
   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -77,7 +89,8 @@ const makeRawOrder = () => ({
   serviceStatus: { id: 1, name: "Pendiente" },
   paymentStatus: { id: 1, name: "Pendiente" },
   currency: { id: 1, iso4217Code: "GTQ", name: "Quetzal Guatemalteco", symbol: "Q" },
-  serviceDetails: [{ quantity: 25 }],
+  assignedUser: null,
+  serviceDetails: [{ quantity: 25, isRental: true }],
 });
 
 /** The same order as the RICH include fetches it (full lines, extras, history, driver). */
@@ -112,6 +125,9 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
   const count = vi.fn().mockResolvedValue(1);
   const findFirst = vi.fn().mockResolvedValue(makeRawRichOrder());
   const lookupFindMany = vi.fn().mockResolvedValue([]);
+  // The assignable-staff lookups: `findMany` for the catalog, `findFirst` for the create validator.
+  const userFindMany = vi.fn().mockResolvedValue([]);
+  const userFindFirst = vi.fn().mockResolvedValue({ id: 1 });
   (getPrismaClient as Mock).mockResolvedValue({
     service: { findMany, count, findFirst },
     eventType: { findMany: lookupFindMany },
@@ -120,9 +136,10 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
     paymentMethod: { findMany: lookupFindMany },
     contactType: { findMany: lookupFindMany },
     zone: { findMany: lookupFindMany },
+    user: { findMany: userFindMany, findFirst: userFindFirst },
     ...overrides,
   });
-  return { findMany, count, findFirst, lookupFindMany };
+  return { findMany, count, findFirst, lookupFindMany, userFindMany, userFindFirst };
 }
 
 const buildReq = (
@@ -136,8 +153,8 @@ const successData = <T>(): T => (sendOzariSuccess as Mock).mock.calls[0]?.[3] as
 beforeEach(() => vi.clearAllMocks());
 
 describe("getOrders", () => {
-  it("returns the projected page with pagination (agenda defaults)", async () => {
-    const { findMany } = mockPrisma();
+  it("returns the projected page (agenda: fetch-all + in-memory sort/slice, count unused)", async () => {
+    const { findMany, count } = mockPrisma();
     await getOrders(buildReq(), {} as Response);
 
     const data = successData<OrderListResponseModel>();
@@ -146,19 +163,84 @@ describe("getOrders", () => {
       id: 12,
       clientName: "María López",
       isRegistryClient: false,
-      status: { id: 1, name: "Pendiente" },
+      // The chip tone and the next step both come from the lifecycle machine.
+      status: { id: 1, name: "Pendiente", colorKey: "amber" },
+      nextStatus: { id: 5, name: "En ruta" },
       itemCount: 25,
       totalAmount: 450,
+      isMine: false, // the admin (userId 1) isn't the assignee (unassigned)
     });
+    // The admin may advance it and cancel it (no rewind — it sits at the first step).
+    expect(data.orders[0]?.actions.map((action) => action.kind)).toEqual([
+      "forward",
+      "disruptive",
+    ]);
     expect(data.pagination).toEqual({ page: 1, pageSize: 20, total: 1, totalPages: 1 });
+    // The agenda fetches every matching row (no orderBy/skip/take) and paginates in memory; the
+    // total is the array length, so the DB `count` is never called.
     expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { isActive: true, cancelledAt: null, readyAt: null },
-        orderBy: [{ deliveryAt: "asc" }, { id: "asc" }],
-        skip: 0,
-        take: 20,
-      }),
+      expect.objectContaining({ where: { isActive: true, cancelledAt: null, readyAt: null } }),
     );
+    const call = findMany.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call["orderBy"]).toBeUndefined();
+    expect(call["skip"]).toBeUndefined();
+    expect(call["take"]).toBeUndefined();
+    expect(count).not.toHaveBeenCalled();
+  });
+
+  it("floats MINE (assigned to the admin) above the rest, ignoring raw delivery time", async () => {
+    mockPrisma({
+      service: {
+        findMany: vi.fn().mockResolvedValue([
+          { ...makeRawOrder(), id: 30, assignedUserId: null, deliveryAt: new Date("2026-08-01T06:00:00.000Z") },
+          { ...makeRawOrder(), id: 31, assignedUserId: 1, deliveryAt: new Date("2026-08-01T20:00:00.000Z") },
+        ]),
+        count: vi.fn(),
+      },
+    });
+    await getOrders(buildReq(), {} as Response); // admin userId 1
+
+    const data = successData<OrderListResponseModel>();
+    expect(data.orders.map((o) => o.id)).toEqual([31, 30]); // mine first, though it delivers later
+    expect(data.orders[0]?.isMine).toBe(true);
+    expect(data.orders[1]?.isMine).toBe(false);
+  });
+
+  it("a Driver is row-scoped to their assigned orders, next-action ordered", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { ...makeRawOrder(), id: 20, assignedUserId: 3, deliveryAt: new Date("2026-08-01T18:00:00.000Z") },
+      { ...makeRawOrder(), id: 21, assignedUserId: 3, deliveryAt: new Date("2026-08-01T09:00:00.000Z") },
+    ]);
+    mockPrisma({ service: { findMany, count: vi.fn() } });
+    await getOrders(
+      { query: {}, params: {}, user: { userRole: 3, userId: 3 } } as unknown as CustomRequest,
+      {} as Response,
+    );
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ assignedUserId: 3 }) }),
+    );
+    const data = successData<OrderListResponseModel>();
+    expect(data.orders.map((o) => o.id)).toEqual([21, 20]); // soonest next action first
+    expect(data.orders.every((o) => o.isMine)).toBe(true);
+  });
+
+  it("paginates the in-memory agenda by page/pageSize", async () => {
+    mockPrisma({
+      service: {
+        findMany: vi.fn().mockResolvedValue([
+          { ...makeRawOrder(), id: 40, deliveryAt: new Date("2026-08-01T06:00:00.000Z") },
+          { ...makeRawOrder(), id: 41, deliveryAt: new Date("2026-08-01T07:00:00.000Z") },
+          { ...makeRawOrder(), id: 42, deliveryAt: new Date("2026-08-01T08:00:00.000Z") },
+        ]),
+        count: vi.fn(),
+      },
+    });
+    await getOrders(buildReq({ page: "2", pageSize: "2" }), {} as Response);
+
+    const data = successData<OrderListResponseModel>();
+    expect(data.orders.map((o) => o.id)).toEqual([42]); // the 3rd row lands alone on page 2
+    expect(data.pagination).toEqual({ page: 2, pageSize: 2, total: 3, totalPages: 2 });
   });
 
   it("the history view flips the rows and the direction", async () => {
@@ -345,6 +427,8 @@ describe("createOrder", () => {
       paymentMethodId: 2,
       serviceStatusId: 1,
       paymentStatusId: 1,
+      // No assignee in the body → defaults to the creating admin (userId 1), never unassigned.
+      assignedUserId: 1,
       deliveryAt: body.deliveryAt,
       pickupAt: body.pickupAt,
       serviceStart: body.deliveryAt,
@@ -370,6 +454,17 @@ describe("createOrder", () => {
       "orders.createOrder.orderCreated",
       expect.objectContaining({ order: expect.objectContaining({ id: 12 }) }),
     );
+  });
+
+  it("assigns the order to the CHOSEN staff member when the body carries one", async () => {
+    const tx = mockCreateTx();
+    // An explicit assignee (already validated as a deliverable user upstream) is used as-is.
+    await createOrder(
+      buildCreateReq({ ...createBody(), assignedUserId: 7 } as ReturnType<typeof createBody>),
+      {} as Response,
+    );
+    const createArg = (tx.service.create as Mock).mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(createArg.data["assignedUserId"]).toBe(7);
   });
 
   it("a purchase-only order never queries rental holds and bills a single day", async () => {
@@ -433,6 +528,20 @@ describe("createOrder", () => {
     );
   });
 
+  it("refuses with a 409 when the lifecycle has no initial step configured", async () => {
+    const tx = mockCreateTx();
+    (getStatusCatalog as Mock).mockResolvedValueOnce([]);
+    await createOrder(buildCreateReq(createBody()), {} as Response);
+
+    // Refusing beats inventing a status — nothing is written.
+    expect(tx.service.create).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.createOrder.lifecycleUnconfigured",
+    );
+  });
+
   it("responds 500 when the transaction fails for any other reason", async () => {
     (getPrismaClient as Mock).mockResolvedValue({
       $transaction: vi.fn().mockRejectedValue(new Error("db down")),
@@ -448,7 +557,7 @@ describe("createOrder", () => {
 });
 
 describe("getOrdersCatalog", () => {
-  it("returns the six active reference lists (event types carry minLeadHours; zones carry the fee)", async () => {
+  it("returns the reference lists + assignable staff (minLeadHours, zone fee, decrypted names)", async () => {
     const eventTypes = [{ id: 1, name: "Evento familiar", minLeadHours: 24 }];
     const statuses = [{ id: 1, name: "Pendiente" }];
     const methods = [{ id: 1, name: "Efectivo" }];
@@ -458,20 +567,51 @@ describe("getOrdersCatalog", () => {
       { id: 6, name: "Zona 10", deliveryFee: 50 },
       { id: 1, name: "Zona 1", deliveryFee: null },
     ];
+    // The assignable staff (Admin + Driver) — encrypted names, decrypted + sorted alphabetically.
+    const userRows = [
+      { id: 2, fullNameKms: encryptKms("Romeo Marroquín"), role: { name: "Administrador" } },
+      { id: 3, fullNameKms: encryptKms("Ana Díaz"), role: { name: "Repartidor" } },
+    ];
     mockPrisma({
       eventType: { findMany: vi.fn().mockResolvedValue(eventTypes) },
-      serviceStatus: { findMany: vi.fn().mockResolvedValue(statuses) },
       paymentStatus: { findMany: vi.fn().mockResolvedValue(statuses) },
       paymentMethod: { findMany: vi.fn().mockResolvedValue(methods) },
       contactType: { findMany: vi.fn().mockResolvedValue([{ id: 1, name: "WhatsApp" }]) },
       zone: { findMany: vi.fn().mockResolvedValue(zoneRows) },
+      user: { findMany: vi.fn().mockResolvedValue(userRows) },
     });
     await getOrdersCatalog(buildReq(), {} as Response);
 
     const data = successData<OrderCatalogResponseModel>();
+    // The statuses come from the lifecycle catalog, in PIPELINE order with the off-ramp last, each
+    // carrying its declared behavior and RESOLVED evidence counts.
+    expect(
+      data.serviceStatuses.map((status) => [status.name, status.sortOrder]),
+    ).toEqual([
+      ["Pendiente", 1],
+      ["En ruta", 2],
+      ["Entregado", 3],
+      ["Recolectado", 4],
+      ["Listo", 5],
+      ["Cancelado", undefined],
+    ]);
+    expect(data.serviceStatuses[2]).toEqual({
+      id: 3,
+      name: "Entregado",
+      sortOrder: 3,
+      isInitial: false,
+      isDisruptive: false,
+      inventoryHold: "OUT",
+      requiresEvidence: true,
+      minEvidence: 1,
+      maxEvidence: 10,
+      appliesTo: "ALL",
+      tracksEvent: "DELIVERY",
+      colorKey: "emerald",
+    });
     expect(data).toEqual({
       eventTypes,
-      serviceStatuses: statuses,
+      serviceStatuses: data.serviceStatuses,
       paymentStatuses: statuses,
       paymentMethods: methods,
       contactTypes: [{ id: 1, name: "WhatsApp" }],
@@ -479,18 +619,28 @@ describe("getOrdersCatalog", () => {
         { id: 1, name: "Zona 1" },
         { id: 6, name: "Zona 10", deliveryFee: 50 },
       ],
+      // Alphabetical by decrypted name: Ana Díaz before Romeo Marroquín.
+      assignableUsers: [
+        { id: 3, name: "Ana Díaz", role: "Repartidor" },
+        { id: 2, name: "Romeo Marroquín", role: "Administrador" },
+      ],
     });
   });
 
-  it("scopes every lookup to active rows in id order", async () => {
-    const { lookupFindMany } = mockPrisma();
+  it("scopes every lookup to active rows in id order, and assignable staff to the deliverable roles", async () => {
+    const { lookupFindMany, userFindMany } = mockPrisma();
     await getOrdersCatalog(buildReq(), {} as Response);
 
-    // 6 lookups; each call carries the active-only filter and id order.
-    expect(lookupFindMany).toHaveBeenCalledTimes(6);
+    // 5 seeded lookups (the statuses now come from the lifecycle catalog, not a raw lookup query);
+    // each call carries the active-only filter and id order.
+    expect(lookupFindMany).toHaveBeenCalledTimes(5);
     for (const call of lookupFindMany.mock.calls) {
       expect(call[0]).toMatchObject({ where: { isActive: true }, orderBy: { id: "asc" } });
     }
+    // The assignable-staff query is scoped to active Admin(2)/Driver(3) users.
+    expect(userFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { isActive: true, roleId: { in: [2, 3] } } }),
+    );
   });
 
   it("responds 500 when a lookup fails", async () => {

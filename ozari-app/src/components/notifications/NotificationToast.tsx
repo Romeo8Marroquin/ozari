@@ -344,7 +344,7 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
         </div>
 
         <div ref={bodyRef} className="relative w-full overflow-hidden px-5 py-4">
-          <p ref={messageRef} className="text-[15px] leading-relaxed text-neutral-600">
+          <p ref={messageRef} className="whitespace-pre-line text-[15px] leading-relaxed text-neutral-600">
             {item.message}
           </p>
           {item.duration > 0 && (

@@ -115,6 +115,139 @@ export function gridCellRevealDelay(el: HTMLElement): number {
   return max > 0 ? (distance / max) * PAGE_ENTER_STAGGER : 0;
 }
 
+/**
+ * Row-list analogue of {@link gridCellRevealDelay}: the orders agenda is a single COLUMN of rows
+ * (not a CSS grid), so a resolving row derives its wave slot from its position among the list's
+ * direct children — day/owner header rows included, so the skeleton→content cascade reads strictly
+ * top-to-bottom over the page-entrance budget. Climbs from the `SkeletonFade` wrapper to the direct
+ * child of the `[data-order-rows]` list container.
+ */
+export function rowRevealDelay(el: HTMLElement): number {
+  let row: HTMLElement | null = el;
+  while (row && !row.parentElement?.hasAttribute('data-order-rows')) {
+    row = row.parentElement;
+  }
+  const parent = row?.parentElement;
+  if (!row || !parent) return 0; // not inside the list (defensive) — reveal immediately
+  const children = Array.from(parent.children);
+  const index = children.indexOf(row);
+  const max = children.length - 1;
+  return max > 0 ? (index / max) * PAGE_ENTER_STAGGER : 0;
+}
+
+/**
+ * Grow the marked rows IN — from zero height + faded to their natural height — so an element that
+ * APPEARS when a cold load resolves (a new day/owner header, the total-count line, a surplus ticket)
+ * eases the rows below it DOWN smoothly instead of snapping their space open. Run in a LAYOUT effect
+ * so the zero-height start is pinned before the browser paints (no full-height flash). Wave-staggered
+ * top-to-bottom; instant under reduced motion. Requires a GAP-LESS column (each row spaces itself via
+ * its own padding) so a zero-height row genuinely occupies no space.
+ */
+export function growRowsIn(scope: HTMLElement | null, selector: string): void {
+  if (!scope) return;
+  const items = Array.from(scope.querySelectorAll<HTMLElement>(selector));
+  if (!items.length || prefersReducedMotion()) return; // mounts visible at natural height already
+  const delays = waveDelays(items, PAGE_ENTER_STAGGER);
+  items.forEach((el, index) => {
+    gsap.set(el, { height: 'auto' });
+    const naturalHeight = el.offsetHeight;
+    // Two phases so there is NO clip-reveal "wipe": (1) open the height while the content stays
+    // INVISIBLE — the space eases in (pushing the rows below down) with nothing to reveal, so the
+    // growth is unseen — then (2) once it's (near) full size, the content FADES in un-clipped. The
+    // height and fade never overlap enough to clip visible content.
+    gsap.set(el, { autoAlpha: 0, overflow: 'hidden' });
+    const timeline = gsap.timeline({ delay: delays[index] });
+    timeline.fromTo(
+      el,
+      { height: 0 },
+      {
+        height: naturalHeight,
+        duration: PAGE_ENTER.duration,
+        ease: PAGE_ENTER.ease,
+        onComplete: () => {
+          el.style.height = '';
+          el.style.overflow = '';
+        },
+      },
+    );
+    timeline.to(el, { autoAlpha: 1, duration: PAGE_ENTER.duration * 0.6, ease: 'power2.out' }, '>-0.05');
+  });
+}
+
+/**
+ * Sweep the marked rows OUT in TWO phases so a leftover cold-load skeleton row genuinely ANIMATES
+ * AWAY, never "collapses" upward into the loaded rows: (1) it slides `to` the given side + fades — the
+ * visible exit — then (2) once it's already gone, its space eases shut (height → 0) underneath, so the
+ * content below reclaims the room smoothly with no jump and no visible shrink-in-place. Resolves when
+ * the last row finishes (the caller drops the skeleton state then); resolves immediately with nothing
+ * to do or under reduced motion. The exit twin of {@link growRowsIn} — same gap-less-column
+ * requirement (the height half only reads smoothly when the row spaces itself with its own padding).
+ */
+export function collapseRowsOut(
+  scope: HTMLElement | null,
+  selector: string,
+  to: 'left' | 'right' = 'right',
+): Promise<void> {
+  const items = scope ? Array.from(scope.querySelectorAll<HTMLElement>(selector)) : [];
+  if (!items.length) return Promise.resolve();
+  if (prefersReducedMotion()) {
+    gsap.set(items, { height: 0, autoAlpha: 0, overflow: 'hidden' });
+    return Promise.resolve();
+  }
+  const x = to === 'right' ? 44 : -44;
+  const delays = waveDelays(items, PAGE_EXIT_STAGGER);
+  return new Promise((resolve) => {
+    let remaining = items.length;
+    const settle = (): void => {
+      remaining -= 1;
+      if (remaining === 0) resolve();
+    };
+    items.forEach((el, index) => {
+      gsap.set(el, { overflow: 'hidden' });
+      const timeline = gsap.timeline({ delay: delays[index] });
+      // 1) The row SLIDES out to the side + fades — a clean, VISIBLE "animate out".
+      timeline.to(el, {
+        x,
+        autoAlpha: 0,
+        duration: PAGE_EXIT.duration,
+        ease: PAGE_EXIT.ease,
+        overwrite: 'auto',
+      });
+      // 2) Only AFTER it's mostly gone does its (now invisible) space ease shut — so the eye sees the
+      //    row LEAVE, never shrink in place, and nothing below it jumps as the space is reclaimed.
+      timeline.to(
+        el,
+        { height: 0, duration: 0.28, ease: 'power2.inOut', onComplete: settle, onInterrupt: settle },
+        PAGE_EXIT.duration * 0.55,
+      );
+    });
+  });
+}
+
+/**
+ * A GENTLE in-place fade with only a few px of rise — for a settled element that just needs to appear
+ * at its final position without a wipe or a big travel (the agenda's total-count line once the
+ * skeleton resolves; a full page-entrance rise would read as "coming from too far below"). Instant
+ * under reduced motion.
+ */
+export function fadeUpIn(scope: HTMLElement | null, selector: string): void {
+  if (!scope) return;
+  const items = Array.from(scope.querySelectorAll<HTMLElement>(selector));
+  if (!items.length || prefersReducedMotion()) return;
+  gsap.fromTo(
+    items,
+    { autoAlpha: 0, y: 5 },
+    {
+      autoAlpha: 1,
+      y: 0,
+      duration: PAGE_ENTER.duration,
+      ease: PAGE_ENTER.ease,
+      overwrite: 'auto',
+      clearProps: 'y',
+    },
+  );
+}
+
 /** Staggered entrance for a page's marked items — a gentle fade + settle (a rise by default, or a
  *  lateral slide via `from`), cascading as a row/column wave (see {@link waveDelays}). */
 export function staggerIn(scope: HTMLElement | null, selector: string, options?: EnterOptions): void {

@@ -2,6 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FormProvider, useFieldArray, useForm, useWatch } from 'react-hook-form';
+import type { Resolver } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import {
   HiOutlineArrowPath,
@@ -18,6 +19,7 @@ import CustomTextareaForm from '@components/CustomTextareaForm';
 import FormError from '@components/FormError';
 import { notify } from '@components/notifications/notify';
 import { QueryKeys } from '@constants/QueryKeys';
+import { getStoredUserId } from '@hooks/useRole';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { getStatus, toFormError } from '@utils/apiError';
 import { detailRowIn, detailRowOut, SECTION_REVEAL_STEP, staggerIn, staggerOut } from '../pageMotion';
@@ -39,12 +41,16 @@ import {
   lineUnitPrice,
 } from './orderEstimate';
 import {
+  appendLineAvailabilityErrors,
   createOrderDefaultValues,
   createOrderRequiredPatterns,
   createOrderSchema,
+  nowDateTimeLocal,
   parseDateTime,
   parseLineQuantity,
   parseMoney,
+  reconcileToastDuration,
+  takeableFor,
   toCreateOrderBody,
   type CreateOrderFormType,
 } from './SchemaCreateOrder';
@@ -258,9 +264,41 @@ const OrderForm: React.FC = () => {
   const registries = useMemo(() => registriesQuery.data ?? [], [registriesQuery.data]);
   const productsById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
+  // A resolver that runs the mirrored schema, then layers the LIVE per-window availability cap on top
+  // (refs so it always reads the freshest amounts without rebuilding the resolver on every probe). This
+  // blocks an over-stock line as the admin types — the same limit the backend enforces with a 409. The
+  // refs are synced in an effect (validation only fires on user interaction, well after it commits).
+  const availabilityRef = useRef(availability);
+  const productsByIdRef = useRef(productsById);
+  useEffect(() => {
+    availabilityRef.current = availability;
+    productsByIdRef.current = productsById;
+  }, [availability, productsById]);
+  const zodResolve = useMemo(() => zodResolver(createOrderSchema), []);
+  const resolver = useCallback<Resolver<CreateOrderFormType>>(
+    async (values, context, options) => {
+      const result = await zodResolve(values, context, options);
+      return appendLineAvailabilityErrors(
+        values,
+        result,
+        (productId) => takeableFor(productId, availabilityRef.current, productsByIdRef.current),
+        (available) => t(`${KEY}.errors.lineUnavailable`, { available }),
+      );
+    },
+    [zodResolve, t],
+  );
+
+  // The "Asignar a" select defaults to the CREATING admin (the token's userId), so a created order is
+  // never unassigned and the admin's own orders read as `isMine` on the agenda. Computed once; a null
+  // id (defensive — an admin always has one) leaves the select on its placeholder, which the required
+  // rule then blocks on submit.
+  const defaultValues = useMemo<CreateOrderFormType>(
+    () => ({ ...createOrderDefaultValues, assignedUserId: getStoredUserId() as unknown as number }),
+    [],
+  );
   const methods = useForm<CreateOrderFormType>({
-    resolver: zodResolver(createOrderSchema),
-    defaultValues: createOrderDefaultValues,
+    resolver,
+    defaultValues,
     mode: 'onTouched',
   });
   const { handleSubmit, control, setValue, getValues, setError } = methods;
@@ -352,7 +390,9 @@ const OrderForm: React.FC = () => {
   const reconcileAvailability = useCallback(
     (map: Map<number, number | null>): void => {
       const current = getValues('lines');
-      const adjusted: string[] = [];
+      // Capture each change as structured data (name + old → new) so the toast can lay them out one
+      // per line. Iterate bottom-up so removals don't shift the indices still to process.
+      const adjusted: { name: string; from: number; to: number }[] = [];
       const removed: string[] = [];
       for (let index = current.length - 1; index >= 0; index -= 1) {
         const line = current[index];
@@ -367,14 +407,29 @@ const OrderForm: React.FC = () => {
           removed.push(name);
         } else {
           setValue(`lines.${index}.quantity`, String(available), { shouldValidate: true });
-          adjusted.push(`${name} (${available})`);
+          adjusted.push({ name, from: qty, to: available });
         }
       }
       if (adjusted.length === 0 && removed.length === 0) return;
-      const parts: string[] = [];
-      if (adjusted.length > 0) parts.push(t(`${KEY}.availability.adjustedList`, { items: adjusted.join(', ') }));
-      if (removed.length > 0) parts.push(t(`${KEY}.availability.removedList`, { items: removed.join(', ') }));
-      notify.warning(parts.join(' '), { title: t(`${KEY}.availability.reconciledTitle`) });
+      // Reverse back to natural top-to-bottom order (we walked the lines bottom-up), then build a
+      // multi-line body: a heading per group and each product on its own `\n`-separated row.
+      adjusted.reverse();
+      removed.reverse();
+      const rows: string[] = [];
+      if (adjusted.length > 0) {
+        rows.push(t(`${KEY}.availability.adjustedHeading`));
+        adjusted.forEach(({ name, from, to }) =>
+          rows.push(t(`${KEY}.availability.adjustedItem`, { name, from, to })),
+        );
+      }
+      if (removed.length > 0) {
+        rows.push(t(`${KEY}.availability.removedHeading`));
+        removed.forEach((name) => rows.push(t(`${KEY}.availability.removedItem`, { name })));
+      }
+      notify.warning(rows.join('\n'), {
+        title: t(`${KEY}.availability.reconciledTitle`),
+        duration: reconcileToastDuration(adjusted.length + removed.length),
+      });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- lines.remove is a stable RHF method
     [getValues, productsById, setValue, t],
@@ -553,20 +608,25 @@ const OrderForm: React.FC = () => {
     lineValues.map((line) => line.productId).filter((id): id is number => id != null),
   );
   // The picker offers ALL products (rent + sale) — the order's kind is DERIVED from what's picked (any
-  // rental line ⇒ a pickup is required); no upfront mode fork. Already-picked products are hidden.
-  // Once a window is set, each option is annotated with its takeable amount for that window.
-  const availabilityTag = (productId: number): string => {
-    const amount = availability.get(productId);
-    if (amount == null) return '';
-    return amount === 0
-      ? ` · ${t(`${KEY}.availability.soldOut`)}`
-      : ` · ${t(`${KEY}.availability.count`, { count: amount })}`;
-  };
+  // rental line ⇒ a pickup is required); no upfront mode fork. Already-picked products are hidden. The
+  // dropdown shows ONLY the product name; the takeable amount lives as a quiet hint under its quantity.
   const optionsFor = (currentId: number | null | undefined) =>
     products
       .filter((product) => product.id === currentId || !usedProductIds.has(product.id))
-      .map((product) => ({ value: product.id, label: product.name + availabilityTag(product.id) }));
+      .map((product) => ({ value: product.id, label: product.name }));
   const canAddLine = lines.fields.length < products.length;
+  // The takeable ceiling for a line's product — the window amount once probed, else the product's
+  // current availability. Caps the quantity input's `max` (the resolver enforces the same limit).
+  const availableFor = (productId: number | null | undefined): number | undefined =>
+    productId == null ? undefined : takeableFor(productId, availability, productsById);
+  // A quiet hint under the quantity: how many of the picked product are takeable (the window amount
+  // once dated, else its general availability). Empty until a product is chosen — and the field's own
+  // "only N available" error replaces it — so the number surfaces once, right where it's relevant.
+  const availabilityHint = (productId: number | null | undefined): string => {
+    const amount = availableFor(productId);
+    if (amount == null) return '';
+    return amount === 0 ? t(`${KEY}.availability.soldOut`) : t(`${KEY}.availability.count`, { count: amount });
+  };
   // The section cards' bodies skeleton-reveal until every query has landed (a warm cache reveals
   // instantly). `loading` is per-section; the cards cascade via `SECTION_REVEAL_STEP`.
   const revealing = !dataReady;
@@ -684,6 +744,9 @@ const OrderForm: React.FC = () => {
                         id="order-delivery-at"
                         name="deliveryAt"
                         type="datetime-local"
+                        // Never a past delivery (the admin's one date rule) — the schema + backend
+                        // also guard it, this just stops the native picker offering earlier slots.
+                        min={nowDateTimeLocal()}
                         label={t(`${KEY}.fields.deliveryAtLabel`)}
                         aria-label={t(`${KEY}.fields.deliveryAtLabel`)}
                       />
@@ -741,6 +804,8 @@ const OrderForm: React.FC = () => {
                                 inputMode="numeric"
                                 min={1}
                                 step={1}
+                                max={availableFor(lineValues[index]?.productId)}
+                                instructions={availabilityHint(lineValues[index]?.productId)}
                                 label={t(`${KEY}.fields.lineQuantityLabel`)}
                                 aria-label={t(`${KEY}.fields.lineQuantityLabel`)}
                               />
@@ -783,6 +848,21 @@ const OrderForm: React.FC = () => {
               <Section title={t(`${KEY}.sections.delivery.title`)} description={t(`${KEY}.sections.delivery.description`)}>
                 <SectionReveal loading={revealing} delaySeconds={SECTION_REVEAL_STEP * 4} skeleton={<BodySkeleton rows={3} />}>
                   <div className="flex flex-col gap-5">
+                    {/* Who HANDLES the delivery — the deliverable staff (Admin + Driver), defaulting
+                        to the creating admin, so the order is never unassigned. */}
+                    <div className="reveal-item">
+                      <CustomSelectForm<CreateOrderFormType>
+                        id="order-assigned-user"
+                        name="assignedUserId"
+                        label={t(`${KEY}.fields.assignToLabel`)}
+                        placeholderOption={t(`${KEY}.fields.assignToPlaceholder`)}
+                        options={(catalog?.assignableUsers ?? []).map((u) => ({
+                          value: u.id,
+                          label: `${u.name} · ${u.role}`,
+                        }))}
+                      />
+                      <p className="mt-1 px-2 text-xs text-charcoal/45">{t(`${KEY}.fields.assignToHint`)}</p>
+                    </div>
                     <div className="reveal-item">
                       <CustomInputForm<CreateOrderFormType>
                         id="order-delivery-name"

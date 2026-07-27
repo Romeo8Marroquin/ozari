@@ -1,15 +1,20 @@
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineArrowPath, HiOutlinePlus } from 'react-icons/hi2';
 import Button from '@components/Button';
+import SkeletonFade from '@components/SkeletonFade';
+import { Role } from '@constants/Roles';
+import { useHasRole } from '@hooks/useRole';
 import { useInfiniteScrollSentinel } from '@hooks/useInfiniteScrollSentinel';
-import { staggerIn, staggerOut } from '../pageMotion';
+import { collapseRowsOut, fadeUpIn, growRowsIn, rowRevealDelay, staggerIn, staggerOut } from '../pageMotion';
 import { usePanelNavigate } from '../PanelNavContext';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
 // Shared status panel (empty/error family). Promote to @components when a third section needs it.
 import ProductsStatus from '../products/ProductsStatus';
-import { formatDayLabel, groupOrdersByDay } from './orderDayGroups';
+import { formatDayLabel, groupAgenda, groupHistory, type OrderDayGroup } from './orderDayGroups';
+import type { OrderAction, OrderListItem } from './order.types';
+import OrderAdvanceModal from './OrderAdvanceModal';
 import OrdersViewSwitch from './OrdersViewSwitch';
 import OrderTicket from './OrderTicket';
 import OrderTicketSkeleton from './OrderTicketSkeleton';
@@ -19,35 +24,43 @@ import { useOrders } from './useOrders';
 const KEY = 'modules.panel.orders';
 const SECONDARY_COLOR = '#262626';
 
-// The cold-load skeleton: two believable day groups' worth of ticket rows — enough to read as
-// "an agenda is coming" without filling the screen with shimmer.
-const SKELETON_GROUPS: readonly number[] = [3, 2];
+// The cold-load skeleton: enough ticket rows to read as "an agenda is coming" without flooding the
+// screen. Data rows crossfade INTO these slots in place; leftover skeleton rows sweep out.
+const SKELETON_ROWS = 6;
 // How many shimmer rows an appending page shows — a list reveals ~this many rows near the
 // sentinel; the real rows stagger in when the page lands.
 const APPEND_SKELETONS = 4;
-const SHIMMER = 'animate-pulse rounded bg-charcoal/10 motion-reduce:animate-none';
+
+/** One rendered element of the flat, index-keyed row list — a day/owner header or an order slot
+ *  (its `order` absent while the slot is still a skeleton: a cold load, or an underfilled resolve). */
+type RenderRow =
+  | { kind: 'ownerHeader'; owner: 'mine' | 'rest'; rowKey: string }
+  | { kind: 'dayHeader'; group: OrderDayGroup; rowKey: string }
+  | { kind: 'order'; index: number; order: OrderListItem | undefined };
 
 /**
- * The orders screen (`/panel/pedidos`) — Epic-2's agenda. **Admin only** for now (the route guard
- * mirrors the backend's Admin-only reads; Client/Driver views arrive with their own backend
- * slices). Two views behind an accessible segmented control, held in the URL (`?view=historial`):
- * the **agenda** (every order that is still work, grouped under Hoy/Mañana/date headers, soonest
- * first) and the **history** (finished/cancelled, newest first). The list is an infinite scroll
- * like products, deliberately WITHOUT empty-day placeholders — a rentals agenda is sparse, and the
- * temporal-grid view belongs to the future dashboard calendar.
+ * The orders screen (`/panel/pedidos`) — Epic-2's agenda, row-scoped by role (an Admin sees all,
+ * grouped MINE-first vs the rest; a Driver only their assigned deliveries). Two views behind an
+ * accessible segmented control, held in the URL (`?view=historial`): the **agenda** (still-work
+ * orders, grouped by owner then day, ordered by next action) and the **history** (finished/cancelled,
+ * newest first). The list is an infinite scroll, deliberately WITHOUT empty-day placeholders.
  *
- * Choreography follows the panel doctrine — nothing pops. A **view switch is a page transition
- * in miniature**: the displayed view is DECOUPLED from the URL intent — the current body (list,
- * skeleton, or empty panel alike) staggers OUT first, then the displayed view flips and the new
- * body (cached tickets, or the skeleton of an uncached fetch) staggers IN — while the segmented
- * control's pill glides in step. Flipping back mid-exit cancels and settles the body from the
- * current frame (the panel's latest-intent-wins semantics). The cold load shows a skeleton agenda
- * that sweeps out before the resolved body staggers in; an appended page sweeps shimmer rows in
- * and staggers the new tickets (`.order-appended`) when they land.
+ * Choreography follows the panel doctrine — nothing pops. The cold-load **resolves like the products
+ * grid** (owner decision): the skeleton and the content share ONE set of index-keyed row slots under
+ * a `[data-order-rows]` parent, so each slot's {@link SkeletonFade} crossfades its skeleton into its
+ * ticket IN PLACE (a top-to-bottom {@link rowRevealDelay} wave); leftover skeleton rows sweep out
+ * (`.orders-skel-orphan`), surplus rows + the day/owner headers sweep in (`.orders-enter`) — never a
+ * whole-skeleton-out-then-content-in swap. A **view switch is a page transition in miniature**: the
+ * displayed view is DECOUPLED from the URL intent, the current body staggers out laterally, then the
+ * new body (cached tickets, or the next view's skeleton) staggers in — the segmented pill in step.
+ * An appended page sweeps shimmer rows in and staggers the new tickets (`.order-appended`).
  */
 const OrdersPage: React.FC = () => {
   const { t } = useTranslation();
   const panelNavigate = usePanelNavigate();
+  // Only the Admin creates orders (the backend `POST /orders` is Admin-only) — a Driver's agenda has
+  // no "Nuevo pedido" affordance (it would only bounce them off the Admin-only create route).
+  const canCreate = useHasRole([Role.Admin]);
   const search = useSearch({ from: '/panel/pedidos' }) as OrdersSearch;
   const navigate = useNavigate({ from: '/panel/pedidos' });
   // `view` is the URL INTENT (the pill follows it immediately); `displayedView` is what the body
@@ -67,6 +80,12 @@ const OrdersPage: React.FC = () => {
   } = useOrders(displayedView);
   const root = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
+  // The lifecycle move awaiting confirmation — the order AND the action the backend offered for it.
+  // One dialog serves every kind of move (advance / rewind / cancel); it reads what to ask for from
+  // the action itself.
+  const [advancing, setAdvancing] = useState<
+    { order: OrderListItem; action: OrderAction } | undefined
+  >(undefined);
 
   const orders = useMemo(() => data?.orders ?? [], [data]);
   const pagination = data?.pagination;
@@ -74,7 +93,6 @@ const OrdersPage: React.FC = () => {
   // lands on an uncached view) — drives the skeleton.
   const loading = isLoading && !data;
   const hasError = isError && !data;
-  const empty = orders.length === 0;
   const settled = !loading;
 
   /** Commit a view change to the URL (same route — never through the panel transition). */
@@ -85,8 +103,8 @@ const OrdersPage: React.FC = () => {
     });
   };
 
-  // The skeleton stays mounted while loading AND through its exit sweep after loading ends
-  // (the products page's render-adjust pattern — no synchronous state change inside an effect).
+  // The skeleton slots stay mounted while loading AND through the resolve (each crossfading in place)
+  // — the products page's render-adjust pattern (no synchronous state change inside an effect).
   const [showSkeleton, setShowSkeleton] = useState(loading);
   const [wasLoading, setWasLoading] = useState(loading);
   if (loading !== wasLoading) {
@@ -94,26 +112,41 @@ const OrdersPage: React.FC = () => {
     if (loading) setShowSkeleton(true);
   }
 
-  // The orders BODY always moves LATERALLY (owner preference — the two views live on a left/right
-  // axis, and the list shape reads sideways): a forward swap travels right-to-left, a backward one
-  // mirrors, and a plain cold load/reload uses the forward direction. This ref carries the side
-  // the NEXT body/skeleton entrance comes from (its exit heads the opposite way); swaps retarget
-  // it, resolves reset it to the forward default.
+  // The orders BODY moves LATERALLY on a VIEW SWAP (owner preference — the two views live on a
+  // left/right axis): a forward swap travels right-to-left, a backward one mirrors; a plain cold
+  // load/reload uses the forward default. This ref carries the side the next body entrance comes
+  // from (its exit heads the opposite way).
   const lateralFrom = useRef<'left' | 'right'>('right');
 
-  // Loading resolved → sweep the skeleton out (continuing the travel), THEN mount the real body.
-  useEffect(() => {
+  // The cold-load RESOLVE (products parity, smoothed): the skeleton→ticket crossfade is owned per-slot
+  // by each SkeletonFade; the page GROWS in the elements that had no skeleton to become — the surplus
+  // rows, the day/owner headers, and the total-count line (`.orders-enter`) — so they ease the rows
+  // below them DOWN, and COLLAPSES out the leftover skeleton rows (`.orders-skel-orphan`) so they ease
+  // the content up — no jump either way. A LAYOUT effect pins the zero-height start before paint. The
+  // skeleton drops once the orphans finish collapsing.
+  useLayoutEffect(() => {
     if (loading || !showSkeleton) return;
-    void staggerOut(root.current, '.orders-skel', {
-      to: lateralFrom.current === 'right' ? 'left' : 'right',
-    }).then(() => setShowSkeleton(false));
+    growRowsIn(body.current, '.orders-enter');
+    void collapseRowsOut(body.current, '.orders-skel-orphan').then(() => setShowSkeleton(false));
   }, [loading, showSkeleton]);
 
-  // The page-level entrance runs ONCE, on mount: the chrome (lead + switch) rises with the
-  // app-wide language — it's the page frame — while the body content (skeleton, tickets, or an
-  // empty panel alike) slides in from the side, the page's own axis. Every later transition is
-  // BODY-scoped — re-staggering the root would re-animate the chrome (the same-elements
-  // re-entering glitch the header-title fix killed).
+  // Settled-ONLY elements (the total-count line) are withheld during the resolve so they can never
+  // flash at a transient position under the departing skeletons; the instant the skeleton clears they
+  // mount at their FINAL place and grow in. (A warm load never enters the skeleton, so `was` is false
+  // and they simply ride the mount entrance instead.)
+  const prevShowSkeleton = useRef(showSkeleton);
+  useLayoutEffect(() => {
+    const was = prevShowSkeleton.current;
+    prevShowSkeleton.current = showSkeleton;
+    // A GENTLE fade + a few px rise (NOT a height grow, NOT a full-page-entrance travel): the count
+    // sits at the bottom with nothing visible below it, so its space can appear instantly (unseen) and
+    // only its content eases in, close to its final spot — no wipe, no "from too far below".
+    if (was && !showSkeleton) fadeUpIn(body.current, '.orders-settle-in');
+  }, [showSkeleton]);
+
+  // The page-level entrance runs ONCE, on mount: the chrome (lead + switch) rises with the app-wide
+  // language — it's the page frame — while the body content (skeleton rows, tickets, or an empty
+  // panel alike) slides in from the side, the page's own axis. Every later transition is BODY-scoped.
   const isMounted = useRef(false);
   useLayoutEffect(() => {
     /* v8 ignore next -- StrictMode-only double-invoke guard; an empty-deps effect runs once in prod/tests */
@@ -123,25 +156,11 @@ const OrdersPage: React.FC = () => {
     staggerIn(body.current, '.reveal-item', { from: lateralFrom.current });
   }, []);
 
-  // Body entrance when the skeleton finished sweeping — the resolved content mounted this commit,
-  // entering from the travel's side; then the direction resets to the forward default.
-  const prevShowSkeleton = useRef(showSkeleton);
-  useLayoutEffect(() => {
-    const was = prevShowSkeleton.current;
-    prevShowSkeleton.current = showSkeleton;
-    if (was && !showSkeleton) {
-      const from = lateralFrom.current;
-      lateralFrom.current = 'right';
-      staggerIn(body.current, '.reveal-item', { from });
-    }
-  }, [showSkeleton]);
-
   // ── The view swap (a page transition in miniature) ────────────────────────────────────────────
   // URL intent changed → stagger the CURRENT body out (list, skeleton, or empty panel — whatever
   // is up), then flip the displayed view. Flipping back mid-exit cancels the pending flip. The
   // motion is LATERAL and directional, mirroring the segmented pill: moving toward Historial the
-  // old body slides out LEFT and the new one enters FROM the right; moving back it mirrors —
-  // the two views sit side by side, so the content travels the way the selection does.
+  // old body slides out LEFT and the new one enters FROM the right; moving back it mirrors.
   const swapLanded = useRef(false);
   useLayoutEffect(() => {
     if (!switching) return;
@@ -159,10 +178,10 @@ const OrdersPage: React.FC = () => {
     };
   }, [switching, view, displayedView]);
 
-  // …and the entrance half: when `switching` settles, either the flip landed (a fresh body —
-  // cached tickets or the uncached view's skeleton — mounted this commit: full entrance, from the
-  // side the motion came from) or the user flipped back mid-exit (nothing swapped: settle the
-  // half-faded body from where it stands).
+  // …and the entrance half: when `switching` settles, either the flip landed (a fresh body — cached
+  // tickets or the uncached view's skeleton rows mounted this commit: full entrance, from the side
+  // the motion came from; an uncached view then resolves per-slot via SkeletonFade) or the user
+  // flipped back mid-exit (nothing swapped: settle the half-faded body from where it stands).
   const wasSwitching = useRef(false);
   useLayoutEffect(() => {
     const was = wasSwitching.current;
@@ -170,20 +189,18 @@ const OrdersPage: React.FC = () => {
     if (!was || switching) return;
     if (swapLanded.current) {
       staggerIn(body.current, '.reveal-item', { from: lateralFrom.current });
-      // Landed on an uncached view: the skeleton's RESOLVE keeps travelling this way (the resolve
-      // effect resets the direction). Landed on cached content: the gesture is complete.
-      if (!loading) lateralFrom.current = 'right';
     } else {
       staggerIn(body.current, '.reveal-item', { fromCurrent: true });
     }
+    lateralFrom.current = 'right';
     swapLanded.current = false;
-  }, [switching, loading]);
+  }, [switching]);
 
   // ── Infinite scroll ───────────────────────────────────────────────────────────────────────────
   // An appended page sweeps shimmer rows in under the list; when it lands, the rows past the
-  // pre-append count (and any new day headers) carry `.order-appended` and stagger in. The
-  // baseline is STATE (it tags rows during render); clearing it after the stagger fires drops the
-  // tags on the next commit without disturbing the running tween (GSAP holds the DOM nodes).
+  // pre-append count carry `.order-appended` and stagger in. The baseline is STATE (it tags rows
+  // during render); clearing it after the stagger fires drops the tags on the next commit without
+  // disturbing the running tween (GSAP holds the DOM nodes).
   const [appendBaseline, setAppendBaseline] = useState<number | null>(null);
   const wasAppending = useRef(false);
   useLayoutEffect(() => {
@@ -226,19 +243,57 @@ const OrdersPage: React.FC = () => {
     ),
   );
 
-  // Day groups with each group's flat start index — the append choreography tags rows (and any
-  // new day header) whose flat index is past the pre-append baseline. (Quadratic over the group
-  // count, trivially small; the React Compiler forbids a running-total reassignment here.)
-  const groups = useMemo(
-    () =>
-      groupOrdersByDay(orders).map((group, index, all) => ({
-        ...group,
-        startIndex: all.slice(0, index).reduce((sum, prior) => sum + prior.orders.length, 0),
-      })),
-    [orders],
+  // Owner bands (agenda = MINE-first / the-rest, from the backend's `isMine`; history = one
+  // chronological band), each split into day groups. The list arrives already ordered, so grouping
+  // preserves the sequence and the day cascade still reads soonest-first.
+  const sections = useMemo(
+    () => (displayedView === 'historial' ? groupHistory(orders) : groupAgenda(orders)),
+    [orders, displayedView],
   );
-  const appendedTag = (flatIndex: number): string =>
-    appendBaseline !== null && flatIndex >= appendBaseline ? ' order-appended' : '';
+
+  // The FLAT, index-keyed render sequence — the products slot pattern adapted to a grouped ROW list.
+  // A cold load (no data) is a run of skeleton order slots; once data lands, day/owner headers
+  // interleave and any leftover skeleton slots (data underfilled the skeleton count) trail as
+  // orphans. Order slots keep their flat index as their identity, so a slot's SkeletonFade persists
+  // across the loading→loaded flip and crossfades in place instead of remounting.
+  const rows = useMemo<RenderRow[]>(() => {
+    if (orders.length === 0) {
+      return showSkeleton
+        ? Array.from({ length: SKELETON_ROWS }, (_, index) => ({ kind: 'order' as const, index, order: undefined }))
+        : [];
+    }
+    const out: RenderRow[] = [];
+    let index = 0;
+    for (const section of sections) {
+      if (section.owner !== 'all') {
+        out.push({ kind: 'ownerHeader', owner: section.owner, rowKey: `owner-${section.owner}` });
+      }
+      for (const group of section.days) {
+        out.push({ kind: 'dayHeader', group, rowKey: `day-${section.owner}-${group.key}` });
+        for (const order of group.orders) {
+          out.push({ kind: 'order', index, order });
+          index += 1;
+        }
+      }
+    }
+    // Leftover skeleton slots (only while resolving, when the data underfilled the skeleton count).
+    if (showSkeleton) {
+      for (let extra = orders.length; extra < SKELETON_ROWS; extra += 1) {
+        out.push({ kind: 'order', index: extra, order: undefined });
+      }
+    }
+    return out;
+  }, [sections, orders.length, showSkeleton]);
+
+  // The append choreography tags any row fetched by the latest page — any order past the pre-append
+  // baseline. Grouping preserves the flat order, so the appended rows are the tail of `orders` from
+  // `appendBaseline` on; an id set keeps the lookup O(1).
+  const appendedIds = useMemo(
+    () => (appendBaseline === null ? null : new Set(orders.slice(appendBaseline).map((o) => o.id))),
+    [orders, appendBaseline],
+  );
+  const appendedTag = (orderId: number): string =>
+    appendedIds?.has(orderId) ? ' order-appended' : '';
 
   const total = pagination?.total;
   // Empty copy + panel labelling follow the DISPLAYED view (what the body actually shows); the
@@ -248,90 +303,127 @@ const OrdersPage: React.FC = () => {
   return (
     <div ref={root} className="flex flex-1 flex-col gap-6">
       {/* The chrome never leaves: the view switch must stay reachable in EVERY state (empty,
-          error, loading) — unlike products, where a truly-empty catalog stands alone.
-          `orders-chrome` = the mount entrance's vertical-rise scope (the page frame);
-          `reveal-item` keeps it in the panel-level exit sweep. */}
+          error, loading). `orders-chrome` = the mount entrance's vertical-rise scope (the page
+          frame); `reveal-item` keeps it in the panel-level exit sweep. */}
       <div className="reveal-item orders-chrome flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-charcoal/55">{t(`${KEY}.lead`)}</p>
         <div className="flex flex-wrap items-center gap-3">
           <OrdersViewSwitch view={view} onChange={setView} />
-          <Button
-            size="sm"
-            startIcon={<HiOutlinePlus className="size-4" />}
-            onClick={() => panelNavigate('/panel/pedidos/nuevo')}
-          >
-            {t(`${KEY}.newOrder`)}
-          </Button>
+          {canCreate && (
+            <Button
+              size="sm"
+              startIcon={<HiOutlinePlus className="size-4" />}
+              onClick={() => panelNavigate('/panel/pedidos/nuevo')}
+            >
+              {t(`${KEY}.newOrder`)}
+            </Button>
+          )}
         </div>
       </div>
+      {/* The loading announcement lives OUTSIDE the row list so it never counts as its first child
+          (which would flip the first header's `first:pt-0` on/off as the skeleton comes and goes). */}
+      {showSkeleton && (
+        <span role="status" aria-label={t(`${KEY}.loading`)} aria-busy className="sr-only" />
+      )}
       <div
         ref={body}
+        data-order-rows
         id="orders-view-panel"
         role="tabpanel"
         aria-labelledby={`orders-tab-${displayedView}`}
-        className="flex flex-1 flex-col gap-6"
+        // GAP-LESS on purpose: each row/header spaces itself with its own padding, so a resolving
+        // header/orphan can grow/collapse its HEIGHT to zero and genuinely take no space (a flex gap
+        // would reserve space around a zero-height row and reintroduce the jump).
+        className="flex flex-1 flex-col"
       >
-        {showSkeleton ? (
-          <div
-            role="status"
-            aria-label={t(`${KEY}.loading`)}
-            aria-busy
-            className="flex flex-col gap-6"
-          >
-            {SKELETON_GROUPS.map((rows, groupIndex) => (
-              <div key={`skel-group-${groupIndex}`} className="flex flex-col gap-3">
-                <div aria-hidden className={`reveal-item orders-skel h-3 w-24 ${SHIMMER}`} />
-                {Array.from({ length: rows }).map((_, index) => (
-                  <div key={`skel-${groupIndex}-${index}`} className="reveal-item orders-skel">
+        {hasError ? (
+          <div className="reveal-item">
+            <ProductsStatus
+              tone="error"
+              title={t(`${KEY}.error.title`)}
+              description={t(`${KEY}.error.description`)}
+              action={
+                <Button
+                  variant="soft"
+                  color={SECONDARY_COLOR}
+                  size="sm"
+                  loading={isFetching}
+                  startIcon={<HiOutlineArrowPath className="size-4" />}
+                  onClick={() => void refetch()}
+                >
+                  {t(`${KEY}.error.retry`)}
+                </Button>
+              }
+            />
+          </div>
+        ) : rows.length > 0 ? (
+          <>
+            {rows.map((row) => {
+              if (row.kind === 'ownerHeader') {
+                // The owner band header (Mis pedidos / El resto) — spacing lives in PADDING (not a
+                // margin) so its grow-in height animation carries it. Sweeps in on resolve
+                // (`.orders-enter`); on a warm load it rides the mount/swap `.reveal-item` entrance.
+                return (
+                  <div
+                    key={row.rowKey}
+                    className="reveal-item orders-enter flex items-center gap-3 pb-3 pt-5 first:pt-0"
+                  >
+                    <span className="text-sm font-semibold text-charcoal">
+                      {t(`${KEY}.owner.${row.owner}`)}
+                    </span>
+                    <span aria-hidden className="h-px flex-1 bg-charcoal/10" />
+                  </div>
+                );
+              }
+              if (row.kind === 'dayHeader') {
+                return (
+                  <h2
+                    key={row.rowKey}
+                    className="reveal-item orders-enter pb-3 pt-4 text-xs font-semibold uppercase tracking-wide text-charcoal/45 first:pt-0"
+                  >
+                    {row.group.kind === 'other'
+                      ? formatDayLabel(row.group.date)
+                      : t(`${KEY}.day.${row.group.kind}`)}
+                  </h2>
+                );
+              }
+              // An order slot. While loading, every slot is a SkeletonFade with no content yet; when
+              // the data lands each slot with an order crossfades it in place. A slot that never gets
+              // data (the skeleton overfilled the page) becomes a bare orphan and sweeps out; a slot
+              // BEYOND the skeleton count is a surplus row with no skeleton to become — it sweeps in.
+              const { index, order } = row;
+              const isOrphan = !loading && showSkeleton && order === undefined;
+              const isSurplus = showSkeleton && order !== undefined && index >= SKELETON_ROWS;
+              if (isOrphan) {
+                return (
+                  <div key={`row-${index}`} className="reveal-item orders-skel-orphan pb-3">
                     <OrderTicketSkeleton />
                   </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        ) : hasError ? (
-          <ProductsStatus
-            tone="error"
-            title={t(`${KEY}.error.title`)}
-            description={t(`${KEY}.error.description`)}
-            action={
-              <Button
-                variant="soft"
-                color={SECONDARY_COLOR}
-                size="sm"
-                loading={isFetching}
-                startIcon={<HiOutlineArrowPath className="size-4" />}
-                onClick={() => void refetch()}
-              >
-                {t(`${KEY}.error.retry`)}
-              </Button>
-            }
-          />
-        ) : empty ? (
-          <ProductsStatus
-            tone="empty"
-            title={t(`${KEY}.empty.${emptyKey}.title`)}
-            description={t(`${KEY}.empty.${emptyKey}.description`)}
-          />
-        ) : (
-          <>
-            {groups.map((group) => (
-              <section key={group.key} className="flex flex-col gap-3">
-                <h2
-                  className={`reveal-item${appendedTag(group.startIndex)} text-xs font-semibold uppercase tracking-wide text-charcoal/45`}
+                );
+              }
+              return (
+                <div
+                  key={`row-${index}`}
+                  className={`reveal-item pb-3${isSurplus ? ' orders-enter' : ''}${order ? appendedTag(order.id) : ''}`}
                 >
-                  {group.kind === 'other' ? formatDayLabel(group.date) : t(`${KEY}.day.${group.kind}`)}
-                </h2>
-                {group.orders.map((order, index) => (
-                  <div
-                    key={order.id}
-                    className={`reveal-item${appendedTag(group.startIndex + index)}`}
+                  <SkeletonFade
+                    loading={loading}
+                    skeleton={<OrderTicketSkeleton />}
+                    className="block"
+                    contentClassName="block"
+                    animateSize="height"
+                    revealDelaySeconds={rowRevealDelay}
                   >
-                    <OrderTicket order={order} />
-                  </div>
-                ))}
-              </section>
-            ))}
+                    {order && (
+                      <OrderTicket
+                        order={order}
+                        onAdvance={(target, action) => setAdvancing({ order: target, action })}
+                      />
+                    )}
+                  </SkeletonFade>
+                </div>
+              );
+            })}
             {isFetchingNextPage && (
               <div aria-hidden className="flex flex-col gap-3">
                 {Array.from({ length: APPEND_SKELETONS }).map((_, index) => (
@@ -356,8 +448,15 @@ const OrdersPage: React.FC = () => {
                 </Button>
               </div>
             )}
-            {total !== undefined && (
-              <p aria-live="polite" className="reveal-item text-center text-xs text-charcoal/45">
+            {total !== undefined && !showSkeleton && (
+              // The total is rendered ONLY once the skeleton has FULLY resolved (`!showSkeleton`), so
+              // it never flashes at a transient position under the departing orphans; it then grows
+              // into its final place via the settle effect (`.orders-settle-in`). On a warm load it
+              // rides the mount/swap `.reveal-item` entrance like everything else.
+              <p
+                aria-live="polite"
+                className="reveal-item orders-settle-in pt-2 text-center text-xs text-charcoal/45"
+              >
                 {orders.length < total
                   ? t(`${KEY}.count.partial`, { shown: orders.length, total })
                   : t(`${KEY}.count.all`, { count: total })}
@@ -365,8 +464,26 @@ const OrdersPage: React.FC = () => {
             )}
             <div ref={sentinelRef} aria-hidden className="h-px" />
           </>
+        ) : (
+          // Reached only with NO rows and NO error — and `rows` is empty exactly when the loaded
+          // list is empty (a cold load always has skeleton rows), so this is always the empty state.
+          <div className="reveal-item">
+            <ProductsStatus
+              tone="empty"
+              title={t(`${KEY}.empty.${emptyKey}.title`)}
+              description={t(`${KEY}.empty.${emptyKey}.description`)}
+            />
+          </div>
         )}
       </div>
+      {/* The one confirm dialog for every lifecycle move. It asks for photos or a reason only when
+          the offered action declares it, and refetches both views on success (an advance can move a
+          row from the agenda into the history). */}
+      <OrderAdvanceModal
+        order={advancing?.order}
+        action={advancing?.action}
+        onClose={() => setAdvancing(undefined)}
+      />
     </div>
   );
 };

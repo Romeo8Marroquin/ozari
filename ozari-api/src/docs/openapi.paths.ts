@@ -64,6 +64,13 @@ const productsReadForbidden = (): OpenAPIV3.ResponseObject =>
     403,
     "Forbidden",
   );
+const ordersListForbidden = (): OpenAPIV3.ResponseObject =>
+  errorResponse(
+    "Authenticated but the role cannot list orders — the list is Admin + Driver (an Admin sees " +
+      "every order; a Driver only their assigned ones). A Client has no orders view here.",
+    403,
+    "Forbidden",
+  );
 
 // Response headers set by the two session-issuing paths (login success + refresh).
 const sessionHeaders: Record<string, OpenAPIV3.HeaderObject> = {
@@ -940,13 +947,14 @@ export const paths: OpenAPIV3.PathsObject = {
       summary: "List orders (agenda / history views)",
       operationId: "getOrders",
       description:
-        "Returns the paginated order list behind the panel's segmented control. **Admin only** " +
-        "(the Client own-orders and Driver assigned-orders slices arrive later with their own row " +
-        "scoping). `view=agenda` (default) = every order that is still WORK — upcoming, en route, " +
-        "delivered, or collected-awaiting-the-final-\"listo\" — soonest delivery first; " +
-        "`view=history` = finished (`readyAt` set) or cancelled orders, newest first. Pagination, " +
-        "`view` and the `statusId` filter are clamped or dropped (never rejected), so there is no " +
-        "400. Authenticated limiter (100/min).",
+        "Returns the paginated order list behind the panel's segmented control, **row-scoped by " +
+        "role**: an **Admin** sees every order (each tagged `isMine` vs the rest); a **Driver** " +
+        "sees ONLY orders assigned to them. `view=agenda` (default) = every order that is still " +
+        "WORK — upcoming, en route, delivered, or collected-awaiting-the-final-\"listo\" — ordered " +
+        "MINE-first then by the soonest NEXT ACTION (its delivery, then its pickup, then the " +
+        "\"listo\"), not raw delivery time; `view=history` = finished (`readyAt` set) or cancelled " +
+        "orders, newest first. Pagination, `view` and the `statusId` filter are clamped or dropped " +
+        "(never rejected), so there is no 400. Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         {
@@ -994,6 +1002,8 @@ export const paths: OpenAPIV3.PathsObject = {
               paymentStatus: { id: 1, name: EXAMPLE_STATUS_PENDING },
               deliveryAt: EXAMPLE_DELIVERY_AT,
               pickupAt: EXAMPLE_PICKUP_AT,
+              assignee: { id: 2, name: "Romeo Marroquín" },
+              isMine: true,
               itemCount: 25,
               totalAmount: 450,
               currency: { id: 1, name: EXAMPLE_CURRENCY_NAME, iso4217Code: "GTQ", symbol: "Q" },
@@ -1002,7 +1012,7 @@ export const paths: OpenAPIV3.PathsObject = {
           pagination: { page: 1, pageSize: 20, total: 1, totalPages: 1 },
         }, "Orders fetched"),
         "401": unauthorized(STALE_TOKEN_401),
-        "403": adminOnly(),
+        "403": ordersListForbidden(),
         "429": rateLimited,
         "500": serverError,
       },
@@ -1030,6 +1040,7 @@ export const paths: OpenAPIV3.PathsObject = {
         deliveryAddress: EXAMPLE_ORDER_ADDRESS,
         deliveryAmount: 50,
         paymentMethodId: 1,
+        assignedUserId: 2,
         lines: [{ productId: 3, quantity: 25 }],
       }),
       responses: {
@@ -1075,8 +1086,9 @@ export const paths: OpenAPIV3.PathsObject = {
           },
         }, "Order created"),
         "400": errorResponse(
-          "Validation failed (unknown registry/event type/product, incoherent pickup for the " +
-            "order's mode, bad snapshot fields, unsupported rent unit, mixed currencies…).",
+          "Validation failed (unknown registry/event type/product, a delivery scheduled in the " +
+            "past, incoherent pickup for the order's mode, bad snapshot fields, unsupported rent " +
+            "unit, mixed currencies…).",
           400,
           "An order with rentals requires a pickup time",
         ),
@@ -1141,9 +1153,10 @@ export const paths: OpenAPIV3.PathsObject = {
       operationId: "getOrdersCatalog",
       description:
         "The seeded reference lists the orders section consumes — event types (with their client " +
-        "lead-times), order + payment statuses (filters/chips), and the contact types + zones the " +
-        "client-registry form needs (active rows, id order). **Admin only**, like every orders " +
-        "read today. Authenticated limiter (100/min).",
+        "lead-times), order + payment statuses (filters/chips), the contact types + zones the " +
+        "client-registry form needs, and the **staff an order can be assigned to** (the deliverable " +
+        "roles — Admin + Driver — with decrypted names). Active rows, id order. **Admin only**, like " +
+        "every orders read today. Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       responses: {
         "200": dataResponse("The five reference lists.", "OrderCatalog", {
@@ -1165,6 +1178,10 @@ export const paths: OpenAPIV3.PathsObject = {
             { id: 3, name: "Correo electrónico" },
           ],
           zones: [{ id: 1, name: "Zona 1" }],
+          assignableUsers: [
+            { id: 2, name: "Romeo Marroquín", role: "Administrador" },
+            { id: 3, name: "Ana Díaz", role: "Repartidor" },
+          ],
         }, "Catalog fetched"),
         "401": unauthorized(STALE_TOKEN_401),
         "403": adminOnly(),
@@ -1244,6 +1261,142 @@ export const paths: OpenAPIV3.PathsObject = {
           "The order does not exist (or the id is malformed).",
           404,
           "Order not found",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/orders/{id}/advance": {
+    post: {
+      tags: ["Orders"],
+      summary: "Move an order through its lifecycle (advance / rewind / cancel)",
+      operationId: "advanceOrder",
+      description:
+        "**The single mutating door of the order lifecycle**, for every actor and every kind of " +
+        "move. The client does NOT say which kind it wants — it names the target status (one the " +
+        "order's `actions` offered) and the engine decides whether that is a forward step, an " +
+        "admin rewind or a disruptive exit, and whether this actor may make it.\n\n" +
+        "**Admin + Driver.** An Admin may advance, rewind and cancel any order; a Driver may " +
+        "advance and cancel (with a reason) **only orders assigned to them**, never rewind.\n\n" +
+        "Everything racy happens in ONE transaction: the order row is locked (`SELECT … FOR " +
+        "UPDATE`), the move is re-authorised under the lock (a stale client gets a clean `409`, " +
+        "never a double-advance), the target's evidence requirement is checked against its " +
+        "resolved bounds (`422`), the pre-uploaded R2 keys become evidence rows for the phase " +
+        "being entered, the append-only status-history row is written, and the order's status + " +
+        "tracked actuals (`deliveredAt`/`collectedAt`/`readyAt`/`cancelledAt`) are stamped from " +
+        "the status FLAGS. Rental availability needs no write — holds are derived from " +
+        "`inventoryHold`, so the status change alone returns (or keeps) the units.\n\n" +
+        "Returns the same `{ order }` envelope as `GET /orders/{id}`. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          description: "The order id.",
+          schema: { type: "integer", minimum: 1 },
+          example: 12,
+        },
+      ],
+      requestBody: bodyRef("AdvanceOrderRequest", {
+        toStatusId: 3,
+        evidenceKeys: ["orders/evidence/a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7.jpg"],
+      }),
+      responses: {
+        "200": dataResponse(
+          "The order after the move, in the detail shape (its `actions` now describe what comes next).",
+          "OrderDetailResponse",
+          {
+            order: {
+              id: 12,
+              clientName: EXAMPLE_CLIENT_NAME,
+              status: { id: 3, name: "Entregado", colorKey: "emerald" },
+              nextStatus: { id: 4, name: "Recolectado" },
+              deliveredAt: EXAMPLE_DELIVERY_AT,
+            },
+          },
+          "Order status updated",
+        ),
+        "400": errorResponse(
+          "Validation failed (missing/invalid `toStatusId`, evidence keys outside the orders' " +
+            "evidence namespace, or an oversized reason).",
+          400,
+          "The target order status is not valid",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": errorResponse(
+          "The move is legal from here, but not for THIS actor — a Driver on an order that isn't " +
+            "theirs, or a Driver attempting a rewind.",
+          403,
+          "You are not allowed to make this change to the order",
+        ),
+        "404": errorResponse(
+          "The order does not exist (or the id is malformed).",
+          404,
+          "Order not found",
+        ),
+        "409": errorResponse(
+          "Not a legal move from the order's current status for ANYONE — an unknown target, a " +
+            "skipped step, or an order that already moved (stale client). Refetch and retry.",
+          409,
+          "The order already changed status. Refresh and try again",
+        ),
+        "422": errorResponse(
+          "The target step demands photo evidence and the submitted count is outside its resolved " +
+            "`[minEvidence, maxEvidence]` range.",
+          422,
+          "The evidence photos required for this step are incomplete",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/orders/evidence/upload-url": {
+    post: {
+      tags: ["Orders"],
+      summary: "Mint presigned R2 uploads for tracking evidence",
+      operationId: "createOrderEvidenceUploads",
+      description:
+        "**Admin + Driver.** Mints short-lived presigned PUT URLs so the browser uploads tracking " +
+        "photos straight to R2 (image bytes never pass through the API, which caps bodies at " +
+        "10 kB). The client then hands the returned `key`s to `POST /orders/{id}/advance`, which " +
+        "derives the public URL server-side — a client-sent URL is never trusted. Content type and " +
+        "length are bound INTO the signature, so a minted URL can't store something bigger or of " +
+        "another kind. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      requestBody: bodyRef("OrderEvidenceUploadsRequest", {
+        files: [{ contentType: "image/webp", contentLength: 204800 }],
+      }),
+      responses: {
+        "200": dataResponse(
+          "One presigned upload per requested file.",
+          "OrderEvidenceUploadsResponse",
+          {
+            uploads: [
+              {
+                uploadUrl: "https://<account>.r2.cloudflarestorage.com/orders/evidence/…?X-Amz-Signature=…",
+                key: "orders/evidence/a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7.webp",
+                publicUrl: "https://cdn.example.com/orders/evidence/a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7.webp",
+              },
+            ],
+          },
+          "Upload URLs created",
+        ),
+        "400": errorResponse(
+          "Validation failed (empty/oversized file list, or a file outside the storage policy — " +
+            "unsupported content type or size).",
+          400,
+          "The requested evidence files are not valid",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": errorResponse(
+          "The role may not upload order evidence (only Admin and Driver can).",
+          403,
+          "You do not have permission to perform this action",
         ),
         "429": rateLimited,
         "500": serverError,

@@ -18,6 +18,8 @@ const order = (id: number): OrderListItem => ({
   status: { id: 1, name: 'Pendiente' },
   paymentStatus: { id: 1, name: 'Pendiente' },
   deliveryAt: '2026-08-01T14:00:00.000Z',
+  isMine: false,
+  actions: [],
   itemCount: 1,
   totalAmount: 100,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },

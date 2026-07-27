@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, type Mock } from "vitest";
 import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
-import { ServiceStatusEnum } from "@models/enums/serviceStatusEnum.js";
 import { appConfig } from "@/config/app.js";
+import { SEEDED_HOLDING_IDS } from "@/tests/fixtures/lifecycleCatalog.js";
 import { getStorage } from "@helpers/storage.js";
 import {
   applyProductDelete,
@@ -169,19 +169,22 @@ describe("rentProductIds", () => {
 });
 
 describe("buildRentedNowWhere", () => {
-  it("selects delivered lines unconditionally and pending lines only inside their event window", () => {
+  it("holds OUT statuses unconditionally and WINDOW ones only during their event window", () => {
     const now = new Date("2026-07-15T12:00:00.000Z");
-    expect(buildRentedNowWhere([1, 3], now)).toEqual({
+    // The ids come from the lifecycle flags (`holdingStatusIds`), never from literals here.
+    expect(buildRentedNowWhere([1, 3], now, SEEDED_HOLDING_IDS)).toEqual({
       productId: { in: [1, 3] },
       isActive: true,
+      isRental: true,
       service: {
         isActive: true,
+        cancelledAt: null,
         OR: [
-          // Delivered = physically out until collected — no window check, so an OVERDUE pickup
-          // keeps counting against availability.
-          { serviceStatusId: ServiceStatusEnum.DELIVERED },
+          // En ruta / Entregado / Recolectado = physically gone or being washed — no window check,
+          // so an OVERDUE pickup (or a pending cleaning) keeps counting against availability.
+          { serviceStatusId: { in: SEEDED_HOLDING_IDS.out } },
           {
-            serviceStatusId: ServiceStatusEnum.PENDING,
+            serviceStatusId: { in: SEEDED_HOLDING_IDS.window },
             serviceStart: { lte: now },
             serviceEnd: { gte: now },
           },

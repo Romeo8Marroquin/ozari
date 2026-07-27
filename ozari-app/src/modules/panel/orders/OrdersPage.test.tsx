@@ -27,17 +27,49 @@ vi.mock('@hooks/useInfiniteScrollSentinel', () => ({ useInfiniteScrollSentinel }
 const { usePanelPageMotion } = vi.hoisted(() => ({ usePanelPageMotion: vi.fn() }));
 vi.mock('../PanelPageTransitionContext', () => ({ usePanelPageMotion }));
 
+// Role gate for the "Nuevo pedido" affordance — Admin (true) by default; a driver test flips it off.
+const { useHasRole } = vi.hoisted(() => ({ useHasRole: vi.fn(() => true) }));
+vi.mock('@hooks/useRole', () => ({ useHasRole }));
+
 // Spy on the motion helpers: the append choreography's `.order-appended` tags are deliberately
 // TRANSIENT (cleared in the same commit after the stagger fires), so tests assert the stagger
 // calls, not the classes. Immediate resolution keeps the skeleton sweep flow synchronous-ish.
-const { staggerIn, staggerOut } = vi.hoisted(() => ({
+const { staggerIn, staggerOut, growRowsIn, collapseRowsOut, fadeUpIn } = vi.hoisted(() => ({
   staggerIn: vi.fn(() => Promise.resolve()),
   staggerOut: vi.fn(() => Promise.resolve()),
+  growRowsIn: vi.fn(),
+  collapseRowsOut: vi.fn(() => Promise.resolve()),
+  fadeUpIn: vi.fn(),
 }));
 vi.mock('../pageMotion', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../pageMotion')>()),
   staggerIn,
   staggerOut,
+  growRowsIn,
+  collapseRowsOut,
+  fadeUpIn,
+}));
+
+// The confirm dialog owns the mutation + upload hooks (its own suite covers them); here it stands in
+// as a marker so the page's job — handing the TAPPED action to it — is what's asserted.
+vi.mock('./OrderAdvanceModal', () => ({
+  default: ({
+    order,
+    action,
+    onClose,
+  }: {
+    order?: { id: number };
+    action?: { statusName: string };
+    onClose: () => void;
+  }) =>
+    order && action ? (
+      <div data-testid="advance-modal">
+        {`${order.id}:${action.statusName}`}
+        <button type="button" onClick={onClose}>
+          cerrar
+        </button>
+      </div>
+    ) : null,
 }));
 
 import { PanelNavContext, type PanelNav } from '../PanelNavContext';
@@ -59,7 +91,12 @@ const daysFromNow = (days: number, hour = 10): string => {
   return date.toISOString();
 };
 
-const order = (id: number, deliveryAt: string, name = `Cliente ${id}`): OrderListItem => ({
+const order = (
+  id: number,
+  deliveryAt: string,
+  name = `Cliente ${id}`,
+  over: Partial<OrderListItem> = {},
+): OrderListItem => ({
   id,
   clientName: name,
   isRegistryClient: false,
@@ -68,9 +105,12 @@ const order = (id: number, deliveryAt: string, name = `Cliente ${id}`): OrderLis
   paymentStatus: { id: 1, name: 'Pendiente' },
   deliveryAt,
   pickupAt: deliveryAt,
+  isMine: false,
+  actions: [],
   itemCount: 2,
   totalAmount: 100,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
+  ...over,
 });
 
 type State = {
@@ -117,6 +157,7 @@ const lastSentinelCall = () => {
 
 beforeEach(() => {
   routerState.search = {};
+  useHasRole.mockReturnValue(true); // Admin by default; the driver test opts out
 });
 
 afterEach(() => {
@@ -158,18 +199,27 @@ describe('OrdersPage', () => {
     expect(staggerIn).toHaveBeenCalledWith(expect.anything(), '.reveal-item', { from: 'right' });
   });
 
-  it('resolves the cold skeleton into content (sweep out → body in) and re-arms on a re-entered load', async () => {
+  it('resolves the cold skeleton PER-ROW (crossfade in place, orphans out, headers in) and re-arms on a re-entered load', async () => {
     setOrders({ isLoading: true });
     const { rerender } = render(<OrdersPage />);
     expect(screen.getByRole('status')).toBeInTheDocument();
 
-    // The data lands: the skeleton sweeps out LATERALLY (a plain cold load uses the forward
-    // direction — out to the left), then the tickets enter from the right.
+    // The data lands: each order slot's SkeletonFade crossfades its ticket IN PLACE (products
+    // parity — NOT a whole-skeleton sweep). The page only sweeps the surplus rows + day/owner
+    // headers IN (`.orders-enter`) and the leftover skeleton rows OUT (`.orders-skel-orphan`).
     setOrders({ data: paginated([order(1, todayAt(10))]) });
     rerender(<OrdersPage />);
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
-    expect(staggerOut).toHaveBeenCalledWith(expect.anything(), '.orders-skel', { to: 'left' });
-    expect(staggerIn).toHaveBeenCalledWith(expect.anything(), '.reveal-item', { from: 'right' });
+    // Leftover skeleton rows COLLAPSE out; the day/owner headers + count GROW in — both smoothly,
+    // no jump. The per-slot ticket crossfade is owned by SkeletonFade.
+    expect(collapseRowsOut).toHaveBeenCalledWith(expect.anything(), '.orders-skel-orphan');
+    expect(growRowsIn).toHaveBeenCalledWith(expect.anything(), '.orders-enter');
+    // The total is withheld until the skeleton fully clears, then FADES into its FINAL place (a gentle
+    // fade + tiny rise, no wipe) — never flashing at a transient position under the departing orphans.
+    expect(fadeUpIn).toHaveBeenCalledWith(expect.anything(), '.orders-settle-in');
+    expect(screen.getByText('modules.panel.orders.count.all')).toBeInTheDocument();
+    // The old whole-skeleton lateral sweep is gone.
+    expect(staggerOut).not.toHaveBeenCalledWith(expect.anything(), '.orders-skel', expect.anything());
     expect(screen.getByText('Cliente 1')).toBeInTheDocument();
 
     // A re-entered cold load (cache gone) re-arms the skeleton.
@@ -200,6 +250,85 @@ describe('OrdersPage', () => {
     expect(screen.getByText('modules.panel.orders.count.all')).toBeInTheDocument();
     // Populated + no next page ⇒ the sentinel stays disarmed (nothing to fetch).
     expect(lastSentinelCall().disabled).toBe(true);
+  });
+
+  it('splits the agenda into Mis pedidos / El resto bands when ownership is mixed, hides them when uniform', async () => {
+    setOrders({
+      data: paginated([
+        order(1, todayAt(9), 'Cliente 1', { isMine: true }),
+        order(2, todayAt(12), 'Cliente 2', { isMine: false }),
+      ]),
+    });
+    const { rerender } = render(<OrdersPage />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(screen.getByText('modules.panel.orders.owner.mine')).toBeInTheDocument();
+    expect(screen.getByText('modules.panel.orders.owner.rest')).toBeInTheDocument();
+
+    // A uniform list (nothing to tell apart) drops the owner headers.
+    setOrders({ data: paginated([order(3, todayAt(9), 'Cliente 3', { isMine: false })]) });
+    rerender(<OrdersPage />);
+    expect(screen.queryByText('modules.panel.orders.owner.mine')).not.toBeInTheDocument();
+    expect(screen.queryByText('modules.panel.orders.owner.rest')).not.toBeInTheDocument();
+  });
+
+  it('hides the "Nuevo pedido" affordance for a non-admin (a Driver cannot create orders)', async () => {
+    useHasRole.mockReturnValue(false);
+    setOrders({ data: paginated([order(1, todayAt(9), 'Cliente 1', { isMine: true })]) });
+    render(<OrdersPage />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(
+      screen.queryByRole('button', { name: 'modules.panel.orders.newOrder' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the forward quick action when the lifecycle engine offered one', async () => {
+    // `actions` is the ONLY trigger — the page never re-derives who may advance what.
+    setOrders({
+      data: paginated([
+        order(1, todayAt(9), 'Cliente 1', {
+          isMine: true,
+          actions: [
+            {
+              kind: 'forward',
+              statusId: 5,
+              statusName: 'En ruta',
+              requiresEvidence: false,
+              minEvidence: 1,
+              maxEvidence: 10,
+              requiresReason: false,
+            },
+          ],
+        }),
+      ]),
+    });
+    render(<OrdersPage />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    const advance = screen.getByRole('button', {
+      name: /modules\.panel\.orders\.ticket\.nextStepAria/,
+    });
+    expect(advance).toBeInTheDocument();
+
+    // Tapping it hands THAT order + THAT offered action to the confirm dialog.
+    expect(screen.queryByTestId('advance-modal')).not.toBeInTheDocument();
+    await userEvent.click(advance);
+    expect(screen.getByTestId('advance-modal')).toHaveTextContent('1:En ruta');
+
+    // …and dismissing it clears the pending move (the next tap starts clean).
+    await userEvent.click(screen.getByRole('button', { name: 'cerrar' }));
+    expect(screen.queryByTestId('advance-modal')).not.toBeInTheDocument();
+  });
+
+  it('sweeps in the surplus rows when a cold load resolves to MORE than the skeleton count', async () => {
+    setOrders({ isLoading: true });
+    const { rerender } = render(<OrdersPage />);
+    // Resolve with more orders than skeleton slots (SKELETON_ROWS = 6): the rows past the skeleton
+    // count have no skeleton to become, so they sweep IN with the headers (`.orders-enter`).
+    const many = Array.from({ length: 8 }, (_, i) => order(i + 1, todayAt(9)));
+    setOrders({ data: paginated(many) });
+    rerender(<OrdersPage />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(growRowsIn).toHaveBeenCalledWith(expect.anything(), '.orders-enter');
+    expect(screen.getByText('Cliente 8')).toBeInTheDocument();
   });
 
   it('a partially-loaded list arms the sentinel and shows the partial count', async () => {
@@ -333,12 +462,14 @@ describe('OrdersPage', () => {
     expect(screen.getByText('Cliente 1')).toBeInTheDocument();
   });
 
-  it('a BACKWARD uncached swap mirrors the lateral resolve (skeleton out right, content in from left)', async () => {
+  it('a BACKWARD uncached swap enters the skeleton from the left, then resolves per-slot', async () => {
     routerState.search = { view: 'historial' };
     setOrders({ data: paginated([order(1, todayAt(10))]) });
     const { rerender } = render(<OrdersPage />);
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
 
+    staggerIn.mockClear();
+    staggerOut.mockClear();
     routerState.search = {};
     setOrdersByView({
       historial: { data: paginated([order(1, todayAt(10))]) },
@@ -346,17 +477,19 @@ describe('OrdersPage', () => {
     });
     rerender(<OrdersPage />);
     await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument());
+    // The uncached agenda's skeleton rows enter LATERALLY from the left (a backward move).
+    expect(staggerIn).toHaveBeenCalledWith(expect.anything(), '.reveal-item', { from: 'left' });
 
-    staggerIn.mockClear();
-    staggerOut.mockClear();
+    // Its data resolves PER-SLOT: leftover skeleton rows collapse out; no whole-skeleton lateral sweep.
+    collapseRowsOut.mockClear();
     setOrdersByView({
       historial: { data: paginated([order(1, todayAt(10))]) },
       agenda: { data: paginated([]) },
     });
     rerender(<OrdersPage />);
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
-    expect(staggerOut).toHaveBeenCalledWith(expect.anything(), '.orders-skel', { to: 'right' });
-    expect(staggerIn).toHaveBeenCalledWith(expect.anything(), '.reveal-item', { from: 'left' });
+    expect(collapseRowsOut).toHaveBeenCalledWith(expect.anything(), '.orders-skel-orphan');
+    expect(screen.getByText('modules.panel.orders.empty.agenda.title')).toBeInTheDocument();
   });
 
   it('flipping back mid-exit cancels the swap and settles the body from the current frame', async () => {
@@ -407,8 +540,8 @@ describe('OrdersPage', () => {
     expect(screen.getByRole('status')).toBeInTheDocument();
     expect(lastSentinelCall().disabled).toBe(true);
 
-    // The gesture keeps travelling: when the uncached view resolves, the skeleton sweeps out the
-    // way we were heading and the content enters from the swap's side — never a vertical snap.
+    // When the uncached view resolves, its leftover skeleton rows sweep out PER-SLOT (no whole-
+    // skeleton lateral sweep) and the empty panel settles in.
     staggerIn.mockClear();
     staggerOut.mockClear();
     setOrdersByView({
@@ -417,8 +550,7 @@ describe('OrdersPage', () => {
     });
     rerender(<OrdersPage />);
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
-    expect(staggerOut).toHaveBeenCalledWith(expect.anything(), '.orders-skel', { to: 'left' });
-    expect(staggerIn).toHaveBeenCalledWith(expect.anything(), '.reveal-item', { from: 'right' });
+    expect(collapseRowsOut).toHaveBeenCalledWith(expect.anything(), '.orders-skel-orphan');
     expect(screen.getByText('modules.panel.orders.empty.history.title')).toBeInTheDocument();
   });
 
