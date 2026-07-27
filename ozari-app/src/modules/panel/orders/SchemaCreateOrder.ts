@@ -9,19 +9,10 @@ import {
 } from '@constants/Regex';
 import getZodRequiredPatterns from '@utils/getZodRequiredPatterns';
 import { t } from 'i18next';
+import type { ResolverResult } from 'react-hook-form';
 import { z } from 'zod';
 
 const KEY = 'modules.panel.orders.create.errors';
-
-/**
- * The order-creation MODE the fork asks first ("¿Rentar, comprar o ambos?"): it filters the
- * product picker and, together with which lines are actually rentals, decides whether a pickup
- * exists (Q-A). It is pure UI state — never sent; the backend derives everything from the lines.
- */
-export type OrderMode = 'rent' | 'buy' | 'both';
-
-/** The mode fork's option order (also the radiogroup's arrow-key order). */
-export const ORDER_MODES: readonly OrderMode[] = ['rent', 'buy', 'both'];
 
 /** Parses a MONEY text input: `''` = absent; else a non-negative number within the ceiling; `null`
  *  when present-but-invalid (the schema turns `null` into a field error). Mirrors the product form. */
@@ -50,6 +41,23 @@ export const parseDateTime = (value: string): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+/**
+ * Grace absorbed when checking the delivery isn't in the PAST: the picker is minute-granular and the
+ * admin needs a moment to finish + submit, so a delivery chosen as "now" and saved seconds later
+ * still passes. Mirrors the backend validator's `DELIVERY_PAST_GRACE_MS`.
+ */
+export const DELIVERY_PAST_GRACE_MS = 2 * 60 * 1000;
+
+/**
+ * The current local instant as a `datetime-local` value ('YYYY-MM-DDTHH:mm') — the delivery picker's
+ * `min`, so the native calendar itself won't offer a past date (the schema + backend still guard it).
+ */
+export function nowDateTimeLocal(): string {
+  const now = new Date(Date.now());
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
+
 const moneyField = (invalidMessage: string) =>
   z.string().refine((value) => parseMoney(value) !== null, invalidMessage);
 
@@ -76,7 +84,12 @@ const baseCreateOrderSchema = z.object({
     .string()
     .trim()
     .nonempty(t(`${KEY}.requiredDeliveryAt`))
-    .refine((value) => parseDateTime(value) !== null, t(`${KEY}.invalidDeliveryAt`)),
+    .refine((value) => parseDateTime(value) !== null, t(`${KEY}.invalidDeliveryAt`))
+    // Not in the past (mirrors the backend). Skipped when unparseable — the refine above owns that.
+    .refine((value) => {
+      const parsed = parseDateTime(value);
+      return parsed === null || parsed.getTime() >= Date.now() - DELIVERY_PAST_GRACE_MS;
+    }, t(`${KEY}.deliveryInPast`)),
   // Non-optional strings defaulting to '' (never undefined — the form always registers them): the
   // presence/ordering rule lives in the superRefine, which reads '' as "absent". Keeping these
   // non-optional means the watched values are plain strings, so the UI never optional-chains them.
@@ -93,6 +106,11 @@ const baseCreateOrderSchema = z.object({
     t(`${KEY}.requiredDeliveryContact`),
     t(`${KEY}.invalidDeliveryContact`),
   ),
+  // FORM-ONLY (never sent): the delivery contact's channel drives the leading icon + keyboard, and
+  // the delivery zone drives the fee SUGGESTION. Both default from the chosen client but are freely
+  // editable; the snapshot the API stores is the contact TEXT + the (editable) delivery fee.
+  deliveryContactTypeId: z.number().nullable(),
+  deliveryZoneId: z.number().nullable(),
   deliveryAddress: requiredText(
     ORDER_ADDRESS_MIN_LENGTH,
     ORDER_LONGTEXT_MAX_LENGTH,
@@ -110,6 +128,10 @@ const baseCreateOrderSchema = z.object({
   // `null` = the empty-selection sentinel: how it's paid is OPTIONAL (payment can settle later);
   // the select pre-fills from the client's preferred method. Never required.
   paymentMethodId: z.number().nullable(),
+  // Who the order is assigned to — REQUIRED here (the select defaults to the creating admin), so the
+  // form never produces an unassigned order. The backend treats it as optional (defaulting to the
+  // creator); this mirror is stricter on purpose. The options are the catalog's `assignableUsers`.
+  assignedUserId: z.number({ error: t(`${KEY}.requiredAssignee`) }),
   lines: z
     .array(
       z.object({
@@ -163,12 +185,16 @@ export const createOrderDefaultValues: CreateOrderFormType = {
   pickupAt: '',
   deliveryName: '',
   deliveryContact: '',
+  deliveryContactTypeId: null,
+  deliveryZoneId: null,
   deliveryAddress: '',
   description: '',
   comment: '',
   deliveryAmount: '',
   depositAmount: '',
   paymentMethodId: null,
+  // null = unset; the form overrides it with the current admin's id (from the token) on mount.
+  assignedUserId: null as unknown as number,
   lines: [],
 };
 
@@ -186,6 +212,7 @@ export interface CreateOrderBody {
   deliveryAmount?: number;
   depositAmount?: number;
   paymentMethodId?: number;
+  assignedUserId: number;
   lines: { productId: number; quantity: number }[];
 }
 
@@ -214,6 +241,7 @@ export function toCreateOrderBody(data: CreateOrderFormType): CreateOrderBody {
     ...(money(data.deliveryAmount) !== undefined && { deliveryAmount: money(data.deliveryAmount) }),
     ...(money(data.depositAmount) !== undefined && { depositAmount: money(data.depositAmount) }),
     ...(data.paymentMethodId != null && { paymentMethodId: data.paymentMethodId }),
+    assignedUserId: data.assignedUserId,
     lines: data.lines.map((line) => ({
       productId: line.productId,
       /* v8 ignore next -- parseLineQuantity is guaranteed non-null by the schema */
@@ -223,3 +251,67 @@ export function toCreateOrderBody(data: CreateOrderFormType): CreateOrderBody {
 }
 
 export const createOrderRequiredPatterns = getZodRequiredPatterns(baseCreateOrderSchema);
+
+const RECONCILE_TOAST_BASE_MS = 6000;
+const RECONCILE_TOAST_STEP_MS = 1600;
+const RECONCILE_TOAST_MAX_MS = 15000;
+/** The availability-reconciliation toast lists each changed product on its own line, so it lingers
+ *  longer the more it carries — a generous base plus a step per row, capped so it never overstays. */
+export const reconcileToastDuration = (changeCount: number): number =>
+  Math.min(RECONCILE_TOAST_BASE_MS + changeCount * RECONCILE_TOAST_STEP_MS, RECONCILE_TOAST_MAX_MS);
+
+/**
+ * Resolves how many of a product the admin may still pick: the fetched per-WINDOW amount when it's
+ * known (`POST /orders/availability`), else the product's current stock/fleet count (the pre-window
+ * baseline, so the cap exists even before dates are set). `undefined` = unknown (the product isn't in
+ * the probe and carries no baseline, or a rental with no pickup yet) → left to the server to guard.
+ */
+export function takeableFor(
+  productId: number,
+  windowAvailability: Map<number, number | null>,
+  products: Map<number, { available?: number }>,
+): number | undefined {
+  const windowValue = windowAvailability.get(productId);
+  if (windowValue != null) return windowValue;
+  return products.get(productId)?.available;
+}
+
+/**
+ * Layers a LIVE availability cap on top of the mirrored schema result: any line whose quantity
+ * exceeds what's takeable for the current window gets a `quantity` error, so the form blocks the same
+ * over-stock the backend rejects with a 409 — but as the admin types, not only on submit. A schema
+ * error already on a line is never overwritten, and an `undefined` cap (unknown window / rental with
+ * no pickup) is left to the server. Pure: the resolver wrapper feeds it the live caps.
+ */
+export function appendLineAvailabilityErrors(
+  values: CreateOrderFormType,
+  result: ResolverResult<CreateOrderFormType>,
+  capFor: (productId: number) => number | undefined,
+  message: (available: number) => string,
+): ResolverResult<CreateOrderFormType> {
+  const baseLines = result.errors.lines as unknown as
+    | ({ quantity?: unknown } | undefined)[]
+    | undefined;
+  const extra: Record<number, { type: string; message: string }> = {};
+  values.lines.forEach((line, index) => {
+    if (line.productId == null || baseLines?.[index]?.quantity) return;
+    const cap = capFor(line.productId);
+    const quantity = parseLineQuantity(line.quantity);
+    if (cap != null && quantity != null && quantity > cap) {
+      extra[index] = { type: 'availability', message: message(cap) };
+    }
+  });
+  if (Object.keys(extra).length === 0) return result;
+  // Rebuild `lines` as a sparse array carrying the schema's own line errors plus ours, so RHF resolves
+  // `errors.lines[i].quantity` for the offending fields and treats the form as invalid (empty values).
+  const lines: ({ quantity?: unknown } | undefined)[] = [];
+  values.lines.forEach((_, index) => {
+    const own = baseLines?.[index];
+    const mine = extra[index];
+    if (own || mine) lines[index] = { ...(own ?? {}), ...(mine ? { quantity: mine } : {}) };
+  });
+  return {
+    values: {},
+    errors: { ...result.errors, lines },
+  } as ResolverResult<CreateOrderFormType>;
+}

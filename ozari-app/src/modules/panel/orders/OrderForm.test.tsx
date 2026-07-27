@@ -10,13 +10,22 @@ const { useOrdersCatalog } = vi.hoisted(() => ({ useOrdersCatalog: vi.fn() }));
 const { useOrderProducts } = vi.hoisted(() => ({ useOrderProducts: vi.fn() }));
 const { useClientRegistries } = vi.hoisted(() => ({ useClientRegistries: vi.fn() }));
 const { createOrder, useCreateOrder } = vi.hoisted(() => ({ createOrder: vi.fn(), useCreateOrder: vi.fn() }));
+const { checkAvailability, useOrderAvailability } = vi.hoisted(() => ({
+  checkAvailability: vi.fn(),
+  useOrderAvailability: vi.fn(),
+}));
 vi.mock('./useOrdersCatalog', () => ({ useOrdersCatalog }));
 vi.mock('./useOrderProducts', () => ({ useOrderProducts }));
 vi.mock('./useClientRegistries', () => ({ useClientRegistries }));
 vi.mock('./useCreateOrder', () => ({ useCreateOrder }));
+vi.mock('./useOrderAvailability', () => ({ useOrderAvailability }));
 
-const { success, error } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
-vi.mock('@components/notifications/notify', () => ({ notify: { success, error } }));
+const { success, error, warning } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
+vi.mock('@components/notifications/notify', () => ({ notify: { success, error, warning } }));
+
+// The form defaults the "Asignar a" select to the current admin's id (from the token).
+const { getStoredUserId } = vi.hoisted(() => ({ getStoredUserId: vi.fn(() => 1) }));
+vi.mock('@hooks/useRole', () => ({ getStoredUserId }));
 
 // Stub the registry modal — its own suite covers it; here we only need the create hand-off.
 const { newRegistry } = vi.hoisted(() => ({
@@ -47,6 +56,7 @@ import { PanelNavContext, type PanelNav } from '../PanelNavContext';
 import type { Product } from '../products/product.types';
 import type { ClientRegistry, OrderCatalog } from './order.types';
 import OrderForm from './OrderForm';
+import { reconcileToastDuration } from './SchemaCreateOrder';
 
 const KEY = 'modules.panel.orders.create';
 
@@ -98,8 +108,13 @@ const catalog: OrderCatalog = {
   serviceStatuses: [],
   paymentStatuses: [],
   paymentMethods: [{ id: 1, name: 'Efectivo' }, { id: 2, name: 'Transferencia' }],
-  contactTypes: [{ id: 1, name: 'WhatsApp' }],
+  contactTypes: [{ id: 1, name: 'WhatsApp' }, { id: 2, name: 'Teléfono' }],
   zones: [{ id: 6, name: 'Zona 10', deliveryFee: 50 }],
+  // The deliverable staff the "Asignar a" select offers (id 1 = the current admin, the default).
+  assignableUsers: [
+    { id: 1, name: 'Romeo Marroquín', role: 'Administrador' },
+    { id: 5, name: 'Ana Díaz', role: 'Repartidor' },
+  ],
 };
 
 type QueryState<T> = { data?: T; isLoading?: boolean; isError?: boolean; refetch?: () => void };
@@ -163,10 +178,23 @@ const fillAndSubmit = async (container: HTMLElement): Promise<Handlers> => {
   return createOrder.mock.calls[0][1] as Handlers;
 };
 
+// Freeze "now" before the fixtures' 2026-08 dates so the delivery's not-in-past rule stays satisfied
+// (and the hardcoded future dates don't go stale as the wall clock advances). Restored in afterEach.
+const FROZEN_NOW = new Date('2026-07-15T12:00:00').getTime();
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW);
   useCreateOrder.mockReturnValue({ createOrder, isPending: false });
+  useOrderAvailability.mockReturnValue({ checkAvailability });
   setReady();
+});
+
+/** The `onSuccess` from the most recent `checkAvailability` call. */
+const availabilityHandlers = (): { onSuccess: (res: unknown) => void } =>
+  checkAvailability.mock.calls[checkAvailability.mock.calls.length - 1][1] as { onSuccess: (res: unknown) => void };
+const availabilityResponse = (rows: { productId: number; available: number | null }[]) => ({
+  data: { data: { availability: rows } },
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -179,9 +207,9 @@ describe('OrderForm', () => {
     // The loading state is the FORM view with the section CARD chrome (titles) real, bodies
     // shimmering — NOT the error panel and NOT the raw controls yet.
     expect(screen.getByRole('status')).toHaveAccessibleName(`${KEY}.loading`);
-    expect(screen.getByText(`${KEY}.sections.mode.title`)).toBeInTheDocument();
     expect(screen.getByText(`${KEY}.sections.client.title`)).toBeInTheDocument();
-    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument(); // body still a skeleton
+    // The interactive body (e.g. the "new client" button) is still a skeleton while loading.
+    expect(screen.queryByRole('button', { name: `${KEY}.actions.newClient` })).not.toBeInTheDocument();
     expect(screen.queryByText(`${KEY}.loadError.title`)).not.toBeInTheDocument();
   });
 
@@ -199,25 +227,25 @@ describe('OrderForm', () => {
     useClientRegistries.mockReturnValue(q({ data: [] }));
     renderForm();
     // Registries empty ⇒ the form is fully usable (create a client inline); never the error panel.
-    expect(screen.getByRole('radiogroup')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `${KEY}.actions.newClient` })).toBeInTheDocument();
     expect(screen.queryByText(`${KEY}.loadError.title`)).not.toBeInTheDocument();
     expect(screen.queryByText(`${KEY}.emptyProducts.title`)).not.toBeInTheDocument();
   });
 
   it('smoothly swaps the whole view when the state changes (form → error → back)', async () => {
     const { rerender } = renderForm(); // starts on the form
-    expect(screen.getByRole('radiogroup')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `${KEY}.actions.newClient` })).toBeInTheDocument();
 
     // A query fails on a refetch → the view sweeps out and the error panel sweeps in.
     useOrdersCatalog.mockReturnValue(q({ isError: true }));
     rerender(<OrderForm />);
     await waitFor(() => expect(screen.getByText(`${KEY}.loadError.title`)).toBeInTheDocument());
-    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `${KEY}.actions.newClient` })).not.toBeInTheDocument();
 
     // Recovery → back to the form, same smooth swap.
     setReady();
     rerender(<OrderForm />);
-    await waitFor(() => expect(screen.getByRole('radiogroup')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: `${KEY}.actions.newClient` })).toBeInTheDocument());
   });
 
   it('abandons an in-flight view sweep cleanly on unmount (no stray commit)', async () => {
@@ -257,27 +285,28 @@ describe('OrderForm', () => {
     expect(navigateTo).toHaveBeenCalledWith('/panel/ajustes');
   });
 
-  it('renders the sections with the mode fork defaulting to rent', () => {
+  it('renders the form sections (no mode fork — the kind is derived from the products)', () => {
     renderForm();
-    expect(screen.getByRole('radiogroup')).toBeInTheDocument();
     expect(screen.getByText(`${KEY}.sections.client.title`)).toBeInTheDocument();
-    // Rent mode → the product picker offers only the rental product.
-    // (No line yet — verified indirectly via the mode-switch test below.)
+    expect(screen.getByText(`${KEY}.sections.lines.title`)).toBeInTheDocument();
+    // No rent/sell/both toggle any more.
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
   });
 
-  it('the mode filter offers only matching products and switching drops incompatible lines', async () => {
+  it('the product picker offers ALL products (rentals + sales) without a mode filter', async () => {
     const user = userEvent.setup();
     const { container } = renderForm();
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
     const productSelect = byId(container, 'order-line-product-0');
-    // Rent mode: the option list has the rental (id 3), not the sale (id 4).
+    // Both the rental (id 3) and the sale (id 4) are offered.
     expect(within(productSelect).queryByRole('option', { name: 'Silla plegable' })).toBeInTheDocument();
-    expect(within(productSelect).queryByRole('option', { name: 'Vasos' })).not.toBeInTheDocument();
-
+    expect(within(productSelect).queryByRole('option', { name: 'Vasos' })).toBeInTheDocument();
+    // Already-picked products are hidden from a second line.
     await user.selectOptions(productSelect, '3');
-    // Switch to Buy → the rental line is removed (product 3 doesn't fit).
-    await user.click(screen.getByRole('radio', { name: `${KEY}.mode.buy` }));
-    await waitFor(() => expect(byId(container, 'order-line-product-0')).toBeNull());
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    const second = byId(container, 'order-line-product-1');
+    expect(within(second).queryByRole('option', { name: 'Silla plegable' })).not.toBeInTheDocument();
+    expect(within(second).queryByRole('option', { name: 'Vasos' })).toBeInTheDocument();
   });
 
   it('selecting a client prefills the delivery snapshots', async () => {
@@ -299,9 +328,48 @@ describe('OrderForm', () => {
     );
     // Preferred payment method pre-selected.
     expect((byId(container, 'order-payment-method') as HTMLSelectElement).value).toBe('1');
+    // Contact channel + delivery zone pre-selected from the client (principal contact / favorite zone).
+    expect((byId(container, 'order-delivery-contact-type') as HTMLSelectElement).value).toBe('1');
+    expect(byId(container, 'order-delivery-contact')).toHaveAttribute('inputmode', 'tel');
+    expect((byId(container, 'order-delivery-zone') as HTMLSelectElement).value).toBe('6');
     // The saved-data quick-fill pickers appear (the client has contacts + addresses).
     expect(byId(container, 'order-saved-contact')).toBeInTheDocument();
     expect(byId(container, 'order-saved-address')).toBeInTheDocument();
+  });
+
+  it('flips the saved pickers to custom when the type/zone changes, and re-matches when they align', async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await user.selectOptions(byId(container, 'order-client'), '3');
+    // The principal contact (type 1 / value 5555-1234) and favorite address (zone 6) auto-match.
+    await waitFor(() =>
+      expect((byId(container, 'order-saved-contact') as HTMLSelectElement).value).toBe('1'),
+    );
+    expect((byId(container, 'order-saved-address') as HTMLSelectElement).value).toBe('1');
+
+    // Changing the contact TYPE (value unchanged) no longer matches → the picker shows "custom".
+    await user.selectOptions(byId(container, 'order-delivery-contact-type'), '2');
+    expect((byId(container, 'order-saved-contact') as HTMLSelectElement).value).toBe('');
+    // Restoring the type re-matches the saved contact.
+    await user.selectOptions(byId(container, 'order-delivery-contact-type'), '1');
+    expect((byId(container, 'order-saved-contact') as HTMLSelectElement).value).toBe('1');
+
+    // Changing the delivery ZONE (address text unchanged) flips the address picker to "custom".
+    await user.selectOptions(byId(container, 'order-delivery-zone'), '');
+    expect((byId(container, 'order-saved-address') as HTMLSelectElement).value).toBe('');
+  });
+
+  it('a delivery zone suggests its fee; clearing the zone leaves the fee untouched', async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    // Pick a zone with a configured fee → the delivery fee autofills.
+    await user.selectOptions(byId(container, 'order-delivery-zone'), '6');
+    await waitFor(() =>
+      expect((byId(container, 'order-delivery-amount') as HTMLInputElement).value).toBe('50'),
+    );
+    // Clearing to "no zone" never overwrites the fee (null zone has no fee to apply).
+    await user.selectOptions(byId(container, 'order-delivery-zone'), '');
+    expect((byId(container, 'order-delivery-amount') as HTMLInputElement).value).toBe('50');
   });
 
   it('the saved-data pickers fill the snapshot from another saved contact/address; a placeholder pick is a no-op', async () => {
@@ -341,6 +409,18 @@ describe('OrderForm', () => {
     expect(createOrder.mock.calls[0][0].paymentMethodId).toBe(2);
   });
 
+  it('defaults the assignee to the current admin and lets it be reassigned to a driver', async () => {
+    const { container } = renderForm();
+    await fillValid(container);
+    // The "Asignar a" select defaults to the creating admin (id 1) — never unassigned.
+    expect((byId(container, 'order-assigned-user') as HTMLSelectElement).value).toBe('1');
+    // Reassigning to another deliverable staff member sends that id.
+    await userEvent.selectOptions(byId(container, 'order-assigned-user'), '5');
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createOrder).toHaveBeenCalled());
+    expect(createOrder.mock.calls[0][0].assignedUserId).toBe(5);
+  });
+
   it('creating a client through the modal seeds the picker cache (prepending the new client) and selects it', async () => {
     const user = userEvent.setup();
     const { setData } = renderForm();
@@ -354,15 +434,33 @@ describe('OrderForm', () => {
     expect(updater(undefined)).toEqual([newRegistry]);
   });
 
-  it('adds and removes product lines and reveals pickup for a rental', async () => {
+  it('adds and removes product lines (both dates are always available)', async () => {
     const user = userEvent.setup();
     const { container } = renderForm();
-    expect(byId(container, 'order-pickup-at')).toBeNull(); // no rental yet
+    // Both delivery + pickup are always present (set dates before products if you like).
+    expect(byId(container, 'order-delivery-at')).toBeInTheDocument();
+    expect(byId(container, 'order-pickup-at')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
     await user.selectOptions(byId(container, 'order-line-product-0'), '3');
-    await waitFor(() => expect(byId(container, 'order-pickup-at')).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.removeLine` }));
     expect(byId(container, 'order-line-product-0')).toBeNull();
+  });
+
+  it('fades the subtotal on quantity, keeps its last value on clear, and collapses on deselect', async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    await waitFor(() => expect(screen.getByText(/lineUnitEach/)).toBeInTheDocument());
+    // Typing a quantity reveals the subtotal segment; clearing it keeps the last amount painted while
+    // it fades out (the segment stays in the DOM, just faded).
+    await user.type(byId(container, 'order-line-quantity-0'), '3');
+    await waitFor(() => expect(screen.getByText(/lineSubtotal/)).toBeInTheDocument());
+    await user.clear(byId(container, 'order-line-quantity-0'));
+    expect(screen.getByText(/lineSubtotal/)).toBeInTheDocument();
+    // Deselecting the product collapses the note but keeps the last text painted through the animation.
+    await user.selectOptions(byId(container, 'order-line-product-0'), '');
+    expect(screen.getByText(/lineUnitEach/)).toBeInTheDocument();
   });
 
   it('shows a live estimate from the picked products, window, and delivery fee', async () => {
@@ -373,12 +471,98 @@ describe('OrderForm', () => {
     await user.selectOptions(byId(container, 'order-line-product-0'), '3');
     await user.type(byId(container, 'order-line-quantity-0'), '25');
     setDateTime(byId(container, 'order-pickup-at'), '2026-08-02T15:00'); // 25h → 2 days
-    // 6 × 25 × 2 = 300
-    await waitFor(() => expect(screen.getByText('Q 300.00')).toBeInTheDocument());
-    // A typed delivery fee folds into the estimate (parseMoney → a number, not the 0 fallback).
+    // 6 × 25 × 2 = 300 — shown as the line subtotal AND the products subtotal.
+    await waitFor(() => expect(screen.getAllByText('Q 300.00').length).toBeGreaterThan(0));
+    // A typed delivery fee folds into the total (parseMoney → a number, not the 0 fallback).
     await user.type(byId(container, 'order-delivery-amount'), '50');
-    await waitFor(() => expect(screen.getByText('Q 350.00')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Q 350.00')).toBeInTheDocument()); // the total
   });
+
+  it('fetches availability on window change, reconciles picked lines, and annotates the picker', async () => {
+    const user = userEvent.setup({ delay: null });
+    const { container } = renderForm();
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    await user.type(byId(container, 'order-line-quantity-0'), '10');
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    await user.selectOptions(byId(container, 'order-line-product-1'), '4');
+    await user.type(byId(container, 'order-line-quantity-1'), '10');
+    // Setting the FULL window fires the (debounced) probe with delivery + pickup + all product ids.
+    setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
+    setDateTime(byId(container, 'order-pickup-at'), '2026-08-02T15:00');
+    await waitFor(() => expect(checkAvailability).toHaveBeenCalled());
+    const body = checkAvailability.mock.calls[checkAvailability.mock.calls.length - 1][0];
+    expect(body.deliveryAt).toMatch(/^2026-08-01T/);
+    expect(body.pickupAt).toMatch(/^2026-08-02T/);
+    expect(body.productIds).toEqual([3, 4]);
+
+    // Sufficient (3: 10 ≥ 10) + unknown (4: null rental window) → nothing changes, no toast.
+    act(() => availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 10 }, { productId: 4, available: null }])));
+    expect((byId(container, 'order-line-quantity-0') as HTMLInputElement).value).toBe('10');
+    expect(warning).not.toHaveBeenCalled();
+
+    // A conflict: product 3 over the window (reduced to 4), product 4 none left (removed) → a toast.
+    act(() => availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 4 }, { productId: 4, available: 0 }])));
+    expect((byId(container, 'order-line-quantity-0') as HTMLInputElement).value).toBe('4');
+    expect(byId(container, 'order-line-product-1')).toBeNull(); // product 4 line removed
+    expect(warning).toHaveBeenCalled();
+    // The toast lists each change on its OWN line (adjusted heading + item, removed heading + item),
+    // and lingers longer the more it carries (two changes here).
+    const [message, options] = warning.mock.calls[warning.mock.calls.length - 1];
+    expect(message).toContain(`${KEY}.availability.adjustedHeading`);
+    expect(message).toContain(`${KEY}.availability.adjustedItem`);
+    expect(message).toContain(`${KEY}.availability.removedHeading`);
+    expect(message).toContain('\n'); // one item per row, not a single joined line
+    expect(options).toMatchObject({ title: `${KEY}.availability.reconciledTitle`, duration: reconcileToastDuration(2) });
+
+    // The takeable amount now surfaces as a quiet hint UNDER each line's quantity (the dropdown shows
+    // only the product name). The kept line shows its count; a re-added sold-out product shows "Agotado".
+    expect(await screen.findByText(`${KEY}.availability.count`)).toBeInTheDocument();
+    expect(within(byId(container, 'order-line-product-0')).queryByRole('option', { name: /availability/ })).toBeNull();
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    await user.selectOptions(byId(container, 'order-line-product-1'), '4');
+    expect(await screen.findByText(`${KEY}.availability.soldOut`)).toBeInTheDocument();
+  }, 20000);
+
+  it('handles adjust-only, remove-only, and empty availability payloads', async () => {
+    const user = userEvent.setup({ delay: null });
+    const { container } = renderForm();
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    await user.type(byId(container, 'order-line-quantity-0'), '10');
+    setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
+    await waitFor(() => expect(checkAvailability).toHaveBeenCalled());
+
+    // An empty payload → the `?? []` fallback; nothing to reconcile.
+    act(() => availabilityHandlers().onSuccess({ data: {} }));
+    expect(warning).not.toHaveBeenCalled();
+    expect((byId(container, 'order-line-quantity-0') as HTMLInputElement).value).toBe('10');
+
+    // Only an adjustment (over the window, still some left) → reduced, no removal.
+    act(() => availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 6 }])));
+    expect((byId(container, 'order-line-quantity-0') as HTMLInputElement).value).toBe('6');
+    expect(warning).toHaveBeenCalledTimes(1);
+
+    // Only a removal (nothing left) → the line is dropped.
+    act(() => availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 0 }])));
+    expect(byId(container, 'order-line-product-0')).toBeNull();
+    expect(warning).toHaveBeenCalledTimes(2);
+  }, 20000);
+
+  it('skips reconciling lines with no product or no quantity yet', async () => {
+    const user = userEvent.setup({ delay: null });
+    const { container } = renderForm();
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    await user.selectOptions(byId(container, 'order-line-product-0'), '3'); // product, but NO quantity
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` })); // an empty line (no product)
+    setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
+    await waitFor(() => expect(checkAvailability).toHaveBeenCalled());
+    // Product 3 is sold out, but its line has no quantity → left alone; the empty line is skipped too.
+    act(() => availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 0 }])));
+    expect(byId(container, 'order-line-product-0')).toBeInTheDocument();
+    expect(byId(container, 'order-line-product-1')).toBeInTheDocument();
+    expect(warning).not.toHaveBeenCalled();
+  }, 20000);
 
   it('submits a valid order → invalidates the list, toasts, and navigates', async () => {
     const { container, invalidate, navigateTo } = renderForm();
@@ -389,6 +573,8 @@ describe('OrderForm', () => {
       clientRegistryId: 3,
       eventTypeId: 1,
       deliveryName: 'María López',
+      // Defaulted to the creating admin (id 1) — never unassigned.
+      assignedUserId: 1,
       lines: [{ productId: 3, quantity: 25 }],
     });
     expect(body.pickupAt).toBeTruthy();
@@ -477,20 +663,30 @@ describe('OrderForm', () => {
     expect(screen.queryByRole('button', { name: 'stub-registry-close' })).not.toBeInTheDocument();
   });
 
-  it('mode "both" offers rentals and sales together and keeps a still-fitting line on switch', async () => {
-    const user = userEvent.setup();
+  it('scales the reconciliation toast duration with the number of changes (capped)', () => {
+    expect(reconcileToastDuration(1)).toBe(7600); // base 6000 + one 1600 step
+    expect(reconcileToastDuration(3)).toBe(10800); // base + three steps
+    expect(reconcileToastDuration(50)).toBe(15000); // capped, never overstays
+  });
+
+  it('caps a line quantity at the product availability and blocks an over-stock submit', async () => {
+    const user = userEvent.setup({ delay: null });
+    // A product carrying an Admin availability baseline — the cap exists even before a window is set.
+    useOrderProducts.mockReturnValue(q({ data: [{ ...rentalProduct, available: 5 }] }));
     const { container } = renderForm();
-    // Add a rental line in rent mode, then switch to Both — the rental still fits, so it survives.
+    await user.selectOptions(byId(container, 'order-client'), '3');
+    await user.selectOptions(byId(container, 'order-event-type'), '1');
+    setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
     await user.selectOptions(byId(container, 'order-line-product-0'), '3');
-    await user.click(screen.getByRole('radio', { name: `${KEY}.mode.both` }));
-    expect(byId(container, 'order-line-product-0')).toBeInTheDocument(); // kept (fits Both)
-
-    const productSelect = byId(container, 'order-line-product-0');
-    // The kept line already holds product 3; a NEW line would offer both types — verify the pool.
-    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    const secondSelect = byId(container, 'order-line-product-1');
-    expect(within(secondSelect).queryByRole('option', { name: 'Vasos' })).toBeInTheDocument();
-    expect(within(productSelect).queryByRole('option', { name: 'Silla plegable' })).toBeInTheDocument();
-  });
+    // The input advertises the takeable ceiling as its native max.
+    expect(byId(container, 'order-line-quantity-0')).toHaveAttribute('max', '5');
+    // Typing over the baseline + submitting is blocked with the per-line "only N available" message.
+    await user.type(byId(container, 'order-line-quantity-0'), '9');
+    await waitFor(() => expect(byId(container, 'order-pickup-at')).toBeInTheDocument());
+    setDateTime(byId(container, 'order-pickup-at'), '2026-08-02T15:00');
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    expect(await screen.findByText(`${KEY}.errors.lineUnavailable`)).toBeInTheDocument();
+    expect(createOrder).not.toHaveBeenCalled();
+  }, 20000);
 });

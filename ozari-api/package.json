@@ -29,7 +29,8 @@
     "test:ci": "vitest run && vitest run --config vitest.integration.config.ts",
     "cleanup:sessions": "tsx --env-file=.env src/jobs/cleanupExpiredSessions.ts",
     "reconcile:images": "tsx --env-file=.env scripts/reconcile-product-images.ts",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "db:seed:force": "prisma db seed -- --force"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1081.0",

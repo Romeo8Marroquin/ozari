@@ -2,18 +2,25 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { Prisma } from "@prisma/client";
 import { encryptKms } from "@helpers/encryption.js";
 import { appConfig } from "@/config/app.js";
+import { RolesEnum } from "@models/enums/rolesEnum.js";
+import {
+  SEEDED_HOLDING_IDS,
+  makeProjectionContext,
+} from "@/tests/fixtures/lifecycleCatalog.js";
 import {
   ORDER_LIST_VIEWS,
   buildOrderListWhere,
   buildRentedInWindowWhere,
   buildSpacingConflictWhere,
   computeBilledDays,
+  computeNextActionAt,
   orderListOrderBy,
   parseOrderListQuery,
   parseSpacingMinutes,
   priceOrderLine,
   projectOrderDetail,
   projectOrderListItem,
+  sortAgendaRows,
   type OrderListRow,
   type OrderPricingProductModel,
   type RichOrder,
@@ -67,7 +74,11 @@ const makeListRow = (overrides: Partial<OrderListRow> = {}): OrderListRow => ({
   serviceStatus: { id: 1, name: "Pendiente" },
   paymentStatus: { id: 1, name: "Pendiente" },
   currency: { id: 1, iso4217Code: "GTQ", name: "Quetzal", symbol: "Q" },
-  serviceDetails: [{ quantity: 2 }, { quantity: 3 }],
+  assignedUser: null,
+  serviceDetails: [
+    { quantity: 2, isRental: true },
+    { quantity: 3, isRental: false },
+  ],
   ...overrides,
 });
 
@@ -159,6 +170,99 @@ describe("buildOrderListWhere", () => {
       buildOrderListWhere(parseOrderListQuery({})),
     ).not.toHaveProperty("serviceStatusId");
   });
+
+  it("scopes to an assignee when a scopeUserId is given (a Driver's own orders), else not", () => {
+    // Driver scope → only their assigned orders.
+    expect(buildOrderListWhere(parseOrderListQuery({}), 7)).toMatchObject({
+      assignedUserId: 7,
+    });
+    // Admin (no scope) → every order, no assignee filter.
+    expect(buildOrderListWhere(parseOrderListQuery({}))).not.toHaveProperty(
+      "assignedUserId",
+    );
+  });
+});
+
+describe("computeNextActionAt", () => {
+  // Derived from the tracked ACTUALS, never a status id — the statuses that stamp them are
+  // admin-configurable, but "it has been delivered/collected" is a fact.
+  const base = {
+    id: 1,
+    assignedUserId: null,
+    deliveryAt: new Date("2026-08-01T14:00:00Z"),
+    pickupAt: new Date("2026-08-03T10:00:00Z"),
+    deliveredAt: null,
+    collectedAt: null,
+  };
+
+  it("nothing tracked yet → its DELIVERY is the next action", () => {
+    expect(computeNextActionAt(base)).toBe(base.deliveryAt);
+  });
+
+  it("delivered rental → its PICKUP; a purchase-only delivered falls back to the delivered moment", () => {
+    const deliveredAt = new Date("2026-08-01T14:30:00Z");
+    expect(computeNextActionAt({ ...base, deliveredAt })).toBe(base.pickupAt);
+    expect(computeNextActionAt({ ...base, deliveredAt, pickupAt: null })).toBe(
+      deliveredAt,
+    );
+  });
+
+  it("collected order → its COLLECTION moment (it's waiting out the washing period)", () => {
+    const collectedAt = new Date("2026-08-03T10:30:00Z");
+    expect(
+      computeNextActionAt({
+        ...base,
+        deliveredAt: new Date("2026-08-01T14:30:00Z"),
+        collectedAt,
+      }),
+    ).toBe(collectedAt);
+  });
+});
+
+describe("sortAgendaRows", () => {
+  const row = (
+    id: number,
+    assignedUserId: number | null,
+    deliveryAt: string,
+    over: Partial<{ deliveredAt: string; pickupAt: string }> = {},
+  ) => ({
+    id,
+    assignedUserId,
+    deliveryAt: new Date(deliveryAt),
+    pickupAt: over.pickupAt ? new Date(over.pickupAt) : null,
+    deliveredAt: over.deliveredAt ? new Date(over.deliveredAt) : null,
+    collectedAt: null,
+  });
+
+  it("floats MINE first, then orders by soonest next action, id breaking ties", () => {
+    const me = row(1, 5, "2026-08-01T18:00:00Z"); // mine, later
+    const mineSoon = row(2, 5, "2026-08-01T09:00:00Z"); // mine, sooner
+    const other = row(3, 9, "2026-08-01T06:00:00Z"); // not mine, soonest overall
+    const sorted = sortAgendaRows([me, other, mineSoon], 5);
+    // Both mine come first (sooner then later), then the (earlier-in-time) other.
+    expect(sorted.map((r) => r.id)).toEqual([2, 1, 3]);
+  });
+
+  it("a delivered rental sorts by its PICKUP, not its (earlier) delivery", () => {
+    const deliveredEarly = row(1, 5, "2026-08-01T06:00:00Z", {
+      deliveredAt: "2026-08-01T06:10:00Z",
+      pickupAt: "2026-08-02T20:00:00Z", // next action far out
+    });
+    const pendingSoon = row(2, 5, "2026-08-02T08:00:00Z"); // delivers before the pickup above
+    expect(sortAgendaRows([deliveredEarly, pendingSoon], 5).map((r) => r.id)).toEqual([2, 1]);
+  });
+
+  it("for a driver (every row theirs) it is a pure next-action ordering", () => {
+    const a = row(1, 7, "2026-08-01T12:00:00Z");
+    const b = row(2, 7, "2026-08-01T08:00:00Z");
+    expect(sortAgendaRows([a, b], 7).map((r) => r.id)).toEqual([2, 1]);
+  });
+
+  it("breaks ties on id when two orders share the same next-action moment", () => {
+    const a = row(5, 7, "2026-08-01T10:00:00Z");
+    const b = row(3, 7, "2026-08-01T10:00:00Z");
+    expect(sortAgendaRows([a, b], 7).map((r) => r.id)).toEqual([3, 5]);
+  });
 });
 
 describe("orderListOrderBy", () => {
@@ -176,13 +280,14 @@ describe("orderListOrderBy", () => {
 
 describe("projectOrderListItem", () => {
   it("decrypts the client-name snapshot and shapes the lookups + money", () => {
-    const item = projectOrderListItem(makeListRow());
+    const item = projectOrderListItem(makeListRow(), makeProjectionContext());
     expect(item).toMatchObject({
       id: 7,
       clientName: "María López",
       isRegistryClient: false,
       eventType: { id: 1, name: "Evento familiar" },
-      status: { id: 1, name: "Pendiente" },
+      // The chip tone rides along from the lifecycle catalog, not a client-side id map.
+      status: { id: 1, name: "Pendiente", colorKey: "amber" },
       paymentStatus: { id: 1, name: "Pendiente" },
       deliveryAt: DELIVERY_AT,
       pickupAt: PICKUP_AT,
@@ -192,15 +297,66 @@ describe("projectOrderListItem", () => {
     });
   });
 
+  it("carries the mode-aware next step and the actor's permitted actions", () => {
+    // A rental order in Pendiente: next is En ruta; the admin may advance, and cancel.
+    const mine = projectOrderListItem(makeListRow(), makeProjectionContext());
+    expect(mine.nextStatus).toEqual({ id: 5, name: "En ruta" });
+    expect(mine.actions.map((action) => action.kind)).toEqual([
+      "forward",
+      "disruptive",
+    ]);
+
+    // A DRIVER sees nothing on an order that isn't assigned to them.
+    const foreign = projectOrderListItem(
+      makeListRow(),
+      makeProjectionContext({ userId: 7, role: RolesEnum.Driver }),
+    );
+    expect(foreign.nextStatus).toEqual({ id: 5, name: "En ruta" });
+    expect(foreign.actions).toEqual([]);
+  });
+
+  it("a purchase-only order in the delivered step is finished — no next step", () => {
+    const item = projectOrderListItem(
+      makeListRow({
+        serviceStatusId: 3,
+        serviceStatus: { id: 3, name: "Entregado" },
+        pickupAt: null,
+        serviceDetails: [{ quantity: 4, isRental: false }],
+      }),
+      makeProjectionContext(),
+    );
+    expect(item.nextStatus).toBeUndefined();
+    expect(item.actions.map((action) => action.kind)).toEqual([
+      "backward",
+      "disruptive",
+    ]);
+  });
+
+  it("leaves the tone absent when the status is unknown to the catalog", () => {
+    const item = projectOrderListItem(
+      makeListRow({
+        serviceStatusId: 99,
+        serviceStatus: { id: 99, name: "Inventado" },
+      }),
+      makeProjectionContext(),
+    );
+    expect(item.status.colorKey).toBeUndefined();
+    expect(item.nextStatus).toBeUndefined();
+  });
+
   it("flags a walk-in registry client", () => {
     const item = projectOrderListItem(
       makeListRow({ userId: null, clientRegistryId: 9 }),
+      makeProjectionContext(),
     );
     expect(item.isRegistryClient).toBe(true);
   });
 
   it("maps absent tracking timestamps (and a purchase-only pickup) to undefined", () => {
-    const item = projectOrderListItem(makeListRow({ pickupAt: null }));
+    const item = projectOrderListItem(
+      makeListRow({ pickupAt: null }),
+      makeProjectionContext(),
+    );
     expect(item.pickupAt).toBeUndefined();
     expect(item.deliveredAt).toBeUndefined();
     expect(item.collectedAt).toBeUndefined();
@@ -210,12 +366,59 @@ describe("projectOrderListItem", () => {
 
   it("passes tracking timestamps through when set", () => {
     const readyAt = new Date("2026-08-02T13:00:00Z");
-    const item = projectOrderListItem(makeListRow({ readyAt }));
+    const item = projectOrderListItem(
+      makeListRow({ readyAt }),
+      makeProjectionContext(),
+    );
     expect(item.readyAt).toBe(readyAt);
   });
 
   it("an order with no active lines counts zero items", () => {
-    expect(projectOrderListItem(makeListRow({ serviceDetails: [] })).itemCount).toBe(0);
+    expect(
+      projectOrderListItem(
+        makeListRow({ serviceDetails: [] }),
+        makeProjectionContext(),
+      ).itemCount,
+    ).toBe(0);
+  });
+
+  it("a cancelled order offers nothing at all", () => {
+    const item = projectOrderListItem(
+      makeListRow({
+        serviceStatusId: 2,
+        serviceStatus: { id: 2, name: "Cancelado" },
+        cancelledAt: new Date("2026-07-20T10:00:00Z"),
+      }),
+      makeProjectionContext(),
+    );
+    expect(item.nextStatus).toBeUndefined();
+    expect(item.actions).toEqual([]);
+  });
+
+  it("projects the assignee + isMine relative to the requesting user", () => {
+    const assignedRow = makeListRow({
+      assignedUserId: 2,
+      assignedUser: { id: 2, fullNameKms: encryptKms("Romeo Marroquín") },
+    });
+    // The viewer IS the assignee → mine, with the decrypted name.
+    const mine = projectOrderListItem(
+      assignedRow,
+      makeProjectionContext({ userId: 2 }),
+    );
+    expect(mine.assignee).toEqual({ id: 2, name: "Romeo Marroquín" });
+    expect(mine.isMine).toBe(true);
+    // Another viewer → the same assignee, but not theirs.
+    expect(
+      projectOrderListItem(assignedRow, makeProjectionContext({ userId: 9 }))
+        .isMine,
+    ).toBe(false);
+    // Unassigned → no assignee, never anyone's.
+    const unassigned = projectOrderListItem(
+      makeListRow(),
+      makeProjectionContext({ userId: 2 }),
+    );
+    expect(unassigned.assignee).toBeUndefined();
+    expect(unassigned.isMine).toBe(false);
   });
 });
 
@@ -246,10 +449,12 @@ describe("parseSpacingMinutes", () => {
 });
 
 describe("buildRentedInWindowWhere", () => {
-  it("holds rental lines of out/en-route orders unconditionally and pending ones by window overlap", () => {
+  it("holds OUT statuses unconditionally and WINDOW ones only by overlap, from the flags", () => {
     const start = new Date("2026-08-01T14:00:00Z");
     const end = new Date("2026-08-02T10:00:00Z");
-    expect(buildRentedInWindowWhere([3, 4], start, end)).toEqual({
+    expect(
+      buildRentedInWindowWhere([3, 4], start, end, SEEDED_HOLDING_IDS),
+    ).toEqual({
       productId: { in: [3, 4] },
       isActive: true,
       isRental: true,
@@ -257,11 +462,28 @@ describe("buildRentedInWindowWhere", () => {
         isActive: true,
         cancelledAt: null,
         OR: [
-          { serviceStatusId: 3 },
-          { serviceStatusId: 5 },
-          { serviceStatusId: 1, serviceStart: { lt: end }, serviceEnd: { gt: start } },
+          // En ruta + Entregado + Recolectado (units on the truck, out, or being washed).
+          { serviceStatusId: { in: [3, 4, 5] } },
+          {
+            serviceStatusId: { in: [1] },
+            serviceStart: { lt: end },
+            serviceEnd: { gt: start },
+          },
         ],
       },
+    });
+  });
+
+  it("an unconfigured machine (no holding statuses) simply matches nothing", () => {
+    const where = buildRentedInWindowWhere([3], new Date(), new Date(), {
+      out: [],
+      window: [],
+    });
+    expect(where.service).toMatchObject({
+      OR: [
+        { serviceStatusId: { in: [] } },
+        expect.objectContaining({ serviceStatusId: { in: [] } }),
+      ],
     });
   });
 });
@@ -340,7 +562,7 @@ describe("priceOrderLine", () => {
 
 describe("projectOrderDetail", () => {
   it("extends the list item with decrypted snapshots, lines, and the billed period", () => {
-    const detail = projectOrderDetail(makeRichOrder());
+    const detail = projectOrderDetail(makeRichOrder(), makeProjectionContext());
     expect(detail).toMatchObject({
       clientName: "María López",
       deliveryContact: "WhatsApp 5555-1234",
@@ -362,7 +584,8 @@ describe("projectOrderDetail", () => {
       extras: [],
       statusHistory: [],
     });
-    expect(detail.assignedUser).toBeUndefined();
+    expect(detail.assignee).toBeUndefined();
+    expect(detail.isMine).toBe(false);
     expect(detail.deliveryAmount).toBeUndefined();
     expect(detail.description).toBeUndefined();
     expect(detail.comment).toBeUndefined();
@@ -386,8 +609,10 @@ describe("projectOrderDetail", () => {
         comment: "Llamar al llegar",
         paymentMethod: { id: 1, name: "Efectivo" },
       }),
+      makeProjectionContext({ userId: 2 }),
     );
-    expect(detail.assignedUser).toEqual({ id: 2, name: "Romeo Marroquín" });
+    expect(detail.assignee).toEqual({ id: 2, name: "Romeo Marroquín" });
+    expect(detail.isMine).toBe(true);
     expect(detail.deliveryAmount).toBe(50);
     expect(detail.depositAmount).toBe(100);
     expect(detail.paymentMethod).toEqual({ id: 1, name: "Efectivo" });
@@ -420,6 +645,7 @@ describe("projectOrderDetail", () => {
           },
         ],
       }),
+      makeProjectionContext(),
     );
     expect(detail.extras).toEqual([
       {
@@ -462,6 +688,7 @@ describe("projectOrderDetail", () => {
           },
         ],
       }),
+      makeProjectionContext(),
     );
     expect(detail.statusHistory).toEqual([
       {

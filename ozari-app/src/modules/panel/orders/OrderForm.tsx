@@ -1,7 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FormProvider, useFieldArray, useForm, useWatch } from 'react-hook-form';
+import type { Resolver } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import {
   HiOutlineArrowPath,
@@ -18,6 +19,7 @@ import CustomTextareaForm from '@components/CustomTextareaForm';
 import FormError from '@components/FormError';
 import { notify } from '@components/notifications/notify';
 import { QueryKeys } from '@constants/QueryKeys';
+import { getStoredUserId } from '@hooks/useRole';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { getStatus, toFormError } from '@utils/apiError';
 import { detailRowIn, detailRowOut, SECTION_REVEAL_STEP, staggerIn, staggerOut } from '../pageMotion';
@@ -27,26 +29,34 @@ import type { Product } from '../products/product.types';
 import ProductsStatus from '../products/ProductsStatus';
 import SectionReveal from '../products/SectionReveal';
 import ClientRegistryModal from './ClientRegistryModal';
+import { CHANNEL_INPUT_MODE, contactChannelKind } from '@constants/Regex';
+import ContactChannelIcon from './ContactChannelIcon';
 import type { ClientRegistry, OrderStockConflictItem } from './order.types';
 import {
+  billedDaysFromStrings,
+  estimateLineSubtotal,
   estimateOrderTotal,
   formatMoney,
   isRentalProduct,
-  productsForMode,
+  lineUnitPrice,
 } from './orderEstimate';
-import OrderModeSelect from './OrderModeSelect';
 import {
+  appendLineAvailabilityErrors,
   createOrderDefaultValues,
   createOrderRequiredPatterns,
   createOrderSchema,
+  nowDateTimeLocal,
   parseDateTime,
+  parseLineQuantity,
   parseMoney,
+  reconcileToastDuration,
+  takeableFor,
   toCreateOrderBody,
   type CreateOrderFormType,
-  type OrderMode,
 } from './SchemaCreateOrder';
 import { useClientRegistries } from './useClientRegistries';
 import { useCreateOrder } from './useCreateOrder';
+import { useOrderAvailability } from './useOrderAvailability';
 import { useOrderProducts } from './useOrderProducts';
 import { useOrdersCatalog } from './useOrdersCatalog';
 
@@ -93,9 +103,82 @@ const LineRow: React.FC<{
         ref.current = el;
         onRegister(el);
       }}
-      className="flex items-start gap-3"
+      // `pb` groups a line's price note with its OWN row and widens the visual gap to the next row
+      // (the flex `gap` between rows stays 20px for the `detailRowOut` collapse math). It's part of
+      // the row height, so the enter/exit height animations still swallow it cleanly.
+      className="flex items-start gap-3 pb-2"
     >
       {children}
+    </div>
+  );
+};
+
+/**
+ * A product line's price note (unit + subtotal), collapsing open/closed with the SAME motion as
+ * `FormError` — the row height eases via a `grid-rows` 0fr↔1fr trick and the text fades, so it never
+ * pops. The last product is kept painted while collapsing (deselecting a product) so the text
+ * doesn't vanish mid-animation. `product` is referentially stable per id (a `useMemo` map), so the
+ * "adjust state during render" pattern below is loop-free.
+ */
+const LineSubtotalNote: React.FC<{
+  product: Product | undefined;
+  quantity: number;
+  billedDays: number;
+}> = ({ product, quantity, billedDays }) => {
+  const { t } = useTranslation();
+  // Keep the last product painted while the whole note collapses (deselecting a product).
+  const [displayed, setDisplayed] = useState(product);
+  const [prevProduct, setPrevProduct] = useState(product);
+  if (product !== prevProduct) {
+    setPrevProduct(product);
+    if (product) setDisplayed(product);
+  }
+  // The subtotal segment shows only with a quantity. Keep its last amount painted while it fades out
+  // (clearing the quantity) so the number doesn't jump to 0 mid-fade. `amount` is a primitive, so the
+  // adjust-during-render comparison is loop-free.
+  const amount = product && quantity > 0 ? estimateLineSubtotal(product, quantity, billedDays) : undefined;
+  const [displayedAmount, setDisplayedAmount] = useState(amount);
+  const [prevAmount, setPrevAmount] = useState(amount);
+  if (amount !== prevAmount) {
+    setPrevAmount(amount);
+    if (amount !== undefined) setDisplayedAmount(amount);
+  }
+
+  const open = Boolean(product);
+  const showSubtotal = amount !== undefined;
+  return (
+    <div
+      aria-hidden={!open}
+      className={`grid transition-[grid-template-rows] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
+        open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+      }`}
+    >
+      <div className="overflow-hidden">
+        {displayed && (
+          <p
+            className={`px-2 pt-1 text-xs text-charcoal/55 transition-opacity duration-300 ease-in-out motion-reduce:transition-none ${
+              open ? 'opacity-100' : 'opacity-0'
+            }`}
+          >
+            <span className="tabular-nums">
+              {formatMoney(displayed.currency.symbol, lineUnitPrice(displayed))}
+            </span>{' '}
+            {t(`${KEY}.fields.lineUnitEach`)}
+            {/* The subtotal segment FADES in/out (inline) instead of popping when a quantity is set. */}
+            <span
+              className={`transition-opacity duration-300 ease-in-out motion-reduce:transition-none ${
+                showSubtotal ? 'opacity-100' : 'opacity-0'
+              }`}
+            >
+              {' · '}
+              {t(`${KEY}.fields.lineSubtotal`)}{' '}
+              <span className="font-semibold tabular-nums text-charcoal/70">
+                {displayedAmount !== undefined ? formatMoney(displayed.currency.symbol, displayedAmount) : ''}
+              </span>
+            </span>
+          </p>
+        )}
+      </div>
     </div>
   );
 };
@@ -168,19 +251,54 @@ const OrderForm: React.FC = () => {
   const productsQuery = useOrderProducts();
   const registriesQuery = useClientRegistries();
   const { createOrder, isPending: isCreating } = useCreateOrder();
+  const { checkAvailability } = useOrderAvailability();
 
-  const [mode, setMode] = useState<OrderMode>('rent');
   const [registryModalOpen, setRegistryModalOpen] = useState(false);
   const [formError, setFormError] = useState<string | undefined>(undefined);
+  // Per-product takeable amounts for the current window (null = a rental with no pickup yet). Drives
+  // the picker annotations + the line reconciliation; empty until a valid delivery date is set.
+  const [availability, setAvailability] = useState<Map<number, number | null>>(new Map());
 
   const catalog = catalogQuery.data;
   const products = useMemo(() => productsQuery.data ?? [], [productsQuery.data]);
   const registries = useMemo(() => registriesQuery.data ?? [], [registriesQuery.data]);
   const productsById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
 
+  // A resolver that runs the mirrored schema, then layers the LIVE per-window availability cap on top
+  // (refs so it always reads the freshest amounts without rebuilding the resolver on every probe). This
+  // blocks an over-stock line as the admin types — the same limit the backend enforces with a 409. The
+  // refs are synced in an effect (validation only fires on user interaction, well after it commits).
+  const availabilityRef = useRef(availability);
+  const productsByIdRef = useRef(productsById);
+  useEffect(() => {
+    availabilityRef.current = availability;
+    productsByIdRef.current = productsById;
+  }, [availability, productsById]);
+  const zodResolve = useMemo(() => zodResolver(createOrderSchema), []);
+  const resolver = useCallback<Resolver<CreateOrderFormType>>(
+    async (values, context, options) => {
+      const result = await zodResolve(values, context, options);
+      return appendLineAvailabilityErrors(
+        values,
+        result,
+        (productId) => takeableFor(productId, availabilityRef.current, productsByIdRef.current),
+        (available) => t(`${KEY}.errors.lineUnavailable`, { available }),
+      );
+    },
+    [zodResolve, t],
+  );
+
+  // The "Asignar a" select defaults to the CREATING admin (the token's userId), so a created order is
+  // never unassigned and the admin's own orders read as `isMine` on the agenda. Computed once; a null
+  // id (defensive — an admin always has one) leaves the select on its placeholder, which the required
+  // rule then blocks on submit.
+  const defaultValues = useMemo<CreateOrderFormType>(
+    () => ({ ...createOrderDefaultValues, assignedUserId: getStoredUserId() as unknown as number }),
+    [],
+  );
   const methods = useForm<CreateOrderFormType>({
-    resolver: zodResolver(createOrderSchema),
-    defaultValues: createOrderDefaultValues,
+    resolver,
+    defaultValues,
     mode: 'onTouched',
   });
   const { handleSubmit, control, setValue, getValues, setError } = methods;
@@ -211,6 +329,8 @@ const OrderForm: React.FC = () => {
   const deliveryAmountRaw = useWatch({ control, name: 'deliveryAmount' });
   const deliveryContactValue = useWatch({ control, name: 'deliveryContact' });
   const deliveryAddressValue = useWatch({ control, name: 'deliveryAddress' });
+  const deliveryContactTypeId = useWatch({ control, name: 'deliveryContactTypeId' });
+  const deliveryZoneId = useWatch({ control, name: 'deliveryZoneId' });
 
   // Keep each line's isRental flag in sync with its picked product (the schema's pickup rule reads
   // it). Converges — only writes when the flag actually differs, so it never loops.
@@ -245,28 +365,103 @@ const OrderForm: React.FC = () => {
     const contact = registry.contacts.find((c) => c.isPrincipal) ?? registry.contacts[0];
     const address = registry.addresses.find((a) => a.isFavorite) ?? registry.addresses[0];
     setValue('deliveryName', registry.name, { shouldValidate: true });
-    if (contact) setValue('deliveryContact', contact.value, { shouldValidate: true });
+    if (contact) {
+      setValue('deliveryContact', contact.value, { shouldValidate: true });
+      // The contact's channel (drives the icon + keyboard; editable). Null clears to the generic.
+      setValue('deliveryContactTypeId', contact.contactType.id);
+    }
     if (address) setValue('deliveryAddress', address.address, { shouldValidate: true });
-    // Delivery fee: suggest the favorite address's explicit price, else its zone's default fee —
-    // clear when neither exists so a prior client's fee never lingers. Editable afterwards.
+    // Delivery zone (drives the fee suggestion; editable) + the fee itself: the favorite address's
+    // explicit price, else its zone's default fee — clear when neither exists so a prior client's
+    // fee never lingers. All editable afterwards.
+    setValue('deliveryZoneId', address?.zone?.id ?? null);
     const fee = address?.domicilePrice ?? address?.zone?.deliveryFee;
     setValue('deliveryAmount', fee != null ? String(fee) : '', { shouldValidate: true });
     // Payment method: pre-select the client's preferred (null = clear to "unspecified").
     setValue('paymentMethodId', registry.preferredPaymentMethod?.id ?? null);
   }, [clientRegistryId, registriesById, setValue]);
 
-  // Only ever called by the mode fork with a DIFFERENT mode (OrderModeSelect no-ops on the current
-  // one). Drops lines whose product no longer fits the new mode (buy ⇒ no rentals, rent ⇒ no sales).
-  const changeMode = (next: OrderMode): void => {
-    const current = getValues('lines');
-    for (let index = current.length - 1; index >= 0; index -= 1) {
-      const product = productsById.get(current[index].productId);
-      /* v8 ignore next -- a line only ever holds a loaded product's id; the guard is defensive */
-      if (!product) continue;
-      if (productsForMode([product], next).length === 0) lines.remove(index);
-    }
-    setMode(next);
-  };
+  // Reconcile the picked lines against fresh availability (the "adjust to available + notify" rule):
+  // a line over its window availability is REDUCED to what's takeable, or REMOVED when nothing is
+  // left; a toast summarises the changes. Lines with UNKNOWN availability (a rental with no pickup
+  // yet, or a product not in the response) are left untouched. Stable deps (RHF's `getValues`/
+  // `setValue`/`lines.remove` are memoized; `productsById` is a `useMemo`), so the fetch effect below
+  // that depends on it never re-fires spuriously.
+  const reconcileAvailability = useCallback(
+    (map: Map<number, number | null>): void => {
+      const current = getValues('lines');
+      // Capture each change as structured data (name + old → new) so the toast can lay them out one
+      // per line. Iterate bottom-up so removals don't shift the indices still to process.
+      const adjusted: { name: string; from: number; to: number }[] = [];
+      const removed: string[] = [];
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        const line = current[index];
+        const available = line.productId != null ? map.get(line.productId) : undefined;
+        if (available == null) continue;
+        const qty = parseLineQuantity(line.quantity);
+        if (qty == null || qty <= available) continue;
+        /* v8 ignore next -- `?? ''`: a line with availability always holds a loaded product */
+        const name = productsById.get(line.productId)?.name ?? '';
+        if (available === 0) {
+          lines.remove(index);
+          removed.push(name);
+        } else {
+          setValue(`lines.${index}.quantity`, String(available), { shouldValidate: true });
+          adjusted.push({ name, from: qty, to: available });
+        }
+      }
+      if (adjusted.length === 0 && removed.length === 0) return;
+      // Reverse back to natural top-to-bottom order (we walked the lines bottom-up), then build a
+      // multi-line body: a heading per group and each product on its own `\n`-separated row.
+      adjusted.reverse();
+      removed.reverse();
+      const rows: string[] = [];
+      if (adjusted.length > 0) {
+        rows.push(t(`${KEY}.availability.adjustedHeading`));
+        adjusted.forEach(({ name, from, to }) =>
+          rows.push(t(`${KEY}.availability.adjustedItem`, { name, from, to })),
+        );
+      }
+      if (removed.length > 0) {
+        rows.push(t(`${KEY}.availability.removedHeading`));
+        removed.forEach((name) => rows.push(t(`${KEY}.availability.removedItem`, { name })));
+      }
+      notify.warning(rows.join('\n'), {
+        title: t(`${KEY}.availability.reconciledTitle`),
+        duration: reconcileToastDuration(adjusted.length + removed.length),
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lines.remove is a stable RHF method
+    [getValues, productsById, setValue, t],
+  );
+
+  // Fetch availability whenever the WINDOW changes (debounced): a valid delivery date is enough for
+  // sales, and the pickup adds the rental window. On success, store the amounts (picker annotations)
+  // and reconcile the picked lines. Availability is ADVISORY — a probe failure stays silent (the
+  // create still re-checks under the lock), so the mutation carries `skipErrorNotification`.
+  useEffect(() => {
+    const delivery = parseDateTime(deliveryAt);
+    if (!delivery) return undefined;
+    const pickup = parseDateTime(pickupAt);
+    const productIds = products.map((product) => product.id);
+    const timer = window.setTimeout(() => {
+      checkAvailability(
+        {
+          deliveryAt: delivery.toISOString(),
+          ...(pickup && { pickupAt: pickup.toISOString() }),
+          productIds,
+        },
+        {
+          onSuccess: (response) => {
+            const list = response.data.data?.availability ?? [];
+            setAvailability(new Map(list.map((item) => [item.productId, item.available])));
+            reconcileAvailability(new Map(list.map((item) => [item.productId, item.available])));
+          },
+        },
+      );
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [deliveryAt, pickupAt, products, checkAvailability, reconcileAvailability]);
 
   const onRegistryCreated = (registry: ClientRegistry): void => {
     // Seed the picker cache so the new client appears immediately, then select it (the prefill
@@ -356,44 +551,82 @@ const OrderForm: React.FC = () => {
     .map((line) => (line.productId != null ? productsById.get(line.productId) : undefined))
     .find((product): product is Product => product !== undefined);
   const currencySymbol = firstPicked?.currency.symbol ?? 'Q';
-  const estimate = estimateOrderTotal(
+  // Billed days for the current window (for the per-line rental math) + the money breakdown: the
+  // products subtotal on its own, the delivery fee, and the total.
+  const billedDays = billedDaysFromStrings(deliveryAt, anyRental ? pickupAt : '');
+  const linesSubtotal = estimateOrderTotal(
     lineValues.flatMap((line) =>
       line.productId != null ? [{ productId: line.productId, quantity: line.quantity }] : [],
     ),
     productsById,
     parseDateTime(deliveryAt),
     anyRental ? parseDateTime(pickupAt) : null,
-    parseMoney(deliveryAmountRaw) ?? 0,
+    0,
   );
+  const deliveryFee = parseMoney(deliveryAmountRaw) ?? 0;
+  const estimate = Math.round((linesSubtotal + deliveryFee) * 100) / 100;
 
   // Saved-data quick-fill: the selected client's contacts/addresses become picker options that fill
   // the (always-editable) snapshot fields. The picker's value is DERIVED from the current text —
   // matching a saved row shows it, editing to a one-off shows the placeholder — so there's no
   // convergent effect to keep in sync.
   const selectedRegistry = clientRegistryId != null ? registriesById.get(clientRegistryId) : undefined;
-  const savedContactId = selectedRegistry?.contacts.find((c) => c.value === deliveryContactValue)?.id;
-  const savedAddressId = selectedRegistry?.addresses.find((a) => a.address === deliveryAddressValue)?.id;
+  // A saved item matches (and the picker auto-selects it) only when EVERY field lines up — the
+  // contact's type AND value, the address's text AND zone. Changing any one flips it to "custom".
+  const savedContactId = selectedRegistry?.contacts.find(
+    (c) => c.value === deliveryContactValue && c.contactType.id === deliveryContactTypeId,
+  )?.id;
+  const savedAddressId = selectedRegistry?.addresses.find(
+    (a) => a.address === deliveryAddressValue && (a.zone?.id ?? null) === deliveryZoneId,
+  )?.id;
+  const contactKind = contactChannelKind(deliveryContactTypeId);
   const pickSavedContact = (value: string): void => {
     const contact = selectedRegistry?.contacts.find((c) => String(c.id) === value);
-    if (contact) setValue('deliveryContact', contact.value, { shouldValidate: true });
+    if (contact) {
+      setValue('deliveryContact', contact.value, { shouldValidate: true });
+      setValue('deliveryContactTypeId', contact.contactType.id);
+    }
   };
   const pickSavedAddress = (value: string): void => {
     const address = selectedRegistry?.addresses.find((a) => String(a.id) === value);
     if (!address) return;
     setValue('deliveryAddress', address.address, { shouldValidate: true });
+    setValue('deliveryZoneId', address.zone?.id ?? null);
     const fee = address.domicilePrice ?? address.zone?.deliveryFee;
+    if (fee != null) setValue('deliveryAmount', String(fee), { shouldValidate: true });
+  };
+  // Choosing a delivery zone (for a one-off venue) suggests that zone's fee — editable afterwards.
+  const pickDeliveryZone = (value: string): void => {
+    const zoneId = value === '' ? null : Number(value);
+    setValue('deliveryZoneId', zoneId);
+    /* v8 ignore next -- `?? []`: the catalog is always loaded before the zone select is interactive */
+    const fee = (catalog?.zones ?? []).find((z) => z.id === zoneId)?.deliveryFee;
     if (fee != null) setValue('deliveryAmount', String(fee), { shouldValidate: true });
   };
 
   const usedProductIds = new Set(
     lineValues.map((line) => line.productId).filter((id): id is number => id != null),
   );
-  const modeProducts = productsForMode(products, mode);
+  // The picker offers ALL products (rent + sale) — the order's kind is DERIVED from what's picked (any
+  // rental line ⇒ a pickup is required); no upfront mode fork. Already-picked products are hidden. The
+  // dropdown shows ONLY the product name; the takeable amount lives as a quiet hint under its quantity.
   const optionsFor = (currentId: number | null | undefined) =>
-    modeProducts
+    products
       .filter((product) => product.id === currentId || !usedProductIds.has(product.id))
       .map((product) => ({ value: product.id, label: product.name }));
-  const canAddLine = lines.fields.length < modeProducts.length;
+  const canAddLine = lines.fields.length < products.length;
+  // The takeable ceiling for a line's product — the window amount once probed, else the product's
+  // current availability. Caps the quantity input's `max` (the resolver enforces the same limit).
+  const availableFor = (productId: number | null | undefined): number | undefined =>
+    productId == null ? undefined : takeableFor(productId, availability, productsById);
+  // A quiet hint under the quantity: how many of the picked product are takeable (the window amount
+  // once dated, else its general availability). Empty until a product is chosen — and the field's own
+  // "only N available" error replaces it — so the number surfaces once, right where it's relevant.
+  const availabilityHint = (productId: number | null | undefined): string => {
+    const amount = availableFor(productId);
+    if (amount == null) return '';
+    return amount === 0 ? t(`${KEY}.availability.soldOut`) : t(`${KEY}.availability.count`, { count: amount });
+  };
   // The section cards' bodies skeleton-reveal until every query has landed (a warm cache reveals
   // instantly). `loading` is per-section; the cards cascade via `SECTION_REVEAL_STEP`.
   const revealing = !dataReady;
@@ -461,18 +694,9 @@ const OrderForm: React.FC = () => {
               aria-busy={isLoading}
               className="flex flex-col gap-6"
             >
-              {/* MODE — the fork asks first (Q-A). */}
-              <Section title={t(`${KEY}.sections.mode.title`)} description={t(`${KEY}.sections.mode.description`)}>
-                <SectionReveal loading={revealing} skeleton={<BodySkeleton rows={1} />}>
-                  <div className="reveal-item">
-                    <OrderModeSelect value={mode} onChange={changeMode} disabled={isCreating} />
-                  </div>
-                </SectionReveal>
-              </Section>
-
               {/* CLIENT — pick a walk-in registry or create one inline. */}
               <Section title={t(`${KEY}.sections.client.title`)} description={t(`${KEY}.sections.client.description`)}>
-                <SectionReveal loading={revealing} delaySeconds={SECTION_REVEAL_STEP} skeleton={<BodySkeleton rows={1} />}>
+                <SectionReveal loading={revealing} skeleton={<BodySkeleton rows={1} />}>
                   <div className="reveal-item flex flex-col gap-3 sm:flex-row sm:items-start">
                     <div className="min-w-0 flex-1">
                       <CustomSelectForm<CreateOrderFormType>
@@ -501,9 +725,10 @@ const OrderForm: React.FC = () => {
                 </SectionReveal>
               </Section>
 
-              {/* EVENT + DATES — the window; pickup shows only when the order carries a rental. */}
+              {/* EVENT + DATES — always both dates (set them before products if you like). Pickup is
+                  REQUIRED only when the order carries a rental; ignored for a purchase-only order. */}
               <Section title={t(`${KEY}.sections.event.title`)} description={t(`${KEY}.sections.event.description`)}>
-                <SectionReveal loading={revealing} delaySeconds={SECTION_REVEAL_STEP * 2} skeleton={<BodySkeleton rows={2} />}>
+                <SectionReveal loading={revealing} delaySeconds={SECTION_REVEAL_STEP} skeleton={<BodySkeleton rows={2} />}>
                   <div className="flex flex-col gap-5">
                     <div className="reveal-item">
                       <CustomSelectForm<CreateOrderFormType>
@@ -519,19 +744,22 @@ const OrderForm: React.FC = () => {
                         id="order-delivery-at"
                         name="deliveryAt"
                         type="datetime-local"
+                        // Never a past delivery (the admin's one date rule) — the schema + backend
+                        // also guard it, this just stops the native picker offering earlier slots.
+                        min={nowDateTimeLocal()}
                         label={t(`${KEY}.fields.deliveryAtLabel`)}
                         aria-label={t(`${KEY}.fields.deliveryAtLabel`)}
                       />
-                      {anyRental && (
-                        <CustomInputForm<CreateOrderFormType>
-                          id="order-pickup-at"
-                          name="pickupAt"
-                          type="datetime-local"
-                          min={deliveryAt || undefined}
-                          label={t(`${KEY}.fields.pickupAtLabel`)}
-                          aria-label={t(`${KEY}.fields.pickupAtLabel`)}
-                        />
-                      )}
+                      <CustomInputForm<CreateOrderFormType>
+                        id="order-pickup-at"
+                        name="pickupAt"
+                        type="datetime-local"
+                        min={deliveryAt || undefined}
+                        optionalLabel={!anyRental}
+                        label={t(`${KEY}.fields.pickupAtLabel`)}
+                        aria-label={t(`${KEY}.fields.pickupAtLabel`)}
+                        instructions={t(`${KEY}.fields.pickupAtHint`)}
+                      />
                     </div>
                   </div>
                 </SectionReveal>
@@ -544,43 +772,57 @@ const OrderForm: React.FC = () => {
                     {lines.fields.length === 0 && (
                       <p className="text-sm text-charcoal/45">{t(`${KEY}.lines.empty`)}</p>
                     )}
-                    {lines.fields.map((row, index) => (
-                      <LineRow
-                        key={row.id}
-                        onRegister={(el) => {
-                          if (el) lineRowRefs.current.set(row.id, el);
-                          else lineRowRefs.current.delete(row.id);
-                        }}
-                      >
-                        <div className="grid min-w-0 flex-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,130px)]">
-                          <CustomSelectForm<CreateOrderFormType>
-                            id={`order-line-product-${index}`}
-                            name={`lines.${index}.productId`}
-                            label={t(`${KEY}.fields.lineProductLabel`)}
-                            placeholderOption={t(`${KEY}.fields.lineProductPlaceholder`)}
-                            options={optionsFor(lineValues[index]?.productId)}
-                          />
-                          <CustomInputForm<CreateOrderFormType>
-                            id={`order-line-quantity-${index}`}
-                            name={`lines.${index}.quantity`}
-                            type="number"
-                            inputMode="numeric"
-                            min={1}
-                            step={1}
-                            label={t(`${KEY}.fields.lineQuantityLabel`)}
-                            aria-label={t(`${KEY}.fields.lineQuantityLabel`)}
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeLine(row.id)}
-                          aria-label={t(`${KEY}.actions.removeLine`)}
-                          className="mt-1.5 grid size-9 shrink-0 cursor-pointer place-items-center rounded-chip text-charcoal/45 transition-[color,background-color,box-shadow] duration-200 hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
+                    {lines.fields.map((row, index) => {
+                      // Live per-line price: unit (rent/sale) and subtotal (unit × qty × billed days
+                      // for a Día rental; once otherwise) — shown once a product is picked.
+                      const lineProduct =
+                        lineValues[index]?.productId != null
+                          ? productsById.get(lineValues[index].productId)
+                          : undefined;
+                      const lineQty = parseLineQuantity(lineValues[index]?.quantity ?? '') ?? 0;
+                      return (
+                        <LineRow
+                          key={row.id}
+                          onRegister={(el) => {
+                            if (el) lineRowRefs.current.set(row.id, el);
+                            else lineRowRefs.current.delete(row.id);
+                          }}
                         >
-                          <HiOutlineTrash aria-hidden className="size-4.5" />
-                        </button>
-                      </LineRow>
-                    ))}
+                          <div className="flex min-w-0 flex-1 flex-col">
+                            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,130px)]">
+                              <CustomSelectForm<CreateOrderFormType>
+                                id={`order-line-product-${index}`}
+                                name={`lines.${index}.productId`}
+                                label={t(`${KEY}.fields.lineProductLabel`)}
+                                placeholderOption={t(`${KEY}.fields.lineProductPlaceholder`)}
+                                options={optionsFor(lineValues[index]?.productId)}
+                              />
+                              <CustomInputForm<CreateOrderFormType>
+                                id={`order-line-quantity-${index}`}
+                                name={`lines.${index}.quantity`}
+                                type="number"
+                                inputMode="numeric"
+                                min={1}
+                                step={1}
+                                max={availableFor(lineValues[index]?.productId)}
+                                instructions={availabilityHint(lineValues[index]?.productId)}
+                                label={t(`${KEY}.fields.lineQuantityLabel`)}
+                                aria-label={t(`${KEY}.fields.lineQuantityLabel`)}
+                              />
+                            </div>
+                            <LineSubtotalNote product={lineProduct} quantity={lineQty} billedDays={billedDays} />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeLine(row.id)}
+                            aria-label={t(`${KEY}.actions.removeLine`)}
+                            className="mt-1.5 grid size-9 shrink-0 cursor-pointer place-items-center rounded-chip text-charcoal/45 transition-[color,background-color,box-shadow] duration-200 hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
+                          >
+                            <HiOutlineTrash aria-hidden className="size-4.5" />
+                          </button>
+                        </LineRow>
+                      );
+                    })}
                     <div className="self-start">
                       <Button
                         variant="soft"
@@ -606,6 +848,31 @@ const OrderForm: React.FC = () => {
               <Section title={t(`${KEY}.sections.delivery.title`)} description={t(`${KEY}.sections.delivery.description`)}>
                 <SectionReveal loading={revealing} delaySeconds={SECTION_REVEAL_STEP * 4} skeleton={<BodySkeleton rows={3} />}>
                   <div className="flex flex-col gap-5">
+                    {/* Who HANDLES the delivery — the deliverable staff (Admin + Driver), defaulting
+                        to the creating admin, so the order is never unassigned. */}
+                    <div className="reveal-item">
+                      <CustomSelectForm<CreateOrderFormType>
+                        id="order-assigned-user"
+                        name="assignedUserId"
+                        label={t(`${KEY}.fields.assignToLabel`)}
+                        placeholderOption={t(`${KEY}.fields.assignToPlaceholder`)}
+                        options={(catalog?.assignableUsers ?? []).map((u) => ({
+                          value: u.id,
+                          label: `${u.name} · ${u.role}`,
+                        }))}
+                      />
+                      <p className="mt-1 px-2 text-xs text-charcoal/45">{t(`${KEY}.fields.assignToHint`)}</p>
+                    </div>
+                    <div className="reveal-item">
+                      <CustomInputForm<CreateOrderFormType>
+                        id="order-delivery-name"
+                        name="deliveryName"
+                        type="text"
+                        label={t(`${KEY}.fields.deliveryNameLabel`)}
+                        placeholder={t(`${KEY}.fields.deliveryNamePlaceholder`)}
+                        aria-label={t(`${KEY}.fields.deliveryNameLabel`)}
+                      />
+                    </div>
                     {selectedRegistry && selectedRegistry.contacts.length > 0 && (
                       <div className="reveal-item">
                         <CustomSelect
@@ -622,19 +889,22 @@ const OrderForm: React.FC = () => {
                         />
                       </div>
                     )}
-                    <div className="reveal-item grid gap-5 sm:grid-cols-2">
-                      <CustomInputForm<CreateOrderFormType>
-                        id="order-delivery-name"
-                        name="deliveryName"
-                        type="text"
-                        label={t(`${KEY}.fields.deliveryNameLabel`)}
-                        placeholder={t(`${KEY}.fields.deliveryNamePlaceholder`)}
-                        aria-label={t(`${KEY}.fields.deliveryNameLabel`)}
+                    {/* Contact channel (icon + keyboard) + the value — default from the client, editable. */}
+                    <div className="reveal-item grid gap-5 sm:grid-cols-[minmax(0,190px)_minmax(0,1fr)]">
+                      <CustomSelectForm<CreateOrderFormType>
+                        id="order-delivery-contact-type"
+                        name="deliveryContactTypeId"
+                        optionalLabel
+                        label={t(`${KEY}.fields.deliveryContactTypeLabel`)}
+                        placeholderOption={t(`${KEY}.fields.deliveryContactTypePlaceholder`)}
+                        options={(catalog?.contactTypes ?? []).map((c) => ({ value: c.id, label: c.name }))}
                       />
                       <CustomInputForm<CreateOrderFormType>
                         id="order-delivery-contact"
                         name="deliveryContact"
                         type="text"
+                        inputMode={CHANNEL_INPUT_MODE[contactKind]}
+                        icon={<ContactChannelIcon kind={contactKind} />}
                         label={t(`${KEY}.fields.deliveryContactLabel`)}
                         placeholder={t(`${KEY}.fields.deliveryContactPlaceholder`)}
                         aria-label={t(`${KEY}.fields.deliveryContactLabel`)}
@@ -665,6 +935,19 @@ const OrderForm: React.FC = () => {
                         placeholder={t(`${KEY}.fields.deliveryAddressPlaceholder`)}
                         aria-label={t(`${KEY}.fields.deliveryAddressLabel`)}
                       />
+                    </div>
+                    {/* Delivery zone (for a one-off venue) — suggests the zone's fee, editable below. */}
+                    <div className="reveal-item">
+                      <CustomSelect
+                        id="order-delivery-zone"
+                        optionalLabel
+                        label={t(`${KEY}.fields.deliveryZoneLabel`)}
+                        placeholderOption={t(`${KEY}.fields.deliveryZonePlaceholder`)}
+                        value={deliveryZoneId ?? ''}
+                        onChange={(e) => pickDeliveryZone(e.target.value)}
+                        options={(catalog?.zones ?? []).map((z) => ({ value: z.id, label: z.name }))}
+                      />
+                      <p className="mt-1 px-2 text-xs text-charcoal/45">{t(`${KEY}.fields.deliveryZoneHint`)}</p>
                     </div>
                     <div className="reveal-item">
                       <CustomTextareaForm<CreateOrderFormType>
@@ -722,11 +1005,22 @@ const OrderForm: React.FC = () => {
                         options={(catalog?.paymentMethods ?? []).map((m) => ({ value: m.id, label: m.name }))}
                       />
                     </div>
-                    <div className="reveal-item flex items-center justify-between rounded-control bg-charcoal/[0.03] px-4 py-3">
-                      <span className="text-sm font-medium text-charcoal/70">{t(`${KEY}.estimate.label`)}</span>
-                      <span aria-live="polite" className="text-lg font-bold tabular-nums text-charcoal">
-                        {formatMoney(currencySymbol, estimate)}
-                      </span>
+                    {/* Breakdown: products subtotal + delivery fee → total (all estimated). */}
+                    <div className="reveal-item flex flex-col gap-2 rounded-control bg-charcoal/[0.03] px-4 py-3">
+                      <div className="flex items-center justify-between text-sm text-charcoal/60">
+                        <span>{t(`${KEY}.estimate.productsSubtotal`)}</span>
+                        <span className="tabular-nums">{formatMoney(currencySymbol, linesSubtotal)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm text-charcoal/60">
+                        <span>{t(`${KEY}.estimate.deliveryFee`)}</span>
+                        <span className="tabular-nums">{formatMoney(currencySymbol, deliveryFee)}</span>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between border-t border-charcoal/10 pt-2">
+                        <span className="text-sm font-medium text-charcoal/70">{t(`${KEY}.estimate.label`)}</span>
+                        <span aria-live="polite" className="text-lg font-bold tabular-nums text-charcoal">
+                          {formatMoney(currencySymbol, estimate)}
+                        </span>
+                      </div>
                     </div>
                     <p className="reveal-item text-xs text-charcoal/45">{t(`${KEY}.estimate.note`)}</p>
                   </div>

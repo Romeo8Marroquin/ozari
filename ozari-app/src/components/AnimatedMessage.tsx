@@ -31,7 +31,9 @@ const AnimatedMessage: React.FC<AnimatedMessageProps> = ({
         })
         .to(containerRef.current, { y: 0, opacity: 1 });
     },
-    { scope: containerRef, dependencies: [errorMessage] },
+    // Re-run when EITHER the error or the instructions change, so a field whose hint is dynamic (e.g.
+    // a per-product availability count) updates its text — not only when an error toggles.
+    { scope: containerRef, dependencies: [errorMessage, instructions] },
   );
 
   return (

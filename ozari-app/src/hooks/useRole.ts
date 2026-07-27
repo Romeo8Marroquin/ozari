@@ -21,6 +21,15 @@ export function getStoredRole(): Role | null {
   return typeof role === 'number' ? (role as Role) : null;
 }
 
+/** The current user's id from the stored access token, or `null` when signed out / unreadable — used
+ *  to default the order form's "Asignar a" to the creating admin (the token carries `userId`). */
+export function getStoredUserId(): number | null {
+  const token = Storage.get<string>(StorageKeys.TOKEN);
+  if (!token) return null;
+  const userId = decodeToken(token)?.userId;
+  return typeof userId === 'number' ? userId : null;
+}
+
 /** The current user's role (from the token). Recomputed each render; the token is stable per session. */
 export function useRole(): Role | null {
   return getStoredRole();

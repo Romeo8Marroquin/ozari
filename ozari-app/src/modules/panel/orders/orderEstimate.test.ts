@@ -7,7 +7,7 @@ import {
   estimateOrderTotal,
   formatMoney,
   isRentalProduct,
-  productsForMode,
+  lineUnitPrice,
 } from './orderEstimate';
 
 const rental = (overrides: Partial<Product> = {}): Product => ({
@@ -40,14 +40,10 @@ const sale = (overrides: Partial<Product> = {}): Product => ({
   ...overrides,
 });
 
-describe('isRentalProduct / productsForMode', () => {
-  it('flags rentals and filters by mode', () => {
+describe('isRentalProduct', () => {
+  it('flags rentals vs sales by business type', () => {
     expect(isRentalProduct(rental())).toBe(true);
     expect(isRentalProduct(sale())).toBe(false);
-    const products = [rental(), sale()];
-    expect(productsForMode(products, 'rent')).toEqual([rental()]);
-    expect(productsForMode(products, 'buy')).toEqual([sale()]);
-    expect(productsForMode(products, 'both')).toEqual(products);
   });
 });
 
@@ -71,6 +67,14 @@ describe('estimateLineSubtotal', () => {
 
   it('returns 0 when the product lacks its applicable price', () => {
     expect(estimateLineSubtotal(rental({ rentPrice: undefined }), 5, 2)).toBe(0);
+  });
+});
+
+describe('lineUnitPrice', () => {
+  it('returns the rent price for a rental, the sell price for a sale, and 0 when absent', () => {
+    expect(lineUnitPrice(rental())).toBe(6);
+    expect(lineUnitPrice(sale())).toBe(3.5);
+    expect(lineUnitPrice(rental({ rentPrice: undefined }))).toBe(0);
   });
 });
 

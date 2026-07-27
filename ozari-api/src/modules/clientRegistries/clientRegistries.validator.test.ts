@@ -12,7 +12,8 @@ vi.mock("@models/http/ozariErrorModel.js", () => ({ sendOzariError: vi.fn() }));
 
 function mockPrisma(overrides: Record<string, unknown> = {}) {
   (getPrismaClient as Mock).mockResolvedValue({
-    contactType: { findMany: vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }]) },
+    // 1=WhatsApp 2=Teléfono 3=Correo 4=Otro (the seeded contact-type ids).
+    contactType: { findMany: vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]) },
     zone: { findMany: vi.fn().mockResolvedValue([{ id: 6 }]) },
     paymentMethod: { findMany: vi.fn().mockResolvedValue([{ id: 1 }, { id: 2 }]) },
     ...overrides,
@@ -22,8 +23,8 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
 const validBody = () => ({
   name: "María López",
   contacts: [
-    { contactTypeId: 1, value: "5555-1234" },
-    { contactTypeId: 2, value: "maria@example.com" },
+    { contactTypeId: 1, value: "5555-1234" }, // WhatsApp → phone-shaped
+    { contactTypeId: 3, value: "maria@example.com" }, // Correo → email-shaped
   ],
   addresses: [{ zoneId: 6, address: "Zona 10, 4a avenida 5-55" }],
 });
@@ -69,7 +70,7 @@ describe("validateCreateClientRegistry", () => {
       notes: "  cliente de siempre  ",
       contacts: [
         { contactTypeId: 1, value: "5555-1234" },
-        { contactTypeId: 2, value: "maria@example.com", isPrincipal: true },
+        { contactTypeId: 3, value: "maria@example.com", isPrincipal: true },
       ],
       addresses: [
         {
@@ -105,10 +106,15 @@ describe("validateCreateClientRegistry", () => {
       {
         contacts: [
           { contactTypeId: 1, value: "5555-1234", isPrincipal: true },
-          { contactTypeId: 2, value: "maria@example.com", isPrincipal: true },
+          { contactTypeId: 3, value: "maria@example.com", isPrincipal: true },
         ],
       },
     ],
+    // Per-channel value shape (mirrors the frontend): email must be an email, WhatsApp/phone a phone.
+    ["invalidContactEmail", { contacts: [{ contactTypeId: 3, value: "not-an-email" }] }],
+    ["invalidContactPhone", { contacts: [{ contactTypeId: 1, value: "abcdefg" }] }], // non-digit chars
+    ["invalidContactPhone", { contacts: [{ contactTypeId: 2, value: "123" }] }], // too few digits
+    ["invalidContactPhone", { contacts: [{ contactTypeId: 2, value: "12345678901234567" }] }], // too many
     ["invalidAddresses", { addresses: 42 }],
     ["invalidZoneId", { addresses: [{ zoneId: 99, address: "Zona 10, 4a avenida" }] }],
     ["invalidAddress", { addresses: [{ address: "abc" }] }],

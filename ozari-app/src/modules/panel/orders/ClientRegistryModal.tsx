@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FormProvider, useFieldArray, useForm, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { HiOutlinePlus, HiOutlineTrash } from 'react-icons/hi2';
@@ -10,8 +10,12 @@ import CustomTextareaForm from '@components/CustomTextareaForm';
 import FormError from '@components/FormError';
 import Modal from '@components/Modal';
 import { notify } from '@components/notifications/notify';
+import Radio from '@components/Radio';
+import { CHANNEL_INPUT_MODE, contactChannelKind } from '@constants/Regex';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { toFormError } from '@utils/apiError';
+import ContactChannelIcon from './ContactChannelIcon';
+import { detailRowIn, detailRowOut } from '../pageMotion';
 import type { CatalogOption, ClientRegistry } from './order.types';
 import {
   createRegistryDefaultValues,
@@ -40,32 +44,43 @@ interface ClientRegistryModalProps {
 
 const toOptions = (rows: CatalogOption[]) => rows.map((row) => ({ value: row.id, label: row.name }));
 
-/** The principal/favorite radio — a single choice across a list (exactly one). */
-const ChoiceRadio: React.FC<{
-  name: string;
-  checked: boolean;
-  onChange: () => void;
-  label: string;
-}> = ({ name, checked, onChange, label }) => (
-  <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium text-charcoal/60">
-    <input
-      type="radio"
-      name={name}
-      checked={checked}
-      onChange={onChange}
-      className="size-3.5 cursor-pointer accent-charcoal"
-    />
-    {label}
-  </label>
-);
+/**
+ * One field-array row (contact or address): registers its element so removal can tween it out, and
+ * grows in from the left on mount — but ONLY when `animate` is true, so the DEFAULT rows present when
+ * the modal opens ride the modal's own stagger instead of double-animating. Same `detailRowIn`/
+ * `detailRowOut` language as the product form's detail sub-editor.
+ */
+const RegistryRow: React.FC<{
+  animate: boolean;
+  onRegister: (el: HTMLDivElement | null) => void;
+  children: React.ReactNode;
+}> = ({ animate, onRegister, children }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (animate) detailRowIn(ref.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only; `animate` is read once
+  }, []);
+  return (
+    <div
+      ref={(el) => {
+        ref.current = el;
+        onRegister(el);
+      }}
+      className="flex flex-col gap-2 rounded-control bg-charcoal/[0.02] p-3"
+    >
+      {children}
+    </div>
+  );
+};
 
 /**
  * Inline "new walk-in client" dialog opened from the order form's client picker. Collects the
- * responsible person's name, 1..N contacts (exactly one principal), 0..N addresses (exactly one
- * favorite; a walk-in may have none and type the venue per order), and an optional preferred
- * payment method. Owns its errors per the form doctrine (`skipErrorNotification` + `toFormError`):
- * backend validation lands in the inline banner, ambient failures toast, an outage goes silent. On
- * success it hands the projected registry back and closes.
+ * responsible person's name, 1..N contacts (exactly one principal; the value is validated + the
+ * keyboard/icon adapt per channel — WhatsApp/Teléfono/Correo/Otro), 0..N addresses (exactly one
+ * favorite; a walk-in may have none and type the venue per order), and an optional preferred payment
+ * method. Rows add/remove with the shared row-motion. Owns its errors per the form doctrine
+ * (`skipErrorNotification` + `toFormError`): backend validation → inline banner, ambient → toast,
+ * outage → silent. On success it hands the projected registry back and closes.
  */
 const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
   open,
@@ -84,13 +99,38 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
   const { handleSubmit, reset, control, getValues, setValue } = methods;
   const contacts = useFieldArray({ control, name: 'contacts' });
   const addresses = useFieldArray({ control, name: 'addresses' });
+  const contactValues = useWatch({ control, name: 'contacts' });
   const principalIndex = useWatch({ control, name: 'principalContactIndex' });
   const favoriteIndex = useWatch({ control, name: 'favoriteAddressIndex' });
   const { createRegistry, isPending } = useCreateClientRegistry();
   const [formError, setFormError] = useState<string | undefined>(undefined);
 
-  // A fresh form each time the dialog opens — clear typed values + field errors on close (reset is
-  // an RHF call, safe in an effect; the banner is cleared in `close`, an event handler).
+  // Row entrance animates only for rows added AFTER the modal is open — the default rows present on
+  // open ride the modal's own reveal (they mount in the first commit, before this effect flips the
+  // flag), while rows the admin adds afterwards grow in individually.
+  const [rowAnimReady, setRowAnimReady] = useState(false);
+  useEffect(() => {
+    // Resets the gate on open/close: the DEFAULT rows mount in the first commit (before this passive
+    // effect runs) so they read `false` and stay static; rows added afterwards read `true` and grow
+    // in. A deliberate effect-driven flag, not derivable during render (it depends on mount order).
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional per the note above
+    setRowAnimReady(open);
+  }, [open]);
+
+  // Element maps + live-field mirrors: a removed row tweens OUT before RHF drops it, using the LIVE
+  // index at completion (indices shift as rows leave).
+  const contactRefs = useRef(new Map<string, HTMLDivElement>());
+  const addressRefs = useRef(new Map<string, HTMLDivElement>());
+  const latestContacts = useRef(contacts.fields);
+  const latestAddresses = useRef(addresses.fields);
+  useEffect(() => {
+    latestContacts.current = contacts.fields;
+  }, [contacts.fields]);
+  useEffect(() => {
+    latestAddresses.current = addresses.fields;
+  }, [addresses.fields]);
+
+  // A fresh form each time the dialog opens — clear typed values + field errors on close.
   useEffect(() => {
     if (!open) reset();
   }, [open, reset]);
@@ -101,19 +141,31 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
     onClose();
   }, [onClose]);
 
-  // Removing a row keeps the single-choice index valid: the removed choice falls back to the first,
-  // and a choice after the removed row shifts down one.
-  const removeContact = (index: number): void => {
-    const current = getValues('principalContactIndex');
-    contacts.remove(index);
-    if (current === index) setValue('principalContactIndex', 0);
-    else if (current > index) setValue('principalContactIndex', current - 1);
+  // Removing a row tweens it out, THEN drops it and keeps the single-choice index valid (the removed
+  // choice falls back to the first; a choice after the removed row shifts down one).
+  const removeContact = (id: string): void => {
+    /* v8 ignore next -- `?? null`: a rendered row always has its element registered */
+    void detailRowOut(contactRefs.current.get(id) ?? null).then(() => {
+      const index = latestContacts.current.findIndex((row) => row.id === id);
+      /* v8 ignore next -- defensive: only reachable if the row already left (a raced double-remove) */
+      if (index === -1) return;
+      const current = getValues('principalContactIndex');
+      contacts.remove(index);
+      if (current === index) setValue('principalContactIndex', 0);
+      else if (current > index) setValue('principalContactIndex', current - 1);
+    });
   };
-  const removeAddress = (index: number): void => {
-    const current = getValues('favoriteAddressIndex');
-    addresses.remove(index);
-    if (current === index) setValue('favoriteAddressIndex', 0);
-    else if (current > index) setValue('favoriteAddressIndex', current - 1);
+  const removeAddress = (id: string): void => {
+    /* v8 ignore next -- `?? null`: a rendered row always has its element registered */
+    void detailRowOut(addressRefs.current.get(id) ?? null).then(() => {
+      const index = latestAddresses.current.findIndex((row) => row.id === id);
+      /* v8 ignore next -- defensive: only reachable if the row already left (a raced double-remove) */
+      if (index === -1) return;
+      const current = getValues('favoriteAddressIndex');
+      addresses.remove(index);
+      if (current === index) setValue('favoriteAddressIndex', 0);
+      else if (current > index) setValue('favoriteAddressIndex', current - 1);
+    });
   };
 
   const onSubmit = (data: CreateRegistryFormType): void => {
@@ -148,7 +200,7 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
     <Modal
       open={open}
       onClose={close}
-      size="md"
+      size="xl"
       locked={isPending}
       title={t(`${KEY}.title`)}
       description={t(`${KEY}.description`)}
@@ -172,7 +224,7 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
     >
       <RequiredPatternsContext.Provider value={requiredPatternsValue}>
         <FormProvider {...methods}>
-          <form id={FORM_ID} onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-5">
+          <form id={FORM_ID} onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6">
             <div className="modal-stagger">
               <CustomInputForm<CreateRegistryFormType>
                 id="registry-name"
@@ -185,9 +237,9 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
               />
             </div>
 
-            {/* CONTACTS — ≥1, exactly one principal. */}
-            <div className="modal-stagger flex flex-col gap-3">
-              <div className="flex items-center justify-between">
+            {/* CONTACTS — ≥1, exactly one principal; keyboard + icon adapt per channel. */}
+            <div className="modal-stagger flex flex-col gap-5">
+              <div className="flex items-center justify-between gap-3">
                 <span className="text-sm font-semibold text-charcoal/80">{t(`${KEY}.fields.contactsLabel`)}</span>
                 <Button
                   variant="soft"
@@ -200,50 +252,65 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
                   {t(`${KEY}.actions.addContact`)}
                 </Button>
               </div>
-              {contacts.fields.map((field, index) => (
-                <div key={field.id} className="flex flex-col gap-2 rounded-control bg-charcoal/[0.02] p-3">
-                  <div className="flex items-start gap-2">
-                    <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-[minmax(0,170px)_minmax(0,1fr)]">
-                      <CustomSelectForm<CreateRegistryFormType>
-                        id={`registry-contact-type-${index}`}
-                        name={`contacts.${index}.contactTypeId`}
-                        label={t(`${KEY}.fields.contactTypeLabel`)}
-                        placeholderOption={t(`${KEY}.fields.contactTypePlaceholder`)}
-                        options={toOptions(contactTypes)}
-                      />
-                      <CustomInputForm<CreateRegistryFormType>
-                        id={`registry-contact-value-${index}`}
-                        name={`contacts.${index}.value`}
-                        type="text"
-                        label={t(`${KEY}.fields.contactValueLabel`)}
-                        placeholder={t(`${KEY}.fields.contactValuePlaceholder`)}
-                        aria-label={t(`${KEY}.fields.contactValueLabel`)}
-                      />
-                    </div>
-                    {contacts.fields.length > 1 && (
+              {contacts.fields.map((field, index) => {
+                const kind = contactChannelKind(contactValues?.[index]?.contactTypeId);
+                return (
+                  <RegistryRow
+                    key={field.id}
+                    animate={rowAnimReady}
+                    onRegister={(el) => {
+                      if (el) contactRefs.current.set(field.id, el);
+                      else contactRefs.current.delete(field.id);
+                    }}
+                  >
+                    <div className="flex items-start gap-2">
+                      <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-[minmax(0,180px)_minmax(0,1fr)]">
+                        <CustomSelectForm<CreateRegistryFormType>
+                          id={`registry-contact-type-${index}`}
+                          name={`contacts.${index}.contactTypeId`}
+                          label={t(`${KEY}.fields.contactTypeLabel`)}
+                          placeholderOption={t(`${KEY}.fields.contactTypePlaceholder`)}
+                          options={toOptions(contactTypes)}
+                        />
+                        <CustomInputForm<CreateRegistryFormType>
+                          id={`registry-contact-value-${index}`}
+                          name={`contacts.${index}.value`}
+                          type="text"
+                          inputMode={CHANNEL_INPUT_MODE[kind]}
+                          autoCapitalize={kind === 'email' ? 'none' : undefined}
+                          autoCorrect={kind === 'email' ? 'off' : undefined}
+                          icon={<ContactChannelIcon kind={kind} />}
+                          label={t(`${KEY}.fields.contactValueLabel`)}
+                          placeholder={t(`${KEY}.fields.contactValuePlaceholder`)}
+                          aria-label={t(`${KEY}.fields.contactValueLabel`)}
+                        />
+                      </div>
+                      {/* Always rendered (no abrupt appear/disappear): disabled — with a smooth color
+                          fade — while it's the only contact, since ≥1 is required. */}
                       <button
                         type="button"
-                        onClick={() => removeContact(index)}
+                        onClick={() => removeContact(field.id)}
+                        disabled={contacts.fields.length <= 1}
                         aria-label={t(`${KEY}.actions.removeContact`)}
-                        className="mt-1.5 grid size-8 shrink-0 cursor-pointer place-items-center rounded-chip text-charcoal/45 transition-[color,background-color] duration-200 hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
+                        className="mt-1.5 grid size-8 shrink-0 cursor-pointer place-items-center rounded-chip text-charcoal/45 transition-[color,background-color] duration-200 hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta disabled:cursor-not-allowed disabled:text-charcoal/15 disabled:hover:bg-transparent disabled:hover:text-charcoal/15"
                       >
                         <HiOutlineTrash aria-hidden className="size-4" />
                       </button>
-                    )}
-                  </div>
-                  <ChoiceRadio
-                    name="registry-principal-contact"
-                    checked={principalIndex === index}
-                    onChange={() => setValue('principalContactIndex', index)}
-                    label={t(`${KEY}.fields.principalContact`)}
-                  />
-                </div>
-              ))}
+                    </div>
+                    <Radio
+                      name={`registry-principal-${field.id}`}
+                      checked={principalIndex === index}
+                      onChange={() => setValue('principalContactIndex', index)}
+                      label={t(`${KEY}.fields.principalContact`)}
+                    />
+                  </RegistryRow>
+                );
+              })}
             </div>
 
             {/* ADDRESSES — 0..N, exactly one favorite when any. */}
-            <div className="modal-stagger flex flex-col gap-3">
-              <div className="flex items-center justify-between">
+            <div className="modal-stagger flex flex-col gap-5">
+              <div className="flex items-center justify-between gap-3">
                 <span className="text-sm font-semibold text-charcoal/80">{t(`${KEY}.fields.addressesLabel`)}</span>
                 <Button
                   variant="soft"
@@ -260,7 +327,14 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
                 <p className="text-xs text-charcoal/45">{t(`${KEY}.fields.addressesEmpty`)}</p>
               )}
               {addresses.fields.map((field, index) => (
-                <div key={field.id} className="flex flex-col gap-2 rounded-control bg-charcoal/[0.02] p-3">
+                <RegistryRow
+                  key={field.id}
+                  animate={rowAnimReady}
+                  onRegister={(el) => {
+                    if (el) addressRefs.current.set(field.id, el);
+                    else addressRefs.current.delete(field.id);
+                  }}
+                >
                   <div className="flex items-start gap-2">
                     <div className="flex min-w-0 flex-1 flex-col gap-2">
                       <CustomTextareaForm<CreateRegistryFormType>
@@ -283,20 +357,20 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
                     </div>
                     <button
                       type="button"
-                      onClick={() => removeAddress(index)}
+                      onClick={() => removeAddress(field.id)}
                       aria-label={t(`${KEY}.actions.removeAddress`)}
                       className="mt-1.5 grid size-8 shrink-0 cursor-pointer place-items-center rounded-chip text-charcoal/45 transition-[color,background-color] duration-200 hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
                     >
                       <HiOutlineTrash aria-hidden className="size-4" />
                     </button>
                   </div>
-                  <ChoiceRadio
-                    name="registry-favorite-address"
+                  <Radio
+                    name={`registry-favorite-${field.id}`}
                     checked={favoriteIndex === index}
                     onChange={() => setValue('favoriteAddressIndex', index)}
                     label={t(`${KEY}.fields.favoriteAddress`)}
                   />
-                </div>
+                </RegistryRow>
               ))}
             </div>
 

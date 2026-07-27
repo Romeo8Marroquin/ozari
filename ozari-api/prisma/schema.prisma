@@ -519,19 +519,64 @@ model ClientRegistryAddress {
   @@map("client_registry_addresses")
 }
 
+// One step of the ORDER LIFECYCLE — and the state machine itself, expressed in DATA (EPIC-2 order
+// lifecycle, 2026-07-27). The rows declare their own behavior (position, inventory effect, evidence
+// rule, which actual they stamp, display tone) so the admin can rename/recolor/reorder/add steps
+// without a deploy, and code keeps ONLY the invariants that can't be data (permissions, the
+// transaction, mode-aware completion). Two shapes live here:
+//   - PIPELINE steps — the ordered happy path (`sortOrder` 1..N): Pendiente → En ruta → Entregado →
+//     Recolectado → Listo.
+//   - DISRUPTIVE states — `sortOrder = NULL`, `isDisruptive`: an any-time exit from wherever the
+//     order sits (Cancelado today; a future "No entregado" is just another flagged row).
+// `isActive` is the seeded-lookup PUBLICATION flag (NO-TRASH), never deletion.
 model ServiceStatus {
   id          Int       @id @default(autoincrement())
   name        String
   description String?
   isActive    Boolean   @default(true) @map("is_active")
-  updatedAt   DateTime? @updatedAt @map("updated_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // --- The declarative machine ---------------------------------------------------------------
+  // Pipeline position; NULL = a disruptive off-ramp (Postgres allows many NULLs under @@unique).
+  sortOrder    Int?    @map("sort_order")
+  // The create-time status (exactly one active pipeline row).
+  isInitial    Boolean @default(false) @map("is_initial")
+  // Reachable from ANY step; stops the flow and stamps `services.cancelled_at` + reason.
+  isDisruptive Boolean @default(false) @map("is_disruptive")
+  // How a RENTAL line sitting in this status affects the fleet — THE availability rule, in data:
+  //   NONE   = units are available (Listo returns them to the fleet; Cancelado never held).
+  //   WINDOW = holds only while `now` falls inside the order's billed [serviceStart, serviceEnd]
+  //            (Pendiente: a booking for next week doesn't reduce TODAY's count).
+  //   OUT    = holds unconditionally, however late — the units are physically gone (En ruta, on the
+  //            truck), out at the event (Entregado), or back but not yet washed (Recolectado; the
+  //            washing period, owner decision 2026-07-27 — "listo" is what frees them).
+  inventoryHold String @default("NONE") @map("inventory_hold")
+  // Advancing INTO this step demands photo evidence; `minEvidence`/`maxEvidence` are the per-status
+  // counts, each NULL = fall back to the global `orders.evidenceMin/MaxPhotos` preference.
+  requiresEvidence Boolean @default(false) @map("requires_evidence")
+  minEvidence      Int?    @map("min_evidence")
+  maxEvidence      Int?    @map("max_evidence")
+  // Which ORDER MODES this step applies to (ALL | RENTAL | SALE) — mode-aware completion in data: a
+  // purchase-only order ends at Entregado because collection/listo are RENTAL-only steps.
+  appliesTo String @default("ALL") @map("applies_to")
+  // The tracked ACTUAL this step stamps on the order (DELIVERY → `delivered_at`, COLLECTION →
+  // `collected_at`), or NULL for a step that tracks nothing. Declared, never derived from an id or a
+  // position — an admin inserting "En preparación" simply leaves it NULL.
+  tracksEvent String? @map("tracks_event")
+  // Chip tone TOKEN from the frontend's fixed palette (amber|indigo|emerald|sky|red|slate|violet|…),
+  // never Tailwind classes — design stays in code; an unknown key renders neutral.
+  colorKey String? @map("color_key")
+
+  updatedAt DateTime? @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
 
   services          Service[]
   statusHistoryFrom ServiceStatusHistory[] @relation("StatusHistoryFrom")
   statusHistoryTo   ServiceStatusHistory[] @relation("StatusHistoryTo")
   serviceEvidences  ServiceEvidence[]
 
+  // One status per pipeline slot; the many NULLs (disruptive rows) are unconstrained. Reordering
+  // renumbers 1..N in a transaction (via a temporary negative pass, so the unique never trips).
+  @@unique([sortOrder])
   @@map("service_status")
 }
 

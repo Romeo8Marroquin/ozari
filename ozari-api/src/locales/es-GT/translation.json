@@ -421,6 +421,8 @@
         "tooManyContacts": "El cliente excede el número máximo de contactos.",
         "invalidContactTypeId": "El tipo de un contacto no es válido.",
         "invalidContactValue": "El valor de un contacto no es válido.",
+        "invalidContactEmail": "El correo electrónico de un contacto no es válido.",
+        "invalidContactPhone": "El número de teléfono de un contacto no es válido.",
         "multiplePrincipalContacts": "Solo un contacto puede ser el principal.",
         "invalidAddresses": "El cliente requiere al menos una dirección.",
         "tooManyAddresses": "El cliente excede el número máximo de direcciones.",
@@ -438,6 +440,8 @@
           "tooManyContacts": "El registro excede el máximo de contactos: <{{-count}}> de <{{-max}}>.",
           "invalidContactTypeId": "El tipo de contacto <{{-contactTypeId}}> no es válido.",
           "invalidContactValue": "El valor de contacto <{{-value}}> no es válido.",
+          "invalidContactEmail": "El correo de contacto <{{-value}}> no es válido.",
+          "invalidContactPhone": "El teléfono de contacto <{{-value}}> no es válido.",
           "multiplePrincipalContacts": "Contactos principales duplicados: <{{-principalCount}}>.",
           "invalidAddresses": "La lista de direcciones no es válida.",
           "tooManyAddresses": "El registro excede el máximo de direcciones: <{{-count}}> de <{{-max}}>.",
@@ -483,15 +487,81 @@
         "errorFetchingCatalog": "Error al obtener el catálogo de referencia de órdenes: {{-error}}."
       }
     },
+    "availability": {
+      "computed": "Disponibilidad calculada exitosamente.",
+      "error": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidDeliveryAt": "La fecha y hora de entrega no es válida.",
+        "invalidPickupAt": "La fecha y hora de recolección no es válida.",
+        "pickupBeforeDelivery": "La recolección debe ser posterior a la entrega.",
+        "invalidProductIds": "Los productos consultados no son válidos.",
+        "tooManyProductIds": "Se consultaron demasiados productos.",
+        "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+        "logs": {
+          "invalidDeliveryAt": "Entrega inválida en la consulta de disponibilidad: <{{-deliveryAt}}>.",
+          "invalidPickupAt": "Recolección inválida en la consulta de disponibilidad: <{{-pickupAt}}>.",
+          "pickupBeforeDelivery": "Recolección <{{-pickupAt}}> no posterior a la entrega <{{-deliveryAt}}>.",
+          "invalidProductIds": "Ids de productos inválidos en la consulta de disponibilidad.",
+          "tooManyProductIds": "Demasiados productos (<{{-count}}>) en la consulta de disponibilidad.",
+          "validationError": "Error validando la consulta de disponibilidad: {{-error}}."
+        }
+      },
+      "logs": {
+        "computed": "Disponibilidad calculada para <{{-count}}> productos.",
+        "error": "Error al calcular disponibilidad: {{-error}}."
+      }
+    },
+    "advance": {
+      "orderAdvanced": "Estado del pedido actualizado exitosamente.",
+      "notFound": "El pedido no existe o ya no está disponible.",
+      "forbidden": "No tiene permiso para realizar este cambio en el pedido.",
+      "invalid": "El pedido ya cambió de estado. Actualice la vista e intente de nuevo.",
+      "evidence": "Las fotos de evidencia requeridas para este paso no están completas.",
+      "errorAdvancing": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidToStatusId": "El estado destino del pedido no es válido.",
+        "invalidEvidenceKeys": "Las fotos de evidencia enviadas no son válidas.",
+        "invalidReason": "El motivo no es válido.",
+        "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+        "logs": {
+          "invalidToStatusId": "Estado destino inválido <{{-toStatusId}}> al avanzar el pedido.",
+          "invalidEvidenceKeys": "Claves de evidencia inválidas (<{{-count}}>) al avanzar el pedido.",
+          "invalidReason": "Motivo de cancelación inválido al avanzar el pedido.",
+          "validationError": "Error validando el avance del pedido: {{-error}}."
+        }
+      },
+      "logs": {
+        "orderAdvanced": "Pedido <{{-id}}> avanzado al estado <{{-toStatusId}}>.",
+        "notFound": "Pedido no encontrado al avanzar: <{{-id}}>.",
+        "forbidden": "Avance no permitido para el actor en el pedido <{{-id}}>: {{-detail}}.",
+        "invalid": "Transición inválida en el pedido <{{-id}}>: {{-detail}}.",
+        "evidence": "Evidencia insuficiente al avanzar el pedido <{{-id}}>: {{-detail}}.",
+        "errorAdvancing": "Error al avanzar el pedido: {{-error}}."
+      }
+    },
+    "evidenceUploads": {
+      "uploadsCreated": "URLs de carga generadas exitosamente.",
+      "errorCreatingUploads": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidFiles": "Los archivos de evidencia solicitados no son válidos."
+      },
+      "logs": {
+        "uploadsCreated": "Se generaron <{{-count}}> URLs de carga de evidencia.",
+        "uploadPolicyViolation": "Solicitud de carga de evidencia fuera de política: {{-error}}.",
+        "errorCreatingUploads": "Error al generar URLs de carga de evidencia: {{-error}}."
+      }
+    },
     "createOrder": {
       "orderCreated": "Pedido creado exitosamente.",
       "stockConflict": "Algunos productos no tienen disponibilidad para las fechas solicitadas.",
       "spacingConflict": "Ya existe una entrega o recolección demasiado cerca de ese horario.",
+      "lifecycleUnconfigured": "No hay un estado inicial configurado para los pedidos. Revise los estados del pedido en ajustes.",
       "errorCreatingOrder": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "validators": {
         "invalidClientRegistryId": "El cliente del pedido es requerido y debe ser válido.",
         "invalidEventTypeId": "El tipo de evento es requerido y debe ser válido.",
         "invalidDeliveryAt": "La fecha y hora de entrega es requerida y debe ser válida.",
+        "deliveryInPast": "La fecha y hora de entrega no puede estar en el pasado.",
         "invalidLines": "El pedido requiere al menos un producto.",
         "tooManyLines": "El pedido excede el número máximo de productos.",
         "invalidLineProduct": "Un producto del pedido no es válido.",
@@ -511,11 +581,13 @@
         "invalidDeliveryAmount": "El costo de envío no es válido.",
         "invalidDepositAmount": "El anticipo no es válido.",
         "invalidPaymentMethodId": "El método de pago no es válido.",
+        "invalidAssignedUserId": "El responsable asignado no es válido.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
           "invalidClientRegistryId": "El registro de cliente <{{-clientRegistryId}}> no es válido.",
           "invalidEventTypeId": "El tipo de evento <{{-eventTypeId}}> no es válido.",
           "invalidDeliveryAt": "La fecha de entrega <{{-deliveryAt}}> no es válida.",
+          "deliveryInPast": "La fecha de entrega <{{-deliveryAt}}> está en el pasado.",
           "invalidLines": "La lista de productos del pedido no es válida.",
           "tooManyLines": "El pedido excede el máximo de líneas: <{{-count}}> de <{{-max}}>.",
           "invalidLineProduct": "El producto <{{-productId}}> no es válido.",
@@ -535,6 +607,7 @@
           "invalidDeliveryAmount": "El costo de envío <{{-deliveryAmount}}> no es válido.",
           "invalidDepositAmount": "El anticipo <{{-depositAmount}}> no es válido.",
           "invalidPaymentMethodId": "El método de pago <{{-paymentMethodId}}> no es válido.",
+          "invalidAssignedUserId": "El responsable asignado <{{-assignedUserId}}> no es válido.",
           "validationError": "Error validando la creación del pedido: {{-error}}."
         }
       },
@@ -542,6 +615,7 @@
         "orderCreated": "Pedido <{{-id}}> creado exitosamente.",
         "stockConflict": "Conflicto de disponibilidad al crear pedido: {{-conflicts}}.",
         "spacingConflict": "Conflicto de espaciado logístico al crear pedido, evento cercano en <{{-conflictAt}}>.",
+        "lifecycleUnconfigured": "No existe un estado inicial activo en service_status; no se puede crear el pedido.",
         "errorCreatingOrder": "Error al crear el pedido: {{-error}}."
       }
     }

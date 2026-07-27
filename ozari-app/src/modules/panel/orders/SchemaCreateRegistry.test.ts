@@ -49,6 +49,26 @@ describe('createRegistrySchema', () => {
     expect(parse(validForm({ contacts: [] })).success).toBe(false);
   });
 
+  it('validates the contact value per channel (email, phone, and free "otro")', () => {
+    // Correo (3) must look like an email; WhatsApp/Teléfono (1/2) like a phone; Otro (4) is free.
+    expect(parse(validForm({ contacts: [{ contactTypeId: 3, value: 'not-an-email' }] })).success).toBe(false);
+    expect(parse(validForm({ contacts: [{ contactTypeId: 1, value: 'abcdefg' }] })).success).toBe(false);
+    expect(parse(validForm({ contacts: [{ contactTypeId: 2, value: '123' }] })).success).toBe(false); // too few digits
+    expect(parse(validForm({ contacts: [{ contactTypeId: 4, value: 'cualquier apodo' }] })).success).toBe(true);
+    expect(
+      parse(
+        validForm({
+          contacts: [
+            { contactTypeId: 3, value: 'maria@example.com' },
+            { contactTypeId: 2, value: '5555-1234' },
+          ],
+        }),
+      ).success,
+    ).toBe(true);
+    // An empty value is flagged by the base check; the per-channel refine short-circuits on it.
+    expect(parse(validForm({ contacts: [{ contactTypeId: 3, value: '' }] })).success).toBe(false);
+  });
+
   it('rejects missing/invalid fields', () => {
     expect(parse(validForm({ name: 'x' })).success).toBe(false);
     expect(parse(validForm({ contacts: [{ contactTypeId: null as unknown as number, value: '5555' }] })).success).toBe(false);

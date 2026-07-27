@@ -477,6 +477,181 @@ export const schemas: Record<string, Schema> = {
       name: { type: "string", example: "Pendiente" },
     },
   },
+  AdvanceOrderRequest: {
+    type: "object",
+    required: ["toStatusId"],
+    description:
+      "A lifecycle move, named by its TARGET only — the engine derives whether that's a forward " +
+      "step, a rewind or a cancel, and whether the caller may make it. Take the id from one of the " +
+      "order's offered `actions`.",
+    properties: {
+      toStatusId: {
+        type: "integer",
+        description: "The `service_status` to move into.",
+        example: 3,
+      },
+      evidenceKeys: {
+        type: "array",
+        description:
+          "R2 object keys of photos ALREADY uploaded via `POST /orders/evidence/upload-url`. " +
+          "Required (within the target's resolved count range) when the step demands evidence. Keys " +
+          "must sit under the orders' evidence prefix — anything else is rejected, so a key can " +
+          "never attach an object from another namespace. Duplicates are dropped.",
+        items: { type: "string", example: "orders/evidence/a1b2c3d4-….jpg" },
+      },
+      reason: {
+        type: "string",
+        maxLength: 500,
+        description: "Why the order is being cancelled — recorded on a disruptive move.",
+        example: "El cliente canceló la fiesta",
+      },
+    },
+  },
+  OrderEvidenceUploadsRequest: {
+    type: "object",
+    required: ["files"],
+    properties: {
+      files: {
+        type: "array",
+        minItems: 1,
+        maxItems: 20,
+        items: {
+          type: "object",
+          required: ["contentType", "contentLength"],
+          properties: {
+            contentType: { type: "string", example: "image/webp" },
+            contentLength: { type: "integer", example: 204800 },
+          },
+        },
+      },
+    },
+  },
+  OrderEvidenceUploadsResponse: {
+    type: "object",
+    properties: {
+      uploads: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            uploadUrl: {
+              type: "string",
+              description: "Short-lived presigned PUT the browser uploads to (directly to R2).",
+            },
+            key: {
+              type: "string",
+              description: "The object key — send THIS back with the advance; the server derives the URL.",
+            },
+            publicUrl: { type: "string" },
+          },
+        },
+      },
+    },
+  },
+  OrderStatusRef: {
+    type: "object",
+    description:
+      "The order's current lifecycle status, carrying the chip tone token the admin configured " +
+      "(`colorKey`) so no client keeps an id→colour map of its own.",
+    properties: {
+      id: { type: "integer", example: 1 },
+      name: { type: "string", example: "Pendiente" },
+      colorKey: {
+        type: "string",
+        nullable: true,
+        description:
+          "Palette TOKEN (amber|indigo|emerald|sky|violet|rose|red|slate), never a CSS class; an " +
+          "unknown or absent key renders neutral.",
+        example: "amber",
+      },
+    },
+  },
+  OrderAction: {
+    type: "object",
+    description:
+      "One move the requesting actor may make on the order, with everything the UI must collect " +
+      "first. Produced by the lifecycle engine (`resolveTransitions`), so the offered set already " +
+      "respects the role and the order's assignment.",
+    properties: {
+      kind: {
+        type: "string",
+        enum: ["forward", "backward", "disruptive"],
+        description:
+          "`forward`/`backward` walk the pipeline; `disruptive` is the any-time exit (cancel).",
+        example: "forward",
+      },
+      statusId: { type: "integer", example: 5 },
+      statusName: { type: "string", example: "En ruta" },
+      colorKey: { type: "string", nullable: true, example: "indigo" },
+      requiresEvidence: {
+        type: "boolean",
+        description:
+          "The target step demands photo evidence (only ever true on a `forward` move — undoing " +
+          "or cancelling is never blocked by a camera).",
+        example: false,
+      },
+      minEvidence: {
+        type: "integer",
+        description:
+          "Resolved photo bounds: the status' own counts when set, else the global " +
+          "`orders.evidenceMinPhotos`/`orders.evidenceMaxPhotos` preferences.",
+        example: 1,
+      },
+      maxEvidence: { type: "integer", example: 10 },
+      requiresReason: {
+        type: "boolean",
+        description: "Disruptive moves record a reason (`cancelReason`).",
+        example: false,
+      },
+    },
+  },
+  OrderStatusCatalogOption: {
+    type: "object",
+    description:
+      "A lifecycle status as the catalog publishes it: the lookup PLUS its declared behavior, so " +
+      "clients can render tones, order the filter chips like the real pipeline, and know what a " +
+      "step will demand. Evidence counts arrive RESOLVED (per-status override already merged with " +
+      "the global preference). Pipeline steps carry `sortOrder`; disruptive off-ramps omit it.",
+    properties: {
+      id: { type: "integer", example: 3 },
+      name: { type: "string", example: "Entregado" },
+      sortOrder: { type: "integer", nullable: true, example: 3 },
+      isInitial: { type: "boolean", example: false },
+      isDisruptive: {
+        type: "boolean",
+        description: "An any-time exit (Cancelado) rather than a position in the pipeline.",
+        example: false,
+      },
+      inventoryHold: {
+        type: "string",
+        enum: ["NONE", "WINDOW", "OUT"],
+        description:
+          "How a rental line in this status affects the fleet: `NONE` (available), `WINDOW` (held " +
+          "only during the order's billed period) or `OUT` (held unconditionally — on the truck, " +
+          "at the event, or back but not yet washed).",
+        example: "OUT",
+      },
+      requiresEvidence: { type: "boolean", example: true },
+      minEvidence: { type: "integer", example: 1 },
+      maxEvidence: { type: "integer", example: 10 },
+      appliesTo: {
+        type: "string",
+        enum: ["ALL", "RENTAL", "SALE"],
+        description:
+          "Which order modes walk this step — how a purchase-only order finishes at Entregado " +
+          "without any hardcoded sale-vs-rental branch.",
+        example: "ALL",
+      },
+      tracksEvent: {
+        type: "string",
+        enum: ["DELIVERY", "COLLECTION"],
+        nullable: true,
+        description: "The actual this step stamps (`deliveredAt` / `collectedAt`); absent = none.",
+        example: "DELIVERY",
+      },
+      colorKey: { type: "string", nullable: true, example: "emerald" },
+    },
+  },
   OrderListItem: {
     type: "object",
     description:
@@ -498,7 +673,23 @@ export const schemas: Record<string, Schema> = {
         example: false,
       },
       eventType: schemaRef("OrderLookup"),
-      status: schemaRef("OrderLookup"),
+      status: schemaRef("OrderStatusRef"),
+      nextStatus: {
+        allOf: [schemaRef("OrderLookup")],
+        nullable: true,
+        description:
+          "The MODE-AWARE next pipeline step (a purchase-only order never walks the rental-only " +
+          "steps), or absent when the order is finished or cancelled. Informational — whether the " +
+          "caller may take it is `actions`.",
+      },
+      actions: {
+        type: "array",
+        description:
+          "Every move the REQUESTING actor may make right now, already narrowed by the lifecycle " +
+          "permission matrix (an Admin advances/rewinds/cancels; an assigned Driver advances and " +
+          "cancels; nobody else gets anything). Clients render their buttons straight from this.",
+        items: schemaRef("OrderAction"),
+      },
       paymentStatus: schemaRef("OrderLookup"),
       deliveryAt: { type: "string", format: "date-time" },
       pickupAt: { type: "string", format: "date-time", nullable: true },
@@ -511,6 +702,22 @@ export const schemas: Record<string, Schema> = {
         description: "The explicit final \"listo\" press that returned the units to the fleet.",
       },
       cancelledAt: { type: "string", format: "date-time", nullable: true },
+      assignee: {
+        type: "object",
+        nullable: true,
+        description: "The assigned driver (the admin is also a driver); absent while unassigned.",
+        properties: {
+          id: { type: "integer", example: 2 },
+          name: { type: "string", example: "Romeo Marroquín" },
+        },
+      },
+      isMine: {
+        type: "boolean",
+        description:
+          "True when the order is assigned to the requesting user — the agenda groups MINE vs the " +
+          "rest and shows the per-order quick action only on `isMine` rows.",
+        example: true,
+      },
       itemCount: {
         type: "integer",
         description: "Total units across the order's active lines.",
@@ -591,15 +798,6 @@ export const schemas: Record<string, Schema> = {
           deliveryAddress: { type: "string", example: "Zona 10, 4a avenida 5-55" },
           description: { type: "string", nullable: true },
           comment: { type: "string", nullable: true },
-          assignedUser: {
-            type: "object",
-            nullable: true,
-            description: "The assigned driver; absent while unassigned.",
-            properties: {
-              id: { type: "integer", example: 2 },
-              name: { type: "string", example: "Romeo Marroquín" },
-            },
-          },
           deliveryAmount: {
             type: "number",
             nullable: true,
@@ -639,8 +837,8 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     description:
       "The reference lists the orders section consumes: event types (with their client " +
-      "lead-times), the status vocabularies, and the contact types + zones the client-registry " +
-      "form needs. Active rows, id order.",
+      "lead-times), the status vocabularies, the contact types + zones the client-registry form " +
+      "needs, and the staff an order can be ASSIGNED to. Active rows, id order.",
     properties: {
       eventTypes: {
         type: "array",
@@ -659,11 +857,31 @@ export const schemas: Record<string, Schema> = {
           },
         },
       },
-      serviceStatuses: { type: "array", items: schemaRef("CatalogOption") },
+      serviceStatuses: {
+        type: "array",
+        description:
+          "The lifecycle statuses in PIPELINE order with the disruptive off-ramps last, each " +
+          "carrying its declared behavior (the machine is configured in data).",
+        items: schemaRef("OrderStatusCatalogOption"),
+      },
       paymentStatuses: { type: "array", items: schemaRef("CatalogOption") },
       paymentMethods: { type: "array", items: schemaRef("CatalogOption") },
       contactTypes: { type: "array", items: schemaRef("CatalogOption") },
       zones: { type: "array", items: schemaRef("ZoneOption") },
+      assignableUsers: {
+        type: "array",
+        description:
+          "Staff an order can be assigned to — the deliverable roles (Admin + Driver today). " +
+          "Names are decrypted; the role name rides along. The create form's \"Asignar a\" options.",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "integer", example: 2 },
+            name: { type: "string", example: "Romeo Marroquín" },
+            role: { type: "string", example: "Administrador" },
+          },
+        },
+      },
     },
   },
   CreateOrderRequest: {
@@ -703,6 +921,15 @@ export const schemas: Record<string, Schema> = {
         description: "How it will be paid (an active seeded method); optional — payment can settle later.",
         example: 1,
       },
+      assignedUserId: {
+        type: "integer",
+        nullable: true,
+        description:
+          "Staff member to assign the order to (an active Admin/Driver — see `GET /orders/catalog` " +
+          "`assignableUsers`). Optional: DEFAULTS to the creating admin, so an order made here is " +
+          "never left unassigned.",
+        example: 2,
+      },
       lines: {
         type: "array",
         minItems: 1,
@@ -727,6 +954,39 @@ export const schemas: Record<string, Schema> = {
       productName: { type: "string", example: "Silla plegable" },
       requested: { type: "integer", example: 25 },
       available: { type: "integer", example: 10 },
+    },
+  },
+  OrderAvailabilityRequest: {
+    type: "object",
+    required: ["deliveryAt", "productIds"],
+    description:
+      "The live availability probe: a delivery datetime, an OPTIONAL pickup (after delivery when " +
+      "present — omit it when no rental window exists yet), and 1–200 product ids.",
+    properties: {
+      deliveryAt: { type: "string", format: "date-time" },
+      pickupAt: { type: "string", format: "date-time", nullable: true },
+      productIds: {
+        type: "array",
+        minItems: 1,
+        maxItems: 200,
+        items: { type: "integer", example: 3 },
+      },
+    },
+  },
+  ProductAvailability: {
+    type: "object",
+    description:
+      "One product's availability for the window. `available` is fleet-minus-held for rentals, " +
+      "current stock for sales, and `null` for a rental with no pickup window yet.",
+    properties: {
+      productId: { type: "integer", example: 3 },
+      available: { type: "integer", nullable: true, example: 10 },
+    },
+  },
+  OrderAvailabilityResponse: {
+    type: "object",
+    properties: {
+      availability: { type: "array", items: schemaRef("ProductAvailability") },
     },
   },
   ClientRegistryContact: {

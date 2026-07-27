@@ -71,7 +71,21 @@
 > pickers** (derived value — no convergent effect) let the admin swap to another saved contact/address.
 > OpenAPI + i18n + tests same-commit; both suites green at 100% coverage. Per-address **instructions**
 > stay a documented fast-follow (the modal collects zone + address text only). The **searchable
-> combobox (§10.A)** and the **live availability annotation (§10.D)** remain unbuilt.
+> combobox (§10.A)** remains unbuilt.
+>
+> **MODE-FORK REMOVED + LIVE AVAILABILITY DONE (2026-07-23):** (1) the **rent/sell/both fork
+> (`OrderModeSelect`) is GONE** — the order's kind is DERIVED from the picked products (any rental
+> line ⇒ a pickup is required, else purchase-only). Both dates show ALWAYS (no abrupt toggle); pickup
+> is required only with a rental and simply not sent otherwise (Q-A now handled at submit, not via an
+> upfront fork). The picker offers ALL products. (2) The **`§10.D` live availability annotation is
+> BUILT**: new **`POST /orders/availability`** (Admin-only; per-window per-product takeable amount —
+> rentals = fleet minus held-in-window via `buildRentedInWindowWhere`, `null` until a pickup exists;
+> sales = stock; exact counts for the admin, a future Client tier caps instead per §11.A) + the
+> order form's debounced fetch on window change: it **annotates the picker** with amounts and
+> **reconciles picked lines** with the owner-chosen **adjust-to-available + notify** rule (reduce to
+> what's takeable, remove when none, toast the summary; lines with unknown availability untouched).
+> Still ADVISORY — the create path re-checks under the product lock (the 409 stays the real guard).
+> The delivery-fee hint is now generic (zone/distance), not "free in Hacienda Real". Both suites 100%.
 
 ## 1. The business, in one paragraph
 
@@ -110,6 +124,27 @@ exclusively **drivers**.
   (gallery uploads OK — quality over forced camera; generous but capped count; reuse the R2
   presign machinery). No sanitization step in-flow (cleaning happens during RECOLECTADO; the final
   "listo" press ends it).
+- 📎 **Status vocabulary — analysis (2026-07-27), NO schema change needed.** The order statuses are a
+  **fixed LIFECYCLE, not a free lookup.** `service_status` is a seeded table
+  (`Pendiente`/`Cancelado`/`Entregado`/`Recolectado`/`En ruta`) but the transitions + inventory
+  meaning are **code**: `ServiceStatusEnum` hardcodes the ids and the engine keys off them
+  (`buildRentedNowWhere` counts DELIVERED/EN_ROUTE as holding, `nextStepKey`/`computeNextActionAt`/the
+  ticket tones map ids). So the admin **cannot** freely add/remove/reorder statuses — that's a state
+  machine, and letting it drift would silently break availability + tracking. What a **future
+  preferences UI CAN safely own** without a schema change: the **display name** (and tone) of each
+  seeded status — the lookup row's `name` is already editable in the DB, so "rename *Pendiente* →
+  *Confirmado*" is a pure presentation edit (the frontend already tolerates unknown ids with a neutral
+  chip tone). Adding a genuinely NEW lifecycle state (e.g. an "En preparación" between Pendiente and En
+  ruta) is a **code change** (enum + transition + holding rules), not config — and correctly so. **Bottom
+  line:** keep it hardcoded now; expose *names/tones* as editable preferences later; no `service_status`
+  reshape is warranted.
+- 🔁 **SUPERSEDED (2026-07-27) — owner chose the FULL data-driven engine.** The analysis above is kept
+  for context, but the owner decided to build the lifecycle as a **data-driven, admin-managed state
+  machine** (capability flags on `service_status`: `sortOrder`/`isInitial`/`isDisruptive`/
+  `holdsInventory`/`requiresEvidence`/`appliesTo`/`colorKey`; a linear pipeline + disruptive off-ramps
+  like Cancelado; one reusable transition engine for future client/driver/auto-assign flows). The
+  COMPLETE architecture + phased implementation plan lives in **`EPIC-2-ORDER-LIFECYCLE.md`** (repo
+  root) — that doc is the single source of truth for this work; start there.
 - ✅ **Only the ADMIN can move a step BACKWARD** (any order). Drivers only ADVANCE their ASSIGNED
   orders. Clients only VIEW their own order.
 - ✅ **CANCELLED** can happen at any step by the admin (even en route); by the client only within
@@ -119,10 +154,29 @@ exclusively **drivers**.
   usual case but must be recordable.
 - ✅ **Event types are a parameterizable lookup** (the purpose of the rental). Each type carries a
   **min-lead-time in hours** (default 24): clients can CREATE orders only if delivery is at least
-  that far away, and can EDIT/CANCEL only until that many hours before delivery. Admin: NO time
-  restrictions — only conflict restrictions (stock + 1h spacing).
+  that far away, and can EDIT/CANCEL only until that many hours before delivery. Admin: NO lead-time
+  restriction — only conflict restrictions (stock + 1h spacing) **plus the ONE date guard below**.
+  - ✅ **Delivery not in the PAST (create) — IMPLEMENTED (2026-07-27).** The admin has no lead-time,
+    but a delivery can never be scheduled before now. Enforced on both pickers/validators: the frontend
+    delivery `<input datetime-local>` gets `min={nowDateTimeLocal()}`, the mirrored Zod adds a
+    not-in-past refine (`deliveryInPast`), and the backend `validateCreateOrder` rejects a past delivery
+    with a `deliveryInPast` 400. A small **2-minute grace** (`DELIVERY_PAST_GRACE_MS`, mirrored both
+    sides) absorbs the minute-granular picker + fill/submit latency so choosing "now" still saves. The
+    **pickup inherits "not in the past" for free** — it's already constrained to be after the delivery.
+    The future CLIENT flow layers the event-type `minLeadHours` on top of this same guard.
 - ✅ **Assignment**: MVP = admin assigns orders to a driver manually (the admin is also a driver).
   Auto-assignment (vehicles/capacity/feasibility) is a future door.
+  - ✅ **CREATE-TIME assignment is IMPLEMENTED (2026-07-27).** `POST /orders` accepts an optional
+    `assignedUserId`; the create form's **"Asignar a"** select (in the delivery section) defaults to
+    the **creating admin** (the token's `userId`), so an order made here is **never unassigned** (its
+    creator's own orders then read as `isMine` → *Mis pedidos* + the quick action). The options are the
+    **deliverable staff** exposed by `GET /orders/catalog` → `assignableUsers` (active users whose role
+    is in **`ASSIGNABLE_ROLES`** = `[Admin, Driver]`, `orders.service.ts` — the SINGLE source: widen it
+    to open assignment to a new delivering role everywhere at once). The validator accepts the field as
+    optional (must be an active deliverable user when present) and the controller defaults it to the
+    creator. **Re-assigning an EXISTING order** (a dedicated action / the detail page) is the next
+    assignment slice; the frontend `assignedUserId` is a required-with-self-default mirror (stricter
+    than the API on purpose).
 
 ### Pricing (product model change)
 - ✅ The billing unit is **Día by default and in practice** — the immovable norm — but HOURLY must

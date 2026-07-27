@@ -4,6 +4,7 @@ import type {
   PaginationMeta,
   ZoneCatalogOptionModel,
 } from "../products/products.models.js";
+import type { OrderActionModel } from "./lifecycle/lifecycle.models.js";
 
 /**
  * The two presentation views of the order list (the frontend's segmented control):
@@ -32,6 +33,12 @@ export interface OrderLookupModel {
   name: string;
 }
 
+/** The order's CURRENT status, carrying its chip tone token so the client renders the colour the
+ *  admin configured (never a client-side id→colour map). `colorKey` is absent when unset. */
+export interface OrderStatusRefModel extends OrderLookupModel {
+  colorKey: string | undefined;
+}
+
 /**
  * An order as the AGENDA/HISTORY list renders it — deliberately lean: what the admin needs at a
  * glance (who, what kind of event, where it stands, when, how big, how much). The PII-heavier
@@ -44,7 +51,15 @@ export interface OrderListItemResponseModel {
   /** True when the order belongs to a walk-in client registry rather than a platform user. */
   isRegistryClient: boolean;
   eventType: OrderLookupModel;
-  status: OrderLookupModel;
+  status: OrderStatusRefModel;
+  /** The MODE-AWARE next pipeline step (a purchase-only order never sees the rental-only ones), or
+   *  absent when the order is finished/cancelled. Informational — what WOULD come next; whether the
+   *  viewer may take it is `actions`. */
+  nextStatus: OrderLookupModel | undefined;
+  /** Every move the REQUESTING actor may make right now (forward / backward / cancel), each already
+   *  carrying its evidence + reason requirements. The client renders its buttons straight from this
+   *  — no lifecycle rule is duplicated there, and a role can never see an action it may not take. */
+  actions: OrderActionModel[];
   paymentStatus: OrderLookupModel;
   deliveryAt: Date;
   /** Absent = purchase-only order (no pickup event — Q-A, 2026-07-16). */
@@ -55,6 +70,11 @@ export interface OrderListItemResponseModel {
   /** The explicit final "listo" press that returned the units to the fleet. */
   readyAt: Date | undefined;
   cancelledAt: Date | undefined;
+  /** The assigned driver (the admin is also a driver); absent while unassigned ("Sin asignar"). */
+  assignee: { id: number; name: string } | undefined;
+  /** True when this order is assigned to the requesting user — the agenda groups MINE vs the rest
+   *  and only shows the per-order quick action on `isMine` rows (never on another worker's order). */
+  isMine: boolean;
   /** Total units across the order's active lines. */
   itemCount: number;
   totalAmount: number;
@@ -105,8 +125,6 @@ export interface OrderDetailResponseModel extends OrderListItemResponseModel {
   deliveryAddress: string;
   description: string | undefined;
   comment: string | undefined;
-  /** The assigned driver (the admin is also a driver); absent while unassigned. */
-  assignedUser: { id: number; name: string } | undefined;
   /** Fee actually charged for this delivery (admin-set, distance-based); absent = no fee. */
   deliveryAmount: number | undefined;
   /** Anticipo (partial deposit) recorded so far. */
@@ -142,19 +160,57 @@ export interface EventTypeCatalogOptionModel extends CatalogOptionModel {
 }
 
 /**
+ * A staff member an order can be ASSIGNED to — the "deliverable" roles (**Admin + Driver** today;
+ * the set widens as more delivering roles land, in ONE place: `ASSIGNABLE_ROLES`). The create form's
+ * "Asignar a" select consumes these, defaulting to the creating admin. `role` (the role's display
+ * name) rides along so the picker can disambiguate people and future UIs can group by role.
+ */
+export interface AssignableUserModel {
+  id: number;
+  name: string;
+  role: string;
+}
+
+/**
+ * A lifecycle status as the catalog publishes it — the seeded lookup PLUS its declared behavior, so
+ * the client can render tones, order the filter chips like the real pipeline, and know what a step
+ * will demand before offering it. Evidence counts are RESOLVED (per-status override already merged
+ * with the global preference), so no consumer needs the globals. Pipeline steps carry `sortOrder`;
+ * disruptive off-ramps (Cancelado) leave it absent.
+ */
+export interface OrderStatusCatalogOptionModel extends CatalogOptionModel {
+  sortOrder: number | undefined;
+  isInitial: boolean;
+  isDisruptive: boolean;
+  /** `NONE` | `WINDOW` | `OUT` — how a rental line in this status affects the fleet. */
+  inventoryHold: string;
+  requiresEvidence: boolean;
+  minEvidence: number;
+  maxEvidence: number;
+  /** `ALL` | `RENTAL` | `SALE` — which order modes walk this step. */
+  appliesTo: string;
+  /** `DELIVERY` | `COLLECTION` — the actual this step stamps; absent when it tracks none. */
+  tracksEvent: string | undefined;
+  colorKey: string | undefined;
+}
+
+/**
  * The reference data the orders section needs (`GET /orders/catalog`): every ACTIVE row of the
  * seeded lookups — event types (with their client lead-times), the status vocabularies for
  * filters/chips, and the contact types + zones the client-registry form consumes.
  */
 export interface OrderCatalogResponseModel {
   eventTypes: EventTypeCatalogOptionModel[];
-  serviceStatuses: CatalogOptionModel[];
+  /** The lifecycle statuses, pipeline order first then the off-ramps, each with its flags. */
+  serviceStatuses: OrderStatusCatalogOptionModel[];
   paymentStatuses: CatalogOptionModel[];
   /** How an order is paid — Efectivo / Transferencia (owner 2026-07-23; card door open). */
   paymentMethods: CatalogOptionModel[];
   contactTypes: CatalogOptionModel[];
   /** Each zone carries its default `deliveryFee` (the order form's fee suggestion). */
   zones: ZoneCatalogOptionModel[];
+  /** The staff the order can be assigned to (deliverable roles) — the "Asignar a" select options. */
+  assignableUsers: AssignableUserModel[];
 }
 
 /** One requested order line — the server derives EVERYTHING else (rent-vs-sale, prices) from the
@@ -193,6 +249,10 @@ export interface CreateOrderRequestModel {
   depositAmount: number | undefined;
   /** How it will be paid (an active seeded method); optional — payment can be settled later. */
   paymentMethodId: number | undefined;
+  /** The staff member to assign the order to (an active Admin/Driver). Optional in the API: the
+   *  controller defaults it to the CREATING admin, so an order created here is never unassigned; the
+   *  form always sends it (its select defaults to the creator). */
+  assignedUserId: number | undefined;
   lines: CreateOrderLineRequestModel[];
 }
 
@@ -203,4 +263,29 @@ export interface OrderStockConflictItemModel {
   requested: number;
   /** Units actually takeable for the requested window (rentals) or remaining stock (sales). */
   available: number;
+}
+
+/**
+ * `POST /orders/availability` — the ADMIN's live per-window availability probe (EPIC-2 §10.C/§11.B):
+ * the order form calls it when the delivery/pickup window is set so the product picker can annotate
+ * each product's takeable amount and reconcile already-picked lines. Admin gets EXACT counts (they
+ * run the business — see §11.A); a future CLIENT tier returns only a capped orderable amount.
+ */
+export interface OrderAvailabilityRequestModel {
+  deliveryAt: Date;
+  /** Absent = no rental window yet — rentals return `null` (unknown until a pickup is set). */
+  pickupAt: Date | undefined;
+  productIds: number[];
+}
+
+/** One product's availability for the requested window. */
+export interface ProductAvailabilityModel {
+  productId: number;
+  /** Rentals: fleet minus what's held in the window; sales: current stock. `null` = a rental with
+   *  no pickup window yet (can't be computed until a pickup is chosen). */
+  available: number | null;
+}
+
+export interface OrderAvailabilityResponseModel {
+  availability: ProductAvailabilityModel[];
 }

@@ -5,28 +5,42 @@ import { getPrismaClient } from "@/services/prisma.service.js";
 import { logger } from "@/config/logger.js";
 import { AuditAction, logAudit } from "@/config/auditLogger.js";
 import { isDeployedEnvironment } from "@/config/environment.js";
-import { encryptKms } from "@helpers/encryption.js";
+import { decryptKms, encryptKms } from "@helpers/encryption.js";
 import { type CustomRequest } from "@models/common/customRequestModel.js";
+import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
 import { PaymentStatusEnum } from "@models/enums/paymentStatusEnum.js";
-import { ServiceStatusEnum } from "@models/enums/serviceStatusEnum.js";
+import { RolesEnum } from "@models/enums/rolesEnum.js";
 import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { buildPaginationMeta } from "../products/products.service.js";
 import {
   type CreateOrderRequestModel,
+  type OrderAvailabilityRequestModel,
+  type OrderAvailabilityResponseModel,
   type OrderCatalogResponseModel,
   type OrderDetailEnvelopeModel,
+  type OrderListItemResponseModel,
   type OrderListResponseModel,
   type OrderStockConflictItemModel,
+  type ProductAvailabilityModel,
 } from "./orders.models.js";
 import {
+  evidenceBoundsFor,
+  getEvidenceBounds,
+  getStatusCatalog,
+  holdingStatusIds,
+  initialStatus,
+} from "./lifecycle/lifecycle.service.js";
+import {
+  ASSIGNABLE_ROLES,
   OrderSpacingConflictError,
   OrderStockConflictError,
   buildOrderListWhere,
   buildRentedInWindowWhere,
   buildSpacingConflictWhere,
   computeBilledDays,
+  loadOrderProjectionContext,
   orderListInclude,
   orderListOrderBy,
   parseOrderListQuery,
@@ -35,6 +49,7 @@ import {
   projectOrderDetail,
   projectOrderListItem,
   richOrderInclude,
+  sortAgendaRows,
   type PricedOrderLineModel,
 } from "./orders.service.js";
 
@@ -52,22 +67,53 @@ export const getOrders = async (
 ): Promise<void> => {
   try {
     const query = parseOrderListQuery(req.query);
+    // Role is DB-verified in verifyJwt; fall back to the least-privileged shape if somehow absent.
+    const role = req.user?.userRole ?? RolesEnum.Client;
+    const currentUserId = req.user?.userId ?? 0;
     const prismaClient = await getPrismaClient();
-    const where = buildOrderListWhere(query);
+    // Row scoping: a Driver sees ONLY orders assigned to them; the Admin sees every order.
+    const scopeUserId = role === RolesEnum.Driver ? currentUserId : undefined;
+    const where = buildOrderListWhere(query, scopeUserId);
+    // The lifecycle machine, loaded once for the whole page (the catalog is memoized in-process).
+    const context = await loadOrderProjectionContext({
+      userId: currentUserId,
+      role,
+    });
 
-    const [rows, total] = await Promise.all([
-      prismaClient.service.findMany({
+    // AGENDA: the active set is small (single-vehicle logistics), so fetch every matching row and
+    // order it in memory — MINE first, then soonest NEXT ACTION (delivery/pickup/"listo") — then
+    // slice the page. HISTORY is a growing log, so it keeps native pagination (newest delivery
+    // first) with no owner grouping.
+    let orders: OrderListItemResponseModel[];
+    let total: number;
+    if (query.view === "agenda") {
+      const rows = await prismaClient.service.findMany({
         where,
         include: orderListInclude,
-        orderBy: orderListOrderBy(query.view),
-        skip: (query.page - 1) * query.pageSize,
-        take: query.pageSize,
-      }),
-      prismaClient.service.count({ where }),
-    ]);
+      });
+      const sorted = sortAgendaRows(rows, currentUserId);
+      total = sorted.length;
+      const start = (query.page - 1) * query.pageSize;
+      orders = sorted
+        .slice(start, start + query.pageSize)
+        .map((row) => projectOrderListItem(row, context));
+    } else {
+      const [rows, count] = await Promise.all([
+        prismaClient.service.findMany({
+          where,
+          include: orderListInclude,
+          orderBy: orderListOrderBy(query.view),
+          skip: (query.page - 1) * query.pageSize,
+          take: query.pageSize,
+        }),
+        prismaClient.service.count({ where }),
+      ]);
+      orders = rows.map((row) => projectOrderListItem(row, context));
+      total = count;
+    }
 
     const response: OrderListResponseModel = {
-      orders: rows.map(projectOrderListItem),
+      orders,
       pagination: buildPaginationMeta(query.page, query.pageSize, total),
     };
 
@@ -129,7 +175,13 @@ export const getOrderById = async (
     }
 
     const response: OrderDetailEnvelopeModel = {
-      order: projectOrderDetail(rawOrder),
+      order: projectOrderDetail(
+        rawOrder,
+        await loadOrderProjectionContext({
+          userId: req.user?.userId ?? 0,
+          role: req.user?.userRole ?? RolesEnum.Client,
+        }),
+      ),
     };
     logger.info(i18next.t("orders.getOrderById.logs.orderFetched", { id }));
     sendOzariSuccess(
@@ -185,6 +237,23 @@ export const createOrder = async (
     const byUserId = req.user?.userId ?? 0;
     const prismaClient = await getPrismaClient();
 
+    // The lifecycle machine decides where a new order STARTS and which statuses hold units — both
+    // read from the `service_status` flags, never from a literal id.
+    const catalog = await getStatusCatalog();
+    const initial = initialStatus(catalog);
+    const holding = holdingStatusIds(catalog);
+    if (!initial) {
+      // No active initial step: the lifecycle was misconfigured (or never seeded). Refusing beats
+      // inventing a status — the admin fixes it in "Estados del pedido" (or re-seeds).
+      logger.error(i18next.t("orders.createOrder.logs.lifecycleUnconfigured"));
+      sendOzariError(
+        res,
+        HttpEnum.CONFLICT,
+        i18next.t("orders.createOrder.lifecycleUnconfigured"),
+      );
+      return;
+    }
+
     // One linear transaction script (lock → price → availability → spacing → write); splitting
     // the steps would scatter the atomicity story across helpers that can never run outside it.
     // eslint-disable-next-line sonarjs/cognitive-complexity, complexity
@@ -235,7 +304,12 @@ export const createOrder = async (
         rentalIds.length > 0 && body.pickupAt
           ? await tx.serviceDetail.groupBy({
               by: ["productId"],
-              where: buildRentedInWindowWhere(rentalIds, body.deliveryAt, body.pickupAt),
+              where: buildRentedInWindowWhere(
+                rentalIds,
+                body.deliveryAt,
+                body.pickupAt,
+                holding,
+              ),
               _sum: { quantity: true },
             })
           : [];
@@ -314,8 +388,13 @@ export const createOrder = async (
           deliveryAmount: body.deliveryAmount ?? null,
           depositAmount: body.depositAmount ?? null,
           paymentMethodId: body.paymentMethodId ?? null,
+          // Assignment: the chosen deliverable staff (validated as an active Admin/Driver), else the
+          // CREATING admin — so an order made here is never left unassigned. The admin's own orders
+          // then read as `isMine` on the agenda (Mis pedidos + the quick action).
+          assignedUserId: body.assignedUserId ?? byUserId,
           currencyId,
-          serviceStatusId: ServiceStatusEnum.PENDING,
+          // The configured entry point of the pipeline (today "Pendiente" — the `isInitial` row).
+          serviceStatusId: initial.id,
           paymentStatusId: PaymentStatusEnum.PENDING,
           serviceDetails: {
             create: pricedLines.map((line) => ({
@@ -329,7 +408,7 @@ export const createOrder = async (
           },
           // The audit trail's creation row: no previous status, confirmed by this admin.
           statusHistory: {
-            create: { toStatusId: ServiceStatusEnum.PENDING, byUserId },
+            create: { toStatusId: initial.id, byUserId },
           },
         },
         select: { id: true },
@@ -353,7 +432,15 @@ export const createOrder = async (
       });
     }
 
-    const response: OrderDetailEnvelopeModel = { order: projectOrderDetail(created) };
+    const response: OrderDetailEnvelopeModel = {
+      order: projectOrderDetail(
+        created,
+        await loadOrderProjectionContext({
+          userId: byUserId,
+          role: req.user?.userRole ?? RolesEnum.Admin,
+        }),
+      ),
+    };
     sendOzariSuccess(
       res,
       HttpEnum.CREATED,
@@ -404,6 +491,10 @@ export const createOrder = async (
  * types + zones the client-registry form needs. Active rows, id order, id + name only (plus
  * `minLeadHours` on event types). **Admin only**, like every orders read today.
  */
+/** The numeric zone from a "Zona N" name, for sorting the picker 1 → 25 (the seeded ids are not in
+ *  zone order). Non-numeric names sort first (0). */
+const zoneNumber = (name: string): number => Number.parseInt(name.replace(/\D/g, ""), 10) || 0;
+
 export const getOrdersCatalog = async (
   _req: CustomRequest,
   res: Response,
@@ -415,34 +506,84 @@ export const getOrdersCatalog = async (
       orderBy: { id: "asc" },
       select: { id: true, name: true },
     } as const;
-    const [eventTypes, serviceStatuses, paymentStatuses, paymentMethods, contactTypes, zoneRows] =
-      await Promise.all([
-        prismaClient.eventType.findMany({
-          ...option,
-          select: { id: true, name: true, minLeadHours: true },
-        }),
-        prismaClient.serviceStatus.findMany(option),
-        prismaClient.paymentStatus.findMany(option),
-        prismaClient.paymentMethod.findMany(option),
-        prismaClient.contactType.findMany(option),
-        prismaClient.zone.findMany({
-          ...option,
-          select: { id: true, name: true, deliveryFee: true },
-        }),
-      ]);
-
-    const response: OrderCatalogResponseModel = {
+    const [
       eventTypes,
-      serviceStatuses,
+      statusCatalog,
+      evidenceBounds,
       paymentStatuses,
       paymentMethods,
       contactTypes,
+      zoneRows,
+      assignableRows,
+    ] = await Promise.all([
+      prismaClient.eventType.findMany({
+        ...option,
+        select: { id: true, name: true, minLeadHours: true },
+      }),
+      // The lifecycle statuses come from the ENGINE's cached catalog (with their flags), not a raw
+      // lookup query — one vocabulary, one source.
+      getStatusCatalog(),
+      getEvidenceBounds(),
+      prismaClient.paymentStatus.findMany(option),
+      prismaClient.paymentMethod.findMany(option),
+      prismaClient.contactType.findMany(option),
+      prismaClient.zone.findMany({
+        ...option,
+        select: { id: true, name: true, deliveryFee: true },
+      }),
+      // The staff an order can be assigned to — active "deliverable" roles (Admin + Driver today).
+      // Names are decrypted; the role name rides along for the picker. Sorted below (encrypted at
+      // rest, so a DB `orderBy` on the name is impossible).
+      prismaClient.user.findMany({
+        where: { isActive: true, roleId: { in: [...ASSIGNABLE_ROLES] } },
+        select: { id: true, fullNameKms: true, role: { select: { name: true } } },
+      }),
+    ]);
+
+    const response: OrderCatalogResponseModel = {
+      eventTypes,
+      // Published (active) statuses in PIPELINE order, the disruptive off-ramps last — the order a
+      // filter row or a lifecycle diagram should read in. Evidence counts arrive resolved.
+      serviceStatuses: statusCatalog
+        .filter((status) => status.isActive)
+        .sort(
+          (a, b) =>
+            (a.sortOrder ?? Number.MAX_SAFE_INTEGER) -
+              (b.sortOrder ?? Number.MAX_SAFE_INTEGER) || a.id - b.id,
+        )
+        .map((status) => {
+          const bounds = evidenceBoundsFor(status, evidenceBounds);
+          return {
+            id: status.id,
+            name: status.name,
+            sortOrder: status.sortOrder ?? undefined,
+            isInitial: status.isInitial,
+            isDisruptive: status.isDisruptive,
+            inventoryHold: status.inventoryHold,
+            requiresEvidence: status.requiresEvidence,
+            minEvidence: bounds.min,
+            maxEvidence: bounds.max,
+            appliesTo: status.appliesTo,
+            tracksEvent: status.tracksEvent ?? undefined,
+            colorKey: status.colorKey ?? undefined,
+          };
+        }),
+      paymentStatuses,
+      paymentMethods,
+      contactTypes,
+      // Ordered by the ZONE NUMBER (Zona 1 → 25), not by id (the seeded ids don't run in zone order).
       // Decimal → number, dropping NULL (not configured) so the form only autofills a real fee.
-      zones: zoneRows.map((zone) => ({
-        id: zone.id,
-        name: zone.name,
-        ...(zone.deliveryFee !== null && { deliveryFee: Number(zone.deliveryFee) }),
-      })),
+      zones: zoneRows
+        .slice()
+        .sort((a, b) => zoneNumber(a.name) - zoneNumber(b.name))
+        .map((zone) => ({
+          id: zone.id,
+          name: zone.name,
+          ...(zone.deliveryFee !== null && { deliveryFee: Number(zone.deliveryFee) }),
+        })),
+      assignableUsers: assignableRows
+        .map((user) => ({ id: user.id, name: decryptKms(user.fullNameKms), role: user.role.name }))
+        .sort((a, b) => a.name.localeCompare(b.name, "es")),
     };
 
     logger.info(i18next.t("orders.catalog.logs.catalogFetched"));
@@ -460,6 +601,70 @@ export const getOrdersCatalog = async (
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
       i18next.t("orders.catalog.errorFetchingCatalog"),
+    );
+  }
+};
+
+/**
+ * `POST /orders/availability` — the admin's live per-window availability probe (EPIC-2 §10.C): for
+ * the requested products + window, return each product's takeable amount so the order form can
+ * annotate the picker and reconcile picked lines. Rentals are fleet minus what's held in the window
+ * (only computable once a pickup exists → `null` otherwise); sales are current stock (window-
+ * independent). Exact counts — the ADMIN runs the business (§11.A); a Client tier would cap instead.
+ * A pure read (no lock): a create still re-checks under the product lock, so this is advisory.
+ */
+export const getOrderAvailability = async (
+  req: CustomRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const body = req.body as OrderAvailabilityRequestModel;
+    const prismaClient = await getPrismaClient();
+    const holding = holdingStatusIds(await getStatusCatalog());
+    const products = await prismaClient.product.findMany({
+      where: { id: { in: body.productIds }, isActive: true },
+      select: { id: true, quantity: true, productBusinessTypeId: true },
+    });
+    const rentalIds = products
+      .filter((product) => product.productBusinessTypeId === BusinessTypeEnum.RENT)
+      .map((product) => product.id);
+    const rentedRows =
+      rentalIds.length > 0 && body.pickupAt
+        ? await prismaClient.serviceDetail.groupBy({
+            by: ["productId"],
+            where: buildRentedInWindowWhere(
+              rentalIds,
+              body.deliveryAt,
+              body.pickupAt,
+              holding,
+            ),
+            _sum: { quantity: true },
+          })
+        : [];
+    const rentedByProduct = new Map(rentedRows.map((row) => [row.productId, row._sum.quantity ?? 0]));
+
+    const availability: ProductAvailabilityModel[] = products.map((product) => {
+      const isRental = product.productBusinessTypeId === BusinessTypeEnum.RENT;
+      let available: number | null;
+      if (!isRental) {
+        available = product.quantity;
+      } else if (body.pickupAt) {
+        available = Math.max(0, product.quantity - (rentedByProduct.get(product.id) ?? 0));
+      } else {
+        available = null;
+      }
+      return { productId: product.id, available };
+    });
+
+    const response: OrderAvailabilityResponseModel = { availability };
+    logger.info(i18next.t("orders.availability.logs.computed", { count: availability.length }));
+    sendOzariSuccess(res, HttpEnum.OK, i18next.t("orders.availability.computed"), response);
+  } catch (error) {
+    logger.error(i18next.t("orders.availability.logs.error", { error }));
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("orders.availability.error"),
     );
   }
 };

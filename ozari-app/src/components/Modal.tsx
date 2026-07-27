@@ -5,8 +5,9 @@ import { HiOutlineXMark } from 'react-icons/hi2';
 import { prefersReducedMotion } from '@utils/motion';
 import { collectStaggerTargets, playStaggerIn, playStaggerOut } from './modalStagger';
 import { registerModal } from './modalRegistry';
+import OverlayScrollbar from './OverlayScrollbar';
 
-type ModalSize = 'sm' | 'md' | 'lg';
+type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 
 export interface ModalProps {
   /** Whether the modal is open. Drives the enter/exit animation and mount lifecycle. */
@@ -51,6 +52,9 @@ const SIZES: Record<ModalSize, string> = {
   sm: 'max-w-sm',
   md: 'max-w-md',
   lg: 'max-w-lg',
+  // Grows with the viewport: comfortable on phones, uses the room a laptop/desktop actually has
+  // (so two-column form rows don't shrink into wrapped labels/errors when there's space).
+  xl: 'max-w-md sm:max-w-xl lg:max-w-2xl',
 };
 
 // A graceful, unhurried open/close — long enough to read as deliberate, not a snap. The shell is
@@ -102,6 +106,7 @@ const Modal: React.FC<ModalProps> = ({
   const shown = open && entered;
 
   const panelRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
   const descId = useId();
@@ -254,27 +259,37 @@ const Modal: React.FC<ModalProps> = ({
           </button>
         )}
 
-        {/* The scrollable body: caps the modal to the screen and scrolls (with momentum, no chaining to
-            the page behind) only when the content would otherwise overflow. `overflow-x-hidden` keeps
-            the modal-stagger x-slide from spawning a horizontal scrollbar. */}
-        <div data-modal-body className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-6">
-          {title && (
-            <h2 id={titleId} className={`modal-stagger text-xl font-semibold text-charcoal ${dismissible ? 'pr-8' : ''}`}>
-              {title}
-            </h2>
-          )}
-          {description && (
-            <p id={descId} className="modal-stagger mt-2 text-[15px] leading-relaxed text-charcoal/60">
-              {description}
-            </p>
-          )}
-          {/* Children are NOT auto-staggered as one block — a modal whose body wants a per-item reveal
-              tags its own elements with `modal-stagger` (e.g. ChangePasswordModal's fields); they then
-              join the same sweep as the title/description. */}
-          {children && <div className="mt-4 text-[15px] text-charcoal/75">{children}</div>}
-          {footer && (
-            <div className="modal-stagger-footer mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">{footer}</div>
-          )}
+        {/* A relative wrapper holds the scrolling body + the shared OverlayScrollbar as siblings, so
+            the bar floats OVER the content (the app's single scrollbar: fades when idle, grows on
+            hover). The body hides its native bar (`.no-native-scrollbar`). */}
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          {/* The scrollable body: caps the modal to the screen and scrolls (with momentum, no chaining
+              to the page behind) only when the content would otherwise overflow. `overflow-x-hidden`
+              keeps the modal-stagger x-slide from spawning a horizontal scrollbar. */}
+          <div
+            ref={bodyRef}
+            data-modal-body
+            className="no-native-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-6"
+          >
+            {title && (
+              <h2 id={titleId} className={`modal-stagger text-xl font-semibold text-charcoal ${dismissible ? 'pr-8' : ''}`}>
+                {title}
+              </h2>
+            )}
+            {description && (
+              <p id={descId} className="modal-stagger mt-2 text-[15px] leading-relaxed text-charcoal/60">
+                {description}
+              </p>
+            )}
+            {/* Children are NOT auto-staggered as one block — a modal whose body wants a per-item reveal
+                tags its own elements with `modal-stagger` (e.g. ChangePasswordModal's fields); they then
+                join the same sweep as the title/description. */}
+            {children && <div className="mt-4 text-[15px] text-charcoal/75">{children}</div>}
+            {footer && (
+              <div className="modal-stagger-footer mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">{footer}</div>
+            )}
+          </div>
+          <OverlayScrollbar target={bodyRef} />
         </div>
       </div>
     </div>,

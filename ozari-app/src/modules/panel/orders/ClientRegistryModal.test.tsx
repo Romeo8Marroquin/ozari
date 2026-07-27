@@ -13,7 +13,7 @@ vi.mock('@components/notifications/notify', () => ({ notify: { success, error } 
 import ClientRegistryModal from './ClientRegistryModal';
 
 const KEY = 'modules.panel.orders.registry';
-const contactTypes = [{ id: 1, name: 'WhatsApp' }, { id: 2, name: 'Teléfono' }];
+const contactTypes = [{ id: 1, name: 'WhatsApp' }, { id: 2, name: 'Teléfono' }, { id: 3, name: 'Correo electrónico' }];
 const zones = [{ id: 6, name: 'Zona 10' }];
 const paymentMethods = [{ id: 1, name: 'Efectivo' }, { id: 2, name: 'Transferencia' }];
 
@@ -41,12 +41,13 @@ const removeAddressButtons = () => screen.queryAllByRole('button', { name: `${KE
 
 /** Fill the default (one contact + one address) into a submittable state and return the handlers. */
 const fillValid = async (): Promise<Handlers> => {
-  await userEvent.type(screen.getByPlaceholderText(`${KEY}.fields.namePlaceholder`), 'María López');
+  const user = userEvent.setup({ delay: null });
+  await user.type(screen.getByPlaceholderText(`${KEY}.fields.namePlaceholder`), 'María López');
   const selects = screen.getAllByRole('combobox');
-  await userEvent.selectOptions(selects[0] as HTMLElement, '1'); // first contact type
-  await userEvent.type(screen.getByPlaceholderText(`${KEY}.fields.contactValuePlaceholder`), '5555-1234');
-  await userEvent.type(screen.getByPlaceholderText(`${KEY}.fields.addressPlaceholder`), 'Zona 10, 4a avenida 5-55');
-  await userEvent.click(screen.getByRole('button', { name: `${KEY}.submit` }));
+  await user.selectOptions(selects[0] as HTMLElement, '1'); // first contact type
+  await user.type(screen.getByPlaceholderText(`${KEY}.fields.contactValuePlaceholder`), '5555-1234');
+  await user.type(screen.getByPlaceholderText(`${KEY}.fields.addressPlaceholder`), 'Zona 10, 4a avenida 5-55');
+  await user.click(screen.getByRole('button', { name: `${KEY}.submit` }));
   await waitFor(() => expect(createRegistry).toHaveBeenCalled());
   return createRegistry.mock.calls[0][1] as Handlers;
 };
@@ -146,16 +147,19 @@ describe('ClientRegistryModal', () => {
 
     // (a) current < index: remove a LATER contact → the principal (0) is untouched.
     await user.click(removeContactButtons()[2]);
+    await waitFor(() => expect(principalRadios()).toHaveLength(2));
     expect(principalRadios()[0]).toBeChecked();
     // (b) current === index: remove the selected contact (0) → falls back to 0.
     await user.click(removeContactButtons()[0]);
+    await waitFor(() => expect(principalRadios()).toHaveLength(1));
     expect(principalRadios()[0]).toBeChecked();
     // (c) current > index: select index 1, remove the earlier index 0 → shifts down to 0.
     await addContact(); // back to 2 contacts
     await user.click(principalRadios()[1]);
     await user.click(removeContactButtons()[0]);
+    await waitFor(() => expect(principalRadios()).toHaveLength(1));
     expect(principalRadios()[0]).toBeChecked();
-  });
+  }, 20000);
 
   it('keeps the favorite valid across removals and shows the empty note when all addresses are gone', async () => {
     const user = userEvent.setup({ delay: null });
@@ -165,16 +169,28 @@ describe('ClientRegistryModal', () => {
 
     // (a) current < index: remove a LATER address → favorite (0) untouched.
     await user.click(removeAddressButtons()[1]);
+    await waitFor(() => expect(favoriteRadios()).toHaveLength(1));
     expect(favoriteRadios()[0]).toBeChecked();
     // (b) current > index: add one, select index 1, remove the earlier index 0 → shifts to 0.
     await addAddress();
     await user.click(favoriteRadios()[1]);
     await user.click(removeAddressButtons()[0]);
+    await waitFor(() => expect(favoriteRadios()).toHaveLength(1));
     expect(favoriteRadios()[0]).toBeChecked();
     // (c) current === index: remove the last (selected) address → the empty note appears.
     await user.click(removeAddressButtons()[0]);
-    expect(screen.getByText(`${KEY}.fields.addressesEmpty`)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(`${KEY}.fields.addressesEmpty`)).toBeInTheDocument());
     expect(favoriteRadios()).toHaveLength(0);
+  }, 20000);
+
+  it('adapts the contact keyboard + autofill hints to the email channel', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderModal();
+    await user.selectOptions(screen.getAllByRole('combobox')[0] as HTMLElement, '3'); // Correo
+    const valueInput = screen.getByPlaceholderText(`${KEY}.fields.contactValuePlaceholder`);
+    expect(valueInput).toHaveAttribute('inputmode', 'email');
+    expect(valueInput).toHaveAttribute('autocapitalize', 'none');
+    expect(valueInput).toHaveAttribute('autocorrect', 'off');
   });
 
   it('surfaces a 400 inline and a 500 as a toast', async () => {

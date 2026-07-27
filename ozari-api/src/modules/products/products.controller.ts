@@ -12,6 +12,10 @@ import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { getStorage, StorageValidationError } from "@helpers/storage.js";
 import {
+  getStatusCatalog,
+  holdingStatusIds,
+} from "../orders/lifecycle/lifecycle.service.js";
+import {
   type CreateProductImageUploadsRequestModel,
   type CreateProductRequestModel,
   type ProductCatalogResponseModel,
@@ -51,9 +55,12 @@ const loadRentedNowByProductId = async (
     return new Map();
   }
   const prismaClient = await getPrismaClient();
+  // WHICH statuses hold units is the lifecycle machine's call (the `inventory_hold` flag), read
+  // from its cached catalog — products never hardcodes a status id.
+  const holding = holdingStatusIds(await getStatusCatalog());
   const grouped = await prismaClient.serviceDetail.groupBy({
     by: ["productId"],
-    where: buildRentedNowWhere(ids, new Date()),
+    where: buildRentedNowWhere(ids, new Date(), holding),
     _sum: { quantity: true },
   });
   return new Map(grouped.map((row) => [row.productId, row._sum.quantity ?? 0]));

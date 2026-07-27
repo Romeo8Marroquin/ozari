@@ -3,7 +3,7 @@ import { renderHook } from '@testing-library/react';
 import { StorageKeys } from '@constants/StorageKeys';
 import { Role } from '@constants/Roles';
 import { Storage } from '@utils/storage';
-import { getStoredRole, useHasRole, useRole } from './useRole';
+import { getStoredRole, getStoredUserId, useHasRole, useRole } from './useRole';
 
 const base64url = (obj: object): string =>
   btoa(JSON.stringify(obj)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -40,6 +40,22 @@ describe('getStoredRole', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     Storage.set(StorageKeys.TOKEN, 'not-a-jwt');
     expect(getStoredRole()).toBeNull();
+  });
+});
+
+describe('getStoredUserId', () => {
+  it('returns the numeric userId from the stored token', () => {
+    Storage.set(StorageKeys.TOKEN, makeToken({ userId: 7, userRole: Role.Admin }));
+    expect(getStoredUserId()).toBe(7);
+  });
+
+  it('returns null when there is no token', () => {
+    expect(getStoredUserId()).toBeNull();
+  });
+
+  it('returns null when the token has no numeric userId', () => {
+    Storage.set(StorageKeys.TOKEN, makeToken({ userId: 'x', userRole: Role.Admin }));
+    expect(getStoredUserId()).toBeNull();
   });
 });
 

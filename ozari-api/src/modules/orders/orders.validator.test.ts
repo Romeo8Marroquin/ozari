@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, type Mock } from "vitest";
 import type { NextFunction, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
-import { validateCreateOrder } from "./orders.validator.js";
+import { validateCreateOrder, validateOrderAvailability } from "./orders.validator.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
@@ -36,9 +36,17 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
     eventType: { findFirst: vi.fn().mockResolvedValue({ id: 1 }) },
     paymentMethod: { findFirst: vi.fn().mockResolvedValue({ id: 1 }) },
     product: { findMany: vi.fn().mockResolvedValue([rentalProduct, saleProduct]) },
+    // The assignable-staff check: an active deliverable user by default.
+    user: { findFirst: vi.fn().mockResolvedValue({ id: 5 }) },
     ...overrides,
   });
 }
+
+// Freeze "now" well before the fixtures' 2026-08 dates so the not-in-past delivery guard is
+// deterministic (and the hardcoded future fixtures never become stale as the wall clock advances).
+const FROZEN_NOW = new Date("2026-07-15T12:00:00.000Z").getTime();
+beforeAll(() => vi.spyOn(Date, "now").mockReturnValue(FROZEN_NOW));
+afterAll(() => vi.restoreAllMocks());
 
 const validBody = () => ({
   clientRegistryId: 3,
@@ -109,6 +117,7 @@ describe("validateCreateOrder", () => {
     ["invalidClientRegistryId", { clientRegistryId: "x" }],
     ["invalidEventTypeId", { eventTypeId: "x" }],
     ["invalidDeliveryAt", { deliveryAt: "not-a-date" }],
+    ["deliveryInPast", { deliveryAt: "2020-01-01T00:00:00.000Z" }],
     ["invalidLines", { lines: [] }],
     ["invalidLineQuantity", { lines: [{ productId: 3, quantity: 0 }] }],
     ["duplicateLineProduct", { lines: [{ productId: 3, quantity: 1 }, { productId: 3, quantity: 2 }] }],
@@ -138,6 +147,29 @@ describe("validateCreateOrder", () => {
     mockPrisma({ paymentMethod: { findFirst: vi.fn().mockResolvedValue(null) } });
     await run({ ...validBody(), paymentMethodId: 99 });
     expectRejected("invalidPaymentMethodId");
+  });
+
+  it("leaves the assignee undefined when absent (the controller defaults it to the creator)", async () => {
+    const { req, next } = await run(validBody());
+    expect(next).toHaveBeenCalled();
+    expect((req.body as Record<string, unknown>)["assignedUserId"]).toBeUndefined();
+  });
+
+  it("accepts a valid deliverable assignee and puts it on the body", async () => {
+    const { req, next } = await run({ ...validBody(), assignedUserId: 5 });
+    expect(next).toHaveBeenCalled();
+    expect((req.body as Record<string, unknown>)["assignedUserId"]).toBe(5);
+  });
+
+  it("rejects an assignee who is not an active deliverable user (Admin/Driver) via the DB", async () => {
+    mockPrisma({ user: { findFirst: vi.fn().mockResolvedValue(null) } });
+    await run({ ...validBody(), assignedUserId: 99 });
+    expectRejected("invalidAssignedUserId");
+  });
+
+  it("rejects a malformed assignee id without a DB lookup", async () => {
+    await run({ ...validBody(), assignedUserId: "x" });
+    expectRejected("invalidAssignedUserId");
   });
 
   it("rejects an unknown/inactive registry and event type via the DB", async () => {
@@ -215,6 +247,70 @@ describe("validateCreateOrder", () => {
       expect.anything(),
       HttpEnum.INTERNAL_SERVER_ERROR,
       "orders.createOrder.validators.validationError",
+    );
+  });
+});
+
+const runAvailability = (body: unknown): { req: Request; next: Mock } => {
+  const req = { body } as unknown as Request;
+  const next = vi.fn();
+  validateOrderAvailability(req, {} as Response, next as unknown as NextFunction);
+  return { req, next };
+};
+const expectRejectedAvailability = (key: string): void => {
+  expect(sendOzariError).toHaveBeenCalledWith(
+    expect.anything(),
+    HttpEnum.BAD_REQUEST,
+    `orders.availability.validators.${key}`,
+  );
+};
+
+describe("validateOrderAvailability", () => {
+  const DELIVERY = "2026-08-01T14:00:00.000Z";
+  const PICKUP = "2026-08-02T10:00:00.000Z";
+
+  it("passes a valid probe with delivery + pickup + product ids", () => {
+    const { req, next } = runAvailability({ deliveryAt: DELIVERY, pickupAt: PICKUP, productIds: [3, 4] });
+    expect(next).toHaveBeenCalled();
+    const body = req.body as Record<string, unknown>;
+    expect(body["deliveryAt"]).toBeInstanceOf(Date);
+    expect(body["pickupAt"]).toBeInstanceOf(Date);
+    expect(body["productIds"]).toEqual([3, 4]);
+  });
+
+  it("treats an absent/empty/null pickup as 'no rental window yet'", () => {
+    for (const pickupAt of [undefined, null, ""]) {
+      vi.clearAllMocks();
+      const { req, next } = runAvailability({ deliveryAt: DELIVERY, ...(pickupAt !== undefined && { pickupAt }), productIds: [3] });
+      expect(next).toHaveBeenCalled();
+      expect((req.body as Record<string, unknown>)["pickupAt"]).toBeUndefined();
+    }
+  });
+
+  it.each([
+    ["invalidDeliveryAt", { deliveryAt: "nope", productIds: [3] }],
+    ["invalidPickupAt", { deliveryAt: DELIVERY, pickupAt: "nope", productIds: [3] }],
+    ["pickupBeforeDelivery", { deliveryAt: DELIVERY, pickupAt: "2026-08-01T13:00:00.000Z", productIds: [3] }],
+    ["invalidProductIds", { deliveryAt: DELIVERY, productIds: [] }],
+    ["invalidProductIds", { deliveryAt: DELIVERY, productIds: "x" }],
+    ["invalidProductIds", { deliveryAt: DELIVERY, productIds: [0] }],
+  ])("rejects %s", (key, body) => {
+    const { next } = runAvailability(body);
+    expect(next).not.toHaveBeenCalled();
+    expectRejectedAvailability(key);
+  });
+
+  it("rejects too many product ids", () => {
+    runAvailability({ deliveryAt: DELIVERY, productIds: Array.from({ length: 201 }, (_, i) => i + 1) });
+    expectRejectedAvailability("tooManyProductIds");
+  });
+
+  it("responds 500 on a malformed body", () => {
+    validateOrderAvailability({ body: null } as unknown as Request, {} as Response, vi.fn() as unknown as NextFunction);
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      "orders.availability.validators.validationError",
     );
   });
 });

@@ -14,6 +14,14 @@ import {
   type CreateOrderLineRequestModel,
   type CreateOrderRequestModel,
 } from "./orders.models.js";
+import { ASSIGNABLE_ROLES } from "./orders.service.js";
+
+/**
+ * Grace absorbed when checking that a create delivery isn't in the PAST: the picker is minute-
+ * granular and the admin needs a moment to finish + submit, so a delivery chosen as "now" and saved
+ * a few seconds later must still pass. Mirrors the frontend schema's `DELIVERY_PAST_GRACE_MS`.
+ */
+const DELIVERY_PAST_GRACE_MS = 2 * 60 * 1000;
 
 /** Log the create-order validator warning for `key` and send its standard 400. */
 const rejectCreate = (
@@ -126,6 +134,13 @@ export const validateCreateOrder = async (
     const deliveryAt = parseDate(body["deliveryAt"]);
     if (!deliveryAt) {
       rejectCreate(res, "invalidDeliveryAt", { deliveryAt: body["deliveryAt"] });
+      return;
+    }
+    // The admin has NO lead-time restriction (a future client flow will) — but a delivery may never
+    // be scheduled in the PAST. This is the ONE ordering guard on the create date; the pickup is
+    // then constrained to be after the delivery (below), so it inherits "not in the past" for free.
+    if (deliveryAt.getTime() < Date.now() - DELIVERY_PAST_GRACE_MS) {
+      rejectCreate(res, "deliveryInPast", { deliveryAt: body["deliveryAt"] });
       return;
     }
 
@@ -297,6 +312,32 @@ export const validateCreateOrder = async (
       paymentMethodId = rawPaymentMethodId as number;
     }
 
+    // Assignment (OPTIONAL here — the controller defaults it to the creating admin, so an order is
+    // never left unassigned): when present it must be an ACTIVE "deliverable" staff member. The role
+    // set is `ASSIGNABLE_ROLES` (Admin + Driver today) — widen there to open assignment to new roles.
+    let assignedUserId: number | undefined;
+    const rawAssignedUserId = body["assignedUserId"];
+    if (rawAssignedUserId !== undefined && rawAssignedUserId !== null) {
+      const assignedUser =
+        typeof rawAssignedUserId === "number" &&
+        Number.isInteger(rawAssignedUserId) &&
+        rawAssignedUserId >= 1
+          ? await prismaClient.user.findFirst({
+              where: {
+                id: rawAssignedUserId,
+                isActive: true,
+                roleId: { in: [...ASSIGNABLE_ROLES] },
+              },
+              select: { id: true },
+            })
+          : null;
+      if (!assignedUser) {
+        rejectCreate(res, "invalidAssignedUserId", { assignedUserId: rawAssignedUserId });
+        return;
+      }
+      assignedUserId = rawAssignedUserId as number;
+    }
+
     const validatedBody: CreateOrderRequestModel = {
       clientRegistryId: clientRegistryId as number,
       eventTypeId: eventTypeId as number,
@@ -310,6 +351,7 @@ export const validateCreateOrder = async (
       deliveryAmount: deliveryAmount.value,
       depositAmount: depositAmount.value,
       paymentMethodId,
+      assignedUserId,
       lines,
     };
     req.body = validatedBody;
@@ -320,6 +362,75 @@ export const validateCreateOrder = async (
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
       i18next.t("orders.createOrder.validators.validationError"),
+    );
+  }
+};
+
+/** Log the availability validator warning for `key` and send its standard 400. */
+const rejectAvailability = (res: Response, key: string, logParams: Record<string, unknown>): void => {
+  logger.warn(i18next.t(`orders.availability.validators.logs.${key}`, logParams));
+  sendOzariError(res, HttpEnum.BAD_REQUEST, i18next.t(`orders.availability.validators.${key}`));
+};
+
+/** Sensible cap for a per-window availability probe — far above any real catalog page. */
+const MAX_AVAILABILITY_PRODUCTS = 200;
+
+/**
+ * `POST /orders/availability` — validates the live availability probe: a delivery datetime, an
+ * OPTIONAL pickup (after delivery when present — omitting it means "no rental window yet"), and 1..N
+ * product ids. Read-only, so no DB lookups here; the controller reads the products.
+ */
+export const validateOrderAvailability = (req: Request, res: Response, next: NextFunction): void => {
+  try {
+    const body = req.body as Record<string, unknown>;
+
+    const deliveryAt = parseDate(body["deliveryAt"]);
+    if (!deliveryAt) {
+      rejectAvailability(res, "invalidDeliveryAt", { deliveryAt: body["deliveryAt"] });
+      return;
+    }
+
+    let pickupAt: Date | undefined;
+    const rawPickupAt = body["pickupAt"];
+    if (rawPickupAt !== undefined && rawPickupAt !== null && rawPickupAt !== "") {
+      const parsed = parseDate(rawPickupAt);
+      if (!parsed) {
+        rejectAvailability(res, "invalidPickupAt", { pickupAt: rawPickupAt });
+        return;
+      }
+      if (parsed.getTime() <= deliveryAt.getTime()) {
+        rejectAvailability(res, "pickupBeforeDelivery", { deliveryAt, pickupAt: parsed });
+        return;
+      }
+      pickupAt = parsed;
+    }
+
+    const rawIds = body["productIds"];
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      rejectAvailability(res, "invalidProductIds", { productIds: rawIds });
+      return;
+    }
+    if (rawIds.length > MAX_AVAILABILITY_PRODUCTS) {
+      rejectAvailability(res, "tooManyProductIds", { count: rawIds.length });
+      return;
+    }
+    const productIds: number[] = [];
+    for (const id of rawIds) {
+      if (typeof id !== "number" || !Number.isInteger(id) || id < 1) {
+        rejectAvailability(res, "invalidProductIds", { productIds: rawIds });
+        return;
+      }
+      productIds.push(id);
+    }
+
+    req.body = { deliveryAt, pickupAt, productIds };
+    next();
+  } catch (error) {
+    logger.error(i18next.t("orders.availability.validators.logs.validationError", { error }));
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("orders.availability.validators.validationError"),
     );
   }
 };

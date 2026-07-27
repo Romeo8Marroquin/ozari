@@ -4,15 +4,18 @@ import {
   formatDayLabel,
   formatShortDate,
   formatTime,
+  groupAgenda,
+  groupHistory,
   groupOrdersByDay,
   isSameLocalDay,
+  orderNextActionAt,
 } from './orderDayGroups';
 
 // Local-time constructor strings (no Z) so the LOCAL calendar-day grouping is deterministic
 // regardless of the machine's timezone.
 const NOW = new Date('2026-07-16T09:00:00');
 
-const order = (id: number, deliveryAt: string): OrderListItem => ({
+const order = (id: number, deliveryAt: string, over: Partial<OrderListItem> = {}): OrderListItem => ({
   id,
   clientName: `Cliente ${id}`,
   isRegistryClient: false,
@@ -20,9 +23,12 @@ const order = (id: number, deliveryAt: string): OrderListItem => ({
   status: { id: 1, name: 'Pendiente' },
   paymentStatus: { id: 1, name: 'Pendiente' },
   deliveryAt: new Date(deliveryAt).toISOString(),
+  isMine: false,
+  actions: [],
   itemCount: 1,
   totalAmount: 100,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
+  ...over,
 });
 
 describe('groupOrdersByDay', () => {
@@ -59,6 +65,88 @@ describe('groupOrdersByDay', () => {
 
   it('returns no groups for an empty list', () => {
     expect(groupOrdersByDay([], NOW)).toEqual([]);
+  });
+
+  it('files rows under the day the accessor picks (e.g. the next action, not the delivery)', () => {
+    // A delivered rental with a pickup on the 17th, delivered on the 16th → grouped under the 17th.
+    const delivered = order(1, '2026-07-16T10:00:00', {
+      deliveredAt: new Date('2026-07-16T10:20:00').toISOString(),
+      pickupAt: new Date('2026-07-17T10:00:00').toISOString(),
+    });
+    const groups = groupOrdersByDay([delivered], NOW, orderNextActionAt);
+    expect(groups.map((g) => g.key)).toEqual(['2026-07-17']);
+  });
+});
+
+describe('orderNextActionAt', () => {
+  const delivery = '2026-07-16T10:00:00';
+  const pickup = '2026-07-18T10:00:00';
+  const delivered = '2026-07-16T10:30:00';
+  const collected = '2026-07-18T10:30:00';
+  const iso = (value: string) => new Date(value).toISOString();
+
+  it('reads the tracked ACTUALS, not the status (mirrors the backend)', () => {
+    // Nothing tracked yet → the delivery, whatever the order's status is called.
+    expect(
+      orderNextActionAt(
+        order(1, delivery, { status: { id: 42, name: 'Preparando en bodega' } }),
+      ).toISOString(),
+    ).toBe(iso(delivery));
+
+    // Delivered rental → its pickup; delivered purchase (no pickup) → the delivered actual.
+    const deliveredRental = order(1, delivery, {
+      deliveredAt: iso(delivered),
+      pickupAt: iso(pickup),
+    });
+    expect(orderNextActionAt(deliveredRental).toISOString()).toBe(iso(pickup));
+    expect(
+      orderNextActionAt(order(1, delivery, { deliveredAt: iso(delivered) })).toISOString(),
+    ).toBe(iso(delivered));
+
+    // Collected → the collection moment (it's waiting out the washing period).
+    expect(
+      orderNextActionAt(
+        order(1, delivery, {
+          deliveredAt: iso(delivered),
+          pickupAt: iso(pickup),
+          collectedAt: iso(collected),
+        }),
+      ).toISOString(),
+    ).toBe(iso(collected));
+  });
+});
+
+describe('groupAgenda', () => {
+  it('splits MINE-first / the-rest bands when both exist, each grouped by next-action day', () => {
+    const sections = groupAgenda(
+      [
+        order(1, '2026-07-16T18:00:00', { isMine: true }),
+        order(2, '2026-07-17T09:00:00', { isMine: true }),
+        order(3, '2026-07-16T06:00:00', { isMine: false }),
+      ],
+      NOW,
+    );
+    expect(sections.map((s) => s.owner)).toEqual(['mine', 'rest']);
+    expect(sections[0].days.flatMap((d) => d.orders.map((o) => o.id))).toEqual([1, 2]);
+    expect(sections[1].days.flatMap((d) => d.orders.map((o) => o.id))).toEqual([3]);
+  });
+
+  it('collapses to a single un-split band when only one side has rows', () => {
+    const onlyRest = groupAgenda([order(1, '2026-07-16T10:00:00', { isMine: false })], NOW);
+    expect(onlyRest.map((s) => s.owner)).toEqual(['all']);
+    const onlyMine = groupAgenda([order(2, '2026-07-16T10:00:00', { isMine: true })], NOW);
+    expect(onlyMine.map((s) => s.owner)).toEqual(['all']);
+  });
+});
+
+describe('groupHistory', () => {
+  it('is one chronological band by delivery day', () => {
+    const sections = groupHistory(
+      [order(1, '2026-07-16T10:00:00'), order(2, '2026-07-14T10:00:00')],
+      NOW,
+    );
+    expect(sections.map((s) => s.owner)).toEqual(['all']);
+    expect(sections[0].days.map((d) => d.key)).toEqual(['2026-07-16', '2026-07-14']);
   });
 });
 

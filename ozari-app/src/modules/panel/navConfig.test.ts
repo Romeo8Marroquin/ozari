@@ -18,8 +18,12 @@ describe('PANEL_NAV', () => {
     ]);
   });
 
-  it('restricts products to Admin + Client — a Driver never sees the tab (Epic-2A)', () => {
-    expect(filterNavByRole(PANEL_NAV, Role.Driver).map((i) => i.to)).toEqual(['/panel/ajustes']);
+  it('restricts products to Admin + Client — a Driver never sees the products tab (Epic-2A)', () => {
+    // A Driver's tabs are the orders agenda (their deliveries) + settings — never products.
+    expect(filterNavByRole(PANEL_NAV, Role.Driver).map((i) => i.to)).toEqual([
+      '/panel/pedidos',
+      '/panel/ajustes',
+    ]);
     expect(filterNavByRole(PANEL_NAV, Role.Admin).map((i) => i.to)).toEqual([
       '/panel/productos',
       '/panel/pedidos',
@@ -31,11 +35,10 @@ describe('PANEL_NAV', () => {
     ]);
   });
 
-  it('restricts orders to Admin only until the Client/Driver backend slices land', () => {
+  it('opens orders to Admin + Driver (row-scoped), still not to a Client', () => {
+    expect(filterNavByRole(PANEL_NAV, Role.Admin).map((i) => i.to)).toContain('/panel/pedidos');
+    expect(filterNavByRole(PANEL_NAV, Role.Driver).map((i) => i.to)).toContain('/panel/pedidos');
     expect(filterNavByRole(PANEL_NAV, Role.Client).map((i) => i.to)).not.toContain(
-      '/panel/pedidos',
-    );
-    expect(filterNavByRole(PANEL_NAV, Role.Driver).map((i) => i.to)).not.toContain(
       '/panel/pedidos',
     );
   });
@@ -77,10 +80,10 @@ describe('panelSectionFor', () => {
 });
 
 describe('panelHomeFor', () => {
-  it("lands each role on its first visible tab: products for Admin/Client, settings for a Driver", () => {
+  it('lands each role on its first visible tab: products for Admin/Client, the agenda for a Driver', () => {
     expect(panelHomeFor(Role.Admin)).toBe('/panel/productos');
     expect(panelHomeFor(Role.Client)).toBe('/panel/productos');
-    expect(panelHomeFor(Role.Driver)).toBe('/panel/ajustes');
+    expect(panelHomeFor(Role.Driver)).toBe('/panel/pedidos');
   });
 
   it('falls back to settings for a null (unreadable) role', () => {

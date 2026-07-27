@@ -1,7 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
-import { ServiceStatusEnum } from "@models/enums/serviceStatusEnum.js";
 import { appConfig } from "@/config/app.js";
 import { isValidEnumValue } from "@helpers/utils.js";
 import { getStorage, type Storage } from "@helpers/storage.js";
@@ -161,28 +160,38 @@ export function rentProductIds(
 
 /**
  * The `service_details` filter selecting every order line that HOLDS rental units *right now* —
- * the business rule behind the derived availability, in one place:
+ * the business rule behind the derived availability, in one place, and now **read from the
+ * lifecycle machine instead of hardcoded ids** (EPIC-2 order lifecycle, 2026-07-27):
  *
- * - **DELIVERED** services hold their units regardless of the event window — the items are
- *   physically out until COLLECTED, so an overdue pickup keeps counting against availability;
- * - **PENDING** services hold theirs only while `now` falls inside `[serviceStart, serviceEnd]` —
- *   a booking for next week doesn't reduce TODAY's number (order-time validation will run this
- *   same rule against the *event's* window instead of `now`);
- * - **CANCELLED** / **COLLECTED** never hold, and soft-deleted lines/services don't either.
+ * - statuses flagged `inventoryHold = OUT` hold their units unconditionally — the items are
+ *   physically gone (on the truck / at the event) or back but not yet washed, so an overdue pickup
+ *   or a pending cleaning keeps counting against availability;
+ * - statuses flagged `WINDOW` hold theirs only while `now` falls inside `[serviceStart, serviceEnd]`
+ *   — a booking for next week doesn't reduce TODAY's number;
+ * - `NONE` statuses (Listo returned them to the fleet, Cancelado never took them) never hold, and
+ *   soft-deleted lines/services and non-rental lines don't either.
+ *
+ * `holding` comes from `holdingStatusIds(catalog)` — pass the cached catalog's ids, never literals.
+ * Empty id lists simply match nothing, which is the correct reading of "no status holds units".
  */
 export function buildRentedNowWhere(
   productIds: number[],
   now: Date,
+  holding: { out: number[]; window: number[] },
 ): Prisma.ServiceDetailWhereInput {
   return {
     productId: { in: productIds },
     isActive: true,
+    // Rent-vs-sale is SNAPSHOTTED per line: a sold unit already left the recorded quantity, so it
+    // must never also count as held (matters once a product's business type is edited).
+    isRental: true,
     service: {
       isActive: true,
+      cancelledAt: null,
       OR: [
-        { serviceStatusId: ServiceStatusEnum.DELIVERED },
+        { serviceStatusId: { in: holding.out } },
         {
-          serviceStatusId: ServiceStatusEnum.PENDING,
+          serviceStatusId: { in: holding.window },
           serviceStart: { lte: now },
           serviceEnd: { gte: now },
         },
