@@ -256,7 +256,14 @@ const PanelShell: React.FC = () => {
                 <PanelScrollMemory target={main} />
                 <main
                   ref={main}
-                  className="panel-main no-native-scrollbar h-full overflow-y-auto bg-gradient-to-b from-[#f8f5f8] to-[#f0ecf1]"
+                  // `overflow-anchor: none`: panel pages ANIMATE height (cards morphing to their
+                  // content, rows growing in, lists reflowing), and that is exactly the input the
+                  // browser's scroll anchoring reacts to — it re-scrolls to keep some node visually
+                  // fixed while a tween is mid-flight, which reads as the panel jumping under the
+                  // animation, and it self-suppresses after a few adjustments so it looks
+                  // intermittent. GSAP owns choreography here (the division rule), and that includes
+                  // the scroll: growth that needs to be seen calls `revealInScroller` deliberately.
+                  className="panel-main no-native-scrollbar h-full overflow-y-auto [overflow-anchor:none] bg-gradient-to-b from-[#f8f5f8] to-[#f0ecf1]"
                 >
                   {/* The gradient fills the full viewport width, but the content itself is clamped and
                       centered so it stays readable on ultrawide monitors (chrome edge-to-edge, content

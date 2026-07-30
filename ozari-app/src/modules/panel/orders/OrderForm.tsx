@@ -22,7 +22,14 @@ import { QueryKeys } from '@constants/QueryKeys';
 import { getStoredUserId } from '@hooks/useRole';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { getStatus, toFormError } from '@utils/apiError';
-import { detailRowIn, detailRowOut, SECTION_REVEAL_STEP, staggerIn, staggerOut } from '../pageMotion';
+import {
+  detailRowIn,
+  detailRowOut,
+  revealInScroller,
+  SECTION_REVEAL_STEP,
+  staggerIn,
+  staggerOut,
+} from '../pageMotion';
 import { usePanelNavigate } from '../PanelNavContext';
 import PreferencesCta from '../PreferencesCta';
 import type { Product } from '../products/product.types';
@@ -31,7 +38,7 @@ import SectionReveal from '../products/SectionReveal';
 import ClientRegistryModal from './ClientRegistryModal';
 import { CHANNEL_INPUT_MODE, contactChannelKind } from '@constants/Regex';
 import ContactChannelIcon from './ContactChannelIcon';
-import type { ClientRegistry, OrderStockConflictItem } from './order.types';
+import type { ClientRegistry, OrderDetail, OrderStockConflictItem } from './order.types';
 import {
   billedDaysFromStrings,
   estimateLineSubtotal,
@@ -46,12 +53,14 @@ import {
   createOrderRequiredPatterns,
   createOrderSchema,
   nowDateTimeLocal,
+  orderToFormValues,
   parseDateTime,
   parseLineQuantity,
   parseMoney,
   reconcileToastDuration,
   takeableFor,
   toCreateOrderBody,
+  updateOrderSchema,
   type CreateOrderFormType,
 } from './SchemaCreateOrder';
 import { useClientRegistries } from './useClientRegistries';
@@ -59,10 +68,20 @@ import { useCreateOrder } from './useCreateOrder';
 import { useOrderAvailability } from './useOrderAvailability';
 import { useOrderProducts } from './useOrderProducts';
 import { useOrdersCatalog } from './useOrdersCatalog';
+import { useUpdateOrder } from './useUpdateOrder';
 
 const FORM_ID = 'create-order-form';
 const KEY = 'modules.panel.orders.create';
+/** The handful of strings an EDIT phrases differently; every field label is shared with create. */
+const EKEY = 'modules.panel.orders.edit';
 const SECONDARY_COLOR = '#262626';
+
+interface OrderFormProps {
+  /** `create` (default) posts a new order; `edit` prefills from `order` and saves through PUT. */
+  mode?: 'create' | 'edit';
+  /** The order being edited — required in `edit` mode, and the source of every default value. */
+  order?: OrderDetail;
+}
 
 /** A section card matching the panel surface language — each one is a `.reveal-block`. */
 const Section: React.FC<{ title: string; description: string; children: React.ReactNode }> = ({
@@ -96,6 +115,9 @@ const LineRow: React.FC<{
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     detailRowIn(ref.current);
+    // The new line is what the click asked for, so it must not open below the fold — the panel
+    // follows it by the minimum needed, on the same curve as the row's own growth.
+    revealInScroller(ref.current);
   }, []);
   return (
     <div
@@ -237,13 +259,18 @@ function useOrderViewSwap(
  * conflict land inline — a stock 409's `data.conflicts` maps back onto the offending line's
  * quantity field with the real available count (EPIC-2 §8) — while ambient failures toast.
  *
+ * In **edit** mode the very same form is prefilled from the order and saves through
+ * `PUT /orders/:id` — one component, because an edit describes exactly the same thing a create does
+ * and two copies would drift. What differs is only: where the defaults come from, which mutation
+ * runs, the submit label, and where a save lands (back on the order, not on the agenda).
+ *
  * Step zero is the MODE fork (rent / buy / both), which filters the product picker and, together
  * with which lines are rentals, decides whether a pickup exists (Q-A). Selecting a client registry
  * prefills the delivery snapshots (editable — parties rarely happen at the client's home); a "new
  * client" button opens {@link ClientRegistryModal} inline. Pricing is derived SERVER-SIDE; the form
  * shows an on-brand ESTIMATE (mirrors the backend formula) so the admin can quote on the phone.
  */
-const OrderForm: React.FC = () => {
+const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   const { t } = useTranslation();
   const panelNavigate = usePanelNavigate();
   const queryClient = useQueryClient();
@@ -251,7 +278,10 @@ const OrderForm: React.FC = () => {
   const productsQuery = useOrderProducts();
   const registriesQuery = useClientRegistries();
   const { createOrder, isPending: isCreating } = useCreateOrder();
+  const { updateOrder, isPending: isUpdating } = useUpdateOrder();
   const { checkAvailability } = useOrderAvailability();
+  const isEdit = mode === 'edit' && order !== undefined;
+  const isSaving = isCreating || isUpdating;
 
   const [registryModalOpen, setRegistryModalOpen] = useState(false);
   const [formError, setFormError] = useState<string | undefined>(undefined);
@@ -274,7 +304,13 @@ const OrderForm: React.FC = () => {
     availabilityRef.current = availability;
     productsByIdRef.current = productsById;
   }, [availability, productsById]);
-  const zodResolve = useMemo(() => zodResolver(createOrderSchema), []);
+  // An EDIT may move the delivery anywhere, including into the past (owner decision 2026-07-29):
+  // the order already happened, or is being corrected for a reason the form can't know. Creating
+  // still refuses a past date. The pickup-after-delivery rule holds in both.
+  const zodResolve = useMemo(
+    () => zodResolver(mode === 'edit' ? updateOrderSchema : createOrderSchema),
+    [mode],
+  );
   const resolver = useCallback<Resolver<CreateOrderFormType>>(
     async (values, context, options) => {
       const result = await zodResolve(values, context, options);
@@ -288,13 +324,19 @@ const OrderForm: React.FC = () => {
     [zodResolve, t],
   );
 
-  // The "Asignar a" select defaults to the CREATING admin (the token's userId), so a created order is
-  // never unassigned and the admin's own orders read as `isMine` on the agenda. Computed once; a null
-  // id (defensive — an admin always has one) leaves the select on its placeholder, which the required
+  // CREATE: the "Asignar a" select defaults to the CREATING admin (the token's userId), so a created
+  // order is never unassigned and the admin's own orders read as `isMine` on the agenda. A null id
+  // (defensive — an admin always has one) leaves the select on its placeholder, which the required
   // rule then blocks on submit.
+  // EDIT: every value comes from the order itself, so saving an untouched form sends exactly what is
+  // already stored. Computed once — RHF captures defaults at mount, and the edit page only mounts
+  // this component once the order has loaded.
   const defaultValues = useMemo<CreateOrderFormType>(
-    () => ({ ...createOrderDefaultValues, assignedUserId: getStoredUserId() as unknown as number }),
-    [],
+    () =>
+      order
+        ? orderToFormValues(order)
+        : { ...createOrderDefaultValues, assignedUserId: getStoredUserId() as unknown as number },
+    [order],
   );
   const methods = useForm<CreateOrderFormType>({
     resolver,
@@ -356,7 +398,10 @@ const OrderForm: React.FC = () => {
     [registries],
   );
   const clientRegistryId = useWatch({ control, name: 'clientRegistryId' });
-  const previousRegistryId = useRef<number | null>(null);
+  // Seeded with the order's OWN client when editing, so the prefill below sees no change on mount:
+  // an existing order's snapshots are what was actually agreed, and overwriting them with the
+  // client's current defaults would silently rewrite the contact, address and delivery fee.
+  const previousRegistryId = useRef<number | null>(order?.clientRegistryId ?? null);
   useEffect(() => {
     if (clientRegistryId == null || clientRegistryId === previousRegistryId.current) return;
     previousRegistryId.current = clientRegistryId;
@@ -487,25 +532,53 @@ const OrderForm: React.FC = () => {
   };
 
   const onSubmit = (data: CreateOrderFormType): void => {
-    if (isCreating) return;
+    if (isSaving) return;
     setFormError(undefined);
-    createOrder(toCreateOrderBody(data), {
+    const body = toCreateOrderBody(data);
+    // Both flows share every failure path — the 400 contract and the 409 conflicts are identical,
+    // because the endpoints validate against the same contract. Only the destination differs: a new
+    // order lands on the agenda, an edited one returns to the order you were looking at.
+    const onError = (error: unknown): void => {
+      // A stock 409 carries structured conflicts — surface them per-line AND in the banner.
+      if (axios.isAxiosError(error) && getStatus(error) === 409) {
+        const conflicts = (error.response?.data as { data?: { conflicts?: OrderStockConflictItem[] } })
+          ?.data?.conflicts;
+        if (conflicts?.length) applyStockConflicts(conflicts);
+      }
+      const { inline, toast } = toFormError(error, t(`${KEY}.errors.submitFallback`));
+      if (inline) setFormError(inline);
+      if (toast) notify.error(toast);
+    };
+
+    if (isEdit) {
+      updateOrder(
+        { orderId: order.id, body },
+        {
+          onSuccess: (response) => {
+            // The response IS the re-projected order (re-priced, re-derived actions, everything) —
+            // seed the detail cache with it so arriving back shows the saved state immediately,
+            // with no flash of the values we just replaced. The invalidations then re-sync from the
+            // server in the background: the ORDER because a concurrent advance may have moved it,
+            // and the AGENDA because its row shows this order's dates, client and total.
+            const saved = response.data.data?.order;
+            if (saved) queryClient.setQueryData([QueryKeys.ORDER, order.id], saved);
+            void queryClient.invalidateQueries({ queryKey: [QueryKeys.ORDERS] });
+            void queryClient.invalidateQueries({ queryKey: [QueryKeys.ORDER, order.id] });
+            notify.success(t(`${EKEY}.successToast`), { title: t(`${EKEY}.successTitle`) });
+            panelNavigate(`/panel/pedidos/${order.id}`);
+          },
+          onError,
+        },
+      );
+      return;
+    }
+    createOrder(body, {
       onSuccess: () => {
         void queryClient.invalidateQueries({ queryKey: [QueryKeys.ORDERS] });
         notify.success(t(`${KEY}.successToast`), { title: t(`${KEY}.successTitle`) });
         panelNavigate('/panel/pedidos');
       },
-      onError: (error) => {
-        // A stock 409 carries structured conflicts — surface them per-line AND in the banner.
-        if (axios.isAxiosError(error) && getStatus(error) === 409) {
-          const conflicts = (error.response?.data as { data?: { conflicts?: OrderStockConflictItem[] } })
-            ?.data?.conflicts;
-          if (conflicts?.length) applyStockConflicts(conflicts);
-        }
-        const { inline, toast } = toFormError(error, t(`${KEY}.errors.submitFallback`));
-        if (inline) setFormError(inline);
-        if (toast) notify.error(toast);
-      },
+      onError,
     });
   };
 
@@ -744,9 +817,11 @@ const OrderForm: React.FC = () => {
                         id="order-delivery-at"
                         name="deliveryAt"
                         type="datetime-local"
-                        // Never a past delivery (the admin's one date rule) — the schema + backend
-                        // also guard it, this just stops the native picker offering earlier slots.
-                        min={nowDateTimeLocal()}
+                        // CREATE: never a past delivery (the admin's one date rule) — the schema and
+                        // the backend also guard it; this just stops the native picker offering
+                        // earlier slots. EDIT: no floor at all — an order being corrected may be
+                        // moved anywhere, so the picker must not fight the rule the schema drops.
+                        {...(!isEdit && { min: nowDateTimeLocal() })}
                         label={t(`${KEY}.fields.deliveryAtLabel`)}
                         aria-label={t(`${KEY}.fields.deliveryAtLabel`)}
                       />
@@ -1034,8 +1109,10 @@ const OrderForm: React.FC = () => {
                     variant="soft"
                     color={SECONDARY_COLOR}
                     fullWidth
-                    disabled={isCreating}
-                    onClick={() => panelNavigate('/panel/pedidos')}
+                    disabled={isSaving}
+                    onClick={() =>
+                      panelNavigate(isEdit ? `/panel/pedidos/${order.id}` : '/panel/pedidos')
+                    }
                     className="sm:w-auto"
                   >
                     {t(`${KEY}.actions.cancel`)}
@@ -1046,10 +1123,10 @@ const OrderForm: React.FC = () => {
                     color={SECONDARY_COLOR}
                     fullWidth
                     disabled={!dataReady}
-                    loading={isCreating}
+                    loading={isSaving}
                     className="sm:w-auto"
                   >
-                    {t(`${KEY}.actions.submit`)}
+                    {t(isEdit ? `${EKEY}.actions.submit` : `${KEY}.actions.submit`)}
                   </Button>
                 </div>
               </div>

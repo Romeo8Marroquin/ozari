@@ -172,7 +172,8 @@ describe('ProductForm — reference data states', () => {
     expect(screen.getByRole('heading', { name: `${KEY}.configMissing.title` })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: `${KEY}.catalogError.retry` })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'modules.panel.dataStatus.goToPreferences' }));
-    expect(navigate).toHaveBeenCalledWith('/panel/ajustes');
+    // Straight to the preferences screen, where the missing reference data is actually created.
+    expect(navigate).toHaveBeenCalledWith('/panel/preferencias');
   });
 
   it.each([

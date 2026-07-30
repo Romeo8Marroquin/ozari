@@ -44,8 +44,17 @@
 >   `POST /orders/evidence/upload-url`; `OrderAdvanceModal` + `useAdvanceOrder` +
 >   `useOrderEvidenceUploads` — **the agenda's quick action is LIVE**.
 >
-> **Not built: Phase 4** (the admin "Estados del pedido" CRUD + screen). Until it lands the machine is
-> edited by re-seeding; everything else already reads it.
+> **Phase 4 (the admin "Estados del pedido" screen) is DEFERRED, not pending** — owner decision
+> 2026-07-27: it belongs to the preferences surface, which doesn't exist yet, and the machine is
+> already fully editable by re-seeding. **§14 holds the complete brief** (endpoints, invariants,
+> reorder gotcha, cache invalidation, UI) — pick it up as one slice after the order DETAIL page.
+> Nothing shipped depends on it.
+>
+> **Also shipped alongside the phases (2026-07-27):** evidence RETENTION (`pnpm purge:evidence`, §6b);
+> the agenda ticket's live state transition (`MorphSwap` — the chip and next-step button adapt their
+> width while their labels cross-fade); the warm-list diff so a newly created order opens its space
+> instead of popping in (the products grid's `useGridListTransition`, generalized); and a shared
+> single-subscription `useBreakpoint` (it was one resize listener PER ROW — the agenda's jank).
 >
 > **⚠️ To run this: apply the migration (`pnpm prisma:migrate:deploy`) and re-seed (`pnpm db:seed`).**
 > Without the seed there is no `isInitial` status and order creation answers a clean 409.
@@ -388,6 +397,105 @@ Enforced on `POST/PUT/DELETE/reorder /orders/statuses`:
 
 ---
 
+## 6b. Evidence RETENTION (owner decision, 2026-07-27) — built as a script, designed for an admin UI
+
+Every evidence-demanding step stores photos in R2 **forever**, and at ~5 photos per order a couple of
+busy years is tens of thousands of objects nobody will open again. So evidence has a **retention
+policy**, and the first implementation of it is `pnpm purge:evidence`
+(`scripts/purge-order-evidence.ts`, LOCAL-only like `reconcile:images` — it lives outside `src/`, so
+it is never deployed).
+
+**What it deletes, exactly:** the PHOTOS — the R2 objects and their `service_evidence` rows — of
+orders finished before a cutoff. **Nothing else.** The orders, their lines, their money, their
+`service_status_history` and every timestamp survive untouched: the business record is permanent,
+only the storage is recycled. That is the whole design constraint (owner: *"let's make sure that
+we're not erasing the elements on db, but just the image, and the reference on the db"*).
+
+- **Cutoff:** `-- --before=YYYY-MM-DD`, else derived from the **`orders.evidenceRetentionMonths`**
+  preference (seeded at 24). The knob lives in `app_preferences` precisely so an admin screen or a
+  scheduled job can share it later without moving the policy.
+- **Only FINISHED orders** (`readyAt` or `cancelledAt` set) are ever considered — photos of an
+  in-flight or never-completed order are exactly the ones a dispute needs. `--include-unfinished`
+  overrides it deliberately.
+- **Dry run by default** (`--fix` applies); rows are deleted in ONE transaction that re-verifies each
+  one inside it, and the R2 objects go AFTER the commit — a failed object delete leaves a sweepable
+  orphan, never a row pointing at a deleted file.
+
+**What the UI shows afterwards:** a purged step simply has no photos, and the order detail (when it
+lands) renders its evidence section from whatever rows exist. The step still PROVES it happened —
+`service_status_history` records who moved it and when, which is the part that answers disputes; the
+photos were supporting material with a shelf life. *Documented door:* if the business ever needs to
+distinguish "no photos were taken" from "photos were purged", add a `purgedAt` receipt column to
+`service_evidence` (making `r2Key`/`url` nullable) and keep the row as a tombstone — a one-column
+migration, deliberately NOT taken now because the owner asked for the reference to be removed.
+
+**Future (not built):** an admin-facing "Retención de evidencia" control in preferences (edit the
+months, see how much would be freed, run it), a scheduled job that applies it automatically, and a
+notification when a purge runs. All three are callers of the same policy + the same deletion logic —
+promote the script's core into `src/` when the first of them is prioritized.
+
+## 6c. Availability across the WHOLE lifecycle (owner rule, 2026-07-28) — the invariant
+
+There are **two inventories**, and only one of them is ever written. Getting this wrong is how stock
+silently drifts, so it is stated once here and implemented in exactly two helpers
+(`releaseSaleStock` / `reclaimOrderStock` in `orders.service.ts`).
+
+| | RENTAL units | SALE units |
+|---|---|---|
+| **How availability is known** | DERIVED, live, from the order's status (`inventoryHold`) — nothing is stored | A real column: `products.quantity`, decremented at creation |
+| **Create** | nothing to write (the status holds it) | decrement, after the availability check |
+| **Forward / backward** | follows the status automatically (En ruta/Entregado/Recolectado hold; Listo releases) | untouched — a sale is a sale from the moment it's confirmed |
+| **Cancel** | released instantly (Cancelado holds nothing) | **restored** — the order stopped being real |
+| **Uncancel (reopen)** | re-held automatically — but **re-checked first** against the fleet in its window | **re-taken**, and refused with a structured `409` if the goods were promised elsewhere meanwhile |
+| **Finish (Listo)** | released (the washing period ended) | stays consumed — **a delivered sale never comes back** |
+| **Delete** | vanishes with the row | **restored only while the order still HELD them** — not if it was already cancelled (they went back then) and not if it was delivered (the client has them) |
+| **Edit** (`PUT /orders/:id`, DONE 2026-07-28) | re-checked for the new window/lines **excluding this order** — and only when its status actually holds (a finished/cancelled order reserves nothing, so its edit is pure paperwork) | the DIFFERENCE applied, up or down, and only while `holdsSaleStock` — a delivered sale is never restocked by a correction |
+
+Two rules carry the whole table: **rental availability is never written, only derived**, and **every
+point where a SALE order stops or resumes being real must move `products.quantity` exactly once**.
+
+The second rule needs one predicate, `holdsSaleStock(order)` = *not cancelled and not delivered* —
+the single answer to "would giving these back put real goods on the shelf, or invent them?". A sale
+unit is HELD from creation (reserved for this client) until **delivery**, when it physically leaves
+the business and is simply sold. So a cancelled order already returned them, and a delivered one
+cannot: deleting the paperwork of a completed sale must not restock goods the client is holding.
+
+Reopening is the only move that can FAIL — the goods may have been promised elsewhere while the
+order sat cancelled — which is why it answers the same structured 409 as create, naming each line
+and its real count. **The admin can never "just reopen" past a conflict**: uncancelling is for a
+cancellation made in error, and the moment someone else has taken those units it stops being a
+correction and becomes a double-booking.
+
+### 6c-bis. The UI may never GUESS any of this (owner rule, 2026-07-28)
+
+Every dialog that mentions inventory states the effect the **engine reports**, never one inferred
+from the kind of move. The old copy said "sus productos volverán a estar disponibles" on every
+cancel and "esas unidades vuelven al inventario" on every delete — both false on an order that had
+already finished or been delivered, and both would have kept being false as steps were added.
+
+Two derived fields carry it, and nothing else may be used for this:
+
+- **`OrderAction.inventoryEffect`** (`release` | `reclaim` | `none`) — `inventoryEffectOf` in
+  `lifecycle.service.ts` compares what the order holds NOW with what it would hold after the move
+  (`currentHoldings` / `holdingsAfter`). `reclaim` wins a tie because it is the effect that can FAIL.
+  It is the ONE thing the advance dialog's inventory sentence, its cancel description, and its
+  reversibility note branch on.
+- **`order.holdsInventory`** — does the order reserve anything at all right now? The delete dialog
+  states its consequence from this, matching what `deleteOrder` actually does (`holdsSaleStock`).
+
+`OrderAction.purgesEvidence` is the same idea for photos: a backward leg out of a step that demanded
+evidence destroys it, so the single-step rewind dialog warns exactly as the multi-step jump does.
+
+The multi-step jump has no single offered action for the server to describe, so the frontend mirrors
+the rule in `walkInventoryEffect` (`orderStatusPath.ts`) — reading only the walk's ENDPOINTS, since
+a walk is applied in one transaction. Like every mirror here it is UX only: the backend re-resolves
+under the row lock and the 409 remains the authority. **Keep the two in step**; a new inventory rule
+belongs in `inventoryEffectOf` first and is mirrored second.
+
+Consequence worth stating: because all of it is derived from `inventoryHold` + the sale predicate,
+inserting a step, renaming one, or changing which steps hold units rewrites every one of these
+sentences with **no code change** — which is the whole point of the data-driven machine.
+
 ## 7. Reusability — the future doors this unlocks (explicit)
 
 - **Client-created orders**: reuse `canTransition` with a `client` actor + the event-type
@@ -500,15 +608,71 @@ by the data model (the two visible surfaces), engine ready underneath.
 (permissions, evidence bounds, timestamps, history, backward/cancel); FE advance modal + evidence
 uploader; driver/admin scoping; make the quick-action button LIVE. Tests, OpenAPI, i18n.
 
-**Phase 4 — Admin management UI (Preferences).**
-`/orders/statuses` CRUD + reorder + invariants; the "Estados del pedido" screen (drag-reorder, add,
-edit, deactivate). Catalog cache invalidation. Tests, OpenAPI, i18n.
+**Phase 4 — Admin management UI (Preferences). ⏸ DEFERRED by owner decision (2026-07-27) — spec
+ready, see §14. Do NOT treat it as work-in-flight.**
+The machine is already fully editable by re-seeding (`pnpm db:seed`, or `pnpm db:seed:force` to
+restore defaults), and the preferences SURFACE this screen belongs to doesn't exist yet — building
+the CRUD now would ship a screen with no home. It lands *after* the remaining order slices (the
+order DETAIL page first), together with the other admin knobs, as one preferences epic.
 
 **Phase 5 — Future-flow doors (as they're prioritized).**
 Client self-service orders (new actor + edit-window cancel), auto-assign policy (advance hook),
 per-status notifications (post-commit hook). Each reuses the engine; each its own epic.
 
 ---
+
+## 14. Phase 4 — "Estados del pedido" (DEFERRED, spec ready)
+
+> **Status: deliberately not built** (owner, 2026-07-27). Everything below is a complete brief — pick
+> it up as one slice when the preferences surface is built, after the order DETAIL page. Nothing in
+> the shipped system waits on it: the lifecycle is edited today by re-seeding.
+
+**Why it's safe to defer.** The machine lives in `service_status` rows and every consumer already
+reads it: seed a new step, rename one, recolor it, change its evidence rule or its `appliesTo`, and
+the backend engine, the agenda chips, the quick-action label and the confirm dialog all follow with
+no deploy. What's missing is only the *editing surface* — a nicety for the admin, not a capability
+of the system.
+
+**API (all Admin-only, all with OpenAPI + i18n in the same commit — `openapi.test.ts` enforces it):**
+
+| Method + path | Purpose |
+|---|---|
+| `GET /orders/statuses` | The definitions as the editor needs them: RAW `minEvidence`/`maxEvidence` (not resolved) **plus** the global bounds, so the form can show "inherits 1–10" vs an override |
+| `POST /orders/statuses` | Add a step (pipeline or disruptive) |
+| `PUT /orders/statuses/:id` | Edit name/description/colorKey/flags/evidence/`appliesTo`/`tracksEvent` |
+| `PUT /orders/statuses/reorder` | Bulk renumber `sortOrder` from a drag-reorder |
+| `DELETE /orders/statuses/:id` | NO-TRASH delete: deactivate when referenced, hard-delete when not |
+
+**Server-side invariants (minimal — the admin owns the outcome, EPIC §1):**
+- exactly ONE active `isInitial` pipeline status (reassigning moves it);
+- `sortOrder` unique among pipeline rows; disruptive rows keep it `NULL`;
+- **can't deactivate/delete a status orders currently sit in** → `409` with the count (it would
+  strand them); referenced only by history → soft-deactivate;
+- `appliesTo ∈ {ALL,RENTAL,SALE}`, `inventoryHold ∈ {NONE,WINDOW,OUT}`, `tracksEvent ∈
+  {DELIVERY,COLLECTION,null}`, `colorKey ∈` the palette (`STATUS_COLOR_KEYS`), per-status evidence
+  counts inside the global bounds;
+- **reorder renumbers 1..N in a transaction via a temporary negative pass** — `@@unique(sortOrder)`
+  trips otherwise on any swap.
+
+**⚠️ The one thing that must not be forgotten:** every write calls
+`invalidateStatusCatalog()` **and** the frontend drops/invalidates its `/orders/catalog` cache.
+The engine memoizes the catalog per process; the 60s TTL (`appConfig.statusCatalogTtlSeconds`) is the
+safety net for out-of-band edits (a seed, another Cloud Run instance) — an in-app edit must feel
+immediate, not "within a minute".
+
+**UI:** a Preferences → "Estados del pedido" screen following the entity-form doctrine — a
+reorderable list (reuse `useGalleryDrag` + the pure `galleryReorder` geometry), add/edit via RHF +
+mirrored Zod, palette picker fed by `STATUS_COLOR_KEYS` (`statusTone.ts` is already the single
+token→classes map), evidence toggle + optional per-status counts, `appliesTo` selector, deactivate
+with the strand-check surfaced as an inline conflict. Copy under
+`modules.panel.preferences.statuses.*`.
+
+**Put on the same screen while you're there:** the evidence **retention** control (§6b) — months +
+a "what would be freed" preview — since it's the same audience and the same preferences table.
+
+**Doors this screen makes visible (still not built):** branching flows (a
+`service_status_transitions` table swapped in behind `resolveTransitions`), per-status notification
+subscribers on `advance()`'s post-commit hook, and a scheduled retention job.
 
 ## 13. Concrete current-code touch-points (grounding, so nothing's missed)
 

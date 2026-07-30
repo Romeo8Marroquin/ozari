@@ -10,6 +10,7 @@ const { useOrdersCatalog } = vi.hoisted(() => ({ useOrdersCatalog: vi.fn() }));
 const { useOrderProducts } = vi.hoisted(() => ({ useOrderProducts: vi.fn() }));
 const { useClientRegistries } = vi.hoisted(() => ({ useClientRegistries: vi.fn() }));
 const { createOrder, useCreateOrder } = vi.hoisted(() => ({ createOrder: vi.fn(), useCreateOrder: vi.fn() }));
+const { updateOrder, useUpdateOrder } = vi.hoisted(() => ({ updateOrder: vi.fn(), useUpdateOrder: vi.fn() }));
 const { checkAvailability, useOrderAvailability } = vi.hoisted(() => ({
   checkAvailability: vi.fn(),
   useOrderAvailability: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('./useOrdersCatalog', () => ({ useOrdersCatalog }));
 vi.mock('./useOrderProducts', () => ({ useOrderProducts }));
 vi.mock('./useClientRegistries', () => ({ useClientRegistries }));
 vi.mock('./useCreateOrder', () => ({ useCreateOrder }));
+vi.mock('./useUpdateOrder', () => ({ useUpdateOrder }));
 vi.mock('./useOrderAvailability', () => ({ useOrderAvailability }));
 
 const { success, error, warning } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
@@ -54,7 +56,7 @@ vi.mock('./ClientRegistryModal', () => ({
 import { QueryKeys } from '@constants/QueryKeys';
 import { PanelNavContext, type PanelNav } from '../PanelNavContext';
 import type { Product } from '../products/product.types';
-import type { ClientRegistry, OrderCatalog } from './order.types';
+import type { ClientRegistry, OrderCatalog, OrderDetail } from './order.types';
 import OrderForm from './OrderForm';
 import { reconcileToastDuration } from './SchemaCreateOrder';
 
@@ -132,7 +134,7 @@ const setReady = () => {
   useClientRegistries.mockReturnValue(q({ data: [registry] }));
 };
 
-const renderForm = () => {
+const renderForm = (props: { mode?: 'create' | 'edit'; order?: OrderDetail } = {}) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const invalidate = vi.spyOn(client, 'invalidateQueries');
   const setData = vi.spyOn(client, 'setQueryData');
@@ -143,9 +145,25 @@ const renderForm = () => {
       <PanelNavContext.Provider value={nav}>{children}</PanelNavContext.Provider>
     </QueryClientProvider>
   );
-  const utils = render(<OrderForm />, { wrapper });
+  const utils = render(<OrderForm {...props} />, { wrapper });
   return { ...utils, invalidate, setData, navigateTo };
 };
+
+/** The order the EDIT tests reopen: one rental line, the registry client, a fee already agreed. */
+const existingOrder = {
+  id: 12,
+  clientRegistryId: 3,
+  clientName: 'Cliente de la fiesta',
+  eventType: { id: 1, name: 'Evento familiar' },
+  deliveryAt: new Date('2026-08-01T14:00:00').toISOString(),
+  pickupAt: new Date('2026-08-02T15:00:00').toISOString(),
+  deliveryContact: '5555-0000',
+  deliveryAddress: 'Salón del club, entrada norte',
+  deliveryAmount: 75,
+  assignee: { id: 5, name: 'Ana Díaz' },
+  paymentMethod: { id: 2, name: 'Transferencia' },
+  lines: [{ id: 31, productId: 3, productName: 'Silla plegable', isRental: true, quantity: 25, unitaryPrice: 6, parcialPrice: 300 }],
+} as unknown as OrderDetail;
 
 const byId = (container: HTMLElement, id: string) => container.querySelector(`#${id}`) as HTMLElement;
 const setDateTime = (input: HTMLElement, value: string) =>
@@ -186,6 +204,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW);
   useCreateOrder.mockReturnValue({ createOrder, isPending: false });
+  useUpdateOrder.mockReturnValue({ updateOrder, isPending: false });
   useOrderAvailability.mockReturnValue({ checkAvailability });
   setReady();
 });
@@ -282,7 +301,8 @@ describe('OrderForm', () => {
     expect(screen.queryByText(`${KEY}.loadError.title`)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: `${KEY}.loadError.retry` })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'modules.panel.dataStatus.goToPreferences' }));
-    expect(navigateTo).toHaveBeenCalledWith('/panel/ajustes');
+    // Straight to the preferences screen, where the missing reference data is actually created.
+    expect(navigateTo).toHaveBeenCalledWith('/panel/preferencias');
   });
 
   it('renders the form sections (no mode fork — the kind is derived from the products)', () => {
@@ -689,4 +709,99 @@ describe('OrderForm', () => {
     expect(await screen.findByText(`${KEY}.errors.lineUnavailable`)).toBeInTheDocument();
     expect(createOrder).not.toHaveBeenCalled();
   }, 20000);
+});
+
+describe('OrderForm (edit mode)', () => {
+  const EKEY = 'modules.panel.orders.edit';
+
+  it('reopens on the order EXACTLY as it stands, and saving an untouched form sends it back', async () => {
+    const { container, invalidate, setData, navigateTo } = renderForm({
+      mode: 'edit',
+      order: existingOrder,
+    });
+
+    // Every value is the order's own — including the client, whose current defaults must NOT
+    // overwrite the snapshots that were actually agreed for this event.
+    expect(byId(container, 'order-client')).toHaveValue('3');
+    expect(byId(container, 'order-delivery-address')).toHaveValue('Salón del club, entrada norte');
+    expect(byId(container, 'order-delivery-contact')).toHaveValue('5555-0000');
+    expect(byId(container, 'order-delivery-amount')).toHaveValue(75);
+    expect(byId(container, 'order-assigned-user')).toHaveValue('5');
+    expect(byId(container, 'order-line-quantity-0')).toHaveValue(25);
+
+    await userEvent.click(screen.getByRole('button', { name: `${EKEY}.actions.submit` }));
+    await waitFor(() => expect(updateOrder).toHaveBeenCalled());
+    expect(createOrder).not.toHaveBeenCalled();
+    const [payload, handlers] = updateOrder.mock.calls[0] as [
+      { orderId: number; body: Record<string, unknown> },
+      { onSuccess: (response: unknown) => void; onError: (e: unknown) => void },
+    ];
+    expect(payload.orderId).toBe(12);
+    expect(payload.body).toMatchObject({
+      clientRegistryId: 3,
+      eventTypeId: 1,
+      deliveryName: 'Cliente de la fiesta',
+      deliveryAddress: 'Salón del club, entrada norte',
+      deliveryAmount: 75,
+      paymentMethodId: 2,
+      assignedUserId: 5,
+      lines: [{ productId: 3, quantity: 25 }],
+    });
+
+    // The response IS the re-projected order: it seeds the detail cache so arriving back shows the
+    // saved state with no flash of the values we just replaced…
+    const saved = { id: 12, clientName: 'Cliente de la fiesta', totalAmount: 675 };
+    handlers.onSuccess({ data: { data: { order: saved } } });
+    expect(setData).toHaveBeenCalledWith([QueryKeys.ORDER, 12], saved);
+    // …and BOTH caches then re-sync from the server (the order may have been advanced meanwhile;
+    // the agenda row shows this order's dates, client and total).
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: [QueryKeys.ORDERS] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: [QueryKeys.ORDER, 12] });
+    expect(success).toHaveBeenCalled();
+    expect(navigateTo).toHaveBeenCalledWith('/panel/pedidos/12');
+  }, 20000);
+
+  it('still re-syncs when the response carries no envelope', async () => {
+    const { setData, invalidate } = renderForm({ mode: 'edit', order: existingOrder });
+    await userEvent.click(screen.getByRole('button', { name: `${EKEY}.actions.submit` }));
+    await waitFor(() => expect(updateOrder).toHaveBeenCalled());
+    const handlers = updateOrder.mock.calls[0][1] as { onSuccess: (r: unknown) => void };
+
+    handlers.onSuccess({ data: {} });
+    expect(setData).not.toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: [QueryKeys.ORDER, 12] });
+  }, 20000);
+
+  it('lets an EDIT move the delivery date freely — a correction is not a scheduling decision', async () => {
+    const { container } = renderForm({ mode: 'edit', order: existingOrder });
+    // No native floor: the picker must not fight the rule the schema drops.
+    expect(byId(container, 'order-delivery-at')).not.toHaveAttribute('min');
+
+    // A date well before "now" saves without complaint (the pickup rule still applies).
+    setDateTime(byId(container, 'order-delivery-at'), '2026-07-01T09:00');
+    setDateTime(byId(container, 'order-pickup-at'), '2026-07-02T09:00');
+    await userEvent.click(screen.getByRole('button', { name: `${EKEY}.actions.submit` }));
+    await waitFor(() => expect(updateOrder).toHaveBeenCalled());
+    expect(screen.queryByText(`${KEY}.errors.deliveryInPast`)).not.toBeInTheDocument();
+  }, 20000);
+
+  it('routes an edit failure through the same doctrine as create (per-line 409 + inline banner)', async () => {
+    renderForm({ mode: 'edit', order: existingOrder });
+    await userEvent.click(screen.getByRole('button', { name: `${EKEY}.actions.submit` }));
+    await waitFor(() => expect(updateOrder).toHaveBeenCalled());
+    const handlers = updateOrder.mock.calls[0][1] as Handlers;
+
+    handlers.onError(
+      axiosError(409, undefined, {
+        conflicts: [{ productId: 3, productName: 'Silla plegable', requested: 25, available: 4 }],
+      }),
+    );
+    expect(await screen.findByText(`${KEY}.errors.lineUnavailable`)).toBeInTheDocument();
+  }, 20000);
+
+  it('backs out to the ORDER, not the agenda — you came from the order', async () => {
+    const { navigateTo } = renderForm({ mode: 'edit', order: existingOrder });
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.cancel` }));
+    expect(navigateTo).toHaveBeenCalledWith('/panel/pedidos/12');
+  });
 });

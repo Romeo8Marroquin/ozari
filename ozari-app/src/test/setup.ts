@@ -1,12 +1,17 @@
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
+import { assertTranslationContract } from './i18nContract';
 
 /**
  * Global test setup (Vitest `setupFiles`). Unit tests don't exercise real translations, so `t`
  * returns the key it was given — assertions can then check *which* key a code path chose. The i18n
  * singletons are also heavy/async, so mocking them keeps unit tests synchronous and hermetic.
+ *
+ * Returning the key does NOT mean the call goes unchecked: every `t()` is held to the real
+ * string's contract first (the key exists; every placeholder has a value). See `i18nContract.ts`
+ * for why that guarantee is complete rather than best-effort.
  */
-const t = (key: string): string => key;
+const t = assertTranslationContract;
 
 vi.mock('i18next', () => ({
   default: {
@@ -28,7 +33,7 @@ vi.mock('react-i18next', () => ({
 vi.mock('i18next-browser-languagedetector', () => ({ default: vi.fn() }));
 
 // jsdom doesn't implement matchMedia. We report `prefers-reduced-motion: reduce` as TRUE so animated
-// components skip their GSAP timelines and render in their final, visible, accessible state — tests
+// components skip their GSAP timelines and render in their final, visible, accessible state � tests
 // assert content/behaviour, not animation frames (GSAP's `autoAlpha:0` start-state would otherwise
 // leave elements `visibility:hidden` and invisible to role queries).
 window.matchMedia = vi.fn().mockImplementation((query: string) => ({

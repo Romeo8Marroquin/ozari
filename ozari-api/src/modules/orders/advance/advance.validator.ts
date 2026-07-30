@@ -5,15 +5,18 @@ import { appConfig } from "@/config/app.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import type {
+  AdvanceEvidenceModel,
   AdvanceOrderRequestModel,
   CreateOrderEvidenceUploadsRequestModel,
 } from "./advance.models.js";
 
 /** Longest cancel reason accepted — a sentence or two, not an essay. */
 export const CANCEL_REASON_MAX_LENGTH = 500;
-/** Hard cap on evidence keys per request (the per-status count is enforced by the engine, under the
+/** Hard cap on evidence keys per STEP (the per-status count is enforced by the engine, under the
  *  row lock — this is only an input bound so a malicious body can't be unbounded). */
 export const EVIDENCE_KEYS_MAX = 20;
+/** Hard cap on how many steps one request may carry photos for — a jump crosses a handful at most. */
+export const EVIDENCE_STEPS_MAX = 20;
 /** An R2 object key as our own presign mints it: the evidence prefix + a uuid + an extension. A
  *  client-invented key can therefore never point outside the orders' evidence namespace (a
  *  traversal like `…/../products/x.jpg` fails the filename pattern after the prefix is stripped). */
@@ -45,17 +48,40 @@ const reject = (
  * engine inside the transaction, under the row lock: a validator that pre-checked it would either
  * duplicate the machine or race it.
  */
-/** The submitted evidence keys, or `null` when the list itself is unusable. Absent = no photos; a
- *  repeated key would collide on the unique `r2_key`, so duplicates are dropped rather than failing
- *  a well-meant double-add in the uploader. */
-const parseEvidenceKeys = (value: unknown): string[] | null => {
-  if (value === undefined || value === null) {
-    return [];
-  }
+/** One step's keys, or `null` when unusable. A repeated key would collide on the unique `r2_key`,
+ *  so duplicates are dropped rather than failing a well-meant double-add in the uploader. */
+const parseKeys = (value: unknown): string[] | null => {
   if (!Array.isArray(value) || value.length > EVIDENCE_KEYS_MAX) {
     return null;
   }
   return value.every(isEvidenceKey) ? [...new Set(value)] : null;
+};
+
+/**
+ * The per-step evidence list, or `null` when any entry is unusable. Absent = no photos at all. Each
+ * entry names the STEP its photos document, which is what lets a multi-step jump be validated (and
+ * stored) honestly instead of dumping every photo on the final status.
+ */
+const parseEvidence = (
+  value: unknown,
+): AdvanceEvidenceModel[] | null => {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value) || value.length > EVIDENCE_STEPS_MAX) {
+    return null;
+  }
+  const parsed: AdvanceEvidenceModel[] = [];
+  for (const raw of value) {
+    const entry = raw as Record<string, unknown>;
+    const statusId = Number(entry["statusId"]);
+    const keys = parseKeys(entry["keys"]);
+    if (!Number.isInteger(statusId) || statusId < 1 || keys === null) {
+      return null;
+    }
+    parsed.push({ statusId, keys });
+  }
+  return parsed;
 };
 
 /** The trimmed cancel reason: `undefined` when absent, `null` when present but unusable. */
@@ -86,8 +112,8 @@ export const validateAdvanceOrder = (
       return;
     }
 
-    const evidenceKeys = parseEvidenceKeys(body["evidenceKeys"]);
-    if (evidenceKeys === null) {
+    const evidence = parseEvidence(body["evidence"]);
+    if (evidence === null) {
       reject(res, "invalidEvidenceKeys", {});
       return;
     }
@@ -100,7 +126,7 @@ export const validateAdvanceOrder = (
 
     const validated: AdvanceOrderRequestModel = {
       toStatusId,
-      evidenceKeys,
+      evidence,
       reason,
     };
     req.body = validated;

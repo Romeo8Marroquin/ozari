@@ -5,7 +5,7 @@ import { PanelNavContext, type PanelNav } from './PanelNavContext';
 import PreferencesCta from './PreferencesCta';
 
 describe('PreferencesCta', () => {
-  it('routes to Settings (the preferences home) through the panel transition', async () => {
+  it('routes to the PREFERENCES screen through the panel transition', async () => {
     const navigateTo = vi.fn();
     const nav: PanelNav = { navigateTo, pending: null };
     render(
@@ -14,6 +14,7 @@ describe('PreferencesCta', () => {
       </PanelNavContext.Provider>,
     );
     await userEvent.click(screen.getByRole('button', { name: 'modules.panel.dataStatus.goToPreferences' }));
-    expect(navigateTo).toHaveBeenCalledWith('/panel/ajustes');
+    // It pointed at Ajustes as a placeholder until the preferences screen existed (2026-07-29).
+    expect(navigateTo).toHaveBeenCalledWith('/panel/preferencias');
   });
 });

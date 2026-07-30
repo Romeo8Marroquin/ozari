@@ -6,11 +6,13 @@ import {
   createOrderRequiredPatterns,
   createOrderSchema,
   nowDateTimeLocal,
+  orderToFormValues,
   parseDateTime,
   parseLineQuantity,
   parseMoney,
   takeableFor,
   toCreateOrderBody,
+  toDateTimeLocal,
   type CreateOrderFormType,
 } from './SchemaCreateOrder';
 
@@ -288,5 +290,101 @@ describe('appendLineAvailabilityErrors', () => {
     const out = appendLineAvailabilityErrors(form, base, () => 4, message);
     expect(lineErrorsOf(out)?.[0]?.quantity?.message).toBe('max 4');
     expect(lineErrorsOf(out)?.[1]?.productId?.message).toBe('dup');
+  });
+});
+
+describe('orderToFormValues', () => {
+  /** The order as `GET /orders/:id` returns it — ISO instants, numbers, optional fields absent. */
+  const order = (overrides: Record<string, unknown> = {}) =>
+    ({
+      clientRegistryId: 3,
+      eventType: { id: 1 },
+      deliveryAt: new Date('2026-08-01T14:00:00').toISOString(),
+      pickupAt: new Date('2026-08-02T10:30:00').toISOString(),
+      clientName: 'María López',
+      deliveryContact: '5555-1234',
+      deliveryAddress: 'Zona 10, 4a avenida 5-55',
+      deliveryAmount: 50,
+      depositAmount: 100,
+      paymentMethod: { id: 2 },
+      assignee: { id: 5 },
+      lines: [
+        { productId: 3, quantity: 25, isRental: true },
+        { productId: 4, quantity: 10, isRental: false },
+      ],
+      ...overrides,
+    }) as Parameters<typeof orderToFormValues>[0];
+
+  it('round-trips: what the form sends back for an untouched order is what it already had', () => {
+    const values = orderToFormValues(order());
+    // The pickers hold LOCAL `datetime-local` strings — the order was scheduled on the business's
+    // own clock, and the field carries no timezone.
+    expect(values.deliveryAt).toBe('2026-08-01T14:00');
+    expect(values.pickupAt).toBe('2026-08-02T10:30');
+    expect(values.lines).toEqual([
+      { productId: 3, quantity: '25', isRental: true },
+      { productId: 4, quantity: '10', isRental: false },
+    ]);
+
+    const body = toCreateOrderBody(values);
+    expect(body).toMatchObject({
+      clientRegistryId: 3,
+      eventTypeId: 1,
+      deliveryName: 'María López',
+      deliveryContact: '5555-1234',
+      deliveryAddress: 'Zona 10, 4a avenida 5-55',
+      deliveryAmount: 50,
+      depositAmount: 100,
+      paymentMethodId: 2,
+      assignedUserId: 5,
+      lines: [
+        { productId: 3, quantity: 25 },
+        { productId: 4, quantity: 10 },
+      ],
+    });
+    expect(new Date(body.deliveryAt).getTime()).toBe(new Date(order().deliveryAt).getTime());
+  });
+
+  it('leaves absent fields empty rather than inventing values', () => {
+    const values = orderToFormValues(
+      order({
+        pickupAt: undefined,
+        description: undefined,
+        comment: undefined,
+        deliveryAmount: undefined,
+        depositAmount: undefined,
+        paymentMethod: undefined,
+        lines: [{ productId: 4, quantity: 2, isRental: false }],
+      }),
+    );
+    expect(values.pickupAt).toBe('');
+    expect(values.description).toBe('');
+    expect(values.comment).toBe('');
+    expect(values.deliveryAmount).toBe('');
+    expect(values.depositAmount).toBe('');
+    expect(values.paymentMethodId).toBeNull();
+    // A purchase-only order sends no pickup at all (the mode rule, mirrored).
+    expect(toCreateOrderBody(values).pickupAt).toBeUndefined();
+  });
+
+  it('restores the optional TEXTS an order does carry', () => {
+    const values = orderToFormValues(
+      order({ description: 'Cumpleaños en el jardín', comment: 'Llamar al llegar' }),
+    );
+    expect(values.description).toBe('Cumpleaños en el jardín');
+    expect(values.comment).toBe('Llamar al llegar');
+  });
+
+  it('does NOT restore the form-only aids — they were never part of the order', () => {
+    // `deliveryContactTypeId` picks an icon/keyboard and `deliveryZoneId` suggests a fee; what an
+    // order records is the agreed TEXT. Guessing them from the registry would let a later zone
+    // change silently rewrite the fee that was actually agreed.
+    const values = orderToFormValues(order());
+    expect(values.deliveryContactTypeId).toBeNull();
+    expect(values.deliveryZoneId).toBeNull();
+  });
+
+  it('pads every part of the datetime-local value', () => {
+    expect(toDateTimeLocal(new Date('2026-01-05T09:07:00').toISOString())).toBe('2026-01-05T09:07');
   });
 });

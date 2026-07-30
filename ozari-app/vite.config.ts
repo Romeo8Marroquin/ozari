@@ -81,6 +81,10 @@ export default defineConfig({
         // default body fade) — no business logic; the pages' STATE decisions and the layout's
         // transition CONTROLLER are tested, these timelines are visual-only.
         'src/modules/panel/pageMotion.ts',
+        // The "region adapts instead of repainting" hook — a thin React wrapper that measures a box
+        // after each commit and replays the difference through pageMotion's GSAP helpers. Same
+        // rationale as pageMotion/useAuthCard: visual orchestration only, no decisions of its own.
+        'src/modules/panel/useMorphOnChange.ts',
         // The card→detail shared-element image transition (fixed clone + GSAP travel between the
         // pages) — pure visual orchestration on top of the standard transition, verified by eye;
         // the components' begin/claim DECISIONS are what the unit tests pin.

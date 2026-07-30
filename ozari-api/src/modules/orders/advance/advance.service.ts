@@ -1,11 +1,16 @@
 import type { Prisma } from "@prisma/client";
 import { TrackedEventEnum } from "@models/enums/serviceLifecycleEnum.js";
 import type {
+  EvidenceBoundsModel,
   LifecycleOrderModel,
   StatusDefinitionModel,
   TransitionKindModel,
 } from "../lifecycle/lifecycle.models.js";
-import { isComplete } from "../lifecycle/lifecycle.service.js";
+import {
+  evidenceBoundsFor,
+  isComplete,
+  statusById,
+} from "../lifecycle/lifecycle.service.js";
 
 /**
  * The PURE half of a lifecycle transition: given the machine, the order and the move, what exactly
@@ -75,6 +80,22 @@ export function buildTransitionData({
   if (kind === "disruptive") {
     return { ...base, cancelledAt: now, cancelReason: reason ?? null };
   }
+  if (kind === "reopen") {
+    // Undoing a cancellation: the order returns to a real step and the cancellation is erased. The
+    // tracked ACTUALS are deliberately kept — it really was delivered/collected on those dates; only
+    // whether it is finished is recomputed for the step it lands on.
+    const reopened: LifecycleOrderModel = {
+      ...order,
+      serviceStatusId: to.id,
+      cancelledAt: null,
+    };
+    return {
+      ...base,
+      cancelledAt: null,
+      cancelReason: null,
+      readyAt: isComplete(catalog, reopened) ? now : null,
+    };
+  }
   if (kind === "backward") {
     return {
       ...base,
@@ -114,6 +135,102 @@ const clearActual = (
   return status?.tracksEvent === TrackedEventEnum.COLLECTION
     ? { collectedAt: null }
     : {};
+};
+
+/** One step of a resolved path, fully worked out: what to write, which photos to attach, and whose
+ *  photos to destroy. The controller only has to execute these in order. */
+export interface PlannedStepModel {
+  to: StatusDefinitionModel;
+  from: StatusDefinitionModel | undefined;
+  kind: TransitionKindModel;
+  data: Prisma.ServiceUpdateInput;
+  /** Pre-uploaded R2 keys documenting the step being entered. */
+  evidenceKeys: string[];
+  /** The status whose evidence this step DESTROYS — set only on a backward leg, where the step being
+   *  undone must not keep photos of something that no longer happened. */
+  purgeStatusId: number | null;
+}
+
+/**
+ * Turns a resolved path into the exact sequence of writes, replaying the order's state as it walks
+ * so every step is planned against the state the previous one left behind (its actuals, its
+ * completion, whether it is still cancelled). PURE — the controller executes the plan inside its
+ * transaction, and a wrong stamping rule fails here, in a unit test, rather than in the database.
+ *
+ * Throws {@link AdvanceOrderError} (`evidence`) as soon as a step's photo requirement isn't met, so
+ * a jump that would land half-documented never begins.
+ */
+// One linear walk over the path; the per-step decisions (kind → evidence → data → purge) belong
+// together in the order they happen.
+export function planStatusPath({
+  catalog,
+  order,
+  path,
+  evidenceByStatus,
+  bounds,
+  now,
+  reason,
+}: {
+  catalog: StatusDefinitionModel[];
+  order: LifecycleOrderModel;
+  path: StatusDefinitionModel[];
+  /** Photo keys per target status id — a multi-step jump collects them all in one pass. */
+  evidenceByStatus: Map<number, string[]>;
+  bounds: EvidenceBoundsModel;
+  now: Date;
+  reason?: string;
+}): PlannedStepModel[] {
+  const wasCancelled =
+    order.cancelledAt !== null ||
+    statusById(catalog, order.serviceStatusId)?.isDisruptive === true;
+  let running = order;
+  let from = statusById(catalog, order.serviceStatusId);
+  const steps: PlannedStepModel[] = [];
+
+  for (const to of path) {
+    const kind = kindOfStep(from, to, wasCancelled && steps.length === 0);
+    const evidenceKeys = evidenceByStatus.get(to.id) ?? [];
+    assertEvidenceSatisfies(to, kind, evidenceBoundsFor(to, bounds), evidenceKeys);
+    steps.push({
+      to,
+      from,
+      kind,
+      data: buildTransitionData({
+        catalog,
+        order: running,
+        from,
+        to,
+        kind,
+        now,
+        ...(reason !== undefined && { reason }),
+      }),
+      evidenceKeys,
+      // Undoing a step destroys what documented it (no-trash: the photos of an event that, as far
+      // as the record now goes, never happened).
+      purgeStatusId: from !== undefined && kind === "backward" ? from.id : null,
+    });
+    running = {
+      ...running,
+      serviceStatusId: to.id,
+      cancelledAt: kind === "disruptive" ? now : null,
+    };
+    from = to;
+  }
+  return steps;
+}
+
+const kindOfStep = (
+  from: StatusDefinitionModel | undefined,
+  to: StatusDefinitionModel,
+  reopening: boolean,
+): TransitionKindModel => {
+  if (reopening) {
+    return "reopen";
+  }
+  if (to.isDisruptive) {
+    return "disruptive";
+  }
+  return (from?.sortOrder ?? 0) < (to.sortOrder ?? 0) ? "forward" : "backward";
 };
 
 /**

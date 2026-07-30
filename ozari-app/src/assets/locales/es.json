@@ -59,6 +59,12 @@
       "warning": "Atención",
       "info": "Información"
     },
+    "lightbox": {
+      "close": "Cerrar",
+      "previous": "Foto anterior",
+      "next": "Siguiente foto",
+      "counter": "{{current}} de {{total}}"
+    },
     "share": {
       "label": "Compartir",
       "copied": "Enlace copiado"
@@ -202,7 +208,140 @@
         "products": "Productos",
         "orders": "Pedidos",
         "customers": "Clientes",
+        "preferences": "Preferencias",
         "settings": "Ajustes"
+      },
+      "preferences": {
+        "title": "Preferencias del sistema",
+        "lead": "Reglas y catálogos que aplican a todo el negocio: los tiempos de la logística, la evidencia de cada paso y las listas que alimentan los formularios.",
+        "loading": "Cargando las preferencias",
+        "error": {
+          "title": "No fue posible cargar las preferencias",
+          "description": "Revisa la conexión e inténtalo de nuevo.",
+          "retry": "Reintentar"
+        },
+        "tabs": {
+          "label": "Grupos de preferencias",
+          "operation": "Operación",
+          "orders": "Pedidos",
+          "products": "Productos"
+        },
+        "groups": {
+          "orders": {
+            "title": "Logística",
+            "description": "El margen requerido entre eventos y el tiempo para volver a tener los productos disponibles. Ambos determinan qué se puede comprometer y cuándo."
+          },
+          "evidence": {
+            "title": "Evidencia",
+            "description": "Cuántas fotos solicita cada paso que las requiere, y por cuánto tiempo se conservan."
+          }
+        },
+        "settings": {
+          "save": "Guardar cambios",
+          "integerError": "El valor debe ser un número entero.",
+          "rangeError": "El valor debe estar entre {{min}} y {{max}}.",
+          "invertedError": "El máximo de fotos no puede ser menor que el mínimo.",
+          "logisticsSpacingMinutes": {
+            "label": "Minutos entre eventos",
+            "help": "Margen mínimo entre una entrega o recolección y la de otro pedido. Aplica a todos los pedidos, sin excepción."
+          },
+          "turnaroundMinutes": {
+            "label": "Minutos de lavado",
+            "help": "Tras la recolección los productos permanecen apartados este tiempo. Con 0 quedan disponibles de inmediato."
+          },
+          "evidenceMinPhotos": {
+            "label": "Mínimo de fotos",
+            "help": "Se aplica a los pasos que no definen su propio mínimo."
+          },
+          "evidenceMaxPhotos": {
+            "label": "Máximo de fotos",
+            "help": "Límite para cualquier paso. No puede ser menor que el mínimo."
+          },
+          "evidenceRetentionMonths": {
+            "label": "Meses de retención",
+            "help": "Antigüedad a partir de la cual pueden depurarse las fotos de pedidos terminados. Los pedidos y su historial se conservan siempre."
+          }
+        },
+        "catalogs": {
+          "eventTypes": {
+            "title": "Tipos de evento",
+            "description": "El motivo del alquiler. Cada tipo define con cuánta antelación puede solicitarlo un cliente."
+          },
+          "zones": {
+            "title": "Zonas y tarifas",
+            "description": "Las zonas de entrega y su costo de envío sugerido. Una zona sin tarifa configurada no equivale a envío gratis."
+          },
+          "paymentMethods": {
+            "title": "Métodos de pago",
+            "description": "Las formas en que puede cobrarse un pedido."
+          },
+          "contactTypes": {
+            "title": "Tipos de contacto",
+            "description": "Los canales que pueden registrarse de un cliente: WhatsApp, teléfono, correo…"
+          },
+          "productCategories": {
+            "title": "Categorías de producto",
+            "description": "La agrupación del catálogo."
+          },
+          "productDetailTypes": {
+            "title": "Tipos de detalle",
+            "description": "Las características que puede llevar un producto: color, material…"
+          }
+        },
+        "actions": {
+          "add": "Agregar",
+          "editRow": "Editar {{name}}",
+          "deleteRow": "Eliminar {{name}}",
+          "lastActive": "Debe permanecer al menos uno activo."
+        },
+        "badges": {
+          "inactive": "Inactivo",
+          "leadHours": "{{count}} h de antelación",
+          "fee": "Q {{amount}}",
+          "noFee": "Sin tarifa"
+        },
+        "rowForm": {
+          "name": "Nombre",
+          "description": "Nota (opcional)",
+          "leadHours": "Horas de antelación",
+          "municipality": "Municipio",
+          "municipalityPlaceholder": "Selecciona un municipio",
+          "fee": "Costo de envío",
+          "feePlaceholder": "Sin configurar",
+          "active": "Activo",
+          "save": "Guardar",
+          "cancel": "Cancelar",
+          "nameError": "El nombre debe tener entre {{min}} y {{max}} caracteres.",
+          "descriptionError": "La nota no puede exceder {{max}} caracteres.",
+          "leadError": "Indica un número entero de horas.",
+          "feeError": "Indica un monto válido, o deja el campo vacío.",
+          "municipalityError": "Selecciona el municipio de la zona."
+        },
+        "deleteRow": {
+          "dismiss": "Volver",
+          "remove": {
+            "title": "Eliminar elemento",
+            "description": "Se eliminará “{{name}}”.",
+            "note": "Ningún registro lo utiliza, así que se eliminará por completo. La acción no se podrá deshacer.",
+            "confirm": "Eliminar"
+          },
+          "hide": {
+            "title": "Ocultar elemento",
+            "description": "“{{name}}” ya está en uso.",
+            "note": "Se ocultará en lugar de eliminarse: dejará de aparecer en los formularios y los registros que lo mencionan conservarán su nombre. Podrás volver a activarlo cuando lo necesites.",
+            "confirm": "Ocultar"
+          }
+        },
+        "toasts": {
+          "settingsSaved": "Preferencias guardadas.",
+          "created": "Elemento agregado.",
+          "updated": "Elemento actualizado.",
+          "deleted": "Elemento eliminado.",
+          "deactivated": "El elemento está en uso: se ocultó en lugar de eliminarse."
+        },
+        "errors": {
+          "saveFallback": "No fue posible guardar. Inténtalo de nuevo."
+        }
       },
       "dataStatus": {
         "goToPreferences": "Ir a preferencias"
@@ -232,29 +371,175 @@
           "pickupLabel": "Recolección",
           "purchaseOnly": "Solo entrega",
           "unassigned": "Sin asignar",
+          "openAria": "Ver el pedido de {{client}}",
           "nextStepAria": "Avanzar: {{step}}",
-          "nextStep": "Marcar {{status}}"
+          "nextStep": "Marcar “{{status}}”"
+        },
+        "detail": {
+          "back": "Volver a pedidos",
+          "loading": "Cargando el pedido",
+          "notFound": {
+            "title": "Este pedido no está disponible",
+            "description": "Puede que se haya eliminado, o que no esté asignado a ti.",
+            "action": "Ver mis pedidos"
+          },
+          "error": {
+            "title": "No pudimos cargar el pedido",
+            "description": "Revisa tu conexión e inténtalo de nuevo.",
+            "retry": "Reintentar"
+          },
+          "state": {
+            "title": "Estado del pedido",
+            "next": "El siguiente paso es “{{status}}”.",
+            "idle": "Este pedido ya recorrió todos sus pasos.",
+            "finished": "Pedido finalizado: las unidades volvieron a la flota.",
+            "cancelled": "Pedido cancelado. Motivo: {{reason}}",
+            "changeStatus": "Cambiar estado"
+          },
+          "actions": {
+            "advance": "Marcar “{{status}}”",
+            "rewind": "Regresar a “{{status}}”",
+            "cancel": "Cancelar pedido",
+            "changeStatus": "Cambiar estado",
+            "reopen": "Reactivar pedido",
+            "edit": "Editar pedido"
+          },
+          "client": {
+            "title": "Cliente y entrega",
+            "name": "Quien recibe",
+            "contact": "Contacto",
+            "address": "Dirección de entrega",
+            "eventType": "Tipo de evento",
+            "description": "Descripción",
+            "comment": "Comentario"
+          },
+          "logistics": {
+            "title": "Logística",
+            "delivery": "Entrega",
+            "pickup": "Recolección",
+            "noPickup": "Solo entrega (sin recolección)",
+            "assignee": "Responsable",
+            "unassigned": "Sin asignar",
+            "delivered": "Entregado el",
+            "collected": "Recolectado el",
+            "ready": "Listo el"
+          },
+          "lines": {
+            "title": "Productos",
+            "detail": "{{quantity}} × {{price}}",
+            "rental": "Alquiler",
+            "sale": "Venta"
+          },
+          "money": {
+            "title": "Cobro",
+            "lines": "Subtotal productos",
+            "delivery": "Envío",
+            "discount": "Descuento",
+            "total": "Total",
+            "deposit": "Anticipo",
+            "method": "Método de pago",
+            "status": "Estado del pago",
+            "paidAt": "Pagado el"
+          },
+          "evidence": {
+            "title": "Evidencia",
+            "photoAlt": "Foto de evidencia del paso {{status}}",
+            "open": "Ver las fotos del paso {{status}} en tamaño completo"
+          },
+          "history": {
+            "title": "Historial",
+            "created": "Pedido creado en “{{to}}”",
+            "moved": "De “{{from}}” a “{{to}}”"
+          },
+          "danger": {
+            "title": "Zona de riesgo",
+            "description": "Eliminar borra el pedido y todo lo que existe por él. Para cerrar un pedido que sí ocurrió, cancélalo.",
+            "delete": "Eliminar pedido"
+          },
+          "delete": {
+            "title": "Eliminar pedido permanentemente",
+            "description": "Vas a borrar el pedido de {{client}} y todo lo que existe por él.",
+            "bullets": {
+              "record": "El pedido, sus productos y su historial completo.",
+              "evidence": "Todas las fotos de evidencia, también las guardadas en la nube.",
+              "stock": "Las unidades que este pedido tiene apartadas volverán al inventario.",
+              "stockFree": "El inventario no cambiará: este pedido ya no tiene productos apartados."
+            },
+            "warning": "Esta acción no se podrá deshacer.",
+            "confirm": "Sí, eliminar",
+            "dismiss": "Volver",
+            "successTitle": "Pedido eliminado",
+            "successToast": "El pedido de {{client}} se eliminó permanentemente.",
+            "error": "No se pudo eliminar el pedido."
+          },
+          "changeStatus": {
+            "title": "Cambiar el estado del pedido",
+            "description": "El pedido de {{client}} está en “{{status}}”. Elige a dónde debe quedar.",
+            "reopenTitle": "Reactivar pedido",
+            "reopenDescription": "El pedido de {{client}} está cancelado. Elige el paso en el que debe quedar al reactivarse.",
+            "targetLabel": "Nuevo estado",
+            "targetPlaceholder": "Selecciona un paso",
+            "walk": "Se registrarán los pasos: {{steps}}",
+            "purgeWarning": "Al regresar se borrarán definitivamente las fotos de: {{steps}}. No se podrán recuperar.",
+            "reclaimWarning": "Al quedar en “{{status}}”, el pedido volverá a apartar sus productos. Si ya no hay disponibilidad para esas fechas, no será posible aplicar el cambio.",
+            "releaseNote": "Al quedar en “{{status}}”, sus productos volverán a estar disponibles para otras fechas.",
+            "stepPhotos": "Fotos del paso “{{status}}”",
+            "stepCount": "{{count}} de {{max}} · mínimo {{min}}",
+            "addPhotos": "Agregar fotos",
+            "removePhoto": "Quitar la foto {{name}}",
+            "conflictLine": "{{product}}: pediste {{requested}} y quedan {{available}}.",
+            "confirm": "Aplicar cambio",
+            "dismiss": "Volver",
+            "successTitle": "Pedido actualizado",
+            "successToast": "El pedido quedó en “{{status}}”.",
+            "errors": {
+              "conflict": "No se puede reactivar: esos productos ya están comprometidos en otro pedido.",
+              "fallback": "No se pudo cambiar el estado del pedido.",
+              "upload": "No se pudieron subir las fotos. Intenta de nuevo."
+            }
+          }
+        },
+        "edit": {
+          "back": "Volver al pedido",
+          "title": "Editar pedido",
+          "lead": "Actualiza lo que se acordó: el cliente, las fechas, los productos y el cobro. El estado del pedido no cambia.",
+          "loading": "Cargando el pedido",
+          "actions": {
+            "submit": "Guardar cambios"
+          },
+          "successTitle": "Pedido actualizado",
+          "successToast": "Los cambios del pedido se guardaron correctamente."
         },
         "advance": {
-          "title": "Marcar {{status}}",
-          "description": "El pedido de {{client}} pasará a «{{status}}».",
-          "rewindTitle": "Regresar a {{status}}",
-          "rewindDescription": "El pedido de {{client}} volverá a «{{status}}». Se borrará la marca de tiempo del paso que se deshace.",
+          "title": "Mover pedido a “{{status}}”",
+          "description": "El pedido de {{client}} pasará de “{{from}}” a “{{status}}”.",
+          "rewindTitle": "Regresar pedido a “{{status}}”",
+          "rewindDescription": "El pedido de {{client}} regresará de “{{from}}” a “{{status}}”. Se borrará la hora que quedó registrada en el paso que estás deshaciendo.",
           "cancelTitle": "Cancelar pedido",
-          "cancelDescription": "El pedido de {{client}} se cancelará y sus unidades volverán a estar disponibles. Esta acción no se puede deshacer.",
+          "cancelDescription": "El pedido de {{client}} se cancelará y sus productos volverán a estar disponibles para otras fechas.",
+          "cancelDescriptionSettled": "El pedido de {{client}} quedará registrado como cancelado. El inventario no cambiará: sus productos ya no están apartados.",
+          "cancelReversible": "Un administrador podrá reactivarlo mientras esos productos sigan disponibles.",
+          "cancelReversibleSettled": "Un administrador podrá reactivarlo más adelante.",
+          "cancelFinal": "No podrás deshacerlo: solo un administrador puede reactivar un pedido cancelado.",
+          "releaseNote": "Al aplicarlo, sus productos volverán a estar disponibles para otras fechas.",
+          "reclaimWarning": "Al aplicarlo, el pedido volverá a apartar sus productos. Si ya no hay disponibilidad para esas fechas, no será posible.",
+          "purgeWarning": "Se borrarán definitivamente las fotos del paso “{{from}}”. No se podrán recuperar.",
           "evidenceLabel": "Fotos de evidencia",
-          "evidenceCount": "{{count}} de {{min}}–{{max}}",
+          "evidenceHint": "Este paso necesita fotos para poder confirmarse.",
+          "evidenceCount": "{{count}} de {{max}} · mínimo {{min}}",
           "addPhotos": "Agregar fotos",
           "removePhoto": "Quitar la foto {{name}}",
-          "reasonLabel": "Motivo",
-          "reasonPlaceholder": "¿Por qué se cancela el pedido?",
-          "confirm": "Confirmar",
-          "cancelAction": "Cancelar",
+          "reasonLabel": "Motivo de la cancelación",
+          "reasonPlaceholder": "Explica brevemente por qué se cancela el pedido.",
+          "confirm": "Mover a “{{status}}”",
+          "confirmRewind": "Regresar a “{{status}}”",
+          "confirmCancel": "Sí, cancelar pedido",
+          "dismiss": "Volver",
           "successTitle": "Pedido actualizado",
-          "successToast": "El pedido pasó a «{{status}}».",
+          "successToast": "El pedido de {{client}} pasó a “{{status}}”.",
           "errors": {
             "fallback": "No se pudo actualizar el estado del pedido.",
-            "upload": "No se pudieron subir las fotos. Intente de nuevo."
+            "upload": "No se pudieron subir las fotos. Intenta de nuevo."
           }
         },
         "empty": {
@@ -561,11 +846,7 @@
           "detailsTitle": "Detalles",
           "replacementPrice": "Precio de reposición",
           "lightbox": {
-            "open": "Ver fotos en tamaño completo",
-            "close": "Cerrar",
-            "previous": "Foto anterior",
-            "next": "Siguiente foto",
-            "counter": "{{current}} de {{total}}"
+            "open": "Ver fotos en tamaño completo"
           },
           "actions": {
             "edit": "Editar",
@@ -574,7 +855,7 @@
           "deleteModal": {
             "title": "Eliminar producto",
             "description": "Estás a punto de eliminar \"{{name}}\" del catálogo.",
-            "warning": "Esta acción no se puede deshacer: el producto y toda su información se eliminarán de forma permanente.",
+            "warning": "Esta acción no se podrá deshacer: el producto y toda su información se eliminarán de forma permanente.",
             "confirm": "Eliminar",
             "cancel": "Cancelar",
             "successTitle": "Producto eliminado",

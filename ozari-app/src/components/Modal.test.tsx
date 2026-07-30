@@ -123,7 +123,24 @@ describe('Modal', () => {
   });
 
   describe('focus management', () => {
-    it('moves focus to the [data-modal-autofocus] element on open', () => {
+    /** Pretend this is a mouse/trackpad device — the default test `matchMedia` matches only
+     *  reduced-motion, so every other suite (and the touch case below) runs as TOUCH. Assigned the
+     *  same way as `setReducedMotion`, so the file's `afterEach` puts it back. */
+    const asDesktop = (): void => {
+      window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+        matches: query === '(hover: hover) and (pointer: fine)',
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+    };
+
+    it('moves focus to the [data-modal-autofocus] element on open (mouse/trackpad)', () => {
+      asDesktop();
       vi.useFakeTimers();
       render(
         <Modal open onClose={vi.fn()} title="t">
@@ -135,7 +152,8 @@ describe('Modal', () => {
       expect(screen.getByLabelText('apellido')).toHaveFocus();
     });
 
-    it('moves focus to the first focusable when there is no autofocus target', () => {
+    it('moves focus to the first focusable when there is no autofocus target (mouse/trackpad)', () => {
+      asDesktop();
       vi.useFakeTimers();
       render(
         <Modal open onClose={vi.fn()} title="t">
@@ -147,7 +165,25 @@ describe('Modal', () => {
       expect(screen.getByRole('button', { name: 'components.modal.close' })).toHaveFocus();
     });
 
+    it('on TOUCH focuses the dialog itself, never a field — no keyboard pops up', () => {
+      // Focus must still enter the dialog (that is what makes the trap, Escape and the screen-reader
+      // announcement work) — but landing on an input would throw the on-screen keyboard over half
+      // the screen the instant it opens, unasked.
+      vi.useFakeTimers();
+      render(
+        <Modal open onClose={vi.fn()} title="t">
+          <input data-modal-autofocus aria-label="apellido" />
+        </Modal>,
+      );
+      act(() => vi.advanceTimersByTime(20));
+      expect(screen.getByRole('dialog')).toHaveFocus();
+      expect(screen.getByLabelText('apellido')).not.toHaveFocus();
+    });
+
     it('handles having no focusable elements at all', () => {
+      // As DESKTOP: that is the path that hunts for something to focus and can come up empty (touch
+      // always lands on the dialog itself), so it's where the "nothing to focus" fallback lives.
+      asDesktop();
       vi.useFakeTimers();
       render(<Modal open onClose={vi.fn()} title="Solo texto" dismissible={false} />);
       act(() => vi.advanceTimersByTime(20));

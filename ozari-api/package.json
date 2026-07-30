@@ -29,6 +29,7 @@
     "test:ci": "vitest run && vitest run --config vitest.integration.config.ts",
     "cleanup:sessions": "tsx --env-file=.env src/jobs/cleanupExpiredSessions.ts",
     "reconcile:images": "tsx --env-file=.env scripts/reconcile-product-images.ts",
+    "purge:evidence": "tsx --env-file=.env scripts/purge-order-evidence.ts",
     "db:seed": "prisma db seed",
     "db:seed:force": "prisma db seed -- --force"
   },

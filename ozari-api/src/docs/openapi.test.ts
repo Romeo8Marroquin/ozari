@@ -29,11 +29,18 @@ const EXPECTED_OPERATIONS: ReadonlyArray<readonly [string, string]> = [
   ["/orders", "post"],
   ["/orders/availability", "post"],
   ["/orders/{id}", "get"],
+  ["/orders/{id}", "put"],
+  ["/orders/{id}", "delete"],
   ["/orders/{id}/advance", "post"],
   ["/orders/catalog", "get"],
   ["/orders/evidence/upload-url", "post"],
   ["/client-registries", "get"],
   ["/client-registries", "post"],
+  ["/preferences", "get"],
+  ["/preferences/settings", "put"],
+  ["/preferences/catalogs/{catalog}", "post"],
+  ["/preferences/catalogs/{catalog}/{id}", "put"],
+  ["/preferences/catalogs/{catalog}/{id}", "delete"],
   ["/health/check", "get"],
 ];
 

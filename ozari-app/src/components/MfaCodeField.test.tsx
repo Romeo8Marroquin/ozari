@@ -66,12 +66,28 @@ describe('MfaCodeField', () => {
     expect(await screen.findByText('too-short')).toBeInTheDocument();
   });
 
-  it('honours autoFocus (modal autofocus hook) and disabled', () => {
-    const { rerender } = render(<Harness autoFocus />);
-    expect(screen.getByLabelText('Code')).toHaveAttribute('data-modal-autofocus');
+  it('treats autoFocus as an INTENT the device gets to veto, and honours disabled', () => {
+    // On touch (the suite default) the caller's `autoFocus` is dropped: focusing the code field as
+    // the MFA step sweeps in would pop the on-screen keyboard over the card, mid-animation.
+    const { rerender, unmount } = render(<Harness autoFocus />);
+    expect(screen.getByLabelText('Code')).not.toHaveAttribute('data-modal-autofocus');
 
     rerender(<Harness disabled />);
     expect(screen.getByLabelText('Code')).toBeDisabled();
+    unmount();
+
+    // With a mouse or trackpad it IS the field to start on — the shortcut it was written for.
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) =>
+        ({
+          matches: query === '(hover: hover) and (pointer: fine)',
+          media: query,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }) as unknown as MediaQueryList,
+    );
+    render(<Harness autoFocus />);
+    expect(screen.getByLabelText('Code')).toHaveAttribute('data-modal-autofocus');
   });
 
   it('fires onComplete on a bulk fill (paste/autofill), but not while typing', async () => {

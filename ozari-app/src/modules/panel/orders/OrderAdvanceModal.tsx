@@ -1,20 +1,21 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { HiOutlineCamera, HiOutlineTrash } from 'react-icons/hi2';
 import Button from '@components/Button';
 import CustomTextarea from '@components/CustomTextarea';
 import FormError from '@components/FormError';
 import Modal from '@components/Modal';
 import { notify } from '@components/notifications/notify';
+import { Role } from '@constants/Roles';
+import { useHasRole } from '@hooks/useRole';
 import { toFormError } from '@utils/apiError';
+import { mintEvidencePhotos, revokeEvidencePhotos, type EvidencePhoto } from './evidencePhotos';
+import OrderEvidencePicker from './OrderEvidencePicker';
 import type { OrderAction, OrderListItem } from './order.types';
 import { useAdvanceOrder } from './useAdvanceOrder';
 import { useOrderEvidenceUploads } from './useOrderEvidenceUploads';
 
 const KEY = 'modules.panel.orders.advance';
 const SECONDARY_COLOR = '#262626';
-/** Same content types the storage policy accepts (the presign re-checks and binds them). */
-const ACCEPTED_IMAGES = 'image/jpeg,image/png,image/webp,image/avif';
 
 interface OrderAdvanceModalProps {
   /** The order being moved, and the move — both absent while the dialog is closed. */
@@ -36,47 +37,71 @@ interface OrderAdvanceModalProps {
  * (`skipErrorNotification` + `toFormError`): the 409 "it already moved", the 422 "evidence
  * incomplete" and a 403 land in the inline banner, ambient failures toast, an outage stays silent.
  */
-const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({ order, action, onClose }) => {
+const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({
+  order: pendingOrder,
+  action: pendingAction,
+  onClose,
+}) => {
   const { t } = useTranslation();
-  const [files, setFiles] = useState<File[]>([]);
+  const [photos, setPhotos] = useState<EvidencePhoto[]>([]);
   const [reason, setReason] = useState('');
   const [formError, setFormError] = useState<string | undefined>(undefined);
-  const fileInput = useRef<HTMLInputElement>(null);
+  const isAdmin = useHasRole([Role.Admin]);
   const { advanceOrder, isPending } = useAdvanceOrder();
   const { uploadEvidence, isUploading } = useOrderEvidenceUploads();
-  const open = order !== undefined && action !== undefined;
+  const open = pendingOrder !== undefined && pendingAction !== undefined;
   const busy = isPending || isUploading;
 
-  // A fresh dialog for every move — the next one must never inherit the previous photos, reason or
-  // error. Done as React's sanctioned "adjust state during render" (keyed by which move is up)
-  // rather than an effect, so nothing renders once with stale content.
-  const move = open ? `${order.id}:${action.statusId}` : undefined;
-  const [openedMove, setOpenedMove] = useState(move);
-  if (openedMove !== move) {
-    setOpenedMove(move);
-    setFiles([]);
+  // Every object URL this dialog ever minted, revoked when it unmounts (the per-photo revoke on
+  // remove/reset handles the rest) — a preview handle is a live reference to the file's bytes.
+  const minted = useRef<EvidencePhoto[]>([]);
+  useEffect(
+    () => () => {
+      revokeEvidencePhotos(minted.current);
+      minted.current = [];
+    },
+    [],
+  );
+
+  // The dialog keeps rendering the move it LAST showed, so the `Modal` primitive can play its exit
+  // (fade + reverse content sweep, ~480ms) instead of being torn out of the tree the instant the
+  // page clears its pending move — which is exactly what made closing SNAP while opening was smooth.
+  const [shown, setShown] = useState<{ order: OrderListItem; action: OrderAction }>();
+  if (open && (shown?.order !== pendingOrder || shown.action !== pendingAction)) {
+    setShown({ order: pendingOrder, action: pendingAction });
+    // A fresh dialog for every NEW move — and never on the way out, so the photos and the reason
+    // stay painted while it animates away. React's sanctioned "adjust state during render".
+    revokeEvidencePhotos(photos);
+    setPhotos([]);
     setReason('');
     setFormError(undefined);
   }
 
-  if (!open) return null;
+  // Nothing has ever been opened → nothing in the tree at all.
+  if (!shown) return null;
+  const { order, action } = shown;
 
   const needsEvidence = action.requiresEvidence;
   const needsReason = action.requiresReason;
-  const enoughEvidence = !needsEvidence || files.length >= action.minEvidence;
+  const enoughEvidence = !needsEvidence || photos.length >= action.minEvidence;
   const enoughReason = !needsReason || reason.trim().length > 0;
 
-  const addFiles = (input: HTMLInputElement): void => {
-    // Read the picked files BEFORE clearing the input (the reset empties its FileList, and the
-    // state updater runs later). Clearing it is what lets the SAME file be re-picked afterwards.
-    const picked = Array.from(input.files ?? []);
-    input.value = '';
+  const addPhotos = (files: File[]): void => {
+    const added = mintEvidencePhotos(files);
+    minted.current.push(...added);
     // Respect the step's own maximum — the backend rejects an overflow, so never let it be sent.
-    setFiles((current) => [...current, ...picked].slice(0, action.maxEvidence));
+    setPhotos((current) => [...current, ...added].slice(0, action.maxEvidence));
   };
 
-  const removeFile = (index: number): void => {
-    setFiles((current) => current.filter((_, position) => position !== index));
+  const removePhoto = (id: string): void => {
+    setPhotos((current) =>
+      current.filter((photo) => {
+        if (photo.id !== id) return true;
+        // The preview holds the file's bytes — release it with the photo it belonged to.
+        URL.revokeObjectURL(photo.previewUrl);
+        return false;
+      }),
+    );
   };
 
   const submit = (): void => {
@@ -87,19 +112,28 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({ order, action, on
     const fallback = t(`${KEY}.errors.fallback`);
     // Photos first: their keys are what the advance records, and a failed upload must leave the
     // order exactly where it was.
-    void uploadEvidence(files)
+    void uploadEvidence(photos.map((photo) => photo.file))
       .then((evidenceKeys) => {
         advanceOrder(
           {
             orderId: order.id,
             toStatusId: action.statusId,
-            ...(evidenceKeys.length > 0 && { evidenceKeys }),
+            // Photos are tagged with the step they document — this dialog moves ONE step, so it's a
+            // single entry (the multi-step jump on the detail page sends one per crossed step).
+            ...(evidenceKeys.length > 0 && {
+              evidence: [{ statusId: action.statusId, keys: evidenceKeys }],
+            }),
             ...(needsReason && { reason: reason.trim() }),
           },
           {
             onSuccess: () => {
+              // BOTH values — the toast names the client as well as the step ("El pedido de María
+              // López pasó a En ruta"), and a missing one renders as a literal `{{client}}`.
               notify.success(
-                t(`${KEY}.successToast`, { status: action.statusName }),
+                t(`${KEY}.successToast`, {
+                  status: action.statusName,
+                  client: order.clientName,
+                }),
                 { title: t(`${KEY}.successTitle`) },
               );
               onClose();
@@ -119,13 +153,36 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({ order, action, on
       });
   };
 
-  // The copy is per KIND (advance / rewind / cancel), with the admin-configured status name in it.
-  const titleKey = needsReason ? 'cancelTitle' : action.kind === 'backward' ? 'rewindTitle' : 'title';
-  const descriptionKey = needsReason
-    ? 'cancelDescription'
-    : action.kind === 'backward'
-      ? 'rewindDescription'
-      : 'description';
+  // The copy is per KIND (advance / rewind / cancel), phrased as the INSTRUCTION being confirmed
+  // ("Mover pedido a En ruta"), never as a label ("Marcar En ruta") — the person tapping this is
+  // often mid-delivery on a phone, so it must say exactly what is about to happen, to WHICH order,
+  // and FROM where. The status names are whatever the admin configured them to be.
+  const kindKey = needsReason ? 'cancel' : action.kind === 'backward' ? 'rewind' : 'forward';
+  // Cancelling only frees goods the order was still HOLDING. On one that already finished (its units
+  // went back to the fleet at the last step) or whose sale units were already delivered, the old
+  // blanket promise — "sus productos volverán a estar disponibles" — was simply false, so the
+  // description and the reversibility note both follow the move's real `inventoryEffect`.
+  const settled = action.inventoryEffect === 'none';
+  const COPY = {
+    forward: { title: 'title', description: 'description', confirm: 'confirm' },
+    rewind: {
+      title: 'rewindTitle',
+      description: 'rewindDescription',
+      confirm: 'confirmRewind',
+    },
+    cancel: {
+      title: 'cancelTitle',
+      description: settled ? 'cancelDescriptionSettled' : 'cancelDescription',
+      confirm: 'confirmCancel',
+    },
+  }[kindKey];
+  // Naming BOTH ends of the move ("de Pendiente a En ruta") removes the last ambiguity for someone
+  // who can't see the row they tapped once the dialog covers it.
+  const copyValues = {
+    status: action.statusName,
+    from: order.status.name,
+    client: order.clientName,
+  };
 
   return (
     <Modal
@@ -134,13 +191,12 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({ order, action, on
       size="md"
       locked={busy}
       dismissible
-      title={t(`${KEY}.${titleKey}`, { status: action.statusName })}
-      description={t(`${KEY}.${descriptionKey}`, {
-        status: action.statusName,
-        client: order.clientName,
-      })}
+      title={t(`${KEY}.${COPY.title}`, copyValues)}
+      description={t(`${KEY}.${COPY.description}`, copyValues)}
       footer={
         <>
+          {/* "Volver", never "Cancelar" — on the CANCEL dialog a button labelled "Cancelar" beside
+              one that cancels the order is exactly the kind of ambiguity this screen can't afford. */}
           <Button
             variant="soft"
             color={SECONDARY_COLOR}
@@ -149,8 +205,10 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({ order, action, on
             disabled={busy}
             className="sm:w-auto"
           >
-            {t(`${KEY}.cancelAction`)}
+            {t(`${KEY}.dismiss`)}
           </Button>
+          {/* The confirm repeats the instruction rather than saying "Confirmar", so the last thing
+              read before the tap is the action itself. */}
           <Button
             color={SECONDARY_COLOR}
             fullWidth
@@ -159,71 +217,71 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({ order, action, on
             onClick={submit}
             className="sm:w-auto"
           >
-            {t(`${KEY}.confirm`)}
+            {t(`${KEY}.${COPY.confirm}`, copyValues)}
           </Button>
         </>
       }
     >
-      <div className="flex flex-col gap-5">
+      {/* Each block below is its own `.modal-stagger` target, so the dialog's open/close sweep
+          CASCADES through the body (label → hint → picker → photos → reason → error) instead of
+          moving the whole content as one slab. */}
+      <div className="flex flex-col gap-4">
+        {/* Cancelling is REVERSIBLE — but only by an admin, and only while the freed products are
+            still free. Saying "no se puede deshacer" to an admin was simply untrue; saying nothing
+            to a driver would be worse, since they genuinely can't undo it. So each reader gets the
+            sentence that applies to them. */}
+        {needsReason && (
+          <p
+            className={`modal-stagger rounded-control px-3 py-2 text-sm ${
+              isAdmin ? 'bg-charcoal/[0.04] text-charcoal/70' : 'bg-amber-50 text-amber-700'
+            }`}
+          >
+            {isAdmin
+              ? t(`${KEY}.${settled ? 'cancelReversibleSettled' : 'cancelReversible'}`)
+              : t(`${KEY}.cancelFinal`)}
+          </p>
+        )}
+        {/* What this move does to the goods, stated only when it does something. A `reclaim` is the
+            one that can FAIL — the order takes units back, and someone else may already have them —
+            so it's an amber warning; a `release` is just useful news. Both come from the lifecycle
+            flags, so inserting or re-flagging a step rewrites them with no code change. */}
+        {!needsReason && action.inventoryEffect !== 'none' && (
+          <p
+            className={`modal-stagger rounded-control px-3 py-2 text-sm ${
+              action.inventoryEffect === 'reclaim'
+                ? 'bg-amber-50 text-amber-700'
+                : 'bg-charcoal/[0.04] text-charcoal/70'
+            }`}
+          >
+            {t(`${KEY}.${action.inventoryEffect === 'reclaim' ? 'reclaimWarning' : 'releaseNote'}`)}
+          </p>
+        )}
+        {/* Undoing a documented step destroys its photos — said here, before it happens, exactly as
+            the multi-step dialog does for every step of a walk. */}
+        {action.purgesEvidence && (
+          <p className="modal-stagger rounded-control bg-amber-50 px-3 py-2 text-sm text-amber-700">
+            {t(`${KEY}.purgeWarning`, { from: order.status.name })}
+          </p>
+        )}
         {needsEvidence && (
-          <div className="modal-stagger flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-charcoal/80">
-                {t(`${KEY}.evidenceLabel`)}
-              </span>
-              <span className="text-xs text-charcoal/45">
-                {t(`${KEY}.evidenceCount`, {
-                  count: files.length,
-                  min: action.minEvidence,
-                  max: action.maxEvidence,
-                })}
-              </span>
-            </div>
-            <input
-              ref={fileInput}
-              type="file"
-              accept={ACCEPTED_IMAGES}
-              multiple
-              // `capture` is deliberately absent: the driver may shoot now OR pick a photo already
-              // taken — quality of evidence over forcing the camera (EPIC-2 §8).
-              className="sr-only"
-              aria-label={t(`${KEY}.evidenceLabel`)}
-              onChange={(event) => addFiles(event.target)}
-            />
-            <Button
-              variant="soft"
-              color={SECONDARY_COLOR}
-              size="sm"
-              startIcon={<HiOutlineCamera className="size-4" />}
-              disabled={busy || files.length >= action.maxEvidence}
-              onClick={() => fileInput.current?.click()}
-            >
-              {t(`${KEY}.addPhotos`)}
-            </Button>
-            {files.length > 0 && (
-              <ul className="flex flex-col gap-2">
-                {files.map((file, index) => (
-                  <li
-                    key={`${file.name}-${index}`}
-                    className="flex items-center gap-3 rounded-control bg-charcoal/[0.03] px-3 py-2"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-xs text-charcoal/70">
-                      {file.name}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label={t(`${KEY}.removePhoto`, { name: file.name })}
-                      disabled={busy}
-                      onClick={() => removeFile(index)}
-                      className="shrink-0 cursor-pointer rounded-control p-1 text-charcoal/50 outline-none transition-[color] hover:text-red-500 focus-visible:ring-2 focus-visible:ring-charcoal/30 disabled:cursor-not-allowed"
-                    >
-                      <HiOutlineTrash className="size-4" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <OrderEvidencePicker
+            className="flex flex-col gap-4"
+            blockClassName="modal-stagger"
+            label={t(`${KEY}.evidenceLabel`)}
+            hint={t(`${KEY}.evidenceHint`)}
+            countLabel={t(`${KEY}.evidenceCount`, {
+              count: photos.length,
+              min: action.minEvidence,
+              max: action.maxEvidence,
+            })}
+            addLabel={t(`${KEY}.addPhotos`)}
+            removeLabel={(name) => t(`${KEY}.removePhoto`, { name })}
+            photos={photos}
+            max={action.maxEvidence}
+            disabled={busy}
+            onAdd={addPhotos}
+            onRemove={removePhoto}
+          />
         )}
 
         {needsReason && (
@@ -241,7 +299,9 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({ order, action, on
           </div>
         )}
 
-        <FormError message={formError} />
+        <div className="modal-stagger">
+          <FormError message={formError} />
+        </div>
       </div>
     </Modal>
   );

@@ -140,11 +140,25 @@ export const appConfig = {
   // Fallback when the `orders.logisticsSpacingMinutes` app preference is missing/corrupt — the
   // seeded default (single-vehicle rule: ≥1h between any two logistics events).
   defaultLogisticsSpacingMinutes: 60,
+  // Fallback when the `orders.turnaroundMinutes` app preference is missing/corrupt — the washing
+  // period after a collection. Rental units stay unavailable for this long past an order's billed
+  // window, so two events can't be promised the same goods back-to-back with no time to clean them.
+  defaultTurnaroundMinutes: 120,
   // Fallbacks when the `orders.evidenceMinPhotos` / `orders.evidenceMaxPhotos` preferences are
   // missing or corrupt. These are the GLOBAL bounds: a status that leaves its own `minEvidence`/
   // `maxEvidence` unset inherits them, and a per-status count may never fall outside them.
   defaultEvidenceMinPhotos: 1,
   defaultEvidenceMaxPhotos: 10,
+  // Fallback when the `orders.evidenceRetentionMonths` preference is missing/corrupt — how long
+  // evidence PHOTOS are kept before `pnpm purge:evidence` may remove them (orders are permanent).
+  defaultEvidenceRetentionMonths: 24,
+  // How long the in-process lifecycle catalog (`service_status` + its flags) is trusted before it
+  // is re-read. Admin edits invalidate it explicitly, so this TTL exists for the changes that
+  // CAN'T call back: a `pnpm db:seed`, a hand-edited row, and — on Cloud Run with more than one
+  // instance — an admin edit made on a DIFFERENT instance. Without it a stale process serves a
+  // machine that no longer exists (no pipeline ⇒ no next step ⇒ no quick action) until it restarts.
+  // 60s: the definition changes rarely, so this is ~free, and it bounds every kind of staleness.
+  statusCatalogTtlSeconds: 60,
 
   sensitiveKeys: ["password", "token", "secret", "creditCard", "cvv", "auth"],
   basePath: "/api",

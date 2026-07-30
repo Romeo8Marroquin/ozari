@@ -5,6 +5,7 @@ import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import {
   CANCEL_REASON_MAX_LENGTH,
   EVIDENCE_KEYS_MAX,
+  EVIDENCE_STEPS_MAX,
   validateAdvanceOrder,
   validateOrderEvidenceUploads,
 } from "./advance.validator.js";
@@ -38,7 +39,7 @@ describe("validateAdvanceOrder", () => {
   it("passes a bare advance (just the target status)", () => {
     const { req, next } = run({ toStatusId: 5 });
     expect(next).toHaveBeenCalled();
-    expect(req.body).toEqual({ toStatusId: 5, evidenceKeys: [], reason: undefined });
+    expect(req.body).toEqual({ toStatusId: 5, evidence: [], reason: undefined });
   });
 
   it("rejects a missing or malformed target status", () => {
@@ -56,16 +57,22 @@ describe("validateAdvanceOrder", () => {
     rejectedWith("invalidToStatusId");
   });
 
-  it("accepts evidence keys minted by OUR presign, and de-duplicates them", () => {
+  it("accepts per-STEP evidence minted by OUR presign, and de-duplicates each step's keys", () => {
+    // A multi-step jump carries one entry per step it must document.
     const { req, next } = run({
-      toStatusId: 3,
-      evidenceKeys: [KEY(), KEY(), KEY("11111111-2222-4333-8444-555555555555.webp")],
+      toStatusId: 4,
+      evidence: [
+        { statusId: 3, keys: [KEY(), KEY()] },
+        { statusId: 4, keys: [KEY("11111111-2222-4333-8444-555555555555.webp")] },
+      ],
     });
     expect(next).toHaveBeenCalled();
-    expect((req.body as { evidenceKeys: string[] }).evidenceKeys).toEqual([
-      KEY(),
-      KEY("11111111-2222-4333-8444-555555555555.webp"),
-    ]);
+    expect(req.body).toMatchObject({
+      evidence: [
+        { statusId: 3, keys: [KEY()] },
+        { statusId: 4, keys: [KEY("11111111-2222-4333-8444-555555555555.webp")] },
+      ],
+    });
   });
 
   it("refuses a key that points outside the orders' evidence namespace", () => {
@@ -79,16 +86,31 @@ describe("validateAdvanceOrder", () => {
       Array.from({ length: EVIDENCE_KEYS_MAX + 1 }, () => KEY()),
     ]) {
       vi.clearAllMocks();
-      const { next } = run({ toStatusId: 3, evidenceKeys: keys });
+      const { next } = run({ toStatusId: 3, evidence: [{ statusId: 3, keys }] });
+      expect(next).not.toHaveBeenCalled();
+      rejectedWith("invalidEvidenceKeys");
+    }
+  });
+
+  it("refuses a malformed evidence list (bad step id, wrong shape, too many steps)", () => {
+    for (const evidence of [
+      "nope",
+      [{ keys: [KEY()] }],
+      [{ statusId: 0, keys: [KEY()] }],
+      [{ statusId: 3 }],
+      Array.from({ length: EVIDENCE_STEPS_MAX + 1 }, () => ({ statusId: 3, keys: [] })),
+    ]) {
+      vi.clearAllMocks();
+      const { next } = run({ toStatusId: 3, evidence });
       expect(next).not.toHaveBeenCalled();
       rejectedWith("invalidEvidenceKeys");
     }
   });
 
   it("treats an absent/null evidence list as no photos", () => {
-    for (const evidenceKeys of [undefined, null]) {
-      const { req } = run({ toStatusId: 3, evidenceKeys });
-      expect((req.body as { evidenceKeys: string[] }).evidenceKeys).toEqual([]);
+    for (const evidence of [undefined, null]) {
+      const { req } = run({ toStatusId: 3, evidence });
+      expect((req.body as { evidence: unknown[] }).evidence).toEqual([]);
     }
   });
 

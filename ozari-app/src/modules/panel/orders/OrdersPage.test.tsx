@@ -107,6 +107,7 @@ const order = (
   pickupAt: deliveryAt,
   isMine: false,
   actions: [],
+  holdsInventory: true,
   itemCount: 2,
   totalAmount: 100,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
@@ -264,10 +265,13 @@ describe('OrdersPage', () => {
     expect(screen.getByText('modules.panel.orders.owner.mine')).toBeInTheDocument();
     expect(screen.getByText('modules.panel.orders.owner.rest')).toBeInTheDocument();
 
-    // A uniform list (nothing to tell apart) drops the owner headers.
+    // A uniform list (nothing to tell apart) drops the owner headers. A refetch over the WARM list
+    // is a two-phase diff now (rows out, then the new list commits), so it lands asynchronously.
     setOrders({ data: paginated([order(3, todayAt(9), 'Cliente 3', { isMine: false })]) });
     rerender(<OrdersPage />);
-    expect(screen.queryByText('modules.panel.orders.owner.mine')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText('modules.panel.orders.owner.mine')).not.toBeInTheDocument(),
+    );
     expect(screen.queryByText('modules.panel.orders.owner.rest')).not.toBeInTheDocument();
   });
 
@@ -296,6 +300,8 @@ describe('OrdersPage', () => {
               minEvidence: 1,
               maxEvidence: 10,
               requiresReason: false,
+              inventoryEffect: 'none',
+              purgesEvidence: false,
             },
           ],
         }),
@@ -316,6 +322,20 @@ describe('OrdersPage', () => {
     // …and dismissing it clears the pending move (the next tap starts clean).
     await userEvent.click(screen.getByRole('button', { name: 'cerrar' }));
     expect(screen.queryByTestId('advance-modal')).not.toBeInTheDocument();
+  });
+
+  it('opens an order through the PANEL transition, not a raw jump', async () => {
+    const navigateTo = vi.fn();
+    setOrders({ data: paginated([order(7, todayAt(9), 'Cliente 7')]) });
+    render(
+      <PanelNavContext.Provider value={{ navigateTo, pending: null } as PanelNav}>
+        <OrdersPage />
+      </PanelNavContext.Provider>,
+    );
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+
+    await userEvent.click(screen.getAllByRole('link')[0]);
+    expect(navigateTo).toHaveBeenCalledWith('/panel/pedidos/7');
   });
 
   it('sweeps in the surplus rows when a cold load resolves to MORE than the skeleton count', async () => {

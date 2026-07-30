@@ -4,6 +4,8 @@ export enum QueryKeys {
   PRODUCT = 'product',
   PRODUCT_CATALOG = 'product-catalog',
   ORDERS = 'orders',
+  ORDER = 'order',
   ORDER_CATALOG = 'order-catalog',
   CLIENT_REGISTRIES = 'client-registries',
+  PREFERENCES = 'preferences',
 }

@@ -48,10 +48,10 @@ vi.mock('./productsScroll', () => ({ scrollPanelToTop }));
 
 // The full-size viewer has its own suite — a stub captures the wiring.
 const lightbox = vi.hoisted(() => ({
-  props: null as null | { initialIndex: number; productName: string; onClose: () => void },
+  props: null as null | { initialIndex: number; label: string; onClose: () => void },
 }));
-vi.mock('./ProductLightbox', () => ({
-  default: (props: { initialIndex: number; productName: string; onClose: () => void }) => {
+vi.mock('@components/ImageLightbox', () => ({
+  default: (props: { initialIndex: number; label: string; onClose: () => void }) => {
     lightbox.props = props;
     return <div data-testid="lightbox-stub" />;
   },
@@ -273,7 +273,7 @@ describe('ProductDetailPage', () => {
     await userEvent.click(screen.getByRole('button', { name: `${D}.lightbox.open` }));
 
     expect(screen.getByTestId('lightbox-stub')).toBeInTheDocument();
-    expect(lightbox.props).toMatchObject({ initialIndex: 1, productName: 'Mesa redonda' });
+    expect(lightbox.props).toMatchObject({ initialIndex: 1, label: 'Mesa redonda' });
 
     act(() => lightbox.props!.onClose());
     expect(screen.queryByTestId('lightbox-stub')).not.toBeInTheDocument();

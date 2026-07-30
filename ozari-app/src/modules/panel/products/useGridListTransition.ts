@@ -1,11 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { animateListReflow, animateTilesOut, captureGalleryLayout } from '../pageMotion';
-import type { Product } from './product.types';
 
-/** The FLIP wrapper selector — each rendered card carries `data-flip-id={product.id}`. */
+/** The FLIP wrapper selector — each rendered row/card carries `data-flip-id`. */
 const CARD_SELECTOR = '[data-flip-id]';
 
-const idsOf = (list: Product[]): number[] => list.map((product) => product.id);
+/** Anything with a stable id can ride this: the product GRID and the orders AGENDA both do. */
+interface Identified {
+  id: number;
+}
+
+const idsOf = (list: Identified[]): number[] => list.map((item) => item.id);
 const sameIds = (a: number[], b: number[]): boolean =>
   a.length === b.length && a.every((id, index) => id === b[index]);
 /** `a` is a strict prefix of `b` — the infinite scroll APPENDED a page (its own machinery owns it). */
@@ -13,9 +17,12 @@ const isPrefix = (a: number[], b: number[]): boolean =>
   a.length < b.length && a.every((id, index) => id === b[index]);
 
 /**
- * Smooths a **background-refetch list change** on the (cache-warm) product grid — the moment a
- * deletion/creation lands over an already-rendered list, which used to swap every index-keyed slot
- * abruptly. Two phases, the gallery's removal language at grid scale:
+ * Smooths a **background-refetch list change** over a (cache-warm) list — the moment a
+ * deletion/creation lands on an already-rendered one, which used to swap every index-keyed slot
+ * abruptly. Shared by the product GRID and the orders AGENDA: returning from "Nuevo pedido" to a
+ * cached agenda has exactly the same problem as returning from "Nuevo producto" to a cached grid,
+ * and it deserves the same answer rather than a second one. Two phases, the gallery's removal
+ * language at list scale:
  *
  *  1. cards whose ids VANISHED shrink-fade out in place (`animateTilesOut`) while the old list is
  *     still rendered;
@@ -29,11 +36,11 @@ const isPrefix = (a: number[], b: number[]): boolean =>
  * anything while `animate` is false. In-place field updates (same ids — an edit) also swap
  * directly: the card re-renders its own content, nothing moves.
  */
-export function useGridListTransition(
-  products: Product[],
+export function useGridListTransition<T extends Identified>(
+  products: T[],
   animate: boolean,
   scopeRef: React.RefObject<HTMLElement | null>,
-): Product[] {
+): T[] {
   const [displayed, setDisplayed] = useState(products);
   // The generation token: any newer change abandons an in-flight phase 1 (latest intent wins).
   const generation = useRef(0);
@@ -47,7 +54,15 @@ export function useGridListTransition(
   // Non-animated changes (appends, filter/cold flows, same-id field updates) sync during render —
   // the existing machineries expect the list to be current at commit time. (No ref writes here —
   // superseding an in-flight phase 1 is the effect's job below.)
-  if (products !== displayed && !animatable) {
+  //
+  // The comparison is by CONTENT, never by array identity: a caller whose `products` array is
+  // rebuilt on every render (a fresh query result, a `map` in the body) would otherwise re-set state
+  // on every render — a render-phase update loop that re-runs the page's own effects underneath it
+  // and can cut short an in-flight transition. Same-length + same element references = nothing to do.
+  const changed =
+    products.length !== displayed.length ||
+    products.some((item, index) => item !== displayed[index]);
+  if (changed && !animatable) {
     setDisplayed(products);
   }
 

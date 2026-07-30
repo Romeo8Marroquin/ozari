@@ -6,10 +6,19 @@ import type { OrderDetailEnvelope } from './order.types';
 
 /** The advance body — a TARGET status and whatever that move needs. The client never says which
  *  KIND of move it is: the backend engine derives that (and re-authorises it) under a row lock. */
+/** Photos documenting ONE step of the move — a multi-step admin jump sends one entry per step it
+ *  crosses, so every demanding step is documented in a single pass. */
+export interface AdvanceEvidence {
+  statusId: number;
+  /** R2 keys already uploaded via the presign. */
+  keys: string[];
+}
+
 export interface AdvanceOrderBody {
+  /** The target status. For an admin it may be SEVERAL steps away — the backend resolves the path
+   *  and applies every step in between (and reopens a cancelled order onto it). */
   toStatusId: number;
-  /** R2 keys of photos already uploaded via the presign — required by steps that demand evidence. */
-  evidenceKeys?: string[];
+  evidence?: AdvanceEvidence[];
   /** Why it's being cancelled — sent on a disruptive move. */
   reason?: string;
 }
@@ -37,8 +46,12 @@ export function useAdvanceOrder() {
         { skipErrorNotification: true },
       ),
     retry: false,
-    onSuccess: () => {
+    onSuccess: (_result, variables) => {
       void queryClient.invalidateQueries({ queryKey: [QueryKeys.ORDERS] });
+      // …and the DETAIL, whose status, actions, trail and evidence all just changed.
+      void queryClient.invalidateQueries({
+        queryKey: [QueryKeys.ORDER, variables.orderId],
+      });
     },
   });
 

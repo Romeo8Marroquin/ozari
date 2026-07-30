@@ -147,7 +147,26 @@ const baseCreateOrderSchema = z.object({
     .max(ORDER_MAX_LINES, t(`${KEY}.tooManyLines`)),
 });
 
-export const createOrderSchema = baseCreateOrderSchema.superRefine((data, ctx) => {
+/**
+ * The EDIT schema — identical except that the delivery date is free (owner decision, 2026-07-29).
+ * "Not in the past" is a rule about SCHEDULING something new; an order being corrected already
+ * happened, or is being moved for a reason the admin knows and the form doesn't. The pickup rule is
+ * untouched, so a rental's collection still has to come after its delivery whatever the date.
+ * The backend's update validator drops the same guard — the two mirrors stay in step.
+ */
+const baseUpdateOrderSchema = baseCreateOrderSchema.extend({
+  deliveryAt: z
+    .string()
+    .trim()
+    .nonempty(t(`${KEY}.requiredDeliveryAt`))
+    .refine((value) => parseDateTime(value) !== null, t(`${KEY}.invalidDeliveryAt`)),
+});
+
+/** The cross-field rules both schemas share (duplicate lines, pickup coherence). */
+const orderCrossFieldRules = (
+  data: z.infer<typeof baseCreateOrderSchema>,
+  ctx: z.RefinementCtx,
+): void => {
   // No duplicate products in one order (mirrors the backend; the picker already hides picked ones).
   const seen = new Set<number>();
   data.lines.forEach((line, index) => {
@@ -174,7 +193,10 @@ export const createOrderSchema = baseCreateOrderSchema.superRefine((data, ctx) =
     }
   }
   // A purchase-only order carries no pickup — the UI hides the field, so a value here is stale.
-});
+};
+
+export const createOrderSchema = baseCreateOrderSchema.superRefine(orderCrossFieldRules);
+export const updateOrderSchema = baseUpdateOrderSchema.superRefine(orderCrossFieldRules);
 
 export type CreateOrderFormType = z.infer<typeof createOrderSchema>;
 
@@ -246,6 +268,64 @@ export function toCreateOrderBody(data: CreateOrderFormType): CreateOrderBody {
       productId: line.productId,
       /* v8 ignore next -- parseLineQuantity is guaranteed non-null by the schema */
       quantity: parseLineQuantity(line.quantity) ?? 1,
+    })),
+  };
+}
+
+/** An ISO instant → the `datetime-local` value ('YYYY-MM-DDTHH:mm') the pickers hold, in LOCAL time
+ *  (the field has no timezone, and the order was scheduled in the business's own clock). */
+export function toDateTimeLocal(iso: string): string {
+  const date = new Date(iso);
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/**
+ * An existing order → the form's values, for the EDIT page. The mirror of {@link toCreateOrderBody}:
+ * every field the form owns is restored, so saving without touching anything sends exactly what is
+ * already stored.
+ *
+ * Two fields are deliberately NOT restored — `deliveryContactTypeId` and `deliveryZoneId`. They are
+ * form AIDS (they pick the contact icon/keyboard and suggest a delivery fee), never part of the
+ * order: what an order records is the snapshot TEXT that was agreed. Reopening on the generic icon
+ * with no zone pre-selected is honest; guessing them from the registry would silently rewrite the
+ * agreed fee the moment a zone was chosen.
+ */
+export function orderToFormValues(order: {
+  clientRegistryId?: number;
+  eventType: { id: number };
+  deliveryAt: string;
+  pickupAt?: string;
+  clientName: string;
+  deliveryContact: string;
+  deliveryAddress: string;
+  description?: string;
+  comment?: string;
+  deliveryAmount?: number;
+  depositAmount?: number;
+  paymentMethod?: { id: number };
+  assignee?: { id: number };
+  lines: { productId: number; quantity: number; isRental: boolean }[];
+}): CreateOrderFormType {
+  return {
+    ...createOrderDefaultValues,
+    clientRegistryId: order.clientRegistryId as unknown as number,
+    eventTypeId: order.eventType.id,
+    deliveryAt: toDateTimeLocal(order.deliveryAt),
+    pickupAt: order.pickupAt ? toDateTimeLocal(order.pickupAt) : '',
+    deliveryName: order.clientName,
+    deliveryContact: order.deliveryContact,
+    deliveryAddress: order.deliveryAddress,
+    description: order.description ?? '',
+    comment: order.comment ?? '',
+    deliveryAmount: order.deliveryAmount != null ? String(order.deliveryAmount) : '',
+    depositAmount: order.depositAmount != null ? String(order.depositAmount) : '',
+    paymentMethodId: order.paymentMethod?.id ?? null,
+    assignedUserId: order.assignee?.id as unknown as number,
+    lines: order.lines.map((line) => ({
+      productId: line.productId,
+      quantity: String(line.quantity),
+      isRental: line.isRental,
     })),
   };
 }

@@ -302,6 +302,18 @@ async function seedAppPreferences(prisma: SeedPrismaClient): Promise<void> {
       description:
         "Mínimo global de fotos de evidencia por paso (y mínimo permitido al configurar un estado)",
     },
+    // How long evidence photos are KEPT. Nothing enforces this automatically yet — it is the cutoff
+    // `pnpm purge:evidence` uses when run without an explicit `--before`, so the policy has ONE home
+    // whether it's run by hand today or by an admin screen / scheduled job later. Only the PHOTOS
+    // are ever purged; the orders and their status history are permanent.
+    {
+      key: "orders.evidenceRetentionMonths",
+      value: "24",
+      valueType: "int",
+      group: "orders",
+      description:
+        "Meses que se conservan las fotos de evidencia antes de poder depurarlas (los pedidos y su historial nunca se borran)",
+    },
     {
       key: "orders.evidenceMaxPhotos",
       value: "10",
@@ -349,6 +361,14 @@ async function seedAppPreferences(prisma: SeedPrismaClient): Promise<void> {
       create: row,
     });
   }
+
+  // RETIRED keys — swept so nothing dead accumulates (the no-trash policy applies to preferences
+  // too). `orders.evidencePhotosRequired` was a single global switch; whether a step demands photos
+  // is now the PER-STATUS `service_status.requires_evidence` flag (EPIC-2 order lifecycle,
+  // 2026-07-27), so the old row could only ever mislead. Safe + idempotent: no code reads it.
+  await prisma.appPreference.deleteMany({
+    where: { key: { in: ["orders.evidencePhotosRequired"] } },
+  });
 }
 
 async function main(): Promise<void> {

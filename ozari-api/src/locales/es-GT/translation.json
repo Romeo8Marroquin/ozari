@@ -387,7 +387,7 @@
       "tokenMissing": "Token de protección CSRF requerido.",
       "tokenInvalid": "Token de protección CSRF inválido.",
       "logs": {
-        "tokenMissing": "[middleware] Token CSRF faltante. Cookie: {{-hasCookie}}, Header: {{-hasHeader}}.",
+        "tokenMissing": "[middleware] Token CSRF faltante en la cabecera para {{-method}} {{-url}}.",
         "tokenMismatch": "[middleware] Token CSRF no coincide para {{-method}} {{-url}}.",
         "tokenValid": "[middleware] Token CSRF válido para {{-method}} {{-url}}."
       }
@@ -511,12 +511,24 @@
         "error": "Error al calcular disponibilidad: {{-error}}."
       }
     },
+    "deleteOrder": {
+      "orderDeleted": "Pedido eliminado permanentemente.",
+      "orderNotFound": "El pedido no existe o ya no está disponible.",
+      "errorDeletingOrder": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "orderDeleted": "Pedido <{{-id}}> eliminado permanentemente (con sus líneas, evidencias e historial).",
+        "orderNotFound": "Pedido no encontrado al eliminar: <{{-id}}>.",
+        "evidenceCleanupFailed": "No se pudieron borrar de R2 las fotos del pedido eliminado: {{-error}}.",
+        "errorDeletingOrder": "Error al eliminar el pedido: {{-error}}."
+      }
+    },
     "advance": {
       "orderAdvanced": "Estado del pedido actualizado exitosamente.",
       "notFound": "El pedido no existe o ya no está disponible.",
       "forbidden": "No tiene permiso para realizar este cambio en el pedido.",
       "invalid": "El pedido ya cambió de estado. Actualice la vista e intente de nuevo.",
       "evidence": "Las fotos de evidencia requeridas para este paso no están completas.",
+      "stockConflict": "No hay disponibilidad para reactivar este pedido: algunos productos ya están comprometidos.",
       "errorAdvancing": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "validators": {
         "invalidToStatusId": "El estado destino del pedido no es válido.",
@@ -536,6 +548,8 @@
         "forbidden": "Avance no permitido para el actor en el pedido <{{-id}}>: {{-detail}}.",
         "invalid": "Transición inválida en el pedido <{{-id}}>: {{-detail}}.",
         "evidence": "Evidencia insuficiente al avanzar el pedido <{{-id}}>: {{-detail}}.",
+        "stockConflict": "Conflicto de disponibilidad al reactivar el pedido: {{-conflicts}}.",
+        "evidenceCleanupFailed": "No se pudieron borrar de R2 las fotos de un paso deshecho: {{-error}}.",
         "errorAdvancing": "Error al avanzar el pedido: {{-error}}."
       }
     },
@@ -617,6 +631,142 @@
         "spacingConflict": "Conflicto de espaciado logístico al crear pedido, evento cercano en <{{-conflictAt}}>.",
         "lifecycleUnconfigured": "No existe un estado inicial activo en service_status; no se puede crear el pedido.",
         "errorCreatingOrder": "Error al crear el pedido: {{-error}}."
+      }
+    },
+    "updateOrder": {
+      "orderUpdated": "Pedido actualizado exitosamente.",
+      "orderNotFound": "El pedido solicitado no existe.",
+      "stockConflict": "Algunos productos no tienen disponibilidad para las fechas solicitadas.",
+      "spacingConflict": "Ya existe una entrega o recolección demasiado cerca de ese horario.",
+      "errorUpdatingOrder": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidClientRegistryId": "El cliente del pedido es requerido y debe ser válido.",
+        "invalidEventTypeId": "El tipo de evento es requerido y debe ser válido.",
+        "invalidDeliveryAt": "La fecha y hora de entrega es requerida y debe ser válida.",
+        "deliveryInPast": "La fecha y hora de entrega no puede moverse al pasado.",
+        "invalidLines": "El pedido requiere al menos un producto.",
+        "tooManyLines": "El pedido excede el número máximo de productos.",
+        "invalidLineProduct": "Un producto del pedido no es válido.",
+        "duplicateLineProduct": "Un producto no puede repetirse en el pedido.",
+        "invalidLineQuantity": "La cantidad de un producto no es válida.",
+        "unknownLineProduct": "Un producto del pedido no existe o ya no está disponible.",
+        "unsupportedRentTimeUnit": "Un producto de alquiler tiene una unidad de tiempo aún no soportada para pedidos.",
+        "mixedCurrencies": "Todos los productos del pedido deben usar la misma moneda.",
+        "pickupRequiredForRental": "Un pedido con alquileres requiere fecha y hora de recolección.",
+        "pickupBeforeDelivery": "La recolección debe ser posterior a la entrega.",
+        "pickupForbiddenForPurchase": "Un pedido solo de compra no lleva recolección.",
+        "invalidDeliveryName": "El nombre de quien recibe es requerido y debe ser válido.",
+        "invalidDeliveryContact": "El contacto de entrega es requerido y debe ser válido.",
+        "invalidDeliveryAddress": "La dirección de entrega es requerida y debe ser válida.",
+        "invalidDescription": "La descripción del pedido debe ser válida.",
+        "invalidComment": "El comentario del pedido debe ser válido.",
+        "invalidDeliveryAmount": "El costo de envío no es válido.",
+        "invalidDepositAmount": "El anticipo no es válido.",
+        "invalidPaymentMethodId": "El método de pago no es válido.",
+        "invalidAssignedUserId": "El responsable asignado no es válido.",
+        "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+        "logs": {
+          "invalidClientRegistryId": "El registro de cliente <{{-clientRegistryId}}> no es válido.",
+          "invalidEventTypeId": "El tipo de evento <{{-eventTypeId}}> no es válido.",
+          "invalidDeliveryAt": "La fecha de entrega <{{-deliveryAt}}> no es válida.",
+          "deliveryInPast": "La fecha de entrega <{{-deliveryAt}}> se movería al pasado.",
+          "invalidLines": "La lista de productos del pedido no es válida.",
+          "tooManyLines": "El pedido excede el máximo de líneas: <{{-count}}> de <{{-max}}>.",
+          "invalidLineProduct": "El producto <{{-productId}}> no es válido.",
+          "duplicateLineProduct": "El producto <{{-productId}}> está repetido en el pedido.",
+          "invalidLineQuantity": "La cantidad <{{-quantity}}> del producto <{{-productId}}> no es válida.",
+          "unknownLineProduct": "El producto <{{-productId}}> no existe o está inactivo.",
+          "unsupportedRentTimeUnit": "El producto <{{-productId}}> usa la unidad de renta <{{-rentTimeUnitId}}>, no soportada por el motor de cobro diario.",
+          "mixedCurrencies": "El pedido mezcla monedas: <{{-currencyIds}}>.",
+          "pickupRequiredForRental": "Recolección faltante o inválida <{{-pickupAt}}> para un pedido con alquileres.",
+          "pickupBeforeDelivery": "La recolección <{{-pickupAt}}> no es posterior a la entrega <{{-deliveryAt}}>.",
+          "pickupForbiddenForPurchase": "Un pedido solo de compra incluyó recolección <{{-pickupAt}}>.",
+          "invalidDeliveryName": "El nombre de entrega <{{-deliveryName}}> no es válido.",
+          "invalidDeliveryContact": "El contacto de entrega <{{-deliveryContact}}> no es válido.",
+          "invalidDeliveryAddress": "La dirección de entrega no es válida.",
+          "invalidDescription": "La descripción del pedido no es válida.",
+          "invalidComment": "El comentario del pedido no es válido.",
+          "invalidDeliveryAmount": "El costo de envío <{{-deliveryAmount}}> no es válido.",
+          "invalidDepositAmount": "El anticipo <{{-depositAmount}}> no es válido.",
+          "invalidPaymentMethodId": "El método de pago <{{-paymentMethodId}}> no es válido.",
+          "invalidAssignedUserId": "El responsable asignado <{{-assignedUserId}}> no es válido.",
+          "validationError": "Error validando la actualización del pedido: {{-error}}."
+        }
+      },
+      "logs": {
+        "orderUpdated": "Pedido <{{-id}}> actualizado exitosamente.",
+        "orderNotFound": "El pedido <{{-id}}> no existe.",
+        "stockConflict": "Conflicto de disponibilidad al actualizar pedido: {{-conflicts}}.",
+        "spacingConflict": "Conflicto de espaciado logístico al actualizar pedido, evento cercano en <{{-conflictAt}}>.",
+        "errorUpdatingOrder": "Error al actualizar el pedido: {{-error}}."
+      }
+    }
+  },
+  "preferences": {
+    "getPreferences": {
+      "preferencesFetched": "Preferencias obtenidas exitosamente.",
+      "errorFetching": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "preferencesFetched": "Preferencias obtenidas exitosamente.",
+        "errorFetching": "Error al obtener las preferencias: {{-error}}."
+      }
+    },
+    "updateSettings": {
+      "settingsUpdated": "Preferencias actualizadas exitosamente.",
+      "errorUpdating": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "settingsUpdated": "Preferencias actualizadas: {{-keys}}.",
+        "errorUpdating": "Error al actualizar las preferencias: {{-error}}."
+      }
+    },
+    "catalogs": {
+      "rowCreated": "Elemento agregado exitosamente.",
+      "rowUpdated": "Elemento actualizado exitosamente.",
+      "rowDeleted": "Elemento eliminado exitosamente.",
+      "rowDeactivated": "El elemento está en uso, así que se desactivó en lugar de eliminarse.",
+      "rowNotFound": "El elemento solicitado no existe.",
+      "unknownCatalog": "El catálogo solicitado no existe.",
+      "lastActive": "Debe quedar al menos un elemento activo en este catálogo.",
+      "errorCreating": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "errorUpdating": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "errorDeleting": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "rowCreated": "Elemento <{{-id}}> creado en el catálogo <{{-catalog}}>.",
+        "rowUpdated": "Elemento <{{-id}}> actualizado en el catálogo <{{-catalog}}>.",
+        "rowDeleted": "Elemento <{{-id}}> eliminado del catálogo <{{-catalog}}>.",
+        "rowDeactivated": "Elemento <{{-id}}> desactivado en el catálogo <{{-catalog}}> por estar referenciado.",
+        "rowNotFound": "El elemento <{{-id}}> del catálogo <{{-catalog}}> no existe.",
+        "unknownCatalog": "El catálogo <{{-catalog}}> no es administrable.",
+        "lastActive": "Se intentó dejar el catálogo <{{-catalog}}> sin elementos activos.",
+        "errorCreating": "Error al crear el elemento del catálogo: {{-error}}.",
+        "errorUpdating": "Error al actualizar el elemento del catálogo: {{-error}}.",
+        "errorDeleting": "Error al eliminar el elemento del catálogo: {{-error}}."
+      }
+    },
+    "validators": {
+      "invalidSettings": "La lista de preferencias no es válida.",
+      "unknownSetting": "Una de las preferencias enviadas no es configurable.",
+      "duplicateSetting": "Una preferencia no puede repetirse.",
+      "invalidSettingValue": "El valor de una preferencia está fuera del rango permitido.",
+      "invertedEvidenceRange": "El máximo de fotos no puede ser menor que el mínimo.",
+      "unknownCatalog": "El catálogo solicitado no existe.",
+      "invalidName": "El nombre es requerido y debe ser válido.",
+      "invalidDescription": "La descripción debe ser válida.",
+      "invalidIsActive": "El estado de publicación no es válido.",
+      "invalidExtraField": "Uno de los campos del elemento no es válido.",
+      "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "invalidSettings": "La lista de preferencias no es válida: <{{-settings}}> <{{-count}}>.",
+        "unknownSetting": "La preferencia <{{-key}}> no es configurable.",
+        "duplicateSetting": "La preferencia <{{-key}}> está repetida.",
+        "invalidSettingValue": "El valor <{{-value}}> de <{{-key}}> está fuera de [<{{-min}}>, <{{-max}}>].",
+        "invertedEvidenceRange": "Rango de fotos invertido: mínimo <{{-min}}>, máximo <{{-max}}>.",
+        "unknownCatalog": "El catálogo <{{-catalog}}> no es administrable.",
+        "invalidName": "El nombre <{{-name}}> no es válido.",
+        "invalidDescription": "La descripción <{{-description}}> no es válida.",
+        "invalidIsActive": "El estado de publicación <{{-isActive}}> no es válido.",
+        "invalidExtraField": "El campo <{{-field}}> con valor <{{-value}}> no es válido.",
+        "validationError": "Error validando las preferencias: {{-error}}."
       }
     }
   },

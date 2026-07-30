@@ -10,10 +10,11 @@ import {
 } from './navConfig';
 
 describe('PANEL_NAV', () => {
-  it('lists only the built modules (products + orders + settings), all reachable', () => {
+  it('lists only the built modules (products + orders + preferences + settings), all reachable', () => {
     expect(PANEL_NAV.map((item) => item.to)).toEqual([
       '/panel/productos',
       '/panel/pedidos',
+      '/panel/preferencias',
       '/panel/ajustes',
     ]);
   });
@@ -27,12 +28,22 @@ describe('PANEL_NAV', () => {
     expect(filterNavByRole(PANEL_NAV, Role.Admin).map((i) => i.to)).toEqual([
       '/panel/productos',
       '/panel/pedidos',
+      '/panel/preferencias',
       '/panel/ajustes',
     ]);
     expect(filterNavByRole(PANEL_NAV, Role.Client).map((i) => i.to)).toEqual([
       '/panel/productos',
       '/panel/ajustes',
     ]);
+  });
+
+  it('keeps PREFERENCES strictly Admin — it changes how the business behaves for everyone', () => {
+    // Ajustes stays personal (password, 2FA) and is open to every staff member; system configuration
+    // is a different concern with a different audience.
+    const visibleTo = (role: Role) => filterNavByRole(PANEL_NAV, role).map((i) => i.to);
+    expect(visibleTo(Role.Admin)).toContain('/panel/preferencias');
+    expect(visibleTo(Role.Driver)).not.toContain('/panel/preferencias');
+    expect(visibleTo(Role.Client)).not.toContain('/panel/preferencias');
   });
 
   it('opens orders to Admin + Driver (row-scoped), still not to a Client', () => {
@@ -73,6 +84,7 @@ describe('panelSectionFor', () => {
 
   it('resolves the other tabs and returns null for unknown paths', () => {
     expect(panelSectionFor('/panel/pedidos')).toBe('/panel/pedidos');
+    expect(panelSectionFor('/panel/preferencias')).toBe('/panel/preferencias');
     expect(panelSectionFor('/panel/ajustes')).toBe('/panel/ajustes');
     expect(panelSectionFor('/panel')).toBeNull();
     expect(panelSectionFor('/sesion/inicio')).toBeNull();

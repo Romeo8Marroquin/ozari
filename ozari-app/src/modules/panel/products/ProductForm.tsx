@@ -16,6 +16,7 @@ import { toFormError } from '@utils/apiError';
 import {
   detailRowIn,
   detailRowOut,
+  revealInScroller,
   SECTION_REVEAL_STEP,
   staggerIn,
   staggerOut,
@@ -130,7 +131,11 @@ const DetailRow: React.FC<{
 }> = ({ animateIn, onRegister, children }) => {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (animateIn) detailRowIn(ref.current);
+    if (!animateIn) return;
+    detailRowIn(ref.current);
+    // A row added at the bottom of a long form can land below the fold — and the click that added it
+    // was a request to fill it in. The panel follows it by the minimum needed, on the same curve.
+    revealInScroller(ref.current);
   }, [animateIn]);
   return (
     <div

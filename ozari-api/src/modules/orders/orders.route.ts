@@ -4,12 +4,18 @@ import { isGrantedRoles } from "@middlewares/role.middleware.js";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
 import {
   createOrder,
+  deleteOrder,
   getOrderAvailability,
   getOrderById,
   getOrders,
   getOrdersCatalog,
+  updateOrder,
 } from "./orders.controller.js";
-import { validateCreateOrder, validateOrderAvailability } from "./orders.validator.js";
+import {
+  validateCreateOrder,
+  validateOrderAvailability,
+  validateUpdateOrder,
+} from "./orders.validator.js";
 import {
   advanceOrder,
   createOrderEvidenceUploads,
@@ -30,7 +36,15 @@ const canListOrders = isGrantedRoles([RolesEnum.Admin, RolesEnum.Driver]);
 const canReadOrders = isGrantedRoles([RolesEnum.Admin]);
 router.get("/", verifyJwt, canListOrders, getOrders);
 router.get("/catalog", verifyJwt, canReadOrders, getOrdersCatalog);
-router.get("/:id", verifyJwt, canReadOrders, getOrderById);
+// The DETAIL is Admin + Driver, row-scoped in the controller: a driver's query is narrowed to
+// `assignedUserId = self`, so another worker's order answers the same plain 404 as a missing one —
+// the guard widened TOGETHER with that scoping, as the rule demands.
+router.get("/:id", verifyJwt, canListOrders, getOrderById);
+
+// Region: **Permanent deletion — STRICTLY Admin.** Destroys the order and everything that exists
+// only because of it (evidence + objects, status trail, lines, extras) and returns sale stock. A
+// driver never deletes; cancelling is their off-ramp.
+router.delete("/:id", verifyJwt, isGrantedRoles([RolesEnum.Admin]), deleteOrder);
 
 // Region: Order creation — **STRICTLY Admin** (owner rule: ONLY the admin creates orders; no
 // employee — not even a future call-center role — inherits this by default. If a call-center
@@ -43,6 +57,18 @@ router.post(
   isGrantedRoles([RolesEnum.Admin]),
   validateCreateOrder,
   createOrder,
+);
+
+// Region: The full order EDIT — **STRICTLY Admin**, same stance as creation (a driver reports what
+// happened through the lifecycle; rewriting what was agreed is the admin's job). Declarative: the
+// body is the order's FINAL state and is validated by the very same contract as create, so the two
+// can never drift apart.
+router.put(
+  "/:id",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  validateUpdateOrder,
+  updateOrder,
 );
 
 // Region: Live availability probe — **Admin only** (exact counts; a Client tier would cap instead,

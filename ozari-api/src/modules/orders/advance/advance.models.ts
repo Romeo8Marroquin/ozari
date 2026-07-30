@@ -4,12 +4,21 @@
  * move is and whether this actor may make it (`transitionKindFor`). That is why a new flow — a client
  * self-cancel, an auto-advance job — needs no new endpoint.
  */
+/** Photos documenting ONE step of the move. A jump collects every demanding step's set in a single
+ *  pass, so the whole walk can be validated before anything is written. */
+export interface AdvanceEvidenceModel {
+  statusId: number;
+  /** R2 object keys already uploaded via `POST /orders/evidence/upload-url`. */
+  keys: string[];
+}
+
 export interface AdvanceOrderRequestModel {
-  /** The `service_status` to move into (offered by the order's `actions`). */
+  /** The `service_status` to move into (offered by the order's `actions`). May be SEVERAL steps away
+   *  for an admin — the engine resolves the path and applies every step in between. */
   toStatusId: number;
-  /** R2 object keys of photos already uploaded via `POST /orders/evidence/upload-url`. Required (in
-   *  the target's resolved count range) when the step demands evidence; ignored otherwise. */
-  evidenceKeys: string[];
+  /** Evidence per target step; required (in each step's resolved count range) for the steps that
+   *  demand it, ignored elsewhere. */
+  evidence: AdvanceEvidenceModel[];
   /** Why the order is being cancelled — required on a disruptive move, absent otherwise. */
   reason: string | undefined;
 }

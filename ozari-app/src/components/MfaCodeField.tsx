@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { Controller, useFormContext, type FieldValues, type Path } from 'react-hook-form';
 import AnimatedMessage from '@components/AnimatedMessage';
+import useDesktopAutoFocus from '@hooks/useDesktopAutoFocus';
 
 /** `numeric` = 6-digit TOTP (digits only, OTP autofill); `text` = alphanumeric recovery code. */
 export type MfaCodeMode = 'numeric' | 'text';
@@ -50,6 +51,12 @@ function MfaCodeField<T extends FieldValues>({
   onComplete,
 }: MfaCodeFieldProps<T>) {
   const { control, formState } = useFormContext<T>();
+  // `autoFocus` is the caller's INTENT ("this is the field to start on"); whether it actually
+  // happens is the device's call. On touch, focusing here would pop the keyboard the moment the
+  // MFA step swaps in — mid-animation, over the card. The same rule the dialogs and the auth pages
+  // use, so a caller can never opt out of it by accident.
+  const canAutoFocus = useDesktopAutoFocus();
+  const focusOnMount = autoFocus && canAutoFocus;
   // Read at the top so the component subscribes to `isSubmitted` (reveal errors after a submit
   // attempt even on a field the user never blurred) — matching CustomInputForm.
   const { isSubmitted } = formState;
@@ -97,8 +104,8 @@ function MfaCodeField<T extends FieldValues>({
               enterKeyHint="go"
               maxLength={maxLength}
               disabled={disabled}
-              autoFocus={autoFocus}
-              data-modal-autofocus={autoFocus || undefined}
+              autoFocus={focusOnMount}
+              data-modal-autofocus={focusOnMount || undefined}
               aria-required
               aria-invalid={showError || undefined}
               aria-describedby={showError ? messageId : undefined}

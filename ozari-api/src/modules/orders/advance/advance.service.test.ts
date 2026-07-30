@@ -9,6 +9,7 @@ import {
   AdvanceOrderError,
   assertEvidenceSatisfies,
   buildTransitionData,
+  planStatusPath,
 } from "./advance.service.js";
 
 const CATALOG = SEEDED_STATUS_CATALOG;
@@ -30,7 +31,9 @@ const order = (
   serviceStatusId: 1,
   assignedUserId: 7,
   isRental: true,
+  isSale: false,
   cancelledAt: null,
+  deliveredAt: null,
   ...overrides,
 });
 
@@ -152,6 +155,91 @@ describe("buildTransitionData — disruptive", () => {
     expect(
       transition(order(), PENDIENTE, CANCELADO, "disruptive"),
     ).toMatchObject({ cancelReason: null });
+  });
+});
+
+describe("planStatusPath", () => {
+  const plan = (
+    current: LifecycleOrderModel,
+    path: StatusDefinitionModel[],
+    evidence: Array<[number, string[]]> = [],
+  ) =>
+    planStatusPath({
+      catalog: CATALOG,
+      order: current,
+      path,
+      evidenceByStatus: new Map(evidence),
+      bounds: { min: 1, max: 10 },
+      now: NOW,
+    });
+
+  it("replays the order state so each step is planned against what the last one left", () => {
+    const steps = plan(
+      order({ serviceStatusId: 1 }),
+      [EN_RUTA, ENTREGADO, RECOLECTADO, LISTO],
+      [
+        [3, ["a"]],
+        [4, ["b"]],
+      ],
+    );
+    expect(steps.map((step) => [step.to.name, step.kind])).toEqual([
+      ["En ruta", "forward"],
+      ["Entregado", "forward"],
+      ["Recolectado", "forward"],
+      ["Listo", "forward"],
+    ]);
+    // Only the LAST step completes the order — that's the replay working (each step was planned
+    // from the state the previous one produced, not from the original).
+    expect(steps.map((step) => step.data["readyAt"])).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      NOW,
+    ]);
+    expect(steps[1]?.evidenceKeys).toEqual(["a"]);
+  });
+
+  it("marks each backward leg with the step whose photos it destroys", () => {
+    const steps = plan(order({ serviceStatusId: 6 }), [RECOLECTADO, ENTREGADO]);
+    expect(steps.map((step) => [step.kind, step.purgeStatusId])).toEqual([
+      ["backward", 6], // leaving Listo
+      ["backward", 4], // leaving Recolectado — its collection photos go with it
+    ]);
+    expect(steps[1]?.data["collectedAt"]).toBeNull();
+  });
+
+  it("reopening a cancelled order lands it on the step, finished or not", () => {
+    const cancelled = order({ serviceStatusId: 2, cancelledAt: NOW });
+    expect(plan(cancelled, [EN_RUTA])[0]).toMatchObject({
+      kind: "reopen",
+      data: { cancelledAt: null, cancelReason: null, readyAt: null },
+    });
+    // …and onto the LAST applicable step it is finished again, so `readyAt` comes back.
+    const saleCancelled = order({
+      serviceStatusId: 2,
+      cancelledAt: NOW,
+      isRental: false,
+    });
+    expect(plan(saleCancelled, [ENTREGADO])[0]?.data).toMatchObject({ readyAt: NOW });
+  });
+
+  it("treats a vanished current status as the start of the pipeline", () => {
+    // Defensive: an order pointing at a deleted status can still be walked forward, and nothing is
+    // purged (there is no step to undo).
+    const steps = plan(order({ serviceStatusId: 99 }), [EN_RUTA]);
+    expect(steps[0]).toMatchObject({ kind: "forward", purgeStatusId: null });
+  });
+
+  it("treats a positionless (mis-configured) target as a step back, never a leap forward", () => {
+    // An admin can save a non-disruptive status with no pipeline slot; it must not read as progress.
+    const orphanStep = { ...LISTO, sortOrder: null };
+    expect(plan(order({ serviceStatusId: 3 }), [orphanStep])[0]?.kind).toBe("backward");
+  });
+
+  it("refuses the whole walk as soon as one step lacks its photos", () => {
+    expect(() =>
+      plan(order({ serviceStatusId: 1 }), [EN_RUTA, ENTREGADO]),
+    ).toThrow(AdvanceOrderError);
   });
 });
 

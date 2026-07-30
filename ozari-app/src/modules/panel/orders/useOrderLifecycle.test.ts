@@ -10,6 +10,8 @@ const action = (overrides: Partial<OrderAction> & Pick<OrderAction, 'kind'>): Or
   minEvidence: 1,
   maxEvidence: 10,
   requiresReason: false,
+  inventoryEffect: 'none',
+  purgesEvidence: false,
   ...overrides,
 });
 

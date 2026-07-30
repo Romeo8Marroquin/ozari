@@ -257,7 +257,15 @@ const ProductsPage: React.FC = () => {
   };
 
   const addButton = (
-    <Button size="sm" startIcon={<HiOutlinePlus className="size-4" />} onClick={handleAdd}>
+    <Button
+      size="sm"
+      startIcon={<HiOutlinePlus className="size-4" />}
+      onClick={handleAdd}
+      // Keeps the action on the RIGHT once the lead text wraps it onto its own line: a lone item on
+      // a wrapped `justify-between` line falls back to flex-start, which reads as neither aligned
+      // nor centred. Inert while the two share a line (there is no free space to push into).
+      className="ml-auto"
+    >
       {t(`${KEY}.add`)}
     </Button>
   );

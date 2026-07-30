@@ -25,6 +25,7 @@ const order = (id: number, deliveryAt: string, over: Partial<OrderListItem> = {}
   deliveryAt: new Date(deliveryAt).toISOString(),
   isMine: false,
   actions: [],
+  holdsInventory: true,
   itemCount: 1,
   totalAmount: 100,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
