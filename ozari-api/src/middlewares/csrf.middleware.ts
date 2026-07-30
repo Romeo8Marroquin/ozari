@@ -96,7 +96,13 @@ export function verifyCsrfToken(
   const headerToken = req.headers[CSRF_HEADER_NAME] as string | undefined;
 
   if (!headerToken) {
-    logger.warn(i18next.t("middlewares.csrf.logs.tokenMissing"));
+    // Named like its two siblings below (method + url) — the only context that helps here. The
+    // string used to ask for a `hasCookie`/`hasHeader` pair from the days of a double-submit cookie
+    // and was called with neither, so the line logged literal `{{-hasCookie}}` placeholders; the
+    // token has been header-only (a stateless HMAC) since that design changed.
+    logger.warn(
+      i18next.t("middlewares.csrf.logs.tokenMissing", { method, url: req.originalUrl }),
+    );
     sendOzariError(
       res,
       HttpEnum.FORBIDDEN,

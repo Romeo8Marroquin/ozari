@@ -31,7 +31,21 @@ export interface OrderAction {
   maxEvidence: number;
   /** Disruptive moves record a reason. */
   requiresReason: boolean;
+  /**
+   * What accepting this move does to the goods the order reserves — the ONLY thing a dialog may
+   * claim about inventory. `release` gives units back, `reclaim` takes them again (so the move can
+   * fail on availability), `none` leaves the reservation untouched. Derived server-side from the
+   * statuses' `inventoryHold` plus the sale-stock rule, so the copy follows the machine: cancelling
+   * an order that already finished correctly promises nothing.
+   */
+  inventoryEffect: OrderInventoryEffect;
+  /** True when this move DESTROYS the photos of the step it undoes (a backward leg out of a step
+   *  that demanded evidence) — warned about before it happens. */
+  purgesEvidence: boolean;
 }
+
+/** @see OrderAction.inventoryEffect */
+export type OrderInventoryEffect = 'release' | 'reclaim' | 'none';
 
 export interface OrderCurrency {
   id: number;
@@ -60,6 +74,10 @@ export interface OrderListItem {
   /** Every move THIS user may make right now. Empty on another worker's order, on a finished one,
    *  or for a role without rights. */
   actions: OrderAction[];
+  /** Does the order RESERVE anything right now (rental units held by its status, or sale units not
+   *  yet cancelled/delivered)? The delete dialog states its inventory consequence from this instead
+   *  of hedging — a finished or cancelled order gave its goods back long ago. */
+  holdsInventory: boolean;
   paymentStatus: OrderLookup;
   deliveryAt: string;
   pickupAt?: string;
@@ -208,8 +226,20 @@ export interface OrderStatusChange {
   at: string;
 }
 
+/** One tracking photo, tagged with the step it documents. A step with none is normal: a rewind
+ *  destroyed them, or the retention policy purged them — its history row still proves it happened. */
+export interface OrderEvidence {
+  id: number;
+  statusId: number;
+  url: string;
+  at: string;
+}
+
 /** The full order the detail page and the create response share. */
 export interface OrderDetail extends OrderListItem {
+  /** The walk-in client registry this order belongs to — its IDENTITY, as opposed to the snapshot
+   *  texts below. The edit form reopens on this client. */
+  clientRegistryId?: number;
   deliveryContact: string;
   deliveryAddress: string;
   description?: string;
@@ -226,6 +256,7 @@ export interface OrderDetail extends OrderListItem {
   lines: OrderLine[];
   extras: unknown[];
   statusHistory: OrderStatusChange[];
+  evidence: OrderEvidence[];
   createdAt: string;
 }
 

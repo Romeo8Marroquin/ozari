@@ -1,25 +1,25 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fitImageBox } from './lightboxLayout';
-import ProductLightbox from './ProductLightbox';
-import type { ProductImage } from './product.types';
+import { fitImageBox } from '@utils/lightboxLayout';
+import ImageLightbox from './ImageLightbox';
 
-const images: ProductImage[] = [
-  { id: 1, url: 'https://cdn/a.webp', isPrimary: true, sortOrder: 0 },
-  { id: 2, url: 'https://cdn/b.webp', isPrimary: false, sortOrder: 1 },
-  { id: 3, url: 'https://cdn/c.webp', isPrimary: false, sortOrder: 2 },
+// The viewer only ever needs a `url` — a product image, an order's step evidence, anything.
+const images = [
+  { url: 'https://cdn/a.webp' },
+  { url: 'https://cdn/b.webp' },
+  { url: 'https://cdn/c.webp' },
 ];
 
-const K = 'modules.panel.products.detail.lightbox';
+const K = 'components.lightbox';
 
-const renderBox = (overrides: { images?: ProductImage[]; initialIndex?: number } = {}) => {
+const renderBox = (overrides: { images?: { url: string }[]; initialIndex?: number } = {}) => {
   const onClose = vi.fn();
   const utils = render(
-    <ProductLightbox
+    <ImageLightbox
       images={overrides.images ?? images}
       initialIndex={overrides.initialIndex ?? 0}
-      productName="Mesa redonda"
+      label="Mesa redonda"
       onClose={onClose}
     />,
   );
@@ -41,7 +41,7 @@ describe('fitImageBox', () => {
   });
 });
 
-describe('ProductLightbox', () => {
+describe('ImageLightbox', () => {
   it('renders the dialog with the counter, starts at the initial image, focuses close', () => {
     renderBox({ initialIndex: 1 });
     expect(screen.getByRole('dialog', { name: 'Mesa redonda' })).toBeInTheDocument();

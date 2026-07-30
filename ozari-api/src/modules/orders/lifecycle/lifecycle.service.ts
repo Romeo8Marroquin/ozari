@@ -9,6 +9,8 @@ import {
 import type {
   ActorContextModel,
   EvidenceBoundsModel,
+  InventoryEffectModel,
+  InventoryHoldingsModel,
   LifecycleOrderModel,
   OrderActionModel,
   OrderModeModel,
@@ -34,9 +36,9 @@ import type {
 
 // ── The catalog (cached vocabulary) ──────────────────────────────────────────────────────────────
 
-/** The whole `service_status` table, memoized in-process. Definitions change only when the admin
- *  edits them (Phase 4), which invalidates this — so reads never re-query per request. */
+/** The whole `service_status` table, memoized in-process with the moment it was read. */
 let catalogCache: StatusDefinitionModel[] | null = null;
+let catalogReadAt = 0;
 
 /** Drop the memoized catalog. Called by EVERY admin write to the status definitions (and by tests). */
 export function invalidateStatusCatalog(): void {
@@ -102,11 +104,18 @@ export function toStatusDefinition(row: {
 
 /**
  * The status vocabulary — ALL rows, including inactive ones (an order may still sit in a status the
- * admin has since unpublished, and it must keep behaving per its flags). Memoized; every caller
- * derives from this array instead of querying.
+ * admin has since unpublished, and it must keep behaving per its flags). Memoized so reads never
+ * re-query per request, with a **`statusCatalogTtlSeconds` expiry**: admin edits invalidate the
+ * cache explicitly, but a `pnpm db:seed`, a hand-edited row, or an edit made on ANOTHER Cloud Run
+ * instance cannot — and a process serving a machine that no longer exists silently loses the whole
+ * lifecycle (no pipeline ⇒ no next step ⇒ no quick action). The TTL bounds every such staleness.
  */
 export async function getStatusCatalog(): Promise<StatusDefinitionModel[]> {
-  if (catalogCache !== null) {
+  const now = Date.now();
+  if (
+    catalogCache !== null &&
+    now - catalogReadAt < appConfig.statusCatalogTtlSeconds * 1000
+  ) {
     return catalogCache;
   }
   const prismaClient = await getPrismaClient();
@@ -115,6 +124,7 @@ export async function getStatusCatalog(): Promise<StatusDefinitionModel[]> {
     select: statusDefinitionSelect,
   });
   catalogCache = rows.map(toStatusDefinition);
+  catalogReadAt = now;
   return catalogCache;
 }
 
@@ -202,6 +212,88 @@ export function holdingStatusIds(catalog: StatusDefinitionModel[]): {
   };
 }
 
+// ── Inventory: what an order reserves, and what a move does to it ────────────────────────────────
+
+/** Does sitting in this status reserve rental units at all? `NONE` is the only "no" — WINDOW and OUT
+ *  differ in WHEN the units are unavailable, never in WHETHER they're held. A status that vanished
+ *  from the catalog is treated as holding nothing (the availability queries can't see it either). */
+const statusHoldsRental = (status: StatusDefinitionModel | undefined): boolean =>
+  (status?.inventoryHold ?? InventoryHoldEnum.NONE) !== InventoryHoldEnum.NONE;
+
+/**
+ * What the order reserves RIGHT NOW.
+ *
+ * Rental units are derived from the current status' `inventoryHold` — so an order that has walked
+ * past every holding step (washed and back on the shelf) reserves nothing, even though it is neither
+ * cancelled nor deleted. Sale units are the real decrement, standing from creation until the order is
+ * cancelled or delivered (mirrors `holdsSaleStock`).
+ */
+export function currentHoldings(
+  catalog: StatusDefinitionModel[],
+  order: LifecycleOrderModel,
+): InventoryHoldingsModel {
+  const cancelled = order.cancelledAt !== null;
+  return {
+    rental:
+      order.isRental &&
+      !cancelled &&
+      statusHoldsRental(statusById(catalog, order.serviceStatusId)),
+    sale: order.isSale && !cancelled && order.deliveredAt === null,
+  };
+}
+
+/**
+ * What the order would reserve once `toStatus` is applied.
+ *
+ * The rental side follows the target status' flag, always. The sale side moves only where the order
+ * stops or resumes being real — a cancel gives the units back, a reopen takes them again (unless
+ * they were already delivered, in which case the client has them and nothing can) — because a sale is
+ * decremented at CREATION, not at delivery: walking the pipeline forwards or backwards never changes
+ * the count.
+ */
+export function holdingsAfter(
+  catalog: StatusDefinitionModel[],
+  order: LifecycleOrderModel,
+  toStatus: StatusDefinitionModel,
+  kind: TransitionKindModel,
+): InventoryHoldingsModel {
+  if (kind === "disruptive") {
+    return { rental: false, sale: false };
+  }
+  const rental = order.isRental && statusHoldsRental(toStatus);
+  return {
+    rental,
+    sale:
+      kind === "reopen"
+        ? order.isSale && order.deliveredAt === null
+        : currentHoldings(catalog, order).sale,
+  };
+}
+
+/**
+ * The one answer every confirm dialog states: does this move give goods back, take them again, or
+ * leave the reservation alone? Derived entirely from the flags, so inserting a step, renaming one or
+ * changing its `inventoryHold` rewrites the copy with no code change — and "cancel an order that
+ * already finished" correctly promises nothing, because such an order holds nothing to give back.
+ */
+export function inventoryEffectOf(
+  catalog: StatusDefinitionModel[],
+  order: LifecycleOrderModel,
+  toStatus: StatusDefinitionModel,
+  kind: TransitionKindModel,
+): InventoryEffectModel {
+  const before = currentHoldings(catalog, order);
+  const after = holdingsAfter(catalog, order, toStatus, kind);
+  // `reclaim` is checked first because it is the effect that can FAIL — if a move both freed and
+  // took, the availability risk is the thing the person must be told about.
+  if ((!before.rental && after.rental) || (!before.sale && after.sale)) {
+    return "reclaim";
+  }
+  return (before.rental && !after.rental) || (before.sale && !after.sale)
+    ? "release"
+    : "none";
+}
+
 /**
  * The order's NEXT applicable pipeline step, or `null` when it sits at its last one (⇒ complete) or
  * took a disruptive exit. This is the whole "what's the next tap" question, answered from data.
@@ -284,6 +376,74 @@ export function resolveTransitions(
     backward: isAdmin ? previousStatus(catalog, order) : null,
     disruptive: disruptiveStates(catalog),
   };
+}
+
+/**
+ * The ordered steps that take `order` from where it is to `toStatus`, or `null` when this actor may
+ * not make that move at all. **Every entry is a legal single transition**, so a multi-step jump is
+ * exactly a sequence of the moves the matrix already permits — never a bypass of it.
+ *
+ * - **one step** — the ordinary forward tap / admin rewind / cancel: a one-entry path;
+ * - **several steps** — the ADMIN-only jump (Pendiente → Listo, or Listo back to En ruta). Each entry
+ *   is applied in turn, so each writes its own history row, stamps its own actual and (backwards)
+ *   drops its own evidence. The trail records what really happened: a jump, step by step, now;
+ * - **reopening a cancelled order** — admin-only, and deliberately NOT a pipeline walk: a cancelled
+ *   order sits outside the pipeline, so it is placed directly back on the chosen step (a one-entry
+ *   path) with its cancellation cleared.
+ *
+ * A driver is confined to what {@link resolveTransitions} already grants them — one forward step, or
+ * an off-ramp — so a hand-written multi-step request from a driver resolves to `null`.
+ */
+// A decision TABLE read top to bottom — each branch is one sentence of the doc above.
+// eslint-disable-next-line complexity -- splitting it would hide the order the rules apply in
+export function resolveStatusPath(
+  catalog: StatusDefinitionModel[],
+  order: LifecycleOrderModel,
+  toStatus: StatusDefinitionModel,
+  actor: ActorContextModel,
+): StatusDefinitionModel[] | null {
+  if (!toStatus.isActive) {
+    return null;
+  }
+  const isAdmin = actor.role === RolesEnum.Admin;
+
+  // A cancelled order: only an admin may bring it back, and only onto a real pipeline step.
+  if (order.cancelledAt !== null || statusById(catalog, order.serviceStatusId)?.isDisruptive) {
+    const reopenable =
+      isAdmin &&
+      !toStatus.isDisruptive &&
+      applicablePipeline(catalog, orderMode(order)).some(
+        (status) => status.id === toStatus.id,
+      );
+    return reopenable ? [toStatus] : null;
+  }
+
+  // A single legal move (any actor) — the common path.
+  if (transitionKindFor(catalog, order, toStatus, actor)) {
+    return [toStatus];
+  }
+  if (!isAdmin || toStatus.isDisruptive) {
+    return null;
+  }
+
+  // A multi-step walk along the order's OWN applicable pipeline (admin only).
+  const steps = applicablePipeline(catalog, orderMode(order));
+  const from = statusById(catalog, order.serviceStatusId)?.sortOrder;
+  const target = toStatus.sortOrder;
+  if (from === undefined || from === null || target === null) {
+    return null;
+  }
+  const between =
+    target > from
+      ? steps.filter((step) => step.sortOrder > from && step.sortOrder <= target)
+      : steps
+          .filter((step) => step.sortOrder >= target && step.sortOrder < from)
+          .reverse();
+  // The target must be ON the order's applicable pipeline — a SALE order can never be walked to a
+  // rental-only step, however hard the request asks.
+  return between.length > 0 && between[between.length - 1]?.id === toStatus.id
+    ? between
+    : null;
 }
 
 /**
@@ -410,6 +570,13 @@ export function describeActions(
       minEvidence: bounds.min,
       maxEvidence: bounds.max,
       requiresReason: kind === "disruptive",
+      inventoryEffect: inventoryEffectOf(catalog, order, status, kind),
+      // Undoing a step deletes what documented it. Whether there ARE photos is a per-order fact, but
+      // whether the step DEMANDED them is the machine's — and that is the same proxy the multi-step
+      // dialog warns with, so the two never disagree.
+      purgesEvidence:
+        kind === "backward" &&
+        statusById(catalog, order.serviceStatusId)?.requiresEvidence === true,
     };
   };
   return [

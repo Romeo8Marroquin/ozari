@@ -3,12 +3,11 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { HiChevronLeft, HiChevronRight, HiOutlineXMark } from 'react-icons/hi2';
-import { registerModal } from '@components/modalRegistry';
+import { registerModal } from './modalRegistry';
 import { prefersReducedMotion } from '@utils/motion';
-import { fitImageBox } from './lightboxLayout';
-import type { ProductImage } from './product.types';
+import { fitImageBox } from '@utils/lightboxLayout';
 
-const KEY = 'modules.panel.products.detail.lightbox';
+const KEY = 'components.lightbox';
 
 /** Viewport fraction the image frame may occupy (the rest is the breathing margin). */
 const MAX_WIDTH_FRACTION = 0.92;
@@ -16,11 +15,14 @@ const MAX_HEIGHT_FRACTION = 0.86;
 /** Swipe distance (px) that counts as a page turn on touch/drag. */
 const SWIPE_THRESHOLD_PX = 40;
 
-interface ProductLightboxProps {
-  images: ProductImage[];
-  /** Which image opens first (the hero's current selection). */
+interface ImageLightboxProps {
+  /** The photos of ONE set. Anything with a `url` qualifies — a product's gallery, an order step's
+   *  evidence — because the viewer only ever renders and pages through urls. */
+  images: { url: string }[];
+  /** Which image opens first (whatever the opener was showing). */
   initialIndex: number;
-  productName: string;
+  /** Names the dialog and every photo in it: the product's name, the lifecycle step, … */
+  label: string;
   /** Called once the exit animation settles — the parent unmounts then. */
   onClose: () => void;
 }
@@ -33,14 +35,18 @@ interface ProductLightboxProps {
  * gracefully: switching images fades the current one out (center-origin, slight shrink), EASES the
  * frame to the next image's fitted size, then fades the new one in — quick, smooth, electric.
  *
+ * **It shows exactly the set it was given.** The caller decides what belongs together — a product's
+ * gallery, or the photos of ONE lifecycle step — so paging can never wander from a delivery's
+ * evidence into a collection's.
+ *
  * Navigation is FINITE (no wrap): edge arrows disable at the ends. Arrows, ← → keys, and
  * touch/drag swipe all page; a terse "X de Y" chip tracks the position. Focus is trapped among
  * the controls and restored to the opener on close; background scroll is locked.
  */
-const ProductLightbox: React.FC<ProductLightboxProps> = ({
+const ImageLightbox: React.FC<ImageLightboxProps> = ({
   images,
   initialIndex,
-  productName,
+  label,
   onClose,
 }) => {
   const { t } = useTranslation();
@@ -186,7 +192,7 @@ const ProductLightbox: React.FC<ProductLightboxProps> = ({
       ref={container}
       role="dialog"
       aria-modal="true"
-      aria-label={productName}
+      aria-label={label}
       className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center"
     >
       {/* The scrim — clicking it dismisses (the ✕ is the accessible control). */}
@@ -259,7 +265,7 @@ const ProductLightbox: React.FC<ProductLightboxProps> = ({
               ref={image}
               data-testid="lightbox-image"
               src={current.url}
-              alt={productName}
+              alt={label}
               draggable={false}
               onLoad={handleImageLoad}
               className="absolute inset-0 size-full select-none object-contain"
@@ -304,4 +310,4 @@ const ProductLightbox: React.FC<ProductLightboxProps> = ({
   );
 };
 
-export default ProductLightbox;
+export default ImageLightbox;

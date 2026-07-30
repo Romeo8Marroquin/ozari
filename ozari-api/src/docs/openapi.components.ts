@@ -482,22 +482,37 @@ export const schemas: Record<string, Schema> = {
     required: ["toStatusId"],
     description:
       "A lifecycle move, named by its TARGET only — the engine derives whether that's a forward " +
-      "step, a rewind or a cancel, and whether the caller may make it. Take the id from one of the " +
-      "order's offered `actions`.",
+      "step, a rewind, a cancel, or (for a cancelled order) a reopen, and whether the caller may " +
+      "make it. An **Admin may name a target several steps away**: the engine resolves the path and " +
+      "applies every step in between as its own validated transition, so the audit trail records " +
+      "the walk. A Driver is confined to one forward step or an off-ramp on their own orders.",
     properties: {
       toStatusId: {
         type: "integer",
-        description: "The `service_status` to move into.",
+        description:
+          "The `service_status` to move into — one of the order's offered `actions`, or (Admin) any " +
+          "step on the order's applicable pipeline.",
         example: 3,
       },
-      evidenceKeys: {
+      evidence: {
         type: "array",
         description:
-          "R2 object keys of photos ALREADY uploaded via `POST /orders/evidence/upload-url`. " +
-          "Required (within the target's resolved count range) when the step demands evidence. Keys " +
-          "must sit under the orders' evidence prefix — anything else is rejected, so a key can " +
-          "never attach an object from another namespace. Duplicates are dropped.",
-        items: { type: "string", example: "orders/evidence/a1b2c3d4-….jpg" },
+          "Photos per TARGET STEP. A multi-step jump documents every demanding step it crosses in " +
+          "ONE pass, so the whole walk is validated before anything is written. Keys must have been " +
+          "minted by `POST /orders/evidence/upload-url` and sit under the orders' evidence prefix — " +
+          "anything else is rejected, so a key can never attach an object from another namespace. " +
+          "Duplicates within a step are dropped.",
+        items: {
+          type: "object",
+          required: ["statusId", "keys"],
+          properties: {
+            statusId: { type: "integer", example: 3 },
+            keys: {
+              type: "array",
+              items: { type: "string", example: "orders/evidence/a1b2c3d4-….jpg" },
+            },
+          },
+        },
       },
       reason: {
         type: "string",
@@ -603,6 +618,26 @@ export const schemas: Record<string, Schema> = {
         description: "Disruptive moves record a reason (`cancelReason`).",
         example: false,
       },
+      inventoryEffect: {
+        type: "string",
+        enum: ["release", "reclaim", "none"],
+        description:
+          "What accepting this move does to the goods the order reserves. `release` — units go " +
+          "back to the fleet/shelf; `reclaim` — the order takes units again, so the move CAN FAIL " +
+          "on availability (409); `none` — the reservation is unchanged (e.g. cancelling an order " +
+          "that already finished, which holds nothing to give back). Derived from the statuses' " +
+          "`inventoryHold` plus the sale-stock rule, so it stays correct as steps are added or " +
+          "re-flagged — clients must state THIS instead of assuming a cancel frees anything.",
+        example: "none",
+      },
+      purgesEvidence: {
+        type: "boolean",
+        description:
+          "True when accepting this move destroys the photos of the step it undoes (a `backward` " +
+          "leg out of a step that demanded evidence). The deletion is permanent, including the " +
+          "stored objects.",
+        example: false,
+      },
     },
   },
   OrderStatusCatalogOption: {
@@ -689,6 +724,15 @@ export const schemas: Record<string, Schema> = {
           "permission matrix (an Admin advances/rewinds/cancels; an assigned Driver advances and " +
           "cancels; nobody else gets anything). Clients render their buttons straight from this.",
         items: schemaRef("OrderAction"),
+      },
+      holdsInventory: {
+        type: "boolean",
+        description:
+          "Does the order RESERVE anything right now — rental units held by its current status " +
+          "(`inventoryHold`), or sale units not yet cancelled/delivered? Derived, never stored. " +
+          "Lets a client state a consequence rather than hedge: deleting an order that holds goods " +
+          "returns them; deleting a finished or cancelled one changes no inventory at all.",
+        example: true,
       },
       paymentStatus: schemaRef("OrderLookup"),
       deliveryAt: { type: "string", format: "date-time" },
@@ -794,6 +838,15 @@ export const schemas: Record<string, Schema> = {
       {
         type: "object",
         properties: {
+          clientRegistryId: {
+            type: "integer",
+            nullable: true,
+            description:
+              "The walk-in client registry this order belongs to — the IDENTITY, as opposed to the " +
+              "snapshot texts. Absent on the (future) platform-user variant. The edit form reopens " +
+              "on this client; the list projection deliberately omits it.",
+            example: 3,
+          },
           deliveryContact: { type: "string", example: "WhatsApp 5555-1234" },
           deliveryAddress: { type: "string", example: "Zona 10, 4a avenida 5-55" },
           description: { type: "string", nullable: true },
@@ -1036,6 +1089,169 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     properties: {
       registry: schemaRef("ClientRegistry"),
+    },
+  },
+  PreferenceSetting: {
+    type: "object",
+    description:
+      "One scalar setting with the BOUNDS the API enforces, so a client can enforce the same ones " +
+      "while the admin types (the mirrored-validation doctrine, applied to settings). Deliberately " +
+      "carries no label or help text: that is copy, and the frontend owns it.",
+    properties: {
+      key: { type: "string", example: "orders.turnaroundMinutes" },
+      type: {
+        type: "string",
+        enum: ["int"],
+        description: "Always an integer today; the field exists so a future bool/text setting needs no new shape.",
+      },
+      value: { type: "integer", example: 120 },
+      min: { type: "integer", example: 0 },
+      max: { type: "integer", example: 1440 },
+      group: {
+        type: "string",
+        description: "Grouping token (`orders`, `evidence`) the screen lays its cards out by.",
+        example: "orders",
+      },
+    },
+  },
+  CatalogRow: {
+    type: "object",
+    description:
+      "One manageable catalog row, uniform across every catalog so a client renders them all with " +
+      "one list. The extras are explicit rather than a generic bag — there are only three in the " +
+      "whole system.",
+    properties: {
+      id: { type: "integer", example: 1 },
+      name: { type: "string", example: "Evento familiar" },
+      description: { type: "string", nullable: true },
+      isActive: {
+        type: "boolean",
+        description: "Publication flag, NOT deletion. Unpublished rows are returned here (this is where it is edited).",
+        example: true,
+      },
+      minLeadHours: {
+        type: "integer",
+        description: "Event types only — the client-side lead time before a delivery.",
+        example: 24,
+      },
+      deliveryFee: {
+        type: "number",
+        description:
+          "Zones only — the DEFAULT fee for addresses in the zone. ABSENT means not configured, " +
+          "which is a different answer from 0 (free).",
+        example: 50,
+      },
+      municipalityId: { type: "integer", description: "Zones only.", example: 4 },
+      isReferenced: {
+        type: "boolean",
+        description:
+          "Is anything pointing at this row? Lets a client's delete confirmation name the outcome " +
+          "up front (destroyed vs unpublished) instead of hedging. The server re-decides under the " +
+          "transaction that acts, so this is a preview, not the authority. Absent on " +
+          "`municipalities`, which are plain reference data nobody deletes here.",
+        example: false,
+      },
+    },
+  },
+  PreferencesResponse: {
+    type: "object",
+    properties: {
+      settings: { type: "array", items: schemaRef("PreferenceSetting") },
+      catalogs: {
+        type: "object",
+        description: "Every admin-manageable catalog, unpublished rows included.",
+        properties: {
+          eventTypes: { type: "array", items: schemaRef("CatalogRow") },
+          contactTypes: { type: "array", items: schemaRef("CatalogRow") },
+          zones: { type: "array", items: schemaRef("CatalogRow") },
+          paymentMethods: { type: "array", items: schemaRef("CatalogRow") },
+          productCategories: { type: "array", items: schemaRef("CatalogRow") },
+          productDetailTypes: { type: "array", items: schemaRef("CatalogRow") },
+        },
+      },
+      municipalities: {
+        type: "array",
+        description:
+          "Reference data the ZONE form picks from — active rows only. NOT admin-managed here: the " +
+          "geo tables are shared reference data, not business taxonomy.",
+        items: schemaRef("CatalogRow"),
+      },
+    },
+  },
+  PreferenceSettingsResponse: {
+    type: "object",
+    properties: {
+      settings: { type: "array", items: schemaRef("PreferenceSetting") },
+    },
+  },
+  UpdatePreferenceSettingsRequest: {
+    type: "object",
+    required: ["settings"],
+    description:
+      "The FULL editable set. A partial body would make \"unchanged\" and \"cleared\" " +
+      "indistinguishable, and an unknown or not-yet-honoured key is rejected rather than ignored.",
+    properties: {
+      settings: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          required: ["key", "value"],
+          properties: {
+            key: { type: "string", example: "orders.turnaroundMinutes" },
+            value: { type: "integer", example: 180 },
+          },
+        },
+      },
+    },
+  },
+  CatalogRowRequest: {
+    type: "object",
+    required: ["name", "isActive"],
+    description:
+      "A catalog row's full state. Which EXTRA fields are read depends on the catalog (the registry " +
+      "declares them), so a stray field for another catalog is simply dropped rather than written " +
+      "somewhere it doesn't belong.",
+    properties: {
+      name: { type: "string", minLength: 2, maxLength: 100, example: "Boda" },
+      description: { type: "string", maxLength: 500, nullable: true },
+      isActive: { type: "boolean", example: true },
+      minLeadHours: {
+        type: "integer",
+        minimum: 0,
+        description: "`event-types` only. Omitted on create ⇒ the column's default (24).",
+        example: 48,
+      },
+      deliveryFee: {
+        type: "number",
+        nullable: true,
+        description: "`zones` only. `null`/omitted = not configured (NOT free).",
+        example: 50,
+      },
+      municipalityId: {
+        type: "integer",
+        description: "`zones` only, REQUIRED there — must be an active municipality.",
+        example: 4,
+      },
+    },
+  },
+  CatalogRowResponse: {
+    type: "object",
+    properties: {
+      row: schemaRef("CatalogRow"),
+    },
+  },
+  DeleteCatalogRowResponse: {
+    type: "object",
+    properties: {
+      outcome: {
+        type: "string",
+        enum: ["deleted", "deactivated"],
+        description:
+          "`deleted` — nothing referenced the row, it is gone. `deactivated` — something does, so it " +
+          "was unpublished instead and existing records keep resolving their names.",
+        example: "deactivated",
+      },
     },
   },
   CreateClientRegistryRequest: {

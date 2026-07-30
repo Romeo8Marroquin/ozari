@@ -31,6 +31,36 @@ const EXAMPLE_DELIVERY_AT = "2026-08-01T14:00:00.000Z";
 const EXAMPLE_PICKUP_AT = "2026-08-02T10:00:00.000Z";
 const EXAMPLE_ORDER_CREATED_AT = "2026-07-16T12:00:00.000Z";
 
+// The two path params every catalog route shares.
+const catalogParam: OpenAPIV3.ParameterObject = {
+  name: "catalog",
+  in: "path",
+  required: true,
+  description:
+    "Which manageable catalog. Anything outside this list is a 404 — including the lookups code " +
+    "branches on (roles, currencies, business types, rent units, payment status, geo).",
+  schema: {
+    type: "string",
+    enum: [
+      "event-types",
+      "contact-types",
+      "zones",
+      "payment-methods",
+      "product-categories",
+      "product-detail-types",
+    ],
+  },
+  example: "event-types",
+};
+const catalogIdParam: OpenAPIV3.ParameterObject = {
+  name: "id",
+  in: "path",
+  required: true,
+  description: "The row id.",
+  schema: { type: "integer", minimum: 1 },
+  example: 1,
+};
+
 const rateLimited: OpenAPIV3.ReferenceObject = {
   $ref: "#/components/responses/TooManyRequests",
 };
@@ -1266,6 +1296,155 @@ export const paths: OpenAPIV3.PathsObject = {
         "500": serverError,
       },
     },
+    put: {
+      tags: ["Orders"],
+      summary: "Edit an order (admin, full declarative state)",
+      operationId: "updateOrder",
+      description:
+        "**STRICTLY Admin.** DECLARATIVE, like the product update: the body is the order's FINAL " +
+        "state (identity, snapshots, window, assignment, money and the COMPLETE line list) and the " +
+        "server diffs it in one transaction — there is deliberately no per-field or per-line " +
+        "endpoint. It is validated by the **same contract as create**, with one difference: the " +
+        "delivery may stay on a date that has already passed (correcting yesterday's order), but " +
+        "may never be MOVED into the past.\n\n" +
+        "Everything is re-derived, nothing trusted: prices come from the product rows and the new " +
+        "billed window (so moving the dates re-bills the order), sale stock moves by the " +
+        "DIFFERENCE and only while the order still holds it (`holdsSaleStock`), and rental " +
+        "availability plus the spacing rule are re-checked **excluding this order** — it is " +
+        "holding its own current lines and can never conflict with itself. An order whose status " +
+        "reserves nothing (finished, or cancelled) is a pure paperwork edit and can never 409.\n\n" +
+        "The lifecycle is untouched: an edit never moves the status, stamps an actual or writes " +
+        "history — that is `POST /orders/{id}/advance`'s job alone. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          description: "The order id.",
+          schema: { type: "integer", minimum: 1 },
+          example: 12,
+        },
+      ],
+      requestBody: bodyRef("CreateOrderRequest", {
+        clientRegistryId: 3,
+        eventTypeId: 1,
+        deliveryAt: EXAMPLE_DELIVERY_AT,
+        pickupAt: EXAMPLE_PICKUP_AT,
+        deliveryName: EXAMPLE_CLIENT_NAME,
+        deliveryContact: EXAMPLE_ORDER_CONTACT,
+        deliveryAddress: EXAMPLE_ORDER_ADDRESS,
+        deliveryAmount: 50,
+        paymentMethodId: 1,
+        assignedUserId: 2,
+        lines: [{ productId: 3, quantity: 30 }],
+      }),
+      responses: {
+        "200": dataResponse(
+          "The updated order (the same detail shape as `GET /orders/{id}`).",
+          "OrderDetailResponse",
+          {
+            order: {
+              id: 12,
+              clientName: EXAMPLE_CLIENT_NAME,
+              isRegistryClient: true,
+              eventType: { id: 1, name: EXAMPLE_EVENT_TYPE },
+              status: { id: 1, name: EXAMPLE_STATUS_PENDING },
+              paymentStatus: { id: 1, name: EXAMPLE_STATUS_PENDING },
+              deliveryAt: EXAMPLE_DELIVERY_AT,
+              pickupAt: EXAMPLE_PICKUP_AT,
+              itemCount: 30,
+              totalAmount: 230,
+              currency: { id: 1, name: EXAMPLE_CURRENCY_NAME, iso4217Code: "GTQ", symbol: "Q" },
+              deliveryContact: EXAMPLE_ORDER_CONTACT,
+              deliveryAddress: EXAMPLE_ORDER_ADDRESS,
+              serviceStart: EXAMPLE_DELIVERY_AT,
+              serviceEnd: EXAMPLE_PICKUP_AT,
+              deliveryAmount: 50,
+              lines: [
+                {
+                  id: 31,
+                  productId: 3,
+                  productName: EXAMPLE_LINE_PRODUCT_NAME,
+                  isRental: true,
+                  quantity: 30,
+                  unitaryPrice: 6,
+                  parcialPrice: 180,
+                },
+              ],
+              extras: [],
+              statusHistory: [
+                {
+                  id: 1,
+                  to: { id: 1, name: EXAMPLE_STATUS_PENDING },
+                  byUserName: EXAMPLE_ADMIN_NAME,
+                  at: EXAMPLE_ORDER_CREATED_AT,
+                },
+              ],
+              createdAt: EXAMPLE_ORDER_CREATED_AT,
+            },
+          },
+          "Order updated",
+        ),
+        "400": errorResponse(
+          "The body failed the order contract (same rules as create; plus the delivery may not be " +
+            "moved into the past).",
+          400,
+          "The pickup must be after the delivery.",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse(
+          "The order does not exist (or the id is malformed).",
+          404,
+          "Order not found",
+        ),
+        "409": errorResponse(
+          "Availability or the spacing rule refused the new state. A stock conflict carries " +
+            "`data.conflicts` (per line: requested vs actually available), the same shape as create.",
+          409,
+          "Some products are not available for the requested dates.",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    delete: {
+      tags: ["Orders"],
+      summary: "Permanently delete an order (admin)",
+      operationId: "deleteOrder",
+      description:
+        "**STRICTLY Admin, and genuinely permanent.** Cancelling is how an order that HAPPENED is " +
+        "closed; this is for one that should never have existed, so nothing of it is kept: in one " +
+        "transaction it destroys the evidence rows, the status history, the lines and the extras, " +
+        "then the order — and **returns the sale stock** those lines consumed at creation (rental " +
+        "holds need nothing: they are derived from the status and vanish with the row). The " +
+        "evidence's R2 objects are deleted after the commit, best-effort. There is no undo. " +
+        "Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          description: "The order id.",
+          schema: { type: "integer", minimum: 1 },
+          example: 12,
+        },
+      ],
+      responses: {
+        "200": messageResponse("The order and everything belonging to it are gone.", "Order permanently deleted"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse(
+          "The order does not exist (or the id is malformed).",
+          404,
+          "Order not found",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
   },
 
   "/orders/{id}/advance": {
@@ -1302,7 +1481,12 @@ export const paths: OpenAPIV3.PathsObject = {
       ],
       requestBody: bodyRef("AdvanceOrderRequest", {
         toStatusId: 3,
-        evidenceKeys: ["orders/evidence/a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7.jpg"],
+        evidence: [
+          {
+            statusId: 3,
+            keys: ["orders/evidence/a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7.jpg"],
+          },
+        ],
       }),
       responses: {
         "200": dataResponse(
@@ -1529,6 +1713,227 @@ export const paths: OpenAPIV3.PathsObject = {
         }, "Service is healthy"),
         "503": errorResponse("The database is unreachable — service unhealthy.", 503, "Service unhealthy - database connection failed"),
         "429": rateLimited,
+      },
+    },
+  },
+  "/preferences": {
+    get: {
+      tags: ["Preferences"],
+      summary: "Read every system preference (admin)",
+      operationId: "getPreferences",
+      description:
+        "**STRICTLY Admin.** Everything the preferences screen manages, in one call: the editable " +
+        "scalar settings (each with the BOUNDS the client mirrors while typing) plus every " +
+        "admin-manageable seeded catalog, and the municipalities the zone form picks from.\n\n" +
+        "Two deliberate choices. **Unpublished rows are INCLUDED** — this is the screen where " +
+        "`isActive` is edited, so filtering them here would make them unrecoverable. And only the " +
+        "settings the system actually HONOURS are returned: the seed carries twelve keys, but a " +
+        "control that saves a value nothing reads teaches the admin to distrust the whole screen, so " +
+        "the rest appear when the feature that honours them lands. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      responses: {
+        "200": dataResponse("The settings, the catalogs and the zone form's municipalities.", "PreferencesResponse", {
+          settings: [
+            { key: "orders.logisticsSpacingMinutes", type: "int", value: 60, min: 1, max: 1440, group: "orders" },
+            { key: "orders.turnaroundMinutes", type: "int", value: 120, min: 0, max: 1440, group: "orders" },
+            { key: "orders.evidenceMinPhotos", type: "int", value: 1, min: 1, max: 20, group: "evidence" },
+            { key: "orders.evidenceMaxPhotos", type: "int", value: 10, min: 1, max: 20, group: "evidence" },
+            { key: "orders.evidenceRetentionMonths", type: "int", value: 24, min: 1, max: 120, group: "evidence" },
+          ],
+          catalogs: {
+            // `isReferenced` = something points at the row, so a delete would UNPUBLISH it rather
+            // than destroy it. Here: the event type is in use by an order, the rest are free.
+            eventTypes: [
+              { id: 1, name: EXAMPLE_EVENT_TYPE, isActive: true, minLeadHours: 24, isReferenced: true },
+            ],
+            contactTypes: [{ id: 1, name: "WhatsApp", isActive: true, isReferenced: false }],
+            zones: [
+              { id: 6, name: "Zona 10", isActive: true, deliveryFee: 50, municipalityId: 4, isReferenced: false },
+            ],
+            paymentMethods: [{ id: 1, name: "Efectivo", isActive: true, isReferenced: false }],
+            productCategories: [{ id: 1, name: "Mesas", isActive: true, isReferenced: false }],
+            productDetailTypes: [{ id: 1, name: "Color", isActive: true, isReferenced: false }],
+          },
+          municipalities: [{ id: 4, name: "Mixco", isActive: true }],
+        }, "Preferences fetched"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/preferences/settings": {
+    put: {
+      tags: ["Preferences"],
+      summary: "Update the scalar settings (admin)",
+      operationId: "updatePreferenceSettings",
+      description:
+        "**STRICTLY Admin.** Declarative, like every other update here: the body carries the full " +
+        "editable set. Each value must be an integer inside the bounds `GET /preferences` published, " +
+        "so a rejection means a stale or tampered client rather than a user typo.\n\n" +
+        "Two rules beyond per-field bounds: a key that is unknown or not honoured is **rejected, " +
+        "never ignored** (silently dropping it would leave the admin believing they saved " +
+        "something), and the evidence pair must stay coherent — `max < min` is refused because a " +
+        "status inheriting that range could never be satisfied by any photo count.\n\n" +
+        "The response carries the RELOADED settings, not an echo: a clamped or newly-created value " +
+        "would otherwise diverge from what the system will read. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      requestBody: bodyRef("UpdatePreferenceSettingsRequest", {
+        settings: [
+          { key: "orders.logisticsSpacingMinutes", value: 90 },
+          { key: "orders.turnaroundMinutes", value: 180 },
+        ],
+      }),
+      responses: {
+        "200": dataResponse("The settings as they now stand.", "PreferenceSettingsResponse", {
+          settings: [
+            { key: "orders.logisticsSpacingMinutes", type: "int", value: 90, min: 1, max: 1440, group: "orders" },
+          ],
+        }, "Preferences updated"),
+        "400": errorResponse(
+          "An unknown/non-editable key, a duplicate, a value outside its bounds, or an inverted " +
+            "evidence range.",
+          400,
+          "The maximum number of photos cannot be lower than the minimum.",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/preferences/catalogs/{catalog}": {
+    post: {
+      tags: ["Preferences"],
+      summary: "Add a row to a manageable catalog (admin)",
+      operationId: "createCatalogRow",
+      description:
+        "**STRICTLY Admin.** One endpoint for all six manageable catalogs — `event-types`, " +
+        "`contact-types`, `zones`, `payment-methods`, `product-categories`, " +
+        "`product-detail-types` — driven by a registry that declares each one's extra fields, so an " +
+        "event type can never be sent a `deliveryFee` and a zone can't be saved without its " +
+        "municipality.\n\n" +
+        "**Anything not in that list answers `404`**, including the lookups deliberately kept " +
+        "unmanageable (`user-roles`, `currencies`, `product-business-types`, `rent-time-units`, " +
+        "`payment-status`, the geo tables): runtime code branches on their ids, so an admin adding " +
+        "or removing their rows would break pricing or strand records. They must read as \"no such " +
+        "thing here\", never as a merely malformed request. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [catalogParam],
+      requestBody: bodyRef("CatalogRowRequest", {
+        name: "Boda",
+        description: "Evento social con salón",
+        isActive: true,
+        minLeadHours: 48,
+      }),
+      responses: {
+        "201": dataResponse("The created row.", "CatalogRowResponse", {
+          // Always `isReferenced: false`: a row that did not exist a moment ago cannot be in use.
+          row: {
+            id: 9,
+            name: "Boda",
+            description: "Evento social con salón",
+            isActive: true,
+            minLeadHours: 48,
+            isReferenced: false,
+          },
+        }, "Row created"),
+        "400": errorResponse(
+          "The name/description/publication flag or one of the catalog's declared extra fields is " +
+            "invalid.",
+          400,
+          "The name is required and must be valid.",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse("That catalog is not admin-manageable.", 404, "Catalog not found"),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/preferences/catalogs/{catalog}/{id}": {
+    put: {
+      tags: ["Preferences"],
+      summary: "Update a catalog row (admin)",
+      operationId: "updateCatalogRow",
+      description:
+        "**STRICTLY Admin.** Full-state row update, same registry-driven contract as the create.\n\n" +
+        "One invariant: a catalog the FORMS depend on may not be left with zero active rows " +
+        "(event types, contact types, product categories). Unpublishing the last one wouldn't just " +
+        "look odd — it drops the order or product form into its `config` dead-end, a far worse and " +
+        "much harder-to-diagnose outcome than a refused edit. Zones, payment methods and detail " +
+        "types are genuinely optional, so emptying those is allowed. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [catalogParam, catalogIdParam],
+      requestBody: bodyRef("CatalogRowRequest", {
+        name: "Boda",
+        isActive: true,
+        minLeadHours: 72,
+      }),
+      responses: {
+        "200": dataResponse("The updated row.", "CatalogRowResponse", {
+          row: { id: 1, name: "Boda", isActive: true, minLeadHours: 72, isReferenced: true },
+        }, "Row updated"),
+        "400": errorResponse("The body failed the catalog's field contract.", 400, "The name is required and must be valid."),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse(
+          "The catalog is not manageable, or that row does not exist.",
+          404,
+          "Row not found",
+        ),
+        "409": errorResponse(
+          "It would leave a catalog the forms need with no active rows.",
+          409,
+          "At least one active item must remain in this catalog.",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    delete: {
+      tags: ["Preferences"],
+      summary: "Delete or unpublish a catalog row (admin)",
+      operationId: "deleteCatalogRow",
+      description:
+        "**STRICTLY Admin.** The conditional NO-TRASH rule applied to reference data: the row " +
+        "**hard-deletes** when nothing points at it, and **deactivates** when something does — an " +
+        "order holds a live FK to its event type, so destroying a used row would leave its detail " +
+        "page unable to name it. Every table that can reference the row is checked (a zone from user " +
+        "AND registry addresses; a payment method from orders AND a client's preferred method).\n\n" +
+        "`data.outcome` says WHICH happened (`deleted` | `deactivated`) so the client's copy can be " +
+        "truthful instead of vague. The same last-active-row invariant as the update applies to both " +
+        "doors. No request body: the outcome is decided by what references the row, never by what " +
+        "was sent. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [catalogParam, catalogIdParam],
+      responses: {
+        "200": dataResponse(
+          "Whether the row was removed or merely unpublished.",
+          "DeleteCatalogRowResponse",
+          { outcome: "deactivated" },
+          "The item is in use, so it was unpublished instead of deleted",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse(
+          "The catalog is not manageable, or that row does not exist.",
+          404,
+          "Row not found",
+        ),
+        "409": errorResponse(
+          "It would leave a catalog the forms need with no active rows.",
+          409,
+          "At least one active item must remain in this catalog.",
+        ),
+        "429": rateLimited,
+        "500": serverError,
       },
     },
   },

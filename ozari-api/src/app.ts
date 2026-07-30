@@ -20,6 +20,7 @@ import type { AppError } from "./models/common/error.js";
 import authRouter from "./modules/auth/auth.route.js";
 import clientRegistriesRouter from "./modules/clientRegistries/clientRegistries.route.js";
 import ordersRouter from "./modules/orders/orders.route.js";
+import preferencesRouter from "./modules/preferences/preferences.route.js";
 import productsRouter from "./modules/products/products.route.js";
 import healthRouter from "./modules/health/health.route.js";
 import { mountApiDocs } from "./docs/swagger.js";
@@ -232,6 +233,10 @@ function configureRoutes(app: Express): void {
 
   // Walk-in client registries - authenticated limiter; strictly Admin inside the router
   apiRouter.use("/client-registries", rateLimiters["authenticated"], clientRegistriesRouter);
+
+  // System preferences (scalar settings + the manageable seeded catalogs) - authenticated limiter;
+  // STRICTLY Admin inside the router, every route
+  apiRouter.use("/preferences", rateLimiters["authenticated"], preferencesRouter);
 
   // Mount API router at base path
   app.use(appConfig.basePath, apiRouter);

@@ -12,6 +12,8 @@ import { usePanelNavigate } from '../PanelNavContext';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
 // Shared status panel (empty/error family). Promote to @components when a third section needs it.
 import ProductsStatus from '../products/ProductsStatus';
+// Shared warm-list diff choreography (see its doc — the grid and the agenda have the same problem).
+import { useGridListTransition } from '../products/useGridListTransition';
 import { formatDayLabel, groupAgenda, groupHistory, type OrderDayGroup } from './orderDayGroups';
 import type { OrderAction, OrderListItem } from './order.types';
 import OrderAdvanceModal from './OrderAdvanceModal';
@@ -87,7 +89,7 @@ const OrdersPage: React.FC = () => {
     { order: OrderListItem; action: OrderAction } | undefined
   >(undefined);
 
-  const orders = useMemo(() => data?.orders ?? [], [data]);
+  const fetchedOrders = useMemo(() => data?.orders ?? [], [data]);
   const pagination = data?.pagination;
   // COLD = nothing cached to show for the DISPLAYED view (first visit, or the moment a switch
   // lands on an uncached view) — drives the skeleton.
@@ -111,6 +113,27 @@ const OrdersPage: React.FC = () => {
     setWasLoading(loading);
     if (loading) setShowSkeleton(true);
   }
+
+  // A refetch landing on the WARM agenda — creating an order and returning to a cached list — is a
+  // two-phase DIFF, not a swap: rows that left shrink out, then the new list commits with the
+  // survivors GLIDING to their new places (day/owner headers included, so the space opens instead
+  // of the row appearing inside it) while the fresh row fades-rises in. Shared with the products
+  // grid — same problem, same answer. Cold loads, view swaps and infinite-scroll appends are
+  // excluded here and keep their own machinery.
+  // …and it must stay OUT of the view swap's way. `switching` is already false on the very commit
+  // where the swap lands with the other view's rows, so excluding it isn't enough: the commit that
+  // CHANGES the displayed view is the swap's own entrance, and diffing agenda-vs-history rows there
+  // would fight it. That one commit syncs instantly; every later one diffs.
+  const [listView, setListView] = useState(displayedView);
+  const viewJustLanded = listView !== displayedView;
+  if (viewJustLanded) {
+    setListView(displayedView);
+  }
+  const orders = useGridListTransition(
+    fetchedOrders,
+    settled && !showSkeleton && !switching && !viewJustLanded,
+    body,
+  );
 
   // The orders BODY moves LATERALLY on a VIEW SWAP (owner preference — the two views live on a
   // left/right axis): a forward swap travels right-to-left, a backward one mirrors; a plain cold
@@ -307,13 +330,24 @@ const OrdersPage: React.FC = () => {
           frame); `reveal-item` keeps it in the panel-level exit sweep. */}
       <div className="reveal-item orders-chrome flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-charcoal/55">{t(`${KEY}.lead`)}</p>
-        <div className="flex flex-wrap items-center gap-3">
+        {/* The controls take the WHOLE line once they wrap (`w-full` until `sm`). Without it they
+            became a content-width block that `justify-between` then parked at the LEFT — the row
+            read as neither aligned nor centred. Full-width instead means the switch sits at the
+            start and the action at the end: a real space-between, and the primary action stays on
+            the right edge exactly as it is on a wide screen. From `sm` up the group shrinks back to
+            its content and the OUTER `justify-between` puts it on the right, beside the lead. */}
+        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:flex-nowrap">
           <OrdersViewSwitch view={view} onChange={setView} />
           {canCreate && (
             <Button
               size="sm"
               startIcon={<HiOutlinePlus className="size-4" />}
               onClick={() => panelNavigate('/panel/pedidos/nuevo')}
+              // `ml-auto` is what keeps the action right-aligned in BOTH wrapped shapes: beside the
+              // switch when they share the line, and at the right edge when it drops to its own
+              // (where `justify-between` would have left it hanging at the start). It's inert once
+              // the container is content-width at `sm`, so the desktop layout is untouched.
+              className="ml-auto"
             >
               {t(`${KEY}.newOrder`)}
             </Button>
@@ -366,6 +400,9 @@ const OrdersPage: React.FC = () => {
                 return (
                   <div
                     key={row.rowKey}
+                    // Headers join the FLIP too: when a new order opens a new day, the existing
+                    // headers GLIDE down to make the room rather than the row appearing inside it.
+                    data-flip-id={row.rowKey}
                     className="reveal-item orders-enter flex items-center gap-3 pb-3 pt-5 first:pt-0"
                   >
                     <span className="text-sm font-semibold text-charcoal">
@@ -379,6 +416,7 @@ const OrdersPage: React.FC = () => {
                 return (
                   <h2
                     key={row.rowKey}
+                    data-flip-id={row.rowKey}
                     className="reveal-item orders-enter pb-3 pt-4 text-xs font-semibold uppercase tracking-wide text-charcoal/45 first:pt-0"
                   >
                     {row.group.kind === 'other'
@@ -404,6 +442,9 @@ const OrdersPage: React.FC = () => {
               return (
                 <div
                   key={`row-${index}`}
+                  // The slots are index-keyed (so a skeleton crossfades into its ticket in place),
+                  // so the ORDER's identity for the FLIP has to travel as data, not as the key.
+                  {...(order && { 'data-flip-id': order.id })}
                   className={`reveal-item pb-3${isSurplus ? ' orders-enter' : ''}${order ? appendedTag(order.id) : ''}`}
                 >
                   <SkeletonFade
@@ -417,6 +458,9 @@ const OrdersPage: React.FC = () => {
                     {order && (
                       <OrderTicket
                         order={order}
+                        // Opening rides the PANEL transition (the list staggers out, the detail
+                        // plays its own entrance) — never a raw router jump.
+                        onOpen={(target) => panelNavigate(`/panel/pedidos/${target.id}`)}
                         onAdvance={(target, action) => setAdvancing({ order: target, action })}
                       />
                     )}

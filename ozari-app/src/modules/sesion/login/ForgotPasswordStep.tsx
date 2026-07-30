@@ -8,6 +8,7 @@ import CustomInputForm from '@components/CustomInputForm';
 import FormError from '@components/FormError';
 import { notify } from '@components/notifications/notify';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
+import useDesktopAutoFocus from '@hooks/useDesktopAutoFocus';
 import { toFormError } from '@utils/apiError';
 import { useForgotPassword } from '../hooks/useForgotPassword';
 import {
@@ -36,6 +37,9 @@ interface ForgotPasswordStepProps {
  */
 const ForgotPasswordStep: React.FC<ForgotPasswordStepProps> = ({ onBack, disabled = false }) => {
   const { t } = useTranslation();
+  // Mouse/trackpad only: on touch, focusing the email as this step sweeps in would pop the keyboard
+  // over the card mid-animation — the same rule the login form it replaces already follows.
+  const autoFocusFirst = useDesktopAutoFocus();
   const { requestReset, isPending } = useForgotPassword();
   // Server submit error, rendered inline above the button — not a toast.
   const [formError, setFormError] = useState<string | undefined>(undefined);
@@ -111,7 +115,7 @@ const ForgotPasswordStep: React.FC<ForgotPasswordStepProps> = ({ onBack, disable
                 name="email"
                 icon={<HiOutlineMail />}
                 disabled={disabled}
-                autoFocus
+                autoFocus={autoFocusFirst}
               />
             </div>
 

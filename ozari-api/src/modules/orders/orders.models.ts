@@ -60,6 +60,16 @@ export interface OrderListItemResponseModel {
    *  carrying its evidence + reason requirements. The client renders its buttons straight from this
    *  — no lifecycle rule is duplicated there, and a role can never see an action it may not take. */
   actions: OrderActionModel[];
+  /**
+   * Does the order RESERVE anything right now — rental units held by its current status, or sale
+   * units not yet cancelled/delivered? Derived from the lifecycle flags, never stored.
+   *
+   * It exists so a client can state a consequence instead of hedging: deleting an order that holds
+   * goods returns them, deleting one that finished or was cancelled changes no inventory at all
+   * (those units went back when it reached that state). Both sentences are true only if the UI is
+   * told which one applies.
+   */
+  holdsInventory: boolean;
   paymentStatus: OrderLookupModel;
   deliveryAt: Date;
   /** Absent = purchase-only order (no pickup event — Q-A, 2026-07-16). */
@@ -114,12 +124,24 @@ export interface OrderStatusHistoryResponseModel {
   at: Date;
 }
 
+/** One tracking photo, tagged with the step it documents. */
+export interface OrderEvidenceResponseModel {
+  id: number;
+  statusId: number;
+  url: string;
+  at: Date;
+}
+
 /**
  * `GET /orders/:id` — everything the detail page needs on top of the list item: the decrypted
  * contact/address snapshots, the billed period, the money breakdown (delivery fee, deposit,
  * discount, payment), the lines/extras, and the status audit trail.
  */
 export interface OrderDetailResponseModel extends OrderListItemResponseModel {
+  /** The walk-in client registry this order belongs to — the IDENTITY, as opposed to the snapshot
+   *  texts below. Absent on the (future) platform-user variant. The edit form needs it to reopen on
+   *  the right client; the list projection deliberately doesn't carry it (nothing there uses it). */
+  clientRegistryId: number | undefined;
   /** Decrypted snapshots captured at order time (never live registry/user data). */
   deliveryContact: string;
   deliveryAddress: string;
@@ -141,6 +163,10 @@ export interface OrderDetailResponseModel extends OrderListItemResponseModel {
   lines: OrderLineResponseModel[];
   extras: OrderExtraResponseModel[];
   statusHistory: OrderStatusHistoryResponseModel[];
+  /** Tracking photos, each tagged with the step it documents (the detail page groups by `statusId`).
+   *  Absent entries are normal: a rewound step drops its photos, and old evidence is purged by the
+   *  retention policy — the step is still proven by its history row. */
+  evidence: OrderEvidenceResponseModel[];
   createdAt: Date;
 }
 

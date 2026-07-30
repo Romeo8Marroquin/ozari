@@ -11,16 +11,21 @@ import { RolesEnum } from "@models/enums/rolesEnum.js";
 import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import {
-  evidenceBoundsFor,
   getEvidenceBounds,
   getStatusCatalog,
+  holdingStatusIds,
+  resolveStatusPath,
   statusById,
-  transitionKindFor,
 } from "../lifecycle/lifecycle.service.js";
 import type { ActorContextModel } from "../lifecycle/lifecycle.models.js";
 import {
+  holdsSaleStock,
   loadOrderProjectionContext,
+  loadOrderTimingPreferences,
+  OrderStockConflictError,
   projectOrderDetail,
+  reclaimOrderStock,
+  releaseSaleStock,
   richOrderInclude,
   toLifecycleOrder,
 } from "../orders.service.js";
@@ -30,11 +35,7 @@ import {
   type CreateOrderEvidenceUploadsRequestModel,
   type OrderEvidenceUploadsResponseModel,
 } from "./advance.models.js";
-import {
-  AdvanceOrderError,
-  assertEvidenceSatisfies,
-  buildTransitionData,
-} from "./advance.service.js";
+import { AdvanceOrderError, planStatusPath } from "./advance.service.js";
 
 /** The HTTP answer per failure kind — see {@link AdvanceOrderError}. */
 const FAILURE_STATUS: Record<string, HttpEnum> = {
@@ -66,6 +67,10 @@ const FAILURE_STATUS: Record<string, HttpEnum> = {
  * The response is the same `{ order }` envelope as `GET /orders/:id`, so the agenda cache absorbs it
  * without translation and the ticket's next action re-renders from the new `actions`.
  */
+/* eslint-disable complexity, no-await-in-loop, sonarjs/cognitive-complexity -- one linear
+   transaction script (lock → re-authorise → plan → walk the steps IN ORDER, moving stock at the two
+   points it moves); the sequential awaits are the point, and splitting it would scatter an
+   atomicity story that can never run outside the transaction. */
 export const advanceOrder = async (
   req: CustomRequest,
   res: Response,
@@ -86,11 +91,16 @@ export const advanceOrder = async (
       getStatusCatalog(),
       getEvidenceBounds(),
     ]);
+    // Which statuses hold rental units — needed only when an order comes back from a cancellation
+    // and has to re-check the fleet it would take again.
+    const holding = holdingStatusIds(catalog);
     const toStatus = statusById(catalog, body.toStatusId);
     if (!toStatus) {
       throw new AdvanceOrderError("invalid");
     }
 
+    /** R2 keys freed by backward steps — deleted only AFTER the transaction commits. */
+    const purgedKeys: string[] = [];
     const prismaClient = await getPrismaClient();
     const updated = await prismaClient.$transaction(async (tx) => {
       // Serialize concurrent taps on THIS order (see the doc above).
@@ -104,11 +114,13 @@ export const advanceOrder = async (
       }
 
       const lifecycleOrder = toLifecycleOrder(order);
-      const kind = transitionKindFor(catalog, lifecycleOrder, toStatus, actor);
-      if (!kind) {
+      // The PATH, not a single move: one step for the ordinary tap, several for an admin jump, one
+      // for reopening a cancelled order. Every entry is a move the permission matrix already allows.
+      const path = resolveStatusPath(catalog, lifecycleOrder, toStatus, actor);
+      if (!path) {
         // Re-ask as an ADMIN: if the move is legal for them, this actor simply isn't allowed it
         // (403); if nobody could make it from here, the request is stale or wrong (409).
-        const legalForAdmin = transitionKindFor(catalog, lifecycleOrder, toStatus, {
+        const legalForAdmin = resolveStatusPath(catalog, lifecycleOrder, toStatus, {
           userId: actor.userId,
           role: RolesEnum.Admin,
         });
@@ -118,56 +130,114 @@ export const advanceOrder = async (
         });
       }
 
-      assertEvidenceSatisfies(
-        toStatus,
-        kind,
-        evidenceBoundsFor(toStatus, globalBounds),
-        body.evidenceKeys,
-      );
-
-      const storage = body.evidenceKeys.length > 0 ? getStorage() : null;
       const now = new Date();
-      await tx.service.update({
-        where: { id },
-        data: {
-          ...buildTransitionData({
-            catalog,
-            order: lifecycleOrder,
-            from: statusById(catalog, order.serviceStatusId),
-            to: toStatus,
-            kind,
-            now,
-            ...(body.reason !== undefined && { reason: body.reason }),
-          }),
-          // The photos document the phase being ENTERED (`serviceStatusId` = that step), exactly as
-          // the evidence model intends. The URL is derived from the key server-side — a client-sent
-          // URL is never trusted.
-          ...(storage
-            ? {
-                evidences: {
-                  create: body.evidenceKeys.map((key) => ({
-                    serviceStatusId: toStatus.id,
-                    r2Key: key,
-                    url: storage.getPublicUrl(key),
-                  })),
-                },
-              }
-            : {}),
-          statusHistory: {
-            create: {
-              fromStatusId: order.serviceStatusId,
-              toStatusId: toStatus.id,
-              byUserId: actor.userId,
+      // Planned in full BEFORE anything is written: a jump whose middle step lacks its photos is
+      // rejected here, so the order never lands half-documented.
+      const steps = planStatusPath({
+        catalog,
+        order: lifecycleOrder,
+        path,
+        evidenceByStatus: new Map(
+          body.evidence.map((entry) => [entry.statusId, entry.keys]),
+        ),
+        bounds: globalBounds,
+        now,
+        ...(body.reason !== undefined && { reason: body.reason }),
+      });
+
+      const storage = getStorage();
+      const stockLines = order.serviceDetails.map((line) => ({
+        productId: line.productId,
+        quantity: line.quantity,
+        isRental: line.isRental,
+      }));
+      let fromStatusId = order.serviceStatusId;
+      for (const step of steps) {
+        // ── Inventory, at the only two points where it actually moves ──────────────────────────
+        // Rentals need nothing: their hold is DERIVED from the status, so cancelling frees them and
+        // reopening re-takes them the moment the row changes. Sale units are a real decrement made
+        // at creation, so they must be handed back when the order stops being real and taken again
+        // — with a fresh availability check — if it comes back. Both are gated on whether the order
+        // was still HOLDING them: once delivered, the goods are with the client and no state change
+        // here can move them.
+        if (step.kind === "disruptive" && holdsSaleStock(order)) {
+          await releaseSaleStock(tx, stockLines);
+        }
+        // Symmetrically, only re-take what the cancellation actually gave back — re-checked against
+        // the fleet under the SAME rule a create uses, washing period included.
+        if (step.kind === "reopen" && order.deliveredAt === null) {
+          const { turnaroundMinutes } = await loadOrderTimingPreferences(tx);
+          await reclaimOrderStock(
+            tx,
+            {
+              id,
+              serviceStart: order.serviceStart,
+              serviceEnd: order.serviceEnd,
+              lines: stockLines,
+            },
+            holding,
+            turnaroundMinutes,
+          );
+        }
+        // Undoing a step destroys the photos that documented it — rows now, objects post-commit.
+        if (step.purgeStatusId !== null) {
+          const doomed = await tx.serviceEvidence.findMany({
+            where: { serviceId: id, serviceStatusId: step.purgeStatusId },
+            select: { r2Key: true },
+          });
+          purgedKeys.push(...doomed.map((row) => row.r2Key));
+          await tx.serviceEvidence.deleteMany({
+            where: { serviceId: id, serviceStatusId: step.purgeStatusId },
+          });
+        }
+        await tx.service.update({
+          where: { id },
+          data: {
+            ...step.data,
+            // The photos document the phase being ENTERED (`serviceStatusId` = that step), exactly
+            // as the evidence model intends. The URL is derived from the key server-side — a
+            // client-sent URL is never trusted.
+            ...(step.evidenceKeys.length > 0
+              ? {
+                  evidences: {
+                    create: step.evidenceKeys.map((key) => ({
+                      serviceStatusId: step.to.id,
+                      r2Key: key,
+                      url: storage.getPublicUrl(key),
+                    })),
+                  },
+                }
+              : {}),
+            // One history row PER step, even in a jump: the trail records the walk that was taken.
+            statusHistory: {
+              create: {
+                fromStatusId,
+                toStatusId: step.to.id,
+                byUserId: actor.userId,
+              },
             },
           },
-        },
-      });
+        });
+        fromStatusId = step.to.id;
+      }
 
       return tx.service.findUniqueOrThrow({
         where: { id },
         include: richOrderInclude,
       });
     });
+
+    // Post-commit, best-effort: the photos of undone steps. A failure here leaves a sweepable
+    // orphan object, never a row pointing at a deleted file (the products delete policy).
+    if (purgedKeys.length > 0) {
+      try {
+        await getStorage().deleteObjects(purgedKeys);
+      } catch (error) {
+        logger.warn(
+          i18next.t("orders.advance.logs.evidenceCleanupFailed", { error }),
+        );
+      }
+    }
 
     logger.info(
       i18next.t("orders.advance.logs.orderAdvanced", {
@@ -201,6 +271,23 @@ export const advanceOrder = async (
       response,
     );
   } catch (error) {
+    if (error instanceof OrderStockConflictError) {
+      // Reopening a cancelled order whose goods have since been promised elsewhere: the same
+      // structured 409 the create flow answers, so the UI can name each line and its real count.
+      logger.warn(
+        i18next.t("orders.advance.logs.stockConflict", {
+          conflicts: JSON.stringify(error.conflicts),
+        }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.CONFLICT,
+        i18next.t("orders.advance.stockConflict"),
+        undefined,
+        { conflicts: error.conflicts },
+      );
+      return;
+    }
     if (error instanceof AdvanceOrderError) {
       logger.warn(
         i18next.t(`orders.advance.logs.${error.kind}`, {

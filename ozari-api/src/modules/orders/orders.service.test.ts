@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 import { encryptKms } from "@helpers/encryption.js";
 import { appConfig } from "@/config/app.js";
@@ -16,7 +16,9 @@ import {
   computeNextActionAt,
   orderListOrderBy,
   parseOrderListQuery,
+  loadOrderTimingPreferences,
   parseSpacingMinutes,
+  parseTurnaroundMinutes,
   priceOrderLine,
   projectOrderDetail,
   projectOrderListItem,
@@ -100,6 +102,7 @@ const makeRichOrder = (overrides: Partial<RichOrder> = {}): RichOrder => ({
   ],
   serviceExtras: [],
   statusHistory: [],
+  evidences: [],
   ...overrides,
 });
 
@@ -449,11 +452,14 @@ describe("parseSpacingMinutes", () => {
 });
 
 describe("buildRentedInWindowWhere", () => {
+  const start = new Date("2026-08-01T14:00:00Z");
+  const end = new Date("2026-08-02T10:00:00Z");
+
   it("holds OUT statuses unconditionally and WINDOW ones only by overlap, from the flags", () => {
-    const start = new Date("2026-08-01T14:00:00Z");
-    const end = new Date("2026-08-02T10:00:00Z");
     expect(
-      buildRentedInWindowWhere([3, 4], start, end, SEEDED_HOLDING_IDS),
+      buildRentedInWindowWhere([3, 4], start, end, SEEDED_HOLDING_IDS, {
+        turnaroundMinutes: 0,
+      }),
     ).toEqual({
       productId: { in: [3, 4] },
       isActive: true,
@@ -474,16 +480,72 @@ describe("buildRentedInWindowWhere", () => {
     });
   });
 
-  it("an unconfigured machine (no holding statuses) simply matches nothing", () => {
-    const where = buildRentedInWindowWhere([3], new Date(), new Date(), {
-      out: [],
-      window: [],
+  it("keeps units held for the WASHING period past the billed window", () => {
+    // Goods come back dirty: an event ending at 10:00 does not free its chairs at 10:00. Without
+    // this, two future orders two hours apart both passed — the check said yes and the business
+    // couldn't deliver.
+    const where = buildRentedInWindowWhere([3], start, end, SEEDED_HOLDING_IDS, {
+      turnaroundMinutes: 120,
     });
+    const windowBranch = (where.service as { OR: Array<Record<string, unknown>> }).OR[1];
+    // Expressed as "held rows whose end is after (start − turnaround)" — the same comparison as
+    // `heldEnd + turnaround > start`, but a plain column compare the index can serve.
+    expect(windowBranch).toMatchObject({
+      serviceEnd: { gt: new Date("2026-08-01T12:00:00Z") },
+    });
+  });
+
+  it("an unconfigured machine (no holding statuses) simply matches nothing", () => {
+    const where = buildRentedInWindowWhere(
+      [3],
+      new Date(),
+      new Date(),
+      { out: [], window: [] },
+      { turnaroundMinutes: 0 },
+    );
     expect(where.service).toMatchObject({
       OR: [
         { serviceStatusId: { in: [] } },
         expect.objectContaining({ serviceStatusId: { in: [] } }),
       ],
+    });
+  });
+});
+
+describe("parseTurnaroundMinutes", () => {
+  it("accepts ZERO — a business with no cleaning step is a real configuration", () => {
+    expect(parseTurnaroundMinutes("0")).toBe(0);
+    expect(parseTurnaroundMinutes("180")).toBe(180);
+  });
+
+  it("falls back to the seeded default on a missing or corrupt value", () => {
+    expect(parseTurnaroundMinutes(undefined)).toBe(appConfig.defaultTurnaroundMinutes);
+    expect(parseTurnaroundMinutes("abc")).toBe(appConfig.defaultTurnaroundMinutes);
+    expect(parseTurnaroundMinutes("-5")).toBe(appConfig.defaultTurnaroundMinutes);
+  });
+});
+
+describe("loadOrderTimingPreferences", () => {
+  const client = (rows: Array<{ key: string; value: string }>) => ({
+    appPreference: { findMany: vi.fn().mockResolvedValue(rows) },
+  });
+
+  it("reads BOTH clock rules in one query", async () => {
+    const prisma = client([
+      { key: "orders.logisticsSpacingMinutes", value: "90" },
+      { key: "orders.turnaroundMinutes", value: "45" },
+    ]);
+    await expect(loadOrderTimingPreferences(prisma)).resolves.toEqual({
+      spacingMinutes: 90,
+      turnaroundMinutes: 45,
+    });
+    expect(prisma.appPreference.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back per-rule when a preference row is missing", async () => {
+    await expect(loadOrderTimingPreferences(client([]))).resolves.toEqual({
+      spacingMinutes: appConfig.defaultLogisticsSpacingMinutes,
+      turnaroundMinutes: appConfig.defaultTurnaroundMinutes,
     });
   });
 });

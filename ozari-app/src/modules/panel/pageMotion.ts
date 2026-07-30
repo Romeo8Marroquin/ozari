@@ -56,6 +56,18 @@ const EXIT_TO = {
 } as const;
 
 /**
+ * The scale a directional move starts (or ends) at: 0.98 for the vertical default, **none** for a
+ * lateral one.
+ *
+ * Scale is a DEPTH cue, and its visible magnitude is proportional to the element's size: 2% of an 80px
+ * agenda row is 1.6px of edge travel (imperceptible), but 2% of a 320px section card is ~6px — and with
+ * the default center origin that reads as the card sitting LOWER and rising as it settles. On a screen
+ * whose axis is left/right that contradicts the very motion it was decorating, so a lateral move is
+ * pure slide + fade.
+ */
+const SCALE_FOR = { bottom: 0.98, top: 0.98, left: 1, right: 1 } as const;
+
+/**
  * Distribute a stagger BUDGET across the items as a row/column WAVE instead of one long DOM-order
  * line. Items inside a CSS grid get a 2D position (their row dominates the delay; the column adds a
  * smaller ripple within the row), so a dense product grid cascades diagonally from the top-left;
@@ -274,7 +286,98 @@ export function staggerIn(scope: HTMLElement | null, selector: string, options?:
     gsap.to(items, to);
     return;
   }
-  gsap.fromTo(items, { ...ENTER_FROM[options?.from ?? 'bottom'], autoAlpha: 0, scale: 0.98 }, to);
+  const side = options?.from ?? 'bottom';
+  gsap.fromTo(items, { ...ENTER_FROM[side], autoAlpha: 0, scale: SCALE_FOR[side] }, to);
+}
+
+/** Budget for ONE block's inner item wave, and how long after its block that wave starts. Both are
+ *  small on purpose: the nested cascade is a texture inside the block's own move, not a second
+ *  entrance competing with it. */
+const NESTED_ITEM_STAGGER = 0.16;
+const NESTED_ITEM_LEAD = 0.06;
+/** The inner items travel a SHORTER distance than their block — they are already arriving with it. */
+const NESTED_ITEM_TRAVEL = 12;
+
+/**
+ * A TWO-LEVEL entrance: the marked blocks cascade as a wave (exactly {@link staggerIn}), and inside
+ * each block its own marked items cascade AGAIN, starting just after their block's turn.
+ *
+ * For a screen made of section cards that each contain a list: the card arrives as one object, and its
+ * rows fill in behind it, so a section reads as "a card, filling" rather than a slab of finished
+ * content sliding in. Because each block's inner wave is anchored to that block's delay, the whole
+ * page still reads as ONE cascade rather than two competing ones.
+ *
+ * The inner items travel less than their block (they are riding it in) and never scale — a nested
+ * scale on top of the block's own reads as a wobble.
+ */
+export function staggerInNested(
+  scope: HTMLElement | null,
+  blockSelector: string,
+  itemSelector: string,
+  options?: EnterOptions,
+): void {
+  if (!scope) return;
+  const blocks = gsap.utils.selector(scope)(blockSelector) as HTMLElement[];
+  if (blocks.length === 0) return;
+  const allItems = blocks.flatMap(
+    (block) => gsap.utils.selector(block)(itemSelector) as HTMLElement[],
+  );
+  if (prefersReducedMotion()) {
+    gsap.set([...blocks, ...allItems], {
+      autoAlpha: 1,
+      x: 0,
+      y: 0,
+      scale: 1,
+      clearProps: 'transform',
+    });
+    return;
+  }
+
+  const side = options?.from ?? 'bottom';
+  const blockDelays = waveDelays(blocks, PAGE_ENTER_STAGGER);
+  const axis = ENTER_FROM[side];
+  const itemFrom = {
+    x: Math.sign(axis.x) * NESTED_ITEM_TRAVEL,
+    y: Math.sign(axis.y) * NESTED_ITEM_TRAVEL,
+  };
+
+  blocks.forEach((block, index) => {
+    const blockDelay = blockDelays[index] ?? 0;
+    gsap.fromTo(
+      block,
+      { ...axis, autoAlpha: 0, scale: SCALE_FOR[side] },
+      {
+        x: 0,
+        y: 0,
+        autoAlpha: 1,
+        scale: 1,
+        duration: PAGE_ENTER.duration,
+        ease: PAGE_ENTER.ease,
+        delay: blockDelay,
+        overwrite: true,
+        clearProps: 'transform',
+      },
+    );
+
+    const items = gsap.utils.selector(block)(itemSelector) as HTMLElement[];
+    if (items.length === 0) return;
+    const itemDelays = waveDelays(items, NESTED_ITEM_STAGGER);
+    gsap.fromTo(
+      items,
+      { ...itemFrom, autoAlpha: 0 },
+      {
+        x: 0,
+        y: 0,
+        autoAlpha: 1,
+        duration: PAGE_ENTER.duration,
+        ease: PAGE_ENTER.ease,
+        delay: blockDelay + NESTED_ITEM_LEAD,
+        stagger: (itemIndex: number) => itemDelays[itemIndex],
+        overwrite: true,
+        clearProps: 'transform',
+      },
+    );
+  });
 }
 
 /** Staggered exit — every marked item fades away (a lift by default, or a lateral slide via `to`),
@@ -295,10 +398,11 @@ export function staggerOut(
       return;
     }
     const delays = waveDelays(items, PAGE_EXIT_STAGGER);
+    const side = options?.to ?? 'top';
     gsap.to(items, {
-      ...EXIT_TO[options?.to ?? 'top'],
+      ...EXIT_TO[side],
       autoAlpha: 0,
-      scale: 0.98,
+      scale: SCALE_FOR[side],
       duration: PAGE_EXIT.duration,
       ease: PAGE_EXIT.ease,
       stagger: (index: number) => delays[index],
@@ -358,6 +462,10 @@ export interface SectionRevealOptions {
   /** What cascades inside the content — `.reveal-item` fields by default; a PAGE-level reveal
    *  (product detail/edit) passes `.reveal-block` so whole section cards ride the wave instead. */
   itemSelector?: string;
+  /** Where the content cascade comes FROM: a small rise by default, or a SIDE on a screen whose axis
+   *  is lateral (the preferences groups) — so the skeleton→content resolve travels the same way as
+   *  everything else there instead of contradicting it. */
+  from?: 'bottom' | 'left' | 'right';
 }
 
 /**
@@ -372,7 +480,13 @@ export function revealSectionContent(
   wrapper: HTMLElement,
   content: HTMLElement,
   overlay: HTMLElement,
-  { skeletonHeight, delaySeconds, onSettled, itemSelector = '.reveal-item' }: SectionRevealOptions,
+  {
+    skeletonHeight,
+    delaySeconds,
+    onSettled,
+    itemSelector = '.reveal-item',
+    from = 'bottom',
+  }: SectionRevealOptions,
 ): () => void {
   if (prefersReducedMotion()) {
     onSettled();
@@ -409,10 +523,14 @@ export function revealSectionContent(
   const items = gsap.utils.selector(content)(itemSelector) as HTMLElement[];
   if (items.length > 0) {
     const delays = waveDelays(items, SECTION_ITEM_STAGGER);
+    // A shorter travel than a page entrance's: these items are appearing INSIDE a card that is
+    // already in place, so they only need to arrive, not to enter.
+    const axis = ENTER_FROM[from];
     timeline.fromTo(
       items,
-      { y: 10, autoAlpha: 0 },
+      { x: Math.sign(axis.x) * 12, y: Math.sign(axis.y) * 10, autoAlpha: 0 },
       {
+        x: 0,
         y: 0,
         autoAlpha: 1,
         duration: PAGE_ENTER.duration,
@@ -435,12 +553,14 @@ export function revealSectionContent(
 /** The column gap (`gap-5` = 1.25rem) a leaving/entering row must also open/close. */
 const ROW_GAP_PX = 20;
 
-/** A freshly-added row grows its space open while sliding in from the left (it's a list). */
-export function detailRowIn(row: HTMLElement | null): void {
+/** A freshly-added row grows its space open while sliding in from the left (it's a list).
+ *  `gapPx` is the column gap the row must also swallow while its height is 0 — pass **0** for a
+ *  divided list whose rows space themselves with their own padding (the preferences catalogs). */
+export function detailRowIn(row: HTMLElement | null | undefined, gapPx: number = ROW_GAP_PX): void {
   if (!row || prefersReducedMotion()) return;
   gsap.fromTo(
     row,
-    { height: 0, marginBottom: -ROW_GAP_PX, x: -20, autoAlpha: 0, overflow: 'hidden' },
+    { height: 0, marginBottom: -gapPx, x: -20, autoAlpha: 0, overflow: 'hidden' },
     {
       height: 'auto',
       marginBottom: 0,
@@ -454,6 +574,131 @@ export function detailRowIn(row: HTMLElement | null): void {
   );
 }
 
+/**
+ * A whole CARD joining a settled column: its space grows open (swallowing the column's gap with a
+ * negative margin, so a zero-height card genuinely occupies nothing) while it rises and fades in,
+ * and every card below it slides down in normal flow. For a section that APPEARS because the data
+ * changed — the order detail's evidence card the first time a step is documented — where a plain
+ * mount would pop a whole block into the middle of the page.
+ */
+export function growCardIn(el: HTMLElement | null, gapPx: number): void {
+  if (!el || prefersReducedMotion()) return;
+  gsap.set(el, { clearProps: 'height,marginBottom' });
+  const naturalHeight = el.offsetHeight;
+  gsap.fromTo(
+    el,
+    { height: 0, marginBottom: -gapPx, y: 8, autoAlpha: 0, overflow: 'hidden' },
+    {
+      height: naturalHeight,
+      marginBottom: 0,
+      y: 0,
+      autoAlpha: 1,
+      duration: PAGE_ENTER.duration,
+      ease: PAGE_ENTER.ease,
+      overwrite: true,
+      clearProps: 'height,marginBottom,overflow,transform',
+    },
+  );
+}
+
+/**
+ * Content taking (or leaving) a SLOT inside a morph region — the catalog card's "Agregar" button
+ * becoming a form, a row swapping between its display and its fields, a confirmed deletion leaving.
+ *
+ * These deliberately animate **only opacity and a small lift**, never height: the surrounding region
+ * is a `useMorphOnChange` area that already eases its own height in normal flow, and a second height
+ * tween nested inside it would fight the first (the two would each try to own the same pixels). So the
+ * region grows or shrinks, the content fades within the space it opened or vacated, and the two read
+ * as one gesture. That is also why a deletion here uses THIS rather than `detailRowOut`, which closes
+ * the space itself and belongs to lists that have no morph region above them.
+ *
+ * `editorSlotOut` resolves so a caller can commit the state change only once the outgoing content is
+ * gone — otherwise the box would shrink around content that was still fully visible.
+ */
+export function editorSlotIn(el: HTMLElement | null | undefined): void {
+  if (!el || prefersReducedMotion()) return;
+  gsap.fromTo(
+    el,
+    { autoAlpha: 0, y: 8 },
+    {
+      autoAlpha: 1,
+      y: 0,
+      duration: 0.3,
+      ease: PAGE_ENTER.ease,
+      overwrite: true,
+      clearProps: 'transform',
+    },
+  );
+}
+
+export function editorSlotOut(el: HTMLElement | null | undefined): Promise<void> {
+  if (!el || prefersReducedMotion()) return Promise.resolve();
+  return new Promise((resolve) => {
+    gsap.to(el, {
+      autoAlpha: 0,
+      y: -4,
+      duration: 0.16,
+      ease: PAGE_EXIT.ease,
+      overwrite: true,
+      onComplete: resolve,
+      onInterrupt: resolve,
+    });
+  });
+}
+
+/** The panel's single scroll container — every panel page shares it, and it is NOT the document, which
+ *  is why anything measuring viewport rects across a scroll has to account for it explicitly. */
+export const panelScroller = (): HTMLElement | null =>
+  document.querySelector<HTMLElement>('main.panel-main');
+
+/** The nearest ancestor that actually scrolls — the panel's `main` on a page, the dialog body inside a
+ *  modal. Resolved from the element rather than hardcoded, so one helper serves both. */
+function scrollerFor(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const overflowY = getComputedStyle(node).overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll') return node;
+  }
+  return null;
+}
+
+/**
+ * Bring something that just APPEARED fully into view, in step with the growth that made room for it.
+ *
+ * The rule this encodes: **adding something is a request to see it.** Leaving the scroll where it was
+ * is only correct when nothing was asked for — here the user clicked a control whose whole point is
+ * the row or form it produces, so if that lands below the fold the view follows it down. It scrolls
+ * the MINIMUM needed (never past the element's own top, so a tall form never has its first field
+ * pushed off screen) and rides the entrance curve, so the growth and the follow read as one movement
+ * rather than a scroll on top of an animation.
+ *
+ * The reverse is deliberately NOT symmetric: removing a row must not scroll. The height eases shut and
+ * the browser's own clamp rides down with it, so a second motion there would compete with the first.
+ */
+export function revealInScroller(element: HTMLElement | null, marginPx = 24): void {
+  if (!element) return;
+  const scroller = scrollerFor(element);
+  if (!scroller) return;
+  const view = scroller.getBoundingClientRect();
+  const box = element.getBoundingClientRect();
+  const below = box.bottom + marginPx - view.bottom;
+  if (below <= 0) return;
+  // How far we may scroll before the element's own top would leave the viewport.
+  const headroom = Math.max(box.top - view.top - marginPx, 0);
+  const delta = Math.min(below, headroom);
+  if (delta <= 0) return;
+  const to = scroller.scrollTop + delta;
+  if (prefersReducedMotion()) {
+    scroller.scrollTop = to;
+    return;
+  }
+  gsap.to(scroller, {
+    scrollTop: to,
+    duration: PAGE_ENTER.duration,
+    ease: PAGE_ENTER.ease,
+    overwrite: true,
+  });
+}
+
 /** Swap an inline icon with a soft vertical "blink" (the password-eye motion): collapse to a line,
  *  run `swap` at the midpoint, expand back. Instant under reduced motion. */
 export function iconSwapBlink(el: HTMLElement | null, swap: () => void): void {
@@ -465,19 +710,19 @@ export function iconSwapBlink(el: HTMLElement | null, swap: () => void): void {
   timeline.to(el, { scaleY: 0 }).add(swap).to(el, { scaleY: 1 });
 }
 
-/** A removed row slides out to the right while its space eases closed; resolves when done. */
-export function detailRowOut(row: HTMLElement | null): Promise<void> {
+/** A removed row slides out to the right while its space eases closed; resolves when done.
+ *  `gapPx` mirrors {@link detailRowIn} — 0 for a divided, gap-less list. */
+export function detailRowOut(
+  row: HTMLElement | null | undefined,
+  gapPx: number = ROW_GAP_PX,
+): Promise<void> {
   if (!row || prefersReducedMotion()) return Promise.resolve();
   return new Promise((resolve) => {
     const timeline = gsap.timeline({ onComplete: resolve, onInterrupt: resolve });
     timeline.set(row, { overflow: 'hidden' });
     timeline.to(row, { x: 24, autoAlpha: 0, duration: 0.2, ease: PAGE_EXIT.ease, overwrite: true }, 0);
     // The space closes as the row fades — `-marginBottom` also swallows the flex gap it owned.
-    timeline.to(
-      row,
-      { height: 0, marginBottom: -ROW_GAP_PX, duration: 0.3, ease: 'power3.out' },
-      0.08,
-    );
+    timeline.to(row, { height: 0, marginBottom: -gapPx, duration: 0.3, ease: 'power3.out' }, 0.08);
   });
 }
 
@@ -717,6 +962,101 @@ export function galleryDragSettle(el: HTMLElement | null): Promise<void> {
       onComplete: resolve,
       onInterrupt: resolve,
     });
+  });
+}
+
+/**
+ * Eases a container from a PREVIOUSLY MEASURED height to whatever it is now — the "the space is the
+ * animation" move, without the gallery boundary's tile bounce. Pair it with a Flip reflow when a
+ * list inside grows/shrinks (a thumb strip gaining its first row, a section revealing a field): the
+ * tiles glide, and everything below them eases down instead of jumping. No-ops when the height
+ * didn't actually change, so it's safe to call on every mutation.
+ */
+export function animateHeightFrom(
+  container: HTMLElement | null,
+  fromHeight: number,
+): void {
+  if (!container || prefersReducedMotion()) return;
+  const toHeight = container.offsetHeight;
+  if (fromHeight === toHeight) return;
+  gsap.fromTo(
+    container,
+    { height: fromHeight, overflow: 'hidden' },
+    {
+      height: toHeight,
+      duration: 0.35,
+      ease: PAGE_ENTER.ease,
+      overwrite: true,
+      clearProps: 'height,overflow',
+    },
+  );
+}
+
+// ── A row's own state change (the agenda ticket advancing a step) ───────────────────────────────
+
+/**
+ * A label ADAPTING to its new content: the box eases from the width it had to the width the new
+ * label needs while the two labels CROSS-FADE through each other — the same read as a skeleton
+ * morphing into its content, and the opposite of a swap (nothing ever blanks out, the size never
+ * jumps, and old and new are visible together for a moment).
+ *
+ * Both halves run on ONE timeline so the resize and the fade are the same gesture. The width target
+ * is `auto`, never a measured number: GSAP resolves the natural size at the start of the tween and
+ * lands on `auto`, so an interrupted morph simply re-animates from wherever it stands — measuring
+ * was what once locked a chip at a half-animated width and clipped it ("Entregad…") for good.
+ */
+export function morphSwap({
+  container,
+  incoming,
+  outgoing,
+}: {
+  container: HTMLElement | null;
+  incoming: HTMLElement | null;
+  outgoing: HTMLElement | null;
+}): Promise<void> {
+  if (!container || !incoming || prefersReducedMotion()) {
+    return Promise.resolve();
+  }
+  // The starting width is the OUTGOING copy's own: it is out of flow, still painted, and still at
+  // its natural size — so nothing has to be measured before the commit (which would mean reading
+  // the DOM during render).
+  const fromWidth = outgoing?.offsetWidth ?? 0;
+  return new Promise((resolve) => {
+    const timeline = gsap.timeline({ onComplete: resolve, onInterrupt: resolve });
+    if (fromWidth > 0) {
+      timeline.fromTo(
+        container,
+        { width: fromWidth },
+        {
+          width: 'auto',
+          duration: 0.38,
+          ease: PAGE_ENTER.ease,
+          overwrite: 'auto',
+          clearProps: 'width',
+        },
+        0,
+      );
+    }
+    if (outgoing) {
+      timeline.to(
+        outgoing,
+        { autoAlpha: 0, duration: 0.24, ease: 'power2.in', overwrite: 'auto' },
+        0,
+      );
+    }
+    // The incoming label starts rising through as the old one leaves — overlapping, not queued.
+    timeline.fromTo(
+      incoming,
+      { autoAlpha: 0 },
+      {
+        autoAlpha: 1,
+        duration: 0.3,
+        ease: PAGE_ENTER.ease,
+        overwrite: 'auto',
+        clearProps: 'opacity,visibility',
+      },
+      0.08,
+    );
   });
 }
 

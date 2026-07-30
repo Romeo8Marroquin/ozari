@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineXMark } from 'react-icons/hi2';
 import { prefersReducedMotion } from '@utils/motion';
+import { isFinePointerDevice } from '@utils/pointer';
 import { collectStaggerTargets, playStaggerIn, playStaggerOut } from './modalStagger';
 import { registerModal } from './modalRegistry';
 import OverlayScrollbar from './OverlayScrollbar';
@@ -173,10 +174,17 @@ const Modal: React.FC<ModalProps> = ({
 
     const raf = requestAnimationFrame(() => {
       const panel = panelRef.current;
-      const target =
-        panel?.querySelector<HTMLElement>('[data-modal-autofocus]') ??
-        panel?.querySelector<HTMLElement>(FOCUSABLE) ??
-        panel;
+      // Focus ALWAYS moves into the dialog — that is what makes it a dialog (the trap has something
+      // to trap, Escape works, screen readers announce it). WHERE it lands depends on the device:
+      // a mouse/trackpad gets the marked field, so typing can start straight away; touch gets the
+      // PANEL, because focusing an input there pops the on-screen keyboard over half the screen the
+      // instant the dialog opens — unasked, and usually over the text explaining the decision.
+      // Deliberately not "the first focusable" on touch either: that is often the same input.
+      const target = isFinePointerDevice()
+        ? (panel?.querySelector<HTMLElement>('[data-modal-autofocus]') ??
+          panel?.querySelector<HTMLElement>(FOCUSABLE) ??
+          panel)
+        : panel;
       target?.focus();
     });
 
@@ -229,6 +237,9 @@ const Modal: React.FC<ModalProps> = ({
 
       <div
         ref={setPanelNode}
+        // Focusable-by-script only: on touch the dialog itself takes focus rather than a field (see
+        // the open lifecycle), which needs a target that never appears in the tab order.
+        tabIndex={-1}
         role={role}
         aria-modal="true"
         aria-label={title ? undefined : ariaLabel}
@@ -269,7 +280,10 @@ const Modal: React.FC<ModalProps> = ({
           <div
             ref={bodyRef}
             data-modal-body
-            className="no-native-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-6"
+            // `overflow-anchor: none` for the same reason as the panel's scroller: a dialog body
+            // animates its own height (a step swap, a photo strip growing, a field-array row) and the
+            // browser's anchoring would re-scroll mid-tween. Growth that must be seen asks for it.
+            className="no-native-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [overflow-anchor:none] p-6"
           >
             {title && (
               <h2 id={titleId} className={`modal-stagger text-xl font-semibold text-charcoal ${dismissible ? 'pr-8' : ''}`}>

@@ -296,7 +296,10 @@ export const signInUser = async (
       i18next.t("user.signInUser.userAuthenticated"),
     );
   } catch (error) {
-    logger.error(i18next.t("user.signInUser.logs.internalServerError"), error);
+    // The error goes THROUGH the message (the string carries `{{-error}}`), not beside it as a
+    // second winston argument — passed that way the line logged a literal `{{-error}}`. Every other
+    // handler here interpolates it; this one was the outlier.
+    logger.error(i18next.t("user.signInUser.logs.internalServerError", { error }));
     sendOzariError(
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,

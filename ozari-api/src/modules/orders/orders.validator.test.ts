@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, type Mock } from "vitest";
 import type { NextFunction, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
-import { validateCreateOrder, validateOrderAvailability } from "./orders.validator.js";
+import {
+  validateCreateOrder,
+  validateOrderAvailability,
+  validateUpdateOrder,
+} from "./orders.validator.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
@@ -247,6 +251,61 @@ describe("validateCreateOrder", () => {
       expect.anything(),
       HttpEnum.INTERNAL_SERVER_ERROR,
       "orders.createOrder.validators.validationError",
+    );
+  });
+});
+
+describe("validateUpdateOrder", () => {
+  const runUpdate = async (body: Record<string, unknown>) => {
+    const req = { body, params: { id: "12" } } as unknown as Request;
+    const next = vi.fn() as unknown as NextFunction;
+    await validateUpdateOrder(req, {} as Response, next);
+    return { req, next };
+  };
+
+  it("holds an edit to the SAME contract as create, under its own message namespace", async () => {
+    const { next } = await runUpdate({ ...validBody(), deliveryAddress: "abc" });
+    expect(next).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.BAD_REQUEST,
+      "orders.updateOrder.validators.invalidDeliveryAddress",
+    );
+  });
+
+  it("lets an edit put the delivery ANYWHERE, including the past", async () => {
+    // "Not in the past" is a rule about scheduling something NEW. An order being corrected already
+    // happened — or is being moved for a reason the admin knows and the system doesn't.
+    const { req, next } = await runUpdate({
+      ...validBody(),
+      deliveryAt: "2026-07-01T14:00:00.000Z",
+      pickupAt: "2026-07-02T10:00:00.000Z",
+    });
+    expect(next).toHaveBeenCalled();
+    expect((req.body as Record<string, unknown>)["deliveryAt"]).toBeInstanceOf(Date);
+  });
+
+  it("still keeps the pickup after the delivery, whatever the dates are", async () => {
+    const { next } = await runUpdate({
+      ...validBody(),
+      deliveryAt: "2026-07-02T10:00:00.000Z",
+      pickupAt: "2026-07-01T14:00:00.000Z",
+    });
+    expect(next).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.BAD_REQUEST,
+      "orders.updateOrder.validators.pickupBeforeDelivery",
+    );
+  });
+
+  it("responds 500 under its own key when a lookup blows up", async () => {
+    mockPrisma({ clientRegistry: { findFirst: vi.fn().mockRejectedValue(new Error("db down")) } });
+    await runUpdate(validBody());
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      "orders.updateOrder.validators.validationError",
     );
   });
 });

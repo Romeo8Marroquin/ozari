@@ -47,8 +47,31 @@ export interface LifecycleOrderModel {
   assignedUserId: number | null;
   /** True when the order carries at least one rental line (`service_details.isRental`). */
   isRental: boolean;
+  /** True when it carries at least one SALE line. Independent of {@link isRental} (an order can be
+   *  both): the two inventories are held and released by different rules. */
+  isSale: boolean;
   /** Set ⇒ the order took a disruptive exit and is final. */
   cancelledAt: Date | null;
+  /** Set ⇒ the goods physically left the business. Sale stock can never come back after this. */
+  deliveredAt: Date | null;
+}
+
+/**
+ * What a move does to the goods the order reserves — the ONLY thing the confirm dialogs' inventory
+ * copy is allowed to claim, so it stays true as steps are added, renamed or re-flagged:
+ * - `release` — units this order was holding go back to the fleet/shelf;
+ * - `reclaim` — the order takes units again, so the move **can fail** on availability;
+ * - `none` — the reservation is unchanged (finishing an order that already released, cancelling one
+ *   that holds nothing, any step whose `inventoryHold` matches the one before it).
+ */
+export type InventoryEffectModel = "release" | "reclaim" | "none";
+
+/** What an order reserves at a given moment, split by the two inventories (see `holdsSaleStock`). */
+export interface InventoryHoldingsModel {
+  /** Rental units, DERIVED from the status' `inventoryHold` — never a stored count. */
+  rental: boolean;
+  /** Sale units, a real decrement standing until the order is cancelled or delivered. */
+  sale: boolean;
 }
 
 /** WHO is attempting a transition. Extended (not replaced) as new flows land: a Client actor for
@@ -59,9 +82,17 @@ export interface ActorContextModel {
   role: RolesEnum;
 }
 
-/** The three shapes a move can take. `forward`/`backward` walk the pipeline; `disruptive` is the
- *  any-time exit (cancel), which is why it carries a reason. */
-export type TransitionKindModel = "forward" | "backward" | "disruptive";
+/**
+ * The shapes a move can take. `forward`/`backward` walk the pipeline; `disruptive` is the any-time
+ * exit (cancel), which is why it carries a reason; `reopen` is its admin-only undo — a cancelled
+ * order placed back onto a real step, clearing the cancellation but keeping every actual it had
+ * (those are facts, not state).
+ */
+export type TransitionKindModel =
+  | "forward"
+  | "backward"
+  | "disruptive"
+  | "reopen";
 
 /**
  * Every move an actor may make on an order RIGHT NOW — the single answer both the API projection
@@ -91,6 +122,11 @@ export interface OrderActionModel {
   maxEvidence: number;
   /** Disruptive moves ask for a reason (`services.cancelReason`). */
   requiresReason: boolean;
+  /** What accepting this move does to the reserved goods — the dialog's inventory sentence. */
+  inventoryEffect: InventoryEffectModel;
+  /** True when accepting this move DESTROYS the photos of the step it undoes (a backward leg out of
+   *  a step that demanded evidence). Warned about before it happens, never after. */
+  purgesEvidence: boolean;
 }
 
 /** The global evidence bounds (from `app_preferences`, with `appConfig` fallbacks). */

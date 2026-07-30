@@ -12,6 +12,8 @@ interface SectionRevealProps {
    *  (the product edit page wrapping the whole form) passes `.reveal-block` so section cards ride
    *  the wave as wholes. */
   itemSelector?: string;
+  /** Where that cascade comes from — a rise by default, or a SIDE on a laterally-moving screen. */
+  from?: 'bottom' | 'left' | 'right';
   /** The real body — only mounted once `loading` is false. Fields marked `.reveal-item` cascade. */
   children: React.ReactNode;
 }
@@ -32,6 +34,7 @@ const SectionReveal: React.FC<SectionRevealProps> = ({
   skeleton,
   delaySeconds = 0,
   itemSelector,
+  from,
   children,
 }) => {
   // Is the skeleton overlay in the DOM? True while loading and through the reveal; the reveal's
@@ -73,8 +76,9 @@ const SectionReveal: React.FC<SectionRevealProps> = ({
       delaySeconds,
       onSettled: () => setSkeletonMounted(false),
       ...(itemSelector !== undefined && { itemSelector }),
+      ...(from !== undefined && { from }),
     });
-  }, [loading, skeletonMounted, delaySeconds, itemSelector]);
+  }, [loading, skeletonMounted, delaySeconds, itemSelector, from]);
 
   // `pt-6 -mt-6`: the reveal clips overflow while morphing the height, and the FIRST field's
   // floating label rises ~1rem ABOVE the body's top edge — without headroom it gets clipped for

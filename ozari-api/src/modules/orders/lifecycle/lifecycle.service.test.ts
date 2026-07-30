@@ -10,11 +10,15 @@ import type {
   ActorContextModel,
   LifecycleOrderModel,
   StatusDefinitionModel,
+  TransitionKindModel,
 } from "./lifecycle.models.js";
 import {
   applicablePipeline,
   canTransition,
+  currentHoldings,
   describeActions,
+  holdingsAfter,
+  inventoryEffectOf,
   disruptiveStates,
   evidenceBoundsFor,
   getEvidenceBounds,
@@ -27,6 +31,7 @@ import {
   parseIntPreference,
   pipeline,
   previousStatus,
+  resolveStatusPath,
   resolveTransitions,
   statusById,
   toStatusDefinition,
@@ -43,6 +48,8 @@ vi.mock("@/services/prisma.service.js", () => ({
 }));
 
 const CATALOG = SEEDED_STATUS_CATALOG;
+/** Any fixed moment — these derivations only ever ask whether a timestamp is SET. */
+const NOW = new Date("2026-07-28T12:00:00.000Z");
 const ADMIN: ActorContextModel = { userId: 1, role: RolesEnum.Admin };
 const DRIVER: ActorContextModel = { userId: 7, role: RolesEnum.Driver };
 const CLIENT: ActorContextModel = { userId: 9, role: RolesEnum.Client };
@@ -54,7 +61,9 @@ const order = (
   serviceStatusId: 1,
   assignedUserId: 7,
   isRental: true,
+  isSale: false,
   cancelledAt: null,
+  deliveredAt: null,
   ...overrides,
 });
 
@@ -103,6 +112,25 @@ describe("getStatusCatalog", () => {
     invalidateStatusCatalog();
     await getStatusCatalog();
     expect(findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("expires on its own, so a seed or another instance's edit can't be served stale forever", async () => {
+    // The cache is invalidated explicitly by admin writes — but a `pnpm db:seed`, a hand-edited row
+    // or an edit on a DIFFERENT Cloud Run instance cannot call back, and a process serving a machine
+    // that no longer exists loses the whole lifecycle silently.
+    const start = Date.UTC(2026, 6, 27, 12, 0, 0);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+    findMany.mockResolvedValue([row]);
+
+    await getStatusCatalog();
+    clock.mockReturnValue(start + appConfig.statusCatalogTtlSeconds * 1000 - 1);
+    await getStatusCatalog();
+    expect(findMany).toHaveBeenCalledTimes(1); // still inside the TTL
+
+    clock.mockReturnValue(start + appConfig.statusCatalogTtlSeconds * 1000);
+    await getStatusCatalog();
+    expect(findMany).toHaveBeenCalledTimes(2); // expired → re-read
+    clock.mockRestore();
   });
 
   it("degrades a hand-edited/unknown flag value to its safest meaning", () => {
@@ -303,6 +331,86 @@ describe("transitionKindFor / canTransition", () => {
   });
 });
 
+describe("resolveStatusPath — the admin jump, as a real path", () => {
+  it("returns the single move for an ordinary step (any actor)", () => {
+    const current = order({ serviceStatusId: 1 });
+    expect(
+      resolveStatusPath(CATALOG, current, statusOf(5), DRIVER)?.map((s) => s.name),
+    ).toEqual(["En ruta"]);
+    expect(
+      resolveStatusPath(CATALOG, current, statusOf(2), ADMIN)?.map((s) => s.name),
+    ).toEqual(["Cancelado"]);
+  });
+
+  it("walks EVERY step between here and a distant target (admin)", () => {
+    // Pendiente → Listo is four real transitions, not one leap: each will write its own history
+    // row, stamp its own actual and demand its own evidence.
+    expect(
+      resolveStatusPath(CATALOG, order({ serviceStatusId: 1 }), statusOf(6), ADMIN)?.map(
+        (s) => s.name,
+      ),
+    ).toEqual(["En ruta", "Entregado", "Recolectado", "Listo"]);
+
+    // …and backwards, in reverse order, so each undone step is left in turn.
+    expect(
+      resolveStatusPath(CATALOG, order({ serviceStatusId: 6 }), statusOf(5), ADMIN)?.map(
+        (s) => s.name,
+      ),
+    ).toEqual(["Recolectado", "Entregado", "En ruta"]);
+  });
+
+  it("never walks a purchase-only order onto a rental-only step", () => {
+    const sale = order({ serviceStatusId: 1, isRental: false });
+    expect(resolveStatusPath(CATALOG, sale, statusOf(6), ADMIN)).toBeNull();
+    expect(resolveStatusPath(CATALOG, sale, statusOf(3), ADMIN)?.map((s) => s.name)).toEqual([
+      "En ruta",
+      "Entregado",
+    ]);
+  });
+
+  it("only an ADMIN may jump — a driver keeps their single step", () => {
+    const current = order({ serviceStatusId: 1 });
+    expect(resolveStatusPath(CATALOG, current, statusOf(3), DRIVER)).toBeNull();
+    expect(resolveStatusPath(CATALOG, current, statusOf(3), CLIENT)).toBeNull();
+    // …and not onto someone else's order either.
+    expect(
+      resolveStatusPath(CATALOG, order({ assignedUserId: 99 }), statusOf(5), DRIVER),
+    ).toBeNull();
+  });
+
+  it("REOPENS a cancelled order onto any applicable step (admin only)", () => {
+    const cancelled = order({ serviceStatusId: 2, cancelledAt: new Date() });
+    // Placed directly back on the chosen step — a cancelled order sits outside the pipeline, so
+    // there is no walk to make.
+    expect(
+      resolveStatusPath(CATALOG, cancelled, statusOf(3), ADMIN)?.map((s) => s.name),
+    ).toEqual(["Entregado"]);
+    expect(resolveStatusPath(CATALOG, cancelled, statusOf(2), ADMIN)).toBeNull(); // already there
+    expect(resolveStatusPath(CATALOG, cancelled, statusOf(5), DRIVER)).toBeNull();
+    // A cancelled SALE order can't be reopened onto a rental-only step.
+    expect(
+      resolveStatusPath(
+        CATALOG,
+        order({ serviceStatusId: 2, cancelledAt: new Date(), isRental: false }),
+        statusOf(4),
+        ADMIN,
+      ),
+    ).toBeNull();
+  });
+
+  it("refuses an unpublished target, a no-op, and an unknown current status", () => {
+    const retired = CATALOG.map((status) =>
+      status.id === 5 ? { ...status, isActive: false } : status,
+    );
+    expect(
+      resolveStatusPath(retired, order({ serviceStatusId: 1 }), retired[4] as StatusDefinitionModel, ADMIN),
+    ).toBeNull();
+    // Moving to the status it is already in resolves to nothing.
+    expect(resolveStatusPath(CATALOG, order({ serviceStatusId: 3 }), statusOf(3), ADMIN)).toBeNull();
+    expect(resolveStatusPath(CATALOG, order({ serviceStatusId: 99 }), statusOf(3), ADMIN)).toBeNull();
+  });
+});
+
 describe("evidence bounds", () => {
   it("parses a positive int preference and falls back otherwise", () => {
     expect(parseIntPreference("4", 1)).toBe(4);
@@ -356,6 +464,75 @@ describe("evidence bounds", () => {
   });
 });
 
+describe("inventory holdings and effects", () => {
+  it("derives what an order reserves from its STATUS, not from its age", () => {
+    // Pendiente reserves the window; En ruta / Entregado / Recolectado hold outright…
+    expect(currentHoldings(CATALOG, order({ serviceStatusId: 1 })).rental).toBe(true);
+    expect(currentHoldings(CATALOG, order({ serviceStatusId: 4 })).rental).toBe(true);
+    // …and Listo is where they go back to the fleet, even though nothing was cancelled or deleted.
+    expect(currentHoldings(CATALOG, order({ serviceStatusId: 6 })).rental).toBe(false);
+    // A cancelled order holds nothing whatever step it was sitting on.
+    expect(
+      currentHoldings(CATALOG, order({ serviceStatusId: 3, cancelledAt: NOW })).rental,
+    ).toBe(false);
+    // A status that vanished from the catalog can hold nothing — the availability queries can't
+    // see it either, so claiming a hold here would contradict them.
+    expect(currentHoldings(CATALOG, order({ serviceStatusId: 999 })).rental).toBe(false);
+  });
+
+  it("holds SALE units from creation until the order is cancelled or delivered", () => {
+    const sale = (overrides: Partial<LifecycleOrderModel> = {}) =>
+      currentHoldings(CATALOG, order({ isRental: false, isSale: true, ...overrides })).sale;
+    expect(sale()).toBe(true);
+    expect(sale({ deliveredAt: NOW })).toBe(false); // the client HAS them
+    expect(sale({ cancelledAt: NOW })).toBe(false); // handed back then
+    // A pure rental order has no sale units to hold in the first place.
+    expect(currentHoldings(CATALOG, order()).sale).toBe(false);
+  });
+
+  it("answers the question every confirm dialog asks", () => {
+    const effect = (
+      from: number,
+      to: StatusDefinitionModel,
+      kind: TransitionKindModel,
+      overrides: Partial<LifecycleOrderModel> = {},
+    ) => inventoryEffectOf(CATALOG, order({ serviceStatusId: from, ...overrides }), to, kind);
+
+    // Forward within the holding stretch changes nothing…
+    expect(effect(5, statusOf(3), "forward")).toBe("none");
+    // …the step that ends the washing period gives them back…
+    expect(effect(4, statusOf(6), "forward")).toBe("release");
+    // …and stepping back into it takes them again (so it can fail on availability).
+    expect(effect(6, statusOf(4), "backward")).toBe("reclaim");
+    // Cancelling a holding order frees; cancelling a finished one promises nothing.
+    expect(effect(3, statusOf(2), "disruptive")).toBe("release");
+    expect(effect(6, statusOf(2), "disruptive")).toBe("none");
+    // Reopening takes the goods back — including the sale units the cancel returned…
+    expect(effect(2, statusOf(5), "reopen", { cancelledAt: NOW })).toBe("reclaim");
+    // …but never the ones already delivered: those left the business for good.
+    expect(
+      effect(2, statusOf(6), "reopen", {
+        cancelledAt: NOW,
+        deliveredAt: NOW,
+        isRental: false,
+        isSale: true,
+      }),
+    ).toBe("none");
+  });
+
+  it("never claims a rental effect on a purchase-only order", () => {
+    const purchase = order({ serviceStatusId: 5, isRental: false, isSale: true });
+    // En ruta "holds" rental units — but this order has none, so only the sale rule can speak…
+    expect(currentHoldings(CATALOG, purchase).rental).toBe(false);
+    // …and cancelling it before delivery is exactly what puts those units back on the shelf.
+    expect(inventoryEffectOf(CATALOG, purchase, statusOf(2), "disruptive")).toBe("release");
+    expect(holdingsAfter(CATALOG, purchase, statusOf(3), "forward")).toEqual({
+      rental: false,
+      sale: true,
+    });
+  });
+});
+
 describe("describeActions", () => {
   const globals = { min: 1, max: 10 };
 
@@ -376,6 +553,9 @@ describe("describeActions", () => {
         minEvidence: 1,
         maxEvidence: 10,
         requiresReason: false,
+        // En ruta and Entregado both hold the units — walking between them reserves nothing new.
+        inventoryEffect: "none",
+        purgesEvidence: false,
       },
       {
         kind: "backward",
@@ -386,6 +566,9 @@ describe("describeActions", () => {
         minEvidence: 1,
         maxEvidence: 10,
         requiresReason: false,
+        inventoryEffect: "none",
+        // En ruta demands no photos, so undoing it destroys nothing.
+        purgesEvidence: false,
       },
       {
         kind: "disruptive",
@@ -396,11 +579,14 @@ describe("describeActions", () => {
         minEvidence: 1,
         maxEvidence: 10,
         requiresReason: true,
+        // …but cancelling from a holding step DOES free them.
+        inventoryEffect: "release",
+        purgesEvidence: false,
       },
     ]);
   });
 
-  it("rewinding INTO an evidence step never demands photos", () => {
+  it("rewinding INTO an evidence step never demands photos — but says it DESTROYS the ones it undoes", () => {
     // Recolectado → Entregado: the target requires evidence, but undoing must not ask for a camera.
     const actions = describeActions(
       CATALOG,
@@ -411,7 +597,38 @@ describe("describeActions", () => {
     expect(actions.find((action) => action.kind === "backward")).toMatchObject({
       statusName: "Entregado",
       requiresEvidence: false,
+      // Recolectado — the step being LEFT — demanded photos, so this move deletes them for good.
+      purgesEvidence: true,
     });
+  });
+
+  it("tells the truth about inventory on a FINISHED order: cancelling it frees nothing", () => {
+    // Listo holds nothing (the units went back to the fleet when it was pressed), so the cancel
+    // dialog must not promise that "los productos volverán a estar disponibles" — they already are.
+    const finished = order({ serviceStatusId: 6 });
+    expect(describeActions(CATALOG, finished, ADMIN, globals)).toEqual([
+      expect.objectContaining({
+        kind: "backward",
+        statusName: "Recolectado",
+        // …while stepping BACK into a holding step takes them again — the move that can 409.
+        inventoryEffect: "reclaim",
+        purgesEvidence: false,
+      }),
+      expect.objectContaining({
+        kind: "disruptive",
+        statusName: "Cancelado",
+        inventoryEffect: "none",
+      }),
+    ]);
+  });
+
+  it("marks the forward step that RETURNS the units to the fleet", () => {
+    // Recolectado (still held — there's a washing period) → Listo (free).
+    expect(
+      describeActions(CATALOG, order({ serviceStatusId: 4 }), ADMIN, globals),
+    ).toContainEqual(
+      expect.objectContaining({ kind: "forward", statusName: "Listo", inventoryEffect: "release" }),
+    );
   });
 
   it("gives a stranger nothing to do", () => {

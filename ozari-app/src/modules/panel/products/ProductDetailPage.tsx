@@ -32,7 +32,7 @@ import {
   releaseProductImageMorph,
 } from './productImageMorph';
 import ProductDeleteModal from './ProductDeleteModal';
-import ProductLightbox from './ProductLightbox';
+import ImageLightbox from '@components/ImageLightbox';
 import { scrollPanelToTop } from './productsScroll';
 import ProductsStatus from './ProductsStatus';
 import SectionReveal from './SectionReveal';
@@ -517,10 +517,10 @@ const ProductDetailPage: React.FC = () => {
             )}
           </SectionReveal>
           {lightboxOpen && product && (
-            <ProductLightbox
+            <ImageLightbox
               images={images}
               initialIndex={activeIndex}
-              productName={product.name}
+              label={product.name}
               onClose={() => setLightboxOpen(false)}
             />
           )}

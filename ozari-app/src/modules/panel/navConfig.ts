@@ -1,5 +1,6 @@
 import type { IconType } from 'react-icons';
 import {
+  HiOutlineAdjustmentsHorizontal,
   HiOutlineClipboardDocumentList,
   HiOutlineCog6Tooth,
   HiOutlineCube,
@@ -21,6 +22,9 @@ export type PanelPath =
   | `/panel/productos/${number}/editar`
   | '/panel/pedidos'
   | '/panel/pedidos/nuevo'
+  | `/panel/pedidos/${number}`
+  | `/panel/pedidos/${number}/editar`
+  | '/panel/preferencias'
   | '/panel/ajustes';
 
 export interface PanelNavItem {
@@ -52,12 +56,26 @@ export const PRODUCTS_ROLES: readonly Role[] = [Role.Admin, Role.Client];
  */
 export const ORDERS_ROLES: readonly Role[] = [Role.Admin, Role.Driver];
 
+/**
+ * The roles allowed into system PREFERENCES — **Admin only** (owner decision, 2026-07-29). These
+ * screens change how the business behaves for everyone: the spacing between deliveries, the washing
+ * period, which event types and zones exist. A Driver reports what happened and a Client places
+ * orders; neither configures the system.
+ *
+ * Deliberately separate from Ajustes, which stays PERSONAL (password, 2FA) — "my account" and "the
+ * company's rules" don't belong under one heading. Single source for the nav tab AND the
+ * `/panel/preferencias` route guard, like `PRODUCTS_ROLES`; the backend's Admin-only
+ * `/api/preferences` routes remain the real boundary.
+ */
+export const PREFERENCES_ROLES: readonly Role[] = [Role.Admin];
+
 // The nav shows ONLY built modules: Products + Orders (the agenda) + Settings. A dashboard lands
 // later; until then `/panel` defaults to the first tab the role can see — products for Admin/Client,
 // the orders agenda for a Driver (deliveries are their whole job; see `panelHomeFor`).
 export const PANEL_NAV: PanelNavItem[] = [
   { to: '/panel/productos', icon: HiOutlineCube, labelKey: 'products', roles: PRODUCTS_ROLES },
   { to: '/panel/pedidos', icon: HiOutlineClipboardDocumentList, labelKey: 'orders', roles: ORDERS_ROLES },
+  { to: '/panel/preferencias', icon: HiOutlineAdjustmentsHorizontal, labelKey: 'preferences', roles: PREFERENCES_ROLES },
   { to: '/panel/ajustes', icon: HiOutlineCog6Tooth, labelKey: 'settings' },
 ];
 

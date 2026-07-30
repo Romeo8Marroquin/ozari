@@ -24,14 +24,14 @@ describe('useAdvanceOrder', () => {
     result.current.advanceOrder({
       orderId: 12,
       toStatusId: 3,
-      evidenceKeys: ['orders/evidence/a.webp'],
+      evidence: [{ statusId: 3, keys: ['orders/evidence/a.webp'] }],
     });
 
     await waitFor(() => expect(apiPost).toHaveBeenCalled());
     // The id rides in the PATH; the body is the move itself. The dialog owns its errors.
     expect(apiPost).toHaveBeenCalledWith(
       '/orders/12/advance',
-      { toStatusId: 3, evidenceKeys: ['orders/evidence/a.webp'] },
+      { toStatusId: 3, evidence: [{ statusId: 3, keys: ['orders/evidence/a.webp'] }] },
       { skipErrorNotification: true },
     );
     // An advance can move a row out of the agenda and into the history — invalidate the whole key.
@@ -49,3 +49,4 @@ describe('useAdvanceOrder', () => {
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
 });
+

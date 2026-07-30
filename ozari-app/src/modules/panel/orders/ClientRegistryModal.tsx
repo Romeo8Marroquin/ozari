@@ -15,7 +15,7 @@ import { CHANNEL_INPUT_MODE, contactChannelKind } from '@constants/Regex';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { toFormError } from '@utils/apiError';
 import ContactChannelIcon from './ContactChannelIcon';
-import { detailRowIn, detailRowOut } from '../pageMotion';
+import { detailRowIn, detailRowOut, revealInScroller } from '../pageMotion';
 import type { CatalogOption, ClientRegistry } from './order.types';
 import {
   createRegistryDefaultValues,
@@ -57,7 +57,11 @@ const RegistryRow: React.FC<{
 }> = ({ animate, onRegister, children }) => {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (animate) detailRowIn(ref.current);
+    if (!animate) return;
+    detailRowIn(ref.current);
+    // Inside a dialog the scroller is the modal BODY, which `revealInScroller` resolves from the row
+    // itself — a contact added at the bottom of a long registry must not appear out of sight.
+    revealInScroller(ref.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only; `animate` is read once
   }, []);
   return (

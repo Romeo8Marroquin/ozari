@@ -3,11 +3,14 @@ import type { Response } from "express";
 import { Prisma } from "@prisma/client";
 import {
   createOrder,
+  deleteOrder,
   getOrderAvailability,
   getOrderById,
   getOrders,
   getOrdersCatalog,
+  updateOrder,
 } from "./orders.controller.js";
+import { getStorage } from "@helpers/storage.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
@@ -36,6 +39,7 @@ vi.mock("@/config/auditLogger.js", () => ({
   logAudit: vi.fn(),
 }));
 vi.mock("@/config/environment.js", () => ({ isDeployedEnvironment: vi.fn(() => false) }));
+vi.mock("@helpers/storage.js", () => ({ getStorage: vi.fn() }));
 // The lifecycle machine: only its two DB readers are stubbed (with the SEEDED catalog + bounds) —
 // every derivation, permission and projection below runs the real engine.
 vi.mock("./lifecycle/lifecycle.service.js", async (importOriginal) => ({
@@ -116,6 +120,14 @@ const makeRawRichOrder = () => ({
       fromStatus: null,
       toStatus: { id: 1, name: "Pendiente" },
       byUser: { fullNameKms: encryptKms("Romeo Marroquín") },
+    },
+  ],
+  evidences: [
+    {
+      id: 9,
+      serviceStatusId: 3,
+      url: "https://cdn.example.com/orders/evidence/a.webp",
+      createdAt: new Date("2026-08-01T15:00:00.000Z"),
     },
   ],
 });
@@ -290,6 +302,10 @@ describe("getOrderById", () => {
       statusHistory: [
         { id: 1, from: undefined, to: { id: 1, name: "Pendiente" }, byUserName: "Romeo Marroquín" },
       ],
+      // The tracking photos ride along, each tagged with the step it documents.
+      evidence: [
+        { id: 9, statusId: 3, url: "https://cdn.example.com/orders/evidence/a.webp" },
+      ],
     });
   });
 
@@ -313,6 +329,27 @@ describe("getOrderById", () => {
       expect.anything(),
       HttpEnum.NOT_FOUND,
       "orders.getOrderById.orderNotFound",
+    );
+  });
+
+  it("row-scopes a DRIVER to their own orders — another worker's is a plain 404", async () => {
+    const { findFirst } = mockPrisma();
+    await getOrderById(
+      { query: {}, params: { id: "12" }, user: { userRole: 3, userId: 7 } } as unknown as CustomRequest,
+      {} as Response,
+    );
+    // The scoping is in the QUERY: an order that isn't theirs simply isn't found, so the answer
+    // never confirms that it exists.
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 12, isActive: true, assignedUserId: 7 } }),
+    );
+
+    // …while an Admin's query carries no assignee filter at all.
+    vi.clearAllMocks();
+    const admin = mockPrisma();
+    await getOrderById(buildReq({}, { id: "12" }), {} as Response);
+    expect(admin.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 12, isActive: true } }),
     );
   });
 
@@ -351,6 +388,12 @@ const txSaleProduct = {
   sellPrice: new Prisma.Decimal("3.50"),
 };
 
+/** The seeded timing rules as `loadOrderTimingPreferences` reads them. */
+const TIMING_PREFERENCES = [
+  { key: "orders.logisticsSpacingMinutes", value: "60" },
+  { key: "orders.turnaroundMinutes", value: "120" },
+];
+
 /** One rented-in-window grouped row, as `serviceDetail.groupBy` returns it. */
 const rentedRow = (productId: number, rented: number) => ({
   productId,
@@ -371,7 +414,8 @@ function mockCreateTx(overrides: TxOverrides = {}) {
       update: vi.fn().mockResolvedValue({}),
     },
     serviceDetail: { groupBy: vi.fn().mockResolvedValue(overrides.rented ?? []) },
-    appPreference: { findUnique: vi.fn().mockResolvedValue({ value: "60" }) },
+    // The two clock rules, read in one query: 60 min between logistics events, 120 min of washing.
+    appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
     service: {
       findFirst: vi.fn().mockResolvedValue(overrides.spacingHit ?? null),
       create: vi.fn().mockResolvedValue({ id: 12 }),
@@ -556,6 +600,452 @@ describe("createOrder", () => {
   });
 });
 
+// ── The full edit ────────────────────────────────────────────────────────────────────────────────
+
+/** One SALE line already on the order (10 cups), so the stock-delta rules have something to move. */
+const existingSaleLine = {
+  id: 32,
+  productId: 4,
+  quantity: 10,
+  isRental: false,
+  unitaryPrice: new Prisma.Decimal("3.50"),
+  parcialPrice: new Prisma.Decimal("35.00"),
+  product: { name: "Vasos desechables" },
+};
+
+type UpdateTxOverrides = TxOverrides & {
+  /** The order as it stands before the edit; `null` = it doesn't exist (the 404 path). */
+  order?: Record<string, unknown> | null;
+};
+
+function mockUpdateTx(overrides: UpdateTxOverrides = {}) {
+  const existing = overrides.order === undefined ? makeRawRichOrder() : overrides.order;
+  const tx = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    product: {
+      findMany: vi.fn().mockResolvedValue(overrides.products ?? [txRentalProduct, txSaleProduct]),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    serviceDetail: {
+      groupBy: vi.fn().mockResolvedValue(overrides.rented ?? []),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      update: vi.fn().mockResolvedValue({}),
+      create: vi.fn().mockResolvedValue({}),
+    },
+    // The two clock rules, read in one query: 60 min between logistics events, 120 min of washing.
+    appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
+    service: {
+      // Called twice: first to LOAD the order under the lock, then for the spacing probe.
+      findFirst: vi
+        .fn()
+        .mockResolvedValueOnce(existing)
+        .mockResolvedValue(overrides.spacingHit ?? null),
+      update: vi.fn().mockResolvedValue({}),
+      findUniqueOrThrow: vi.fn().mockResolvedValue(makeRawRichOrder()),
+    },
+  };
+  (getPrismaClient as Mock).mockResolvedValue({
+    $transaction: vi.fn(async (callback: (t: typeof tx) => unknown) => callback(tx)),
+  });
+  return tx;
+}
+
+const buildUpdateReq = (
+  body: ReturnType<typeof createBody>,
+  id = "12",
+): CustomRequest =>
+  ({ body, query: {}, params: { id }, user: { userRole: 2, userId: 1 } }) as unknown as CustomRequest;
+
+describe("updateOrder", () => {
+  it("re-prices from the NEW window, reconciles the lines by product, and moves sale stock by the DIFFERENCE", async () => {
+    const tx = mockUpdateTx({ order: { ...makeRawRichOrder(), serviceDetails: [
+      makeRawRichOrder().serviceDetails[0] as object,
+      existingSaleLine,
+    ] } });
+    // 25 → 30 chairs, and the cups drop from 10 to 4.
+    const body = {
+      ...createBody(),
+      lines: [
+        { productId: 3, quantity: 30 },
+        { productId: 4, quantity: 4 },
+      ],
+    };
+    await updateOrder(buildUpdateReq(body), {} as Response);
+
+    // The surviving product keeps its ROW (and its id) and is re-priced: 6 × 30 × 2 billed days.
+    expect(tx.serviceDetail.update).toHaveBeenCalledWith({
+      where: { id: 31 },
+      data: { quantity: 30, isRental: true, unitaryPrice: 6, parcialPrice: 360, currencyId: 1 },
+    });
+    expect(tx.serviceDetail.update).toHaveBeenCalledWith({
+      where: { id: 32 },
+      data: { quantity: 4, isRental: false, unitaryPrice: 3.5, parcialPrice: 14, currencyId: 1 },
+    });
+    expect(tx.serviceDetail.create).not.toHaveBeenCalled();
+    expect(tx.serviceDetail.deleteMany).not.toHaveBeenCalled();
+    // Sale stock moves by the DIFFERENCE only: 10 held − 4 now = 6 units back on the shelf.
+    expect(tx.product.update).toHaveBeenCalledTimes(1);
+    expect(tx.product.update).toHaveBeenCalledWith({
+      where: { id: 4 },
+      data: { quantity: { increment: 6 } },
+    });
+
+    const updateArg = (tx.service.update as Mock).mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(updateArg.data).toMatchObject({
+      clientRegistryId: 3,
+      eventTypeId: 1,
+      totalAmount: 424, // 360 + 14 + 50 delivery
+      deliveryAt: body.deliveryAt,
+      serviceEnd: body.pickupAt,
+    });
+    // Snapshots are re-encrypted, never stored as plaintext.
+    expect(updateArg.data["deliveryAddressKms"]).not.toBe(body.deliveryAddress);
+    // The lifecycle is untouched: an edit never moves the status or writes history.
+    expect(updateArg.data["serviceStatusId"]).toBeUndefined();
+    expect(sendOzariSuccess).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.OK,
+      "orders.updateOrder.orderUpdated",
+      expect.objectContaining({ order: expect.objectContaining({ id: 12 }) }),
+    );
+  });
+
+  it("deletes the rows of products that left the order and gives their sale units back", async () => {
+    const tx = mockUpdateTx({
+      order: { ...makeRawRichOrder(), serviceDetails: [existingSaleLine] },
+    });
+    await updateOrder(
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 3, quantity: 5 }] }),
+      {} as Response,
+    );
+
+    expect(tx.serviceDetail.deleteMany).toHaveBeenCalledWith({ where: { id: { in: [32] } } });
+    expect(tx.serviceDetail.create).toHaveBeenCalledWith({
+      data: {
+        quantity: 5,
+        isRental: true,
+        unitaryPrice: 6,
+        parcialPrice: 60,
+        currencyId: 1,
+        serviceId: 12,
+        productId: 3,
+      },
+    });
+    // The whole sale quantity comes back — that product is no longer on the order.
+    expect(tx.product.update).toHaveBeenCalledWith({
+      where: { id: 4 },
+      data: { quantity: { increment: 10 } },
+    });
+  });
+
+  it("excludes the order from its OWN availability and spacing checks", async () => {
+    const tx = mockUpdateTx();
+    await updateOrder(buildUpdateReq(createBody()), {} as Response);
+
+    // An order is holding its own current lines; without this it would conflict with itself.
+    expect(tx.serviceDetail.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          service: expect.objectContaining({ id: { not: 12 } }),
+        }),
+      }),
+    );
+    expect(tx.service.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: { not: 12 } }) }),
+    );
+  });
+
+  it("is a pure PAPERWORK edit on an order whose status reserves nothing", async () => {
+    // Listo (6) holds no rental units and the goods were delivered, so nothing is reserved and
+    // nothing can be given back — the edit can never fail on availability.
+    const tx = mockUpdateTx({
+      order: {
+        ...makeRawRichOrder(),
+        serviceStatusId: 6,
+        deliveredAt: new Date("2026-08-01T15:00:00.000Z"),
+        serviceDetails: [makeRawRichOrder().serviceDetails[0] as object, existingSaleLine],
+      },
+      // Even a fully-committed fleet cannot block it: this order competes for nothing.
+      rented: [rentedRow(3, 40)],
+    });
+    await updateOrder(
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 3, quantity: 30 }] }),
+      {} as Response,
+    );
+
+    expect(tx.serviceDetail.groupBy).not.toHaveBeenCalled();
+    expect(tx.product.update).not.toHaveBeenCalled();
+    expect(tx.service.update).toHaveBeenCalled();
+  });
+
+  it("lets a SALE line grow into the units the order itself is already holding", async () => {
+    // The shelf shows 15 left, but this order is holding 10 of them — so 25 is reachable, and 26
+    // is not. Checking against the raw shelf would have refused a change the business can make.
+    const tx = mockUpdateTx({
+      order: { ...makeRawRichOrder(), serviceDetails: [existingSaleLine] },
+      products: [txRentalProduct, { ...txSaleProduct, quantity: 15 }],
+    });
+    await updateOrder(
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, quantity: 25 }], pickupAt: undefined }),
+      {} as Response,
+    );
+    expect(tx.service.update).toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    const tooMany = mockUpdateTx({
+      order: { ...makeRawRichOrder(), serviceDetails: [existingSaleLine] },
+      products: [txRentalProduct, { ...txSaleProduct, quantity: 15 }],
+    });
+    await updateOrder(
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, quantity: 26 }], pickupAt: undefined }),
+      {} as Response,
+    );
+    expect(tooMany.service.update).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.updateOrder.stockConflict",
+      undefined,
+      { conflicts: [{ productId: 4, productName: "Vasos desechables", requested: 26, available: 25 }] },
+    );
+  });
+
+  it("refuses with a STRUCTURED 409 when the new state outruns the window", async () => {
+    const tx = mockUpdateTx({ rented: [rentedRow(3, 35)] });
+    await updateOrder(buildUpdateReq(createBody()), {} as Response);
+
+    expect(tx.service.update).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.updateOrder.stockConflict",
+      undefined,
+      {
+        conflicts: [{ productId: 3, productName: "Silla plegable", requested: 25, available: 5 }],
+      },
+    );
+  });
+
+  it("refuses with a 409 when the new window crowds another order's logistics event", async () => {
+    const tx = mockUpdateTx({
+      spacingHit: { id: 9, deliveryAt: new Date("2026-08-01T14:30:00.000Z") },
+    });
+    await updateOrder(buildUpdateReq(createBody()), {} as Response);
+
+    expect(tx.service.update).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.updateOrder.spacingConflict",
+    );
+  });
+
+  it("treats a product that vanished before the lock as a conflict, not a 500", async () => {
+    mockUpdateTx({ products: [txRentalProduct] });
+    await updateOrder(
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, quantity: 1 }], pickupAt: undefined }),
+      {} as Response,
+    );
+
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.updateOrder.stockConflict",
+      undefined,
+      { conflicts: [{ productId: 4, productName: "#4", requested: 1, available: 0 }] },
+    );
+  });
+
+  it("keeps the current owner when the body carries no assignee, and honours one when it does", async () => {
+    const tx = mockUpdateTx({ order: { ...makeRawRichOrder(), assignedUserId: 7 } });
+    await updateOrder(buildUpdateReq(createBody()), {} as Response);
+    let updateArg = (tx.service.update as Mock).mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    // An edit is not a reassignment — it must never silently move to whoever opened the form.
+    expect(updateArg.data["assignedUserId"]).toBe(7);
+
+    const reassigned = mockUpdateTx({ order: { ...makeRawRichOrder(), assignedUserId: 7 } });
+    await updateOrder(
+      buildUpdateReq({ ...createBody(), assignedUserId: 5 } as ReturnType<typeof createBody>),
+      {} as Response,
+    );
+    updateArg = (reassigned.service.update as Mock).mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(updateArg.data["assignedUserId"]).toBe(5);
+  });
+
+  it("answers a plain 404 for a malformed id and for an order that is not there", async () => {
+    mockUpdateTx();
+    await updateOrder(buildUpdateReq(createBody(), "abc"), {} as Response);
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.NOT_FOUND,
+      "orders.updateOrder.orderNotFound",
+    );
+
+    vi.clearAllMocks();
+    const tx = mockUpdateTx({ order: null });
+    await updateOrder(buildUpdateReq(createBody()), {} as Response);
+    expect(tx.service.update).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.NOT_FOUND,
+      "orders.updateOrder.orderNotFound",
+    );
+  });
+
+  it("responds 500 when the transaction fails for any other reason", async () => {
+    (getPrismaClient as Mock).mockResolvedValue({
+      $transaction: vi.fn().mockRejectedValue(new Error("db down")),
+    });
+    await updateOrder(buildUpdateReq(createBody()), {} as Response);
+
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      "orders.updateOrder.errorUpdatingOrder",
+    );
+  });
+});
+
+describe("deleteOrder", () => {
+  const KEY = "orders/evidence/a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7.jpg";
+
+  function mockDeleteTx(order: unknown = {
+    id: 12,
+    cancelledAt: null,
+    deliveredAt: null,
+    serviceDetails: [
+      { productId: 4, quantity: 10, isRental: false },
+      { productId: 3, quantity: 25, isRental: true },
+    ],
+    evidences: [{ r2Key: KEY }],
+  }) {
+    const tx = {
+      service: { findUnique: vi.fn().mockResolvedValue(order), delete: vi.fn().mockResolvedValue({}) },
+      product: { update: vi.fn().mockResolvedValue({}) },
+      serviceEvidence: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      serviceStatusHistory: { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) },
+      serviceDetail: { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) },
+      serviceExtra: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    };
+    (getPrismaClient as Mock).mockResolvedValue({
+      $transaction: vi.fn(async (callback: (t: typeof tx) => unknown) => callback(tx)),
+    });
+    return tx;
+  }
+
+  it("destroys the order and everything that existed only because of it, and gives back SALE stock", async () => {
+    const deleteObjects = vi.fn().mockResolvedValue(undefined);
+    (getStorage as Mock).mockReturnValue({ deleteObjects });
+    const tx = mockDeleteTx();
+
+    await deleteOrder(buildReq({}, { id: "12" }), {} as Response);
+
+    // Sale units come back (the order never happened); the rental line takes nothing back — its
+    // hold was derived from the status and vanishes with the row.
+    expect(tx.product.update).toHaveBeenCalledTimes(1);
+    expect(tx.product.update).toHaveBeenCalledWith({
+      where: { id: 4 },
+      data: { quantity: { increment: 10 } },
+    });
+    for (const child of [
+      tx.serviceEvidence.deleteMany,
+      tx.serviceStatusHistory.deleteMany,
+      tx.serviceDetail.deleteMany,
+      tx.serviceExtra.deleteMany,
+    ]) {
+      expect(child).toHaveBeenCalledWith({ where: { serviceId: 12 } });
+    }
+    expect(tx.service.delete).toHaveBeenCalledWith({ where: { id: 12 } });
+    // The R2 objects go only AFTER the commit — a failure there leaves a sweepable orphan.
+    expect(deleteObjects).toHaveBeenCalledWith([KEY]);
+    expect(sendOzariSuccess).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.OK,
+      "orders.deleteOrder.orderDeleted",
+    );
+  });
+
+  it("survives a failed object cleanup — the deletion still succeeded", async () => {
+    (getStorage as Mock).mockReturnValue({
+      deleteObjects: vi.fn().mockRejectedValue(new Error("R2 down")),
+    });
+    mockDeleteTx();
+    await deleteOrder(buildReq({}, { id: "12" }), {} as Response);
+    expect(sendOzariSuccess).toHaveBeenCalled();
+    expect(sendOzariError).not.toHaveBeenCalled();
+  });
+
+  it("never touches storage when the order had no photos", async () => {
+    mockDeleteTx({ id: 12, cancelledAt: null, serviceDetails: [], evidences: [] });
+    await deleteOrder(buildReq({}, { id: "12" }), {} as Response);
+    expect(getStorage).not.toHaveBeenCalled();
+    expect(sendOzariSuccess).toHaveBeenCalled();
+  });
+
+  it("does NOT restore a DELIVERED order's sale units — the client has them", async () => {
+    // Deleting the paperwork of a completed sale can't bring the goods home; restoring would
+    // invent stock that physically isn't there.
+    const tx = mockDeleteTx({
+      id: 12,
+      cancelledAt: null,
+      deliveredAt: new Date("2026-08-01T14:30:00.000Z"),
+      serviceDetails: [{ productId: 4, quantity: 10, isRental: false }],
+      evidences: [],
+    });
+    await deleteOrder(buildReq({}, { id: "12" }), {} as Response);
+
+    expect(tx.product.update).not.toHaveBeenCalled();
+    expect(tx.service.delete).toHaveBeenCalled();
+  });
+
+  it("does NOT give sale stock back twice when the order was already cancelled", async () => {
+    // Cancelling already handed those units back; giving them again would invent stock.
+    const tx = mockDeleteTx({
+      id: 12,
+      cancelledAt: new Date("2026-07-20T10:00:00.000Z"),
+      serviceDetails: [{ productId: 4, quantity: 10, isRental: false }],
+      evidences: [],
+    });
+    await deleteOrder(buildReq({}, { id: "12" }), {} as Response);
+
+    expect(tx.product.update).not.toHaveBeenCalled();
+    expect(tx.service.delete).toHaveBeenCalledWith({ where: { id: 12 } });
+  });
+
+  it("a malformed or unknown id is a plain 404, and a failure is a 500", async () => {
+    await deleteOrder(buildReq({}, { id: "abc" }), {} as Response);
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.NOT_FOUND,
+      "orders.deleteOrder.orderNotFound",
+    );
+
+    vi.clearAllMocks();
+    mockDeleteTx(null);
+    await deleteOrder(buildReq({}, { id: "99" }), {} as Response);
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.NOT_FOUND,
+      "orders.deleteOrder.orderNotFound",
+    );
+
+    vi.clearAllMocks();
+    (getPrismaClient as Mock).mockResolvedValue({
+      $transaction: vi.fn().mockRejectedValue(new Error("db down")),
+    });
+    await deleteOrder(buildReq({}, { id: "12" }), {} as Response);
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      "orders.deleteOrder.errorDeletingOrder",
+    );
+  });
+});
+
 describe("getOrdersCatalog", () => {
   it("returns the reference lists + assignable staff (minLeadHours, zone fee, decrypted names)", async () => {
     const eventTypes = [{ id: 1, name: "Evento familiar", minLeadHours: 24 }];
@@ -675,6 +1165,8 @@ describe("getOrderAvailability", () => {
         ]),
       },
       serviceDetail: { groupBy },
+      // The probe answers with the same clock rules the create enforces (washing included).
+      appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
     });
     await getOrderAvailability(availabilityReq({ ...window, productIds: [3, 5, 6, 4] }), {} as Response);
 
@@ -692,6 +1184,8 @@ describe("getOrderAvailability", () => {
     (getPrismaClient as Mock).mockResolvedValue({
       product: { findMany: vi.fn().mockResolvedValue([{ id: 3, quantity: 30, productBusinessTypeId: 1 }]) },
       serviceDetail: { groupBy },
+      // The probe answers with the same clock rules the create enforces (washing included).
+      appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
     });
     await getOrderAvailability(availabilityReq({ deliveryAt: window.deliveryAt, pickupAt: undefined, productIds: [3] }), {} as Response);
 

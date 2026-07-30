@@ -5,6 +5,7 @@ import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { RentTimeUnitEnum } from "@models/enums/rentTimeUnitEnum.js";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
 import {
+  currentHoldings,
   describeActions,
   getEvidenceBounds,
   getStatusCatalog,
@@ -100,6 +101,13 @@ export const richOrderInclude = {
       toStatus: { select: { id: true, name: true } },
       byUser: { select: { fullNameKms: true } },
     },
+  },
+  // The tracking photos, each tagged with the STEP it documents — the detail page groups them under
+  // that step. (Rewinding a step deletes its photos; a retention purge deletes old ones. Both simply
+  // leave fewer rows here, which is why the page renders from what exists rather than a count.)
+  evidences: {
+    orderBy: { id: "asc" },
+    select: { id: true, serviceStatusId: true, url: true, createdAt: true },
   },
 } satisfies Prisma.ServiceInclude;
 
@@ -259,19 +267,23 @@ export interface OrderProjectionContextModel {
 }
 
 /** The order-shaped input the lifecycle engine reasons about, derived from a fetched row: its
- *  current status, its assignee (the driver scope check) and whether ANY line is a rental (the
- *  mode that decides which pipeline steps apply). */
+ *  current status, its assignee (the driver scope check), which inventories its lines touch (rental
+ *  decides which pipeline steps apply; sale decides what a cancel can give back) and the two facts
+ *  that end a reservation for good — cancelled, delivered. */
 export function toLifecycleOrder(order: {
   serviceStatusId: number;
   assignedUserId: number | null;
   cancelledAt: Date | null;
+  deliveredAt: Date | null;
   serviceDetails: ReadonlyArray<{ isRental: boolean }>;
 }): LifecycleOrderModel {
   return {
     serviceStatusId: order.serviceStatusId,
     assignedUserId: order.assignedUserId,
     cancelledAt: order.cancelledAt,
+    deliveredAt: order.deliveredAt,
     isRental: order.serviceDetails.some((line) => line.isRental),
+    isSale: order.serviceDetails.some((line) => !line.isRental),
   };
 }
 
@@ -303,6 +315,7 @@ export function projectOrderListItem(
   const currentUserId = context.actor.userId;
   const lifecycleOrder = toLifecycleOrder(order);
   const next = nextStatus(context.catalog, lifecycleOrder);
+  const holdings = currentHoldings(context.catalog, lifecycleOrder);
   return {
     id: order.id,
     clientName: decryptKms(order.deliveryNameKms),
@@ -321,6 +334,10 @@ export function projectOrderListItem(
       context.actor,
       context.evidence,
     ),
+    // Does this order reserve anything at all right now? The delete dialog states the consequence
+    // from THIS, never from a guess: a finished or cancelled order gave its goods back long ago, so
+    // promising that deleting it "returns units to inventory" would simply be false.
+    holdsInventory: holdings.rental || holdings.sale,
     paymentStatus: order.paymentStatus,
     deliveryAt: order.deliveryAt,
     pickupAt: order.pickupAt ?? undefined,
@@ -363,6 +380,7 @@ export function projectOrderDetail(
     // The list item already projects the assigned driver as `assignee` (+ `isMine`) — the detail
     // inherits it, so there is no separate `assignedUser` field to keep in sync.
     ...projectOrderListItem(order, context),
+    clientRegistryId: order.clientRegistryId ?? undefined,
     deliveryContact: decryptKms(order.deliveryContactKms),
     deliveryAddress: decryptKms(order.deliveryAddressKms),
     description: order.description ?? undefined,
@@ -400,6 +418,12 @@ export function projectOrderDetail(
       byUserName: decryptKms(entry.byUser.fullNameKms),
       at: entry.createdAt,
     })),
+    evidence: order.evidences.map((photo) => ({
+      id: photo.id,
+      statusId: photo.serviceStatusId,
+      url: photo.url,
+      at: photo.createdAt,
+    })),
     createdAt: order.createdAt,
   };
 }
@@ -413,6 +437,15 @@ export class OrderStockConflictError extends Error {
   constructor(readonly conflicts: OrderStockConflictItemModel[]) {
     super("order stock conflict");
     this.name = "OrderStockConflictError";
+  }
+}
+
+/** The order vanished between the request and the write — thrown inside a transaction so it rolls
+ *  back and answers a plain `404` (the products-detail stance: malformed and unknown look alike). */
+export class OrderNotFoundError extends Error {
+  constructor() {
+    super("order not found");
+    this.name = "OrderNotFoundError";
   }
 }
 
@@ -449,6 +482,48 @@ export function parseSpacingMinutes(value: string | undefined): number {
 }
 
 /**
+ * The `orders.turnaroundMinutes` app preference — the WASHING period after a collection — parsed
+ * with the same defensive stance. Zero is a legitimate value here (a business with no cleaning step
+ * between rentals), which is why it accepts `>= 0` where spacing demands `> 0`.
+ */
+export function parseTurnaroundMinutes(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0
+    ? parsed
+    : appConfig.defaultTurnaroundMinutes;
+}
+
+/** The two clock rules every booking decision reads: how far apart logistics events must be, and
+ *  how long goods are being washed after they come back. */
+export interface OrderTimingPreferencesModel {
+  spacingMinutes: number;
+  turnaroundMinutes: number;
+}
+
+/**
+ * Reads both timing preferences in ONE query. Every flow that decides whether a booking is possible
+ * — create, edit, and the availability probe — goes through here rather than reaching for
+ * `app_preferences` itself, so the two rules can never be read with different defaults or forgotten
+ * in one path (the turnaround was, for a while: seeded and honoured nowhere).
+ */
+export async function loadOrderTimingPreferences(
+  client: Pick<Prisma.TransactionClient, "appPreference">,
+): Promise<OrderTimingPreferencesModel> {
+  const rows = await client.appPreference.findMany({
+    where: {
+      key: { in: ["orders.logisticsSpacingMinutes", "orders.turnaroundMinutes"] },
+    },
+    select: { key: true, value: true },
+  });
+  const valueOf = (key: string): string | undefined =>
+    rows.find((row) => row.key === key)?.value;
+  return {
+    spacingMinutes: parseSpacingMinutes(valueOf("orders.logisticsSpacingMinutes")),
+    turnaroundMinutes: parseTurnaroundMinutes(valueOf("orders.turnaroundMinutes")),
+  };
+}
+
+/**
  * The `service_details` filter selecting every RENTAL line that holds units against the requested
  * `[windowStart, windowEnd]` window — the order-time twin of products' `buildRentedNowWhere`
  * (EPIC-1 §5 obligation: validation runs the same rule against the EVENT's window, not `now`), and
@@ -461,13 +536,38 @@ export function parseSpacingMinutes(value: string | undefined): number {
  *   availability, governs that gap);
  * - `NONE` statuses and soft-deleted rows never hold, and SALE lines never hold (their stock was
  *   decremented at creation).
+ *
+ * **The window a hold occupies is the billed period PLUS the washing turnaround.** Units come back
+ * dirty: they are not available the instant an event's billed period ends, they are available once
+ * they have been cleaned. Without this, two future orders could be promised the same chairs with a
+ * ten-minute gap — the check would pass and the business would fail (owner rule, 2026-07-29).
+ * `turnaroundMinutes` comes from the `orders.turnaroundMinutes` preference, so an operation with no
+ * cleaning step sets it to 0 and gets the old behaviour exactly.
+ *
+ * `excludeServiceId` drops ONE order from the count — what an EDIT needs, since the order being
+ * re-checked is still holding its own current lines and would otherwise conflict with itself.
  */
+export interface RentedWindowOptions {
+  /** The washing period after a collection, from `orders.turnaroundMinutes`. */
+  turnaroundMinutes: number;
+  /** Drop ONE order from the count (an edit re-checking itself). */
+  excludeServiceId?: number;
+}
+
+// The trailing options are an OBJECT, not two more positional arguments: they are both numbers, and
+// the day `turnaroundMinutes` was added positionally an existing call silently passed its order id
+// as the turnaround and still type-checked. Named at every call site, that cannot happen.
 export function buildRentedInWindowWhere(
   productIds: number[],
   windowStart: Date,
   windowEnd: Date,
   holding: { out: number[]; window: number[] },
+  { turnaroundMinutes, excludeServiceId }: RentedWindowOptions,
 ): Prisma.ServiceDetailWhereInput {
+  // Applied to the REQUESTED window's start rather than to every held row's end — mathematically
+  // the same comparison (`heldEnd + turnaround > start` ⇔ `heldEnd > start − turnaround`), but this
+  // way it stays a plain column comparison the index can serve.
+  const clearedBy = new Date(windowStart.getTime() - turnaroundMinutes * 60 * 1000);
   return {
     productId: { in: productIds },
     isActive: true,
@@ -475,12 +575,13 @@ export function buildRentedInWindowWhere(
     service: {
       isActive: true,
       cancelledAt: null,
+      ...(excludeServiceId !== undefined && { id: { not: excludeServiceId } }),
       OR: [
         { serviceStatusId: { in: holding.out } },
         {
           serviceStatusId: { in: holding.window },
           serviceStart: { lt: windowEnd },
-          serviceEnd: { gt: windowStart },
+          serviceEnd: { gt: clearedBy },
         },
       ],
     },
@@ -493,10 +594,15 @@ export function buildRentedInWindowWhere(
  * single-vehicle rule (§2): the system must BLOCK the admin too. Exclusive bounds: exactly the
  * spacing apart is allowed ("minimum 1 hour BETWEEN"). Cancelled orders don't block; completed
  * ones need no exclusion — their events sit in the past, so time proximity filters them naturally.
+ *
+ * `excludeServiceId` drops ONE order from the check — what an EDIT needs: an order's own delivery and
+ * pickup are always within the spacing of themselves, so without this every edit would collide with
+ * the order it is editing.
  */
 export function buildSpacingConflictWhere(
   events: Date[],
   spacingMinutes: number,
+  excludeServiceId?: number,
 ): Prisma.ServiceWhereInput {
   const delta = spacingMinutes * 60 * 1000;
   const ranges = events.map((event) => ({
@@ -506,8 +612,160 @@ export function buildSpacingConflictWhere(
   return {
     isActive: true,
     cancelledAt: null,
+    ...(excludeServiceId !== undefined && { id: { not: excludeServiceId } }),
     OR: ranges.flatMap((range) => [{ deliveryAt: range }, { pickupAt: range }]),
   };
+}
+
+// ── Stock across the lifecycle ───────────────────────────────────────────────────────────────────
+
+/** One active line, as the stock rules need it. */
+export interface StockLineModel {
+  productId: number;
+  quantity: number;
+  isRental: boolean;
+}
+
+/**
+ * **The two inventories, and why only one of them is written.**
+ *
+ * RENTAL units are never counted in a column: availability is DERIVED from the order's status via
+ * `inventoryHold` (`buildRentedNowWhere`/`buildRentedInWindowWhere`). Cancelling or finishing an
+ * order therefore frees its units the instant the status changes — no write, and nothing that can
+ * drift. Rewinding re-takes them just as automatically.
+ *
+ * SALE units are the opposite: `products.quantity` is really decremented when the order is created,
+ * because a sold item leaves the business. That decrement has to be un-done and re-done by hand at
+ * exactly the points where the order stops or resumes being real — which is what these two helpers
+ * are for. Completion is deliberately NOT one of those points: a delivered sale stays sold.
+ */
+/**
+ * Is this order still HOLDING its sale units — i.e. would giving them back put real goods on the
+ * shelf, or invent them?
+ *
+ * A sale unit is held from creation (when it's decremented, reserved for this client) until the
+ * order is **delivered** — at that moment it physically leaves the business and is simply sold. So:
+ * - not cancelled, not delivered → the order is holding them: stopping it gives them back;
+ * - already cancelled → they were given back then; giving them again would invent stock;
+ * - already delivered → the client HAS them; nothing can put them back on the shelf, and deleting
+ *   the paperwork certainly can't.
+ *
+ * The same predicate answers cancel, reopen and delete, which is why it lives in one place.
+ */
+export const holdsSaleStock = (order: {
+  cancelledAt: Date | null;
+  deliveredAt: Date | null;
+}): boolean => order.cancelledAt === null && order.deliveredAt === null;
+
+export async function releaseSaleStock(
+  tx: Prisma.TransactionClient,
+  lines: readonly StockLineModel[],
+): Promise<void> {
+  await Promise.all(
+    lines
+      .filter((line) => !line.isRental)
+      .map((line) =>
+        tx.product.update({
+          where: { id: line.productId },
+          data: { quantity: { increment: line.quantity } },
+        }),
+      ),
+  );
+}
+
+/**
+ * Re-takes what an order needs when it comes BACK to life (reopening a cancelled one) — and refuses
+ * if the business has since promised those goods to somebody else.
+ *
+ * Both inventories are checked, under a row lock on the products so two concurrent reopens can't
+ * both pass: rentals against the order's own billed window (the units it would hold again), sales
+ * against what is left on the shelf. A shortfall raises the same structured `409` the create flow
+ * uses, naming each line and its real count — because "you can't reopen this" is useless without
+ * "…because there are only 3 chairs left that weekend".
+ */
+export async function reclaimOrderStock(
+  tx: Prisma.TransactionClient,
+  order: {
+    id: number;
+    serviceStart: Date;
+    serviceEnd: Date;
+    lines: readonly StockLineModel[];
+  },
+  holding: { out: number[]; window: number[] },
+  turnaroundMinutes: number,
+): Promise<void> {
+  if (order.lines.length === 0) {
+    return;
+  }
+  const productIds = order.lines.map((line) => line.productId);
+  await tx.$queryRaw`SELECT id FROM products WHERE id IN (${Prisma.join(productIds)}) FOR UPDATE`;
+  const products = await tx.product.findMany({
+    where: { id: { in: productIds }, isActive: true },
+    select: { id: true, name: true, quantity: true },
+  });
+  const productById = new Map(products.map((product) => [product.id, product]));
+
+  // What the FLEET already owes in this order's window. The order itself is still cancelled at this
+  // point, so its own lines aren't counted — no self-exclusion needed.
+  const rentalIds = order.lines.filter((line) => line.isRental).map((line) => line.productId);
+  const rentedRows =
+    rentalIds.length > 0
+      ? await tx.serviceDetail.groupBy({
+          by: ["productId"],
+          where: buildRentedInWindowWhere(
+            rentalIds,
+            order.serviceStart,
+            order.serviceEnd,
+            holding,
+            { turnaroundMinutes },
+          ),
+          _sum: { quantity: true },
+        })
+      : [];
+  const rentedByProduct = new Map(
+    rentedRows.map((row) => [row.productId, row._sum.quantity ?? 0]),
+  );
+
+  const conflicts: OrderStockConflictItemModel[] = [];
+  for (const line of order.lines) {
+    const product = productById.get(line.productId);
+    if (!product) {
+      // The product was deleted while the order sat cancelled — it can't come back as it was.
+      conflicts.push({
+        productId: line.productId,
+        productName: `#${line.productId}`,
+        requested: line.quantity,
+        available: 0,
+      });
+      continue;
+    }
+    const available = line.isRental
+      ? Math.max(0, product.quantity - (rentedByProduct.get(line.productId) ?? 0))
+      : product.quantity;
+    if (available < line.quantity) {
+      conflicts.push({
+        productId: product.id,
+        productName: product.name,
+        requested: line.quantity,
+        available,
+      });
+    }
+  }
+  if (conflicts.length > 0) {
+    throw new OrderStockConflictError(conflicts);
+  }
+
+  // Only sales move a number; the rental hold returns on its own with the status.
+  await Promise.all(
+    order.lines
+      .filter((line) => !line.isRental)
+      .map((line) =>
+        tx.product.update({
+          where: { id: line.productId },
+          data: { quantity: { decrement: line.quantity } },
+        }),
+      ),
+  );
 }
 
 /** A product row as the pricing needs it (fetched under the creation lock). */

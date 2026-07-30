@@ -102,6 +102,7 @@ const rawOrder = (overrides: Record<string, unknown> = {}) => ({
   ],
   serviceExtras: [],
   statusHistory: [],
+  evidences: [],
   ...overrides,
 });
 
@@ -112,6 +113,27 @@ function mockTx(order: ReturnType<typeof rawOrder> | null = rawOrder()) {
       findFirst: vi.fn().mockResolvedValue(order),
       update: vi.fn().mockResolvedValue({}),
       findUniqueOrThrow: vi.fn().mockResolvedValue(rawOrder()),
+    },
+    // Backward steps look up (and destroy) the photos of the step being undone.
+    serviceEvidence: {
+      findMany: vi.fn().mockResolvedValue([]),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    // Sale stock moves on cancel/reopen; reopening also re-checks the rental fleet.
+    product: {
+      findMany: vi.fn().mockResolvedValue([
+        { id: 3, name: "Silla plegable", quantity: 40 },
+        { id: 4, name: "Vasos desechables", quantity: 100 },
+      ]),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    serviceDetail: { groupBy: vi.fn().mockResolvedValue([]) },
+    // A reopen re-checks the fleet under the same clock rules a create uses (washing included).
+    appPreference: {
+      findMany: vi.fn().mockResolvedValue([
+        { key: "orders.logisticsSpacingMinutes", value: "60" },
+        { key: "orders.turnaroundMinutes", value: "120" },
+      ]),
     },
   };
   (getPrismaClient as Mock).mockResolvedValue({
@@ -132,7 +154,7 @@ const buildReq = (
   },
 ): CustomRequest =>
   ({
-    body: { evidenceKeys: [], reason: undefined, ...body },
+    body: { evidence: [], reason: undefined, ...body },
     params,
     query: {},
     user,
@@ -174,7 +196,7 @@ describe("advanceOrder", () => {
   it("stores the evidence against the phase being entered, with a SERVER-derived url", async () => {
     const tx = mockTx(rawOrder({ serviceStatusId: 5, serviceStatus: { id: 5, name: "En ruta" } }));
     await advanceOrder(
-      buildReq({ toStatusId: 3, evidenceKeys: [KEY] }),
+      buildReq({ toStatusId: 3, evidence: [{ statusId: 3, keys: [KEY] }] }),
       {} as Response,
     );
 
@@ -245,10 +267,232 @@ describe("advanceOrder", () => {
     );
   });
 
-  it("a move nobody could make from here is a 409, not a 403", async () => {
-    // Pendiente → Entregado skips En ruta: illegal for every actor (a stale client).
+  it("an ADMIN jump walks EVERY step in between, each with its own history row and photos", async () => {
+    // Pendiente → Recolectado is three real transitions; the evidence arrives per step in one pass.
     const tx = mockTx();
-    await advanceOrder(buildReq({ toStatusId: 3 }), {} as Response);
+    await advanceOrder(
+      buildReq({
+        toStatusId: 4,
+        evidence: [
+          { statusId: 3, keys: [KEY] },
+          { statusId: 4, keys: [KEY.replace("a1b2", "b2c3")] },
+        ],
+      }),
+      {} as Response,
+    );
+
+    const updates = (tx.service.update as Mock).mock.calls.map(
+      (call) => (call[0] as { data: Record<string, unknown> }).data,
+    );
+    expect(updates).toHaveLength(3);
+    expect(updates.map((data) => (data["serviceStatus"] as { connect: { id: number } }).connect.id))
+      .toEqual([5, 3, 4]);
+    // The trail records the WALK — from each step to the next, never a single leap.
+    expect(updates.map((data) => (data["statusHistory"] as { create: { fromStatusId: number } }).create.fromStatusId))
+      .toEqual([1, 5, 3]);
+    // Each demanding step keeps its own photos, and the actuals are stamped along the way.
+    expect(updates[1]?.["deliveredAt"]).toBeInstanceOf(Date);
+    expect(updates[2]?.["collectedAt"]).toBeInstanceOf(Date);
+    expect(sendOzariSuccess).toHaveBeenCalled();
+  });
+
+  it("a rewind DESTROYS the photos of the step it undoes (rows now, objects after the commit)", async () => {
+    const deleteObjects = vi.fn().mockResolvedValue(undefined);
+    (getStorage as Mock).mockReturnValue({
+      getPublicUrl: (key: string) => `https://cdn.example.com/${key}`,
+      deleteObjects,
+    });
+    const tx = mockTx(
+      rawOrder({ serviceStatusId: 3, serviceStatus: { id: 3, name: "Entregado" } }),
+    );
+    (tx.serviceEvidence.findMany as Mock).mockResolvedValue([{ r2Key: KEY }]);
+
+    await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
+
+    // The rows go inside the transaction…
+    expect(tx.serviceEvidence.deleteMany).toHaveBeenCalledWith({
+      where: { serviceId: 12, serviceStatusId: 3 },
+    });
+    // …the objects only after it commits, and the undone actual is cleared.
+    expect(deleteObjects).toHaveBeenCalledWith([KEY]);
+    expect(updateData(tx)["deliveredAt"]).toBeNull();
+  });
+
+  it("CANCELLING gives the sale units back — and rentals need no write at all", async () => {
+    // A mixed order: one rental line, one sale line.
+    const tx = mockTx(
+      rawOrder({
+        serviceDetails: [
+          {
+            id: 31,
+            productId: 3,
+            quantity: 25,
+            isRental: true,
+            unitaryPrice: new Prisma.Decimal("6.00"),
+            parcialPrice: new Prisma.Decimal("150.00"),
+            product: { name: "Silla plegable" },
+          },
+          {
+            id: 32,
+            productId: 4,
+            quantity: 10,
+            isRental: false,
+            unitaryPrice: new Prisma.Decimal("3.50"),
+            parcialPrice: new Prisma.Decimal("35.00"),
+            product: { name: "Vasos" },
+          },
+        ],
+      }),
+    );
+    await advanceOrder(
+      buildReq({ toStatusId: 2, reason: "El cliente canceló" }),
+      {} as Response,
+    );
+
+    // ONLY the sale line moves a number; the rental's hold is released by the status itself.
+    expect(tx.product.update).toHaveBeenCalledTimes(1);
+    expect(tx.product.update).toHaveBeenCalledWith({
+      where: { id: 4 },
+      data: { quantity: { increment: 10 } },
+    });
+  });
+
+  it("REOPENING re-takes the sale units, after re-checking the fleet it would hold again", async () => {
+    const tx = mockTx(
+      rawOrder({
+        serviceStatusId: 2,
+        serviceStatus: { id: 2, name: "Cancelado" },
+        cancelledAt: new Date("2026-07-20T10:00:00.000Z"),
+        serviceDetails: [
+          {
+            id: 32,
+            productId: 4,
+            quantity: 10,
+            isRental: false,
+            unitaryPrice: new Prisma.Decimal("3.50"),
+            parcialPrice: new Prisma.Decimal("35.00"),
+            product: { name: "Vasos" },
+          },
+        ],
+      }),
+    );
+    await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
+
+    // The products are LOCKED before the check, then the sale units are taken again.
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    expect(tx.product.update).toHaveBeenCalledWith({
+      where: { id: 4 },
+      data: { quantity: { decrement: 10 } },
+    });
+    expect(sendOzariSuccess).toHaveBeenCalled();
+  });
+
+  it("REFUSES to reopen when the goods were promised elsewhere meanwhile (structured 409)", async () => {
+    const tx = mockTx(
+      rawOrder({
+        serviceStatusId: 2,
+        serviceStatus: { id: 2, name: "Cancelado" },
+        cancelledAt: new Date("2026-07-20T10:00:00.000Z"),
+      }),
+    );
+    // The fleet is now fully committed for this order's window. (A null-sum row — a group with no
+    // quantity — counts as zero held, like everywhere else availability is derived.)
+    (tx.serviceDetail.groupBy as Mock).mockResolvedValue([
+      { productId: 3, _sum: { quantity: 40 } },
+      { productId: 99, _sum: { quantity: null } },
+    ]);
+
+    await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
+
+    expect(tx.service.update).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.advance.stockConflict",
+      undefined,
+      {
+        conflicts: [
+          { productId: 3, productName: "Silla plegable", requested: 25, available: 0 },
+        ],
+      },
+    );
+  });
+
+  it("REFUSES to reopen when a line's product no longer exists at all", async () => {
+    const tx = mockTx(
+      rawOrder({
+        serviceStatusId: 2,
+        serviceStatus: { id: 2, name: "Cancelado" },
+        cancelledAt: new Date("2026-07-20T10:00:00.000Z"),
+      }),
+    );
+    (tx.product.findMany as Mock).mockResolvedValue([]); // deleted while it sat cancelled
+
+    await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
+
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.advance.stockConflict",
+      undefined,
+      { conflicts: [{ productId: 3, productName: "#3", requested: 25, available: 0 }] },
+    );
+  });
+
+  it("reopens an order with NO lines without touching stock at all", async () => {
+    const tx = mockTx(
+      rawOrder({
+        serviceStatusId: 2,
+        serviceStatus: { id: 2, name: "Cancelado" },
+        cancelledAt: new Date("2026-07-20T10:00:00.000Z"),
+        serviceDetails: [],
+      }),
+    );
+    await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
+
+    // Only the ORDER row is locked — no product lock, no stock query, nothing to re-take.
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.product.findMany).not.toHaveBeenCalled();
+    expect(tx.product.update).not.toHaveBeenCalled();
+    expect(sendOzariSuccess).toHaveBeenCalled();
+  });
+
+  it("REOPENS a cancelled order onto a chosen step, clearing the cancellation", async () => {
+    const tx = mockTx(
+      rawOrder({
+        serviceStatusId: 2,
+        serviceStatus: { id: 2, name: "Cancelado" },
+        cancelledAt: new Date("2026-07-20T10:00:00.000Z"),
+        cancelReason: "El cliente canceló",
+      }),
+    );
+    await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
+
+    expect(updateData(tx)).toMatchObject({
+      serviceStatus: { connect: { id: 5 } },
+      cancelledAt: null,
+      cancelReason: null,
+    });
+  });
+
+  it("a move nobody could make from here is a 409, not a 403", async () => {
+    // A purchase-only order can never reach a RENTAL-only step — illegal for every actor.
+    const tx = mockTx(
+      rawOrder({
+        serviceDetails: [
+          {
+            id: 31,
+            productId: 4,
+            quantity: 10,
+            isRental: false,
+            unitaryPrice: new Prisma.Decimal("3.50"),
+            parcialPrice: new Prisma.Decimal("35.00"),
+            product: { name: "Vasos" },
+          },
+        ],
+      }),
+    );
+    await advanceOrder(buildReq({ toStatusId: 4 }), {} as Response);
 
     expect(tx.service.update).not.toHaveBeenCalled();
     expect(sendOzariError).toHaveBeenCalledWith(

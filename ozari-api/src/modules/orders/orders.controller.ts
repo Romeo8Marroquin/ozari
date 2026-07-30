@@ -32,22 +32,26 @@ import {
   holdingStatusIds,
   initialStatus,
 } from "./lifecycle/lifecycle.service.js";
+import { getStorage } from "@helpers/storage.js";
 import {
   ASSIGNABLE_ROLES,
+  OrderNotFoundError,
   OrderSpacingConflictError,
   OrderStockConflictError,
   buildOrderListWhere,
   buildRentedInWindowWhere,
   buildSpacingConflictWhere,
   computeBilledDays,
+  holdsSaleStock,
   loadOrderProjectionContext,
+  loadOrderTimingPreferences,
   orderListInclude,
   orderListOrderBy,
   parseOrderListQuery,
-  parseSpacingMinutes,
   priceOrderLine,
   projectOrderDetail,
   projectOrderListItem,
+  releaseSaleStock,
   richOrderInclude,
   sortAgendaRows,
   type PricedOrderLineModel,
@@ -151,11 +155,21 @@ export const getOrderById = async (
   try {
     const id = Number(req.params["id"]);
     const validId = Number.isInteger(id) && id >= 1;
+    const role = req.user?.userRole ?? RolesEnum.Client;
+    const currentUserId = req.user?.userId ?? 0;
 
     const prismaClient = await getPrismaClient();
     const rawOrder = validId
       ? await prismaClient.service.findFirst({
-          where: { id, isActive: true },
+          // Row scoping, same rule as the list: a Driver may open ONLY an order assigned to them —
+          // typing another order's id in the URL (or calling this directly) finds nothing and gets
+          // the same plain 404 as a non-existent order. It deliberately does NOT answer 403: that
+          // would confirm the order exists to someone who may not know it does.
+          where: {
+            id,
+            isActive: true,
+            ...(role === RolesEnum.Driver ? { assignedUserId: currentUserId } : {}),
+          },
           include: richOrderInclude,
         })
       : null;
@@ -177,10 +191,7 @@ export const getOrderById = async (
     const response: OrderDetailEnvelopeModel = {
       order: projectOrderDetail(
         rawOrder,
-        await loadOrderProjectionContext({
-          userId: req.user?.userId ?? 0,
-          role: req.user?.userRole ?? RolesEnum.Client,
-        }),
+        await loadOrderProjectionContext({ userId: currentUserId, role }),
       ),
     };
     logger.info(i18next.t("orders.getOrderById.logs.orderFetched", { id }));
@@ -298,6 +309,10 @@ export const createOrder = async (
         pricedLines.push(priced);
       }
 
+      // The two clock rules, read once under the lock: how far apart logistics events must be, and
+      // how long returned goods are being washed (which is part of how long they stay unavailable).
+      const timing = await loadOrderTimingPreferences(tx);
+
       // Availability, under the lock: rentals against the window, sales against remaining stock.
       const rentalIds = pricedLines.filter((line) => line.isRental).map((line) => line.productId);
       const rentedRows =
@@ -309,6 +324,7 @@ export const createOrder = async (
                 body.deliveryAt,
                 body.pickupAt,
                 holding,
+                { turnaroundMinutes: timing.turnaroundMinutes },
               ),
               _sum: { quantity: true },
             })
@@ -338,14 +354,9 @@ export const createOrder = async (
       }
 
       // The single-vehicle spacing rule — the hour is an admin preference, never hardcoded.
-      const preference = await tx.appPreference.findUnique({
-        where: { key: "orders.logisticsSpacingMinutes" },
-        select: { value: true },
-      });
-      const spacingMinutes = parseSpacingMinutes(preference?.value);
       const events = [body.deliveryAt, ...(body.pickupAt ? [body.pickupAt] : [])];
       const spacingConflict = await tx.service.findFirst({
-        where: buildSpacingConflictWhere(events, spacingMinutes),
+        where: buildSpacingConflictWhere(events, timing.spacingMinutes),
         select: { id: true, deliveryAt: true },
       });
       if (spacingConflict) {
@@ -481,6 +492,431 @@ export const createOrder = async (
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
       i18next.t("orders.createOrder.errorCreatingOrder"),
+    );
+  }
+};
+
+/**
+ * `PUT /orders/:id` — **the full order edit. Admin only.**
+ *
+ * DECLARATIVE, like the products update (the RECONCILE design): the client stages every change and
+ * sends the FINAL state of the order — identity, snapshots, logistics window, assignment, money and
+ * the complete line list. The server diffs it in ONE transaction. There is deliberately no
+ * per-field or per-line endpoint; a partial edit could leave the window and the lines describing
+ * different orders, and every rule here (pricing, availability, spacing) reads BOTH.
+ *
+ * **Everything is re-derived, nothing is trusted.** Prices come from the product rows and the billed
+ * window, exactly as at creation — so moving the dates re-bills the order and a client-sent price is
+ * ignored. Sale lines' `products.quantity` moves by the DIFFERENCE, and only while the order still
+ * holds them (`holdsSaleStock`): once delivered, the goods are with the client and correcting the
+ * paperwork must not restock anything.
+ *
+ * **Availability is re-checked exactly when the order actually reserves something** — the same
+ * `inventoryHold` derivation as everywhere else, so an order sitting on a NONE step (finished) or a
+ * cancelled one is a pure paperwork edit that reserves nothing and can never 409. When it does hold,
+ * the check EXCLUDES this order from the count: it is holding its own current lines, and would
+ * otherwise conflict with itself. The spacing rule excludes it for the same reason.
+ *
+ * The lifecycle is untouched: an edit never moves the status, never stamps an actual and never
+ * writes history. Where the order stands is `POST /orders/:id/advance`'s business, and only its.
+ */
+export const updateOrder = async (
+  req: CustomRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const body = req.body as CreateOrderRequestModel;
+    const id = Number(req.params["id"]);
+    /* v8 ignore next -- the route guarantees an authenticated admin; the fallback is defensive */
+    const byUserId = req.user?.userId ?? 0;
+    if (!Number.isInteger(id) || id < 1) {
+      throw new OrderNotFoundError();
+    }
+
+    const catalog = await getStatusCatalog();
+    const holding = holdingStatusIds(catalog);
+    const prismaClient = await getPrismaClient();
+
+    // The same linear transaction script as create (lock → price → availability → spacing → stock
+    // delta → reconcile); splitting it would scatter an atomicity story that can never run outside
+    // the transaction.
+    // eslint-disable-next-line sonarjs/cognitive-complexity, complexity
+    const updated = await prismaClient.$transaction(async (tx) => {
+      // Serialize against concurrent advances of THIS order and concurrent creates touching the
+      // SAME products — including the ones being dropped, whose stock we may have to give back.
+      await tx.$queryRaw`SELECT id FROM services WHERE id = ${id} FOR UPDATE`;
+      const order = await tx.service.findFirst({
+        where: { id, isActive: true },
+        include: richOrderInclude,
+      });
+      if (!order) {
+        throw new OrderNotFoundError();
+      }
+
+      const productIds = [
+        ...new Set([
+          ...body.lines.map((line) => line.productId),
+          ...order.serviceDetails.map((line) => line.productId),
+        ]),
+      ];
+      await tx.$queryRaw`SELECT id FROM products WHERE id IN (${Prisma.join(productIds)}) FOR UPDATE`;
+      const products = await tx.product.findMany({
+        where: { id: { in: productIds }, isActive: true },
+        select: {
+          id: true,
+          name: true,
+          quantity: true,
+          currencyId: true,
+          productBusinessTypeId: true,
+          rentTimeUnitId: true,
+          rentPrice: true,
+          sellPrice: true,
+        },
+      });
+      const productById = new Map(products.map((product) => [product.id, product]));
+
+      // Re-price from the NEW window: the same engine as create, so an edit that moves the dates
+      // re-bills the rental days rather than carrying the old amounts forward.
+      const billedDays = body.pickupAt ? computeBilledDays(body.deliveryAt, body.pickupAt) : 1;
+      const pricedLines: PricedOrderLineModel[] = [];
+      for (const line of body.lines) {
+        const product = productById.get(line.productId);
+        const priced = product ? priceOrderLine(line.quantity, product, billedDays) : null;
+        if (!priced) {
+          throw new OrderStockConflictError([
+            {
+              productId: line.productId,
+              productName: product?.name ?? `#${line.productId}`,
+              requested: line.quantity,
+              available: 0,
+            },
+          ]);
+        }
+        pricedLines.push(priced);
+      }
+
+      // What the order reserves TODAY decides what has to be re-checked. Both flags are derived —
+      // an order on a NONE step (finished) or a cancelled one holds nothing, so its edit is pure
+      // paperwork and can never fail on availability.
+      const holdsRental =
+        order.cancelledAt === null &&
+        holding.out.concat(holding.window).includes(order.serviceStatusId);
+      const holdsSale = holdsSaleStock(order);
+      // What THIS order currently has of each product, per inventory — the pool an edit gets back.
+      const currentByProduct = new Map(
+        order.serviceDetails.map((line) => [line.productId, line]),
+      );
+
+      const timing = await loadOrderTimingPreferences(tx);
+      const conflicts: OrderStockConflictItemModel[] = [];
+      const rentalIds = pricedLines.filter((line) => line.isRental).map((line) => line.productId);
+      const rentedRows =
+        holdsRental && rentalIds.length > 0 && body.pickupAt
+          ? await tx.serviceDetail.groupBy({
+              by: ["productId"],
+              where: buildRentedInWindowWhere(rentalIds, body.deliveryAt, body.pickupAt, holding, {
+                turnaroundMinutes: timing.turnaroundMinutes,
+                // Excluding itself: the order is holding its own current lines, and an order can
+                // never be unavailable because of itself.
+                excludeServiceId: id,
+              }),
+              _sum: { quantity: true },
+            })
+          : [];
+      const rentedByProduct = new Map(rentedRows.map((row) => [row.productId, row._sum.quantity ?? 0]));
+      for (const line of pricedLines) {
+        const product = productById.get(line.productId);
+        /* v8 ignore next 3 -- every priced line's product is in the map; the guard is defensive */
+        if (!product) {
+          continue;
+        }
+        if (line.isRental) {
+          if (!holdsRental) {
+            continue; // the order reserves no rental units — nothing to compete for
+          }
+          const available = Math.max(
+            0,
+            product.quantity - (rentedByProduct.get(line.productId) ?? 0),
+          );
+          if (available < line.quantity) {
+            conflicts.push({
+              productId: product.id,
+              productName: product.name,
+              requested: line.quantity,
+              available,
+            });
+          }
+          continue;
+        }
+        // Sale: the shelf ALREADY has this order's decrement applied, so what it may take is the
+        // remaining stock PLUS whatever it is currently holding of that product.
+        const currentLine = currentByProduct.get(line.productId);
+        const heldHere =
+          holdsSale && currentLine !== undefined && !currentLine.isRental
+            ? currentLine.quantity
+            : 0;
+        const available = product.quantity + heldHere;
+        if (available < line.quantity) {
+          conflicts.push({
+            productId: product.id,
+            productName: product.name,
+            requested: line.quantity,
+            available,
+          });
+        }
+      }
+      if (conflicts.length > 0) {
+        throw new OrderStockConflictError(conflicts);
+      }
+
+      // The single-vehicle spacing rule, minus this order's own events.
+      const events = [body.deliveryAt, ...(body.pickupAt ? [body.pickupAt] : [])];
+      const spacingConflict = await tx.service.findFirst({
+        where: buildSpacingConflictWhere(events, timing.spacingMinutes, id),
+        select: { id: true, deliveryAt: true },
+      });
+      if (spacingConflict) {
+        throw new OrderSpacingConflictError(spacingConflict.deliveryAt);
+      }
+
+      // Sale stock moves by the DIFFERENCE, and only while the order still holds it. A product that
+      // left the order gives its whole quantity back; a new one takes its whole quantity.
+      if (holdsSale) {
+        const deltas = new Map<number, number>();
+        for (const line of order.serviceDetails.filter((detail) => !detail.isRental)) {
+          deltas.set(line.productId, (deltas.get(line.productId) ?? 0) + line.quantity);
+        }
+        for (const line of pricedLines.filter((detail) => !detail.isRental)) {
+          deltas.set(line.productId, (deltas.get(line.productId) ?? 0) - line.quantity);
+        }
+        await Promise.all(
+          [...deltas.entries()]
+            .filter(([, delta]) => delta !== 0)
+            .map(([productId, delta]) =>
+              tx.product.update({
+                where: { id: productId },
+                data: { quantity: { increment: delta } },
+              }),
+            ),
+        );
+      }
+
+      const linesTotal = pricedLines.reduce((sum, line) => sum + line.parcialPrice, 0);
+      const totalAmount = Math.round((linesTotal + (body.deliveryAmount ?? 0)) * 100) / 100;
+      /* v8 ignore next -- the validator rejects mixed/empty currencies; the fallback is defensive */
+      const currencyId = productById.get(pricedLines[0]?.productId ?? 0)?.currencyId ?? order.currencyId;
+
+      // Lines are reconciled BY PRODUCT: a line whose product survives keeps its row (and its id),
+      // one whose product left is deleted, a new product creates a row. `service_details` are part
+      // of the order's current state, not of its audit trail — the trail is `service_status_history`
+      // — so a dropped line hard-deletes, per the NO-TRASH policy.
+      const keptIds = new Set(pricedLines.map((line) => line.productId));
+      const removed = order.serviceDetails.filter((line) => !keptIds.has(line.productId));
+      if (removed.length > 0) {
+        await tx.serviceDetail.deleteMany({
+          where: { id: { in: removed.map((line) => line.id) } },
+        });
+      }
+      await Promise.all(
+        pricedLines.map((line) => {
+          const existing = currentByProduct.get(line.productId);
+          const data = {
+            quantity: line.quantity,
+            isRental: line.isRental,
+            unitaryPrice: line.unitaryPrice,
+            parcialPrice: line.parcialPrice,
+            currencyId,
+          };
+          return existing
+            ? tx.serviceDetail.update({ where: { id: existing.id }, data })
+            : tx.serviceDetail.create({
+                data: { ...data, serviceId: id, productId: line.productId },
+              });
+        }),
+      );
+
+      await tx.service.update({
+        where: { id },
+        data: {
+          clientRegistryId: body.clientRegistryId,
+          eventTypeId: body.eventTypeId,
+          deliveryNameKms: encryptKms(body.deliveryName),
+          deliveryContactKms: encryptKms(body.deliveryContact),
+          deliveryAddressKms: encryptKms(body.deliveryAddress),
+          description: body.description ?? null,
+          comment: body.comment ?? null,
+          deliveryAt: body.deliveryAt,
+          pickupAt: body.pickupAt ?? null,
+          serviceStart: body.deliveryAt,
+          serviceEnd: body.pickupAt ?? body.deliveryAt,
+          totalAmount,
+          deliveryAmount: body.deliveryAmount ?? null,
+          depositAmount: body.depositAmount ?? null,
+          paymentMethodId: body.paymentMethodId ?? null,
+          // Absent ⇒ the order keeps its current owner. An edit is not a reassignment, and silently
+          // moving it to whoever opened the form would be a real operational error.
+          assignedUserId: body.assignedUserId ?? order.assignedUserId,
+          currencyId,
+        },
+      });
+
+      return tx.service.findUniqueOrThrow({ where: { id }, include: richOrderInclude });
+    });
+
+    logger.info(i18next.t("orders.updateOrder.logs.orderUpdated", { id }));
+    if (isDeployedEnvironment()) {
+      logAudit({
+        action: AuditAction.ADMIN_ACTION,
+        ...(req.user && { userId: req.user.userId }),
+        ...(req.ip && { ipAddress: req.ip }),
+        resource: `Order ID ${id}`,
+        success: true,
+        metadata: { operation: "ORDER_UPDATED" },
+      });
+    }
+
+    const response: OrderDetailEnvelopeModel = {
+      order: projectOrderDetail(
+        updated,
+        await loadOrderProjectionContext({
+          userId: byUserId,
+          role: req.user?.userRole ?? RolesEnum.Admin,
+        }),
+      ),
+    };
+    sendOzariSuccess(res, HttpEnum.OK, i18next.t("orders.updateOrder.orderUpdated"), response);
+  } catch (error) {
+    if (error instanceof OrderNotFoundError) {
+      logger.warn(i18next.t("orders.updateOrder.logs.orderNotFound", { id: req.params["id"] }));
+      sendOzariError(res, HttpEnum.NOT_FOUND, i18next.t("orders.updateOrder.orderNotFound"));
+      return;
+    }
+    if (error instanceof OrderStockConflictError) {
+      logger.warn(
+        i18next.t("orders.updateOrder.logs.stockConflict", {
+          conflicts: JSON.stringify(error.conflicts),
+        }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.CONFLICT,
+        i18next.t("orders.updateOrder.stockConflict"),
+        undefined,
+        { conflicts: error.conflicts },
+      );
+      return;
+    }
+    if (error instanceof OrderSpacingConflictError) {
+      logger.warn(
+        i18next.t("orders.updateOrder.logs.spacingConflict", {
+          conflictAt: error.conflictAt.toISOString(),
+        }),
+      );
+      sendOzariError(res, HttpEnum.CONFLICT, i18next.t("orders.updateOrder.spacingConflict"));
+      return;
+    }
+    logger.error(i18next.t("orders.updateOrder.logs.errorUpdatingOrder", { error }));
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("orders.updateOrder.errorUpdatingOrder"),
+    );
+  }
+};
+
+/**
+ * `DELETE /orders/:id` — **permanently destroys an order. Admin only.**
+ *
+ * This is the deliberate exception to the no-tombstone rule going the OTHER way (owner decision,
+ * 2026-07-28): a cancelled order is history worth keeping, but an order deleted on purpose is one
+ * the admin has decided never should have existed — so nothing of it is kept. In ONE transaction it
+ * cascades through everything that only exists because of this order (evidence rows, the status
+ * trail, lines, extras) and then the order itself; the evidence's R2 objects are deleted after the
+ * commit, best-effort (a failure leaves a sweepable orphan, never a row pointing at a dead file).
+ *
+ * **Sale stock is restored.** Sale lines decrement `products.quantity` at creation; an order that
+ * never happened must give those units back. Rental holds need nothing — they are derived from the
+ * status, so they vanish with the row.
+ *
+ * There is no undo, which is why the UI states that plainly before asking.
+ */
+export const deleteOrder = async (
+  req: CustomRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id < 1) {
+      logger.warn(i18next.t("orders.deleteOrder.logs.orderNotFound", { id: req.params["id"] }));
+      sendOzariError(res, HttpEnum.NOT_FOUND, i18next.t("orders.deleteOrder.orderNotFound"));
+      return;
+    }
+
+    const prismaClient = await getPrismaClient();
+    const purgedKeys = await prismaClient.$transaction(async (tx) => {
+      const order = await tx.service.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          cancelledAt: true,
+          deliveredAt: true,
+          serviceDetails: { select: { productId: true, quantity: true, isRental: true } },
+          evidences: { select: { r2Key: true } },
+        },
+      });
+      if (!order) {
+        throw new OrderNotFoundError();
+      }
+
+      // Give back what the sale lines took at creation — but ONLY if this order is still HOLDING
+      // them. A cancelled order already handed them back; a delivered one handed the goods to the
+      // client, and deleting the paperwork can't bring those home. Restoring in either case would
+      // invent stock. (Rentals never took a number: their hold is derived from the status and
+      // disappears with the row, whatever state it was in.)
+      if (holdsSaleStock(order)) {
+        await releaseSaleStock(tx, order.serviceDetails);
+      }
+
+      // Children first — every one of these rows exists only because this order did.
+      await tx.serviceEvidence.deleteMany({ where: { serviceId: id } });
+      await tx.serviceStatusHistory.deleteMany({ where: { serviceId: id } });
+      await tx.serviceDetail.deleteMany({ where: { serviceId: id } });
+      await tx.serviceExtra.deleteMany({ where: { serviceId: id } });
+      await tx.service.delete({ where: { id } });
+      return order.evidences.map((photo) => photo.r2Key);
+    });
+
+    if (purgedKeys.length > 0) {
+      try {
+        await getStorage().deleteObjects(purgedKeys);
+      } catch (error) {
+        logger.warn(i18next.t("orders.deleteOrder.logs.evidenceCleanupFailed", { error }));
+      }
+    }
+
+    logger.info(i18next.t("orders.deleteOrder.logs.orderDeleted", { id }));
+    if (isDeployedEnvironment()) {
+      logAudit({
+        action: AuditAction.ADMIN_ACTION,
+        ...(req.user && { userId: req.user.userId }),
+        ...(req.ip && { ipAddress: req.ip }),
+        resource: `Order ID ${id}`,
+        success: true,
+        metadata: { operation: "ORDER_DELETED", evidenceObjects: purgedKeys.length },
+      });
+    }
+    sendOzariSuccess(res, HttpEnum.OK, i18next.t("orders.deleteOrder.orderDeleted"));
+  } catch (error) {
+    if (error instanceof OrderNotFoundError) {
+      logger.warn(i18next.t("orders.deleteOrder.logs.orderNotFound", { id: req.params["id"] }));
+      sendOzariError(res, HttpEnum.NOT_FOUND, i18next.t("orders.deleteOrder.orderNotFound"));
+      return;
+    }
+    logger.error(i18next.t("orders.deleteOrder.logs.errorDeletingOrder", { error }));
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("orders.deleteOrder.errorDeletingOrder"),
     );
   }
 };
@@ -628,6 +1064,9 @@ export const getOrderAvailability = async (
     const rentalIds = products
       .filter((product) => product.productBusinessTypeId === BusinessTypeEnum.RENT)
       .map((product) => product.id);
+    // The probe must answer with the SAME rule the create will enforce — washing period included —
+    // or the form would offer units the save then refuses.
+    const { turnaroundMinutes } = await loadOrderTimingPreferences(prismaClient);
     const rentedRows =
       rentalIds.length > 0 && body.pickupAt
         ? await prismaClient.serviceDetail.groupBy({
@@ -637,6 +1076,7 @@ export const getOrderAvailability = async (
               body.deliveryAt,
               body.pickupAt,
               holding,
+              { turnaroundMinutes },
             ),
             _sum: { quantity: true },
           })
