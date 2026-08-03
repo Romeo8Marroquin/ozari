@@ -400,10 +400,27 @@ const rentedRow = (productId: number, rented: number) => ({
   _sum: { quantity: rented },
 });
 
+/** One order already on the driver's day, as the logistics candidate query selects it. The actuals
+ *  default to unstamped — the events are still to be performed, so they still occupy the day. */
+const driverEvent = (
+  id: number,
+  deliveryAt: string,
+  pickupAt: string | null = null,
+  performed: { deliveredAt?: string; collectedAt?: string } = {},
+) => ({
+  id,
+  deliveryAt: new Date(deliveryAt),
+  pickupAt: pickupAt === null ? null : new Date(pickupAt),
+  deliveredAt: performed.deliveredAt ? new Date(performed.deliveredAt) : null,
+  collectedAt: performed.collectedAt ? new Date(performed.collectedAt) : null,
+  assignedUser: { fullNameKms: encryptKms("Ana Ruiz") },
+});
+
 type TxOverrides = {
   products?: unknown[];
   rented?: ReturnType<typeof rentedRow>[];
-  spacingHit?: { id: number; deliveryAt: Date } | null;
+  /** What the driver-conflict query finds — the widened candidate set, refined in code. */
+  driverCandidates?: ReturnType<typeof driverEvent>[];
 };
 
 function mockCreateTx(overrides: TxOverrides = {}) {
@@ -417,7 +434,7 @@ function mockCreateTx(overrides: TxOverrides = {}) {
     // The two clock rules, read in one query: 60 min between logistics events, 120 min of washing.
     appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
     service: {
-      findFirst: vi.fn().mockResolvedValue(overrides.spacingHit ?? null),
+      findMany: vi.fn().mockResolvedValue(overrides.driverCandidates ?? []),
       create: vi.fn().mockResolvedValue({ id: 12 }),
       findUniqueOrThrow: vi.fn().mockResolvedValue(makeRawRichOrder()),
     },
@@ -441,6 +458,9 @@ const createBody = () => ({
   comment: undefined,
   deliveryAmount: 50,
   depositAmount: undefined,
+  // REQUIRED since the logistics pad became a rule about a DRIVER's day (Q-D2): every event has
+  // an owner, so the validator refuses a body without one.
+  assignedUserId: 1,
   lines: [
     { productId: 3, quantity: 25 },
     { productId: 4, quantity: 10 },
@@ -471,7 +491,6 @@ describe("createOrder", () => {
       paymentMethodId: 2,
       serviceStatusId: 1,
       paymentStatusId: 1,
-      // No assignee in the body → defaults to the creating admin (userId 1), never unassigned.
       assignedUserId: 1,
       deliveryAt: body.deliveryAt,
       pickupAt: body.pickupAt,
@@ -500,15 +519,19 @@ describe("createOrder", () => {
     );
   });
 
-  it("assigns the order to the CHOSEN staff member when the body carries one", async () => {
+  it("assigns the order to the CHOSEN staff member and checks THEIR day", async () => {
     const tx = mockCreateTx();
-    // An explicit assignee (already validated as a deliverable user upstream) is used as-is.
+    // The assignee (validated as a deliverable user upstream) is used as-is — and is the resource
+    // the logistics pad scopes over, so the conflict query asks about that person's day.
     await createOrder(
       buildCreateReq({ ...createBody(), assignedUserId: 7 } as ReturnType<typeof createBody>),
       {} as Response,
     );
     const createArg = (tx.service.create as Mock).mock.calls[0]?.[0] as { data: Record<string, unknown> };
     expect(createArg.data["assignedUserId"]).toBe(7);
+    expect(tx.service.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ assignedUserId: 7 }) }),
+    );
   });
 
   it("a purchase-only order never queries rental holds and bills a single day", async () => {
@@ -547,15 +570,67 @@ describe("createOrder", () => {
     );
   });
 
-  it("rolls back to a 409 when another order's logistics event is too close", async () => {
-    const tx = mockCreateTx({ spacingHit: { id: 9, deliveryAt: new Date("2026-08-01T14:30:00.000Z") } });
+  it("rolls back to a 409 naming the driver's clashing event, and says which of ours it blocks", async () => {
+    const tx = mockCreateTx({
+      driverCandidates: [driverEvent(9, "2026-08-01T14:30:00.000Z")],
+    });
     await createOrder(buildCreateReq(createBody()), {} as Response);
 
+    expect(tx.service.create).not.toHaveBeenCalled();
+    // The payload is deliberately NOT `conflicts` (that shape belongs to stock and lands on a
+    // line's quantity): a driver clash is about the DATES, and carries everything the form needs
+    // to say so — which order, when, which of ours it blocks, who is busy, and the real gap.
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.createOrder.driverConflict",
+      undefined,
+      {
+        driverConflict: {
+          orderId: 9,
+          at: new Date("2026-08-01T14:30:00.000Z"),
+          kind: "DELIVERY",
+          blocks: "DELIVERY",
+          driverName: "Ana Ruiz",
+          gapMinutes: 60,
+        },
+      },
+    );
+  });
+
+  it("a candidate the SQL over-selected but the pads clear is not a conflict", async () => {
+    // Exactly the configured gap away: touching blocks don't overlap ("minimum 1 hour BETWEEN"),
+    // and the widened candidate query still returns it — this is the code-side refinement working.
+    const tx = mockCreateTx({
+      driverCandidates: [driverEvent(9, "2026-08-01T15:00:00.000Z")],
+    });
+    await createOrder(buildCreateReq(createBody()), {} as Response);
+
+    expect(tx.service.create).toHaveBeenCalled();
+    expect(sendOzariError).not.toHaveBeenCalled();
+  });
+
+  it("refuses an order whose OWN delivery and collection are too close together", async () => {
+    // The hole this epic closes: on create the order isn't in the table yet, so nothing ever
+    // compared its two events — a delivery at 14:00 with a collection at 14:15 saved happily,
+    // though one driver physically cannot do both. Caught before any query runs.
+    const tx = mockCreateTx();
+    await createOrder(
+      buildCreateReq({
+        ...createBody(),
+        pickupAt: new Date("2026-08-01T14:15:00.000Z"),
+      }),
+      {} as Response,
+    );
+
+    expect(tx.service.findMany).not.toHaveBeenCalled();
     expect(tx.service.create).not.toHaveBeenCalled();
     expect(sendOzariError).toHaveBeenCalledWith(
       expect.anything(),
       HttpEnum.CONFLICT,
-      "orders.createOrder.spacingConflict",
+      "orders.createOrder.selfOverlap",
+      undefined,
+      { selfOverlap: { gapMinutes: 60 } },
     );
   });
 
@@ -635,11 +710,9 @@ function mockUpdateTx(overrides: UpdateTxOverrides = {}) {
     // The two clock rules, read in one query: 60 min between logistics events, 120 min of washing.
     appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
     service: {
-      // Called twice: first to LOAD the order under the lock, then for the spacing probe.
-      findFirst: vi
-        .fn()
-        .mockResolvedValueOnce(existing)
-        .mockResolvedValue(overrides.spacingHit ?? null),
+      // Loads the order under the lock; the driver-conflict candidates come from `findMany`.
+      findFirst: vi.fn().mockResolvedValue(existing),
+      findMany: vi.fn().mockResolvedValue(overrides.driverCandidates ?? []),
       update: vi.fn().mockResolvedValue({}),
       findUniqueOrThrow: vi.fn().mockResolvedValue(makeRawRichOrder()),
     },
@@ -740,7 +813,7 @@ describe("updateOrder", () => {
     });
   });
 
-  it("excludes the order from its OWN availability and spacing checks", async () => {
+  it("excludes the order from its OWN availability and driver checks", async () => {
     const tx = mockUpdateTx();
     await updateOrder(buildUpdateReq(createBody()), {} as Response);
 
@@ -752,7 +825,8 @@ describe("updateOrder", () => {
         }),
       }),
     );
-    expect(tx.service.findFirst).toHaveBeenLastCalledWith(
+    // Same reason on the driver's day: the order already occupies exactly these blocks.
+    expect(tx.service.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ id: { not: 12 } }) }),
     );
   });
@@ -776,6 +850,73 @@ describe("updateOrder", () => {
     );
 
     expect(tx.serviceDetail.groupBy).not.toHaveBeenCalled();
+    expect(tx.product.update).not.toHaveBeenCalled();
+    expect(tx.service.update).toHaveBeenCalled();
+  });
+
+  it("asks the driver's day for NOTHING when the order will never be performed", async () => {
+    // A cancelled order occupies nobody: correcting its dates is paperwork about something that is
+    // not going to happen. The very clash that refuses a live edit must not refuse this one — the
+    // same stance the stock rules take, now applied to the logistics pad too.
+    const tx = mockUpdateTx({
+      order: {
+        ...makeRawRichOrder(),
+        cancelledAt: new Date("2026-07-20T10:00:00.000Z"),
+        serviceStatusId: 7,
+      },
+      driverCandidates: [driverEvent(9, "2026-08-01T14:10:00.000Z")],
+    });
+    await updateOrder(buildUpdateReq(createBody()), {} as Response);
+
+    expect(tx.service.findMany).not.toHaveBeenCalled();
+    expect(tx.service.update).toHaveBeenCalled();
+  });
+
+  it("still guards the half of a rental that HASN'T happened yet", async () => {
+    // Delivered but not collected: the delivery is history, the collection is still a promise the
+    // driver has to keep — so the pad is asked about the collection alone, and refuses.
+    const tx = mockUpdateTx({
+      order: { ...makeRawRichOrder(), deliveredAt: new Date("2026-08-01T14:05:00.000Z") },
+      driverCandidates: [
+        // Sits right on the (already performed) delivery — must be ignored…
+        driverEvent(8, "2026-08-01T14:10:00.000Z"),
+        // …while the still-pending collection at 15:00 on the 2nd is refused as usual.
+        driverEvent(9, "2026-08-02T15:20:00.000Z"),
+      ],
+    });
+    await updateOrder(buildUpdateReq(createBody()), {} as Response);
+
+    expect(tx.service.update).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.updateOrder.driverConflict",
+      undefined,
+      expect.objectContaining({
+        driverConflict: expect.objectContaining({ orderId: 9, blocks: "COLLECTION" }),
+      }),
+    );
+  });
+
+  it("never 409s on STOCK for an order that reserves nothing, however big the lines get", async () => {
+    // The sale branch used to check the shelf even when the order held nothing — refusing a
+    // correction that moves no stock whatsoever. 500 cups on a delivered order is paperwork, not a
+    // claim on inventory.
+    const tx = mockUpdateTx({
+      order: {
+        ...makeRawRichOrder(),
+        deliveredAt: new Date("2026-08-01T15:00:00.000Z"),
+        serviceStatusId: 6,
+        serviceDetails: [existingSaleLine],
+      },
+      products: [txRentalProduct, { ...txSaleProduct, quantity: 2 }],
+    });
+    await updateOrder(
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, quantity: 500 }], pickupAt: undefined }),
+      {} as Response,
+    );
+
+    expect(sendOzariError).not.toHaveBeenCalled();
     expect(tx.product.update).not.toHaveBeenCalled();
     expect(tx.service.update).toHaveBeenCalled();
   });
@@ -828,9 +969,11 @@ describe("updateOrder", () => {
     );
   });
 
-  it("refuses with a 409 when the new window crowds another order's logistics event", async () => {
+  it("refuses with a 409 when the new window crowds the driver's day", async () => {
     const tx = mockUpdateTx({
-      spacingHit: { id: 9, deliveryAt: new Date("2026-08-01T14:30:00.000Z") },
+      // The clashing event is the other order's COLLECTION — the payload says so, so the form can
+      // word it truthfully instead of always saying "entrega".
+      driverCandidates: [driverEvent(9, "2026-07-30T09:00:00.000Z", "2026-08-01T14:20:00.000Z")],
     });
     await updateOrder(buildUpdateReq(createBody()), {} as Response);
 
@@ -838,7 +981,35 @@ describe("updateOrder", () => {
     expect(sendOzariError).toHaveBeenCalledWith(
       expect.anything(),
       HttpEnum.CONFLICT,
-      "orders.updateOrder.spacingConflict",
+      "orders.updateOrder.driverConflict",
+      undefined,
+      {
+        driverConflict: {
+          orderId: 9,
+          at: new Date("2026-08-01T14:20:00.000Z"),
+          kind: "COLLECTION",
+          blocks: "DELIVERY",
+          driverName: "Ana Ruiz",
+          gapMinutes: 60,
+        },
+      },
+    );
+  });
+
+  it("refuses with a 409 when the edited window puts the order's own two events too close", async () => {
+    const tx = mockUpdateTx();
+    await updateOrder(
+      buildUpdateReq({ ...createBody(), pickupAt: new Date("2026-08-01T14:30:00.000Z") }),
+      {} as Response,
+    );
+
+    expect(tx.service.update).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.updateOrder.selfOverlap",
+      undefined,
+      { selfOverlap: { gapMinutes: 60 } },
     );
   });
 
@@ -858,22 +1029,22 @@ describe("updateOrder", () => {
     );
   });
 
-  it("keeps the current owner when the body carries no assignee, and honours one when it does", async () => {
+  it("reassigns to the body's owner and re-checks THAT driver's day", async () => {
+    // The form always sends the order's current assignee back, so saving an untouched form is not
+    // a reassignment; deliberately changing the picker moves the order — and the pad is then a
+    // question about the NEW driver, not the old one.
     const tx = mockUpdateTx({ order: { ...makeRawRichOrder(), assignedUserId: 7 } });
-    await updateOrder(buildUpdateReq(createBody()), {} as Response);
-    let updateArg = (tx.service.update as Mock).mock.calls[0]?.[0] as { data: Record<string, unknown> };
-    // An edit is not a reassignment — it must never silently move to whoever opened the form.
-    expect(updateArg.data["assignedUserId"]).toBe(7);
-
-    const reassigned = mockUpdateTx({ order: { ...makeRawRichOrder(), assignedUserId: 7 } });
     await updateOrder(
       buildUpdateReq({ ...createBody(), assignedUserId: 5 } as ReturnType<typeof createBody>),
       {} as Response,
     );
-    updateArg = (reassigned.service.update as Mock).mock.calls[0]?.[0] as {
+    const updateArg = (tx.service.update as Mock).mock.calls[0]?.[0] as {
       data: Record<string, unknown>;
     };
     expect(updateArg.data["assignedUserId"]).toBe(5);
+    expect(tx.service.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ assignedUserId: 5 }) }),
+    );
   });
 
   it("answers a plain 404 for a malformed id and for an order that is not there", async () => {
@@ -1171,12 +1342,163 @@ describe("getOrderAvailability", () => {
     await getOrderAvailability(availabilityReq({ ...window, productIds: [3, 5, 6, 4] }), {} as Response);
 
     expect(groupBy).toHaveBeenCalled();
-    expect(successData<OrderAvailabilityResponseModel>().availability).toEqual([
+    const data = successData<OrderAvailabilityResponseModel>();
+    expect(data.availability).toEqual([
       { productId: 3, available: 10 },
       { productId: 5, available: 15 },
       { productId: 6, available: 8 },
       { productId: 4, available: 120 },
     ]);
+    // No assignee in the body ⇒ no driver block at all: the form has nothing to say until the
+    // admin has reached that field, and nagging about it would be worse than silence.
+    expect(data.driver).toBeUndefined();
+  });
+
+  /** The probe with its driver half wired: products resolve, `service.findMany` is the widened
+   *  candidate query the code-side pads then refine, and `findUnique` is the order being edited
+   *  (its actuals decide which of ITS events still occupy a day). */
+  const mockAvailabilityPrisma = (
+    candidates: ReturnType<typeof driverEvent>[],
+    editing: {
+      deliveredAt: Date | null;
+      collectedAt: Date | null;
+      cancelledAt: Date | null;
+    } = { deliveredAt: null, collectedAt: null, cancelledAt: null },
+  ) => {
+    const findMany = vi.fn().mockResolvedValue(candidates);
+    const groupBy = vi.fn().mockResolvedValue([]);
+    (getPrismaClient as Mock).mockResolvedValue({
+      product: {
+        findMany: vi.fn().mockResolvedValue([{ id: 4, quantity: 120, productBusinessTypeId: 2 }]),
+      },
+      serviceDetail: { groupBy },
+      appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
+      service: { findMany, findUnique: vi.fn().mockResolvedValue(editing) },
+    });
+    return { findMany, groupBy };
+  };
+
+  it("answers the DRIVER half when an assignee is sent — scoped to that person's day", async () => {
+    const { findMany } = mockAvailabilityPrisma([driverEvent(42, "2026-08-01T14:30:00.000Z")]);
+    await getOrderAvailability(
+      availabilityReq({ ...window, productIds: [4], assignedUserId: 2, excludeOrderId: 12 }),
+      {} as Response,
+    );
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ assignedUserId: 2, id: { not: 12 } }),
+      }),
+    );
+    // Admin tier: exact counts, exactly like the product half — the admin runs the business.
+    expect(successData<OrderAvailabilityResponseModel>().driver).toEqual({
+      available: false,
+      gapMinutes: 60,
+      selfOverlap: false,
+      conflicts: [
+        {
+          orderId: 42,
+          at: new Date("2026-08-01T14:30:00.000Z"),
+          kind: "DELIVERY",
+          blocks: "DELIVERY",
+        },
+      ],
+      // The probe names the driver too, so its copy and the save's 409 read the same.
+      driverName: "Ana Ruiz",
+    });
+  });
+
+  it("an EDIT asks the SAME question the save asks — its own units and blocks excluded", async () => {
+    const groupBy = vi.fn().mockResolvedValue([]);
+    const findMany = vi.fn().mockResolvedValue([]);
+    (getPrismaClient as Mock).mockResolvedValue({
+      product: {
+        findMany: vi.fn().mockResolvedValue([{ id: 3, quantity: 30, productBusinessTypeId: 1 }]),
+      },
+      serviceDetail: { groupBy },
+      appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
+      service: {
+        findMany,
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ deliveredAt: null, collectedAt: null, cancelledAt: null }),
+      },
+    });
+    await getOrderAvailability(
+      availabilityReq({ ...window, productIds: [3], assignedUserId: 2, excludeOrderId: 12 }),
+      {} as Response,
+    );
+
+    // Without the exclusion the probe would answer a STRICTER question than the save: the order
+    // competing with its own held units, so the form would cap lines the server was about to
+    // accept — and the reconcile would quietly shrink the admin's own quantities.
+    expect(groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          service: expect.objectContaining({ id: { not: 12 } }),
+        }),
+      }),
+    );
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: { not: 12 } }) }),
+    );
+  });
+
+  it("answers FREE, without asking, for an order that occupies nobody's day", async () => {
+    // Editing a cancelled order: the save refuses nothing, so the probe must promise nothing —
+    // otherwise the form would block a submit the server would have accepted.
+    const { findMany } = mockAvailabilityPrisma([driverEvent(42, "2026-08-01T14:30:00.000Z")], {
+      deliveredAt: null,
+      collectedAt: null,
+      cancelledAt: new Date("2026-07-20T10:00:00.000Z"),
+    });
+    await getOrderAvailability(
+      availabilityReq({ ...window, productIds: [4], assignedUserId: 2, excludeOrderId: 12 }),
+      {} as Response,
+    );
+
+    expect(findMany).not.toHaveBeenCalled();
+    expect(successData<OrderAvailabilityResponseModel>().driver).toEqual({
+      available: true,
+      gapMinutes: 60,
+      selfOverlap: false,
+      conflicts: [],
+    });
+  });
+
+  it("an event that already HAPPENED no longer occupies its driver", async () => {
+    // The other order's delivery is done; the driver is free again at that hour. A completed
+    // morning must not reserve the afternoon.
+    mockAvailabilityPrisma([
+      driverEvent(42, "2026-08-01T14:30:00.000Z", null, {
+        deliveredAt: "2026-08-01T14:35:00.000Z",
+      }),
+    ]);
+    await getOrderAvailability(
+      availabilityReq({ ...window, productIds: [4], assignedUserId: 2 }),
+      {} as Response,
+    );
+
+    expect(successData<OrderAvailabilityResponseModel>().driver).toMatchObject({
+      available: true,
+      conflicts: [],
+    });
+  });
+
+  it("reports the order's own two events colliding, with a free driver", async () => {
+    mockAvailabilityPrisma([]);
+    await getOrderAvailability(
+      availabilityReq({
+        deliveryAt: window.deliveryAt,
+        pickupAt: new Date("2026-08-01T14:30:00.000Z"),
+        productIds: [4],
+        assignedUserId: 2,
+      }),
+      {} as Response,
+    );
+
+    const driver = successData<OrderAvailabilityResponseModel>().driver;
+    expect(driver).toMatchObject({ available: false, selfOverlap: true, conflicts: [] });
   });
 
   it("returns null for rentals when there is NO pickup window (skips the groupBy query)", async () => {

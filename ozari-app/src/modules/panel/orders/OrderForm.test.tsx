@@ -61,6 +61,8 @@ import OrderForm from './OrderForm';
 import { reconcileToastDuration } from './SchemaCreateOrder';
 
 const KEY = 'modules.panel.orders.create';
+/** The logistics pad's own namespace — a driver conflict never borrows the stock keys. */
+const DKEY = 'modules.panel.orders.driverAvailability';
 
 const rentalProduct: Product = {
   id: 3,
@@ -149,9 +151,11 @@ const renderForm = (props: { mode?: 'create' | 'edit'; order?: OrderDetail } = {
   return { ...utils, invalidate, setData, navigateTo };
 };
 
-/** The order the EDIT tests reopen: one rental line, the registry client, a fee already agreed. */
+/** The order the EDIT tests reopen: one rental line, the registry client, a fee already agreed —
+ *  and still LIVE, so it reserves its units and the availability caps apply to it. */
 const existingOrder = {
   id: 12,
+  holdsInventory: true,
   clientRegistryId: 3,
   clientName: 'Cliente de la fiesta',
   eventType: { id: 1, name: 'Evento familiar' },
@@ -215,6 +219,21 @@ const availabilityHandlers = (): { onSuccess: (res: unknown) => void } =>
 const availabilityResponse = (rows: { productId: number; available: number | null }[]) => ({
   data: { data: { availability: rows } },
 });
+/** A probe answer carrying the DRIVER half — the logistics pad's side of the same request. */
+const driverResponse = (driver: Record<string, unknown>) => ({
+  data: { data: { availability: [], driver } },
+});
+/**
+ * Wait for the probe that asks about the FULL window (delivery *and* pickup). Filling the form
+ * fires earlier probes for the partial windows, and an answer to one of those is deliberately
+ * discarded — it describes a question the form is no longer asking.
+ */
+const lastProbeBody = (): Record<string, unknown> | undefined => {
+  const calls = checkAvailability.mock.calls;
+  return calls.length > 0 ? (calls[calls.length - 1][0] as Record<string, unknown>) : undefined;
+};
+const waitForFullProbe = (): Promise<void> =>
+  waitFor(() => expect(lastProbeBody()?.['pickupAt']).toBeTruthy());
 afterEach(() => vi.restoreAllMocks());
 
 describe('OrderForm', () => {
@@ -618,6 +637,132 @@ describe('OrderForm', () => {
     expect(screen.getByText('Sin disponibilidad')).toBeInTheDocument();
   });
 
+  it('probes the DRIVER half too, and puts a clash on the date field with a way out', async () => {
+    const user = userEvent.setup({ delay: null });
+    const { container, navigateTo } = renderForm();
+    await fillValid(container);
+    await waitForFullProbe();
+    // The assignee rides the same request as the products — one keystroke, both answers.
+    expect(lastProbeBody()).toMatchObject({ assignedUserId: 1 });
+    expect(lastProbeBody()?.['excludeOrderId']).toBeUndefined();
+
+    act(() =>
+      availabilityHandlers().onSuccess(
+        driverResponse({
+          available: false,
+          gapMinutes: 60,
+          selfOverlap: false,
+          driverName: 'Ana Ruiz',
+          conflicts: [
+            { orderId: 42, at: new Date('2026-08-01T14:30:00').toISOString(), kind: 'DELIVERY', blocks: 'DELIVERY' },
+          ],
+        }),
+      ),
+    );
+
+    // Submitting re-runs the resolver, which layers the live answer on the schema result: the
+    // message lands on the DATE (never on a line's quantity — that is the stock conflict's field)
+    // and the save is blocked before it can be refused.
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    expect(await screen.findByText(`${DKEY}.conflict`)).toBeInTheDocument();
+    expect(createOrder).not.toHaveBeenCalled();
+
+    // …and the admin can go look at the order that is in the way.
+    await user.click(screen.getByRole('button', { name: `${DKEY}.viewOrder` }));
+    expect(navigateTo).toHaveBeenCalledWith('/panel/pedidos/42');
+  }, 20000);
+
+  it('marks the PICKUP when the order’s own two events are too close, with nothing to open', async () => {
+    const user = userEvent.setup({ delay: null });
+    const { container } = renderForm();
+    await fillValid(container);
+    await waitForFullProbe();
+    act(() =>
+      availabilityHandlers().onSuccess(
+        driverResponse({ available: false, gapMinutes: 60, selfOverlap: true, conflicts: [] }),
+      ),
+    );
+
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    expect(await screen.findByText(`${DKEY}.selfOverlap`)).toBeInTheDocument();
+    // A self-overlap is two dates of THIS order — there is no other order to look at.
+    expect(screen.queryByRole('button', { name: `${DKEY}.viewOrder` })).toBeNull();
+    expect(createOrder).not.toHaveBeenCalled();
+  }, 20000);
+
+  it('a driver answer stops applying the moment the window changes', async () => {
+    const user = userEvent.setup({ delay: null });
+    const { container } = renderForm();
+    await fillValid(container);
+    await waitForFullProbe();
+    act(() =>
+      availabilityHandlers().onSuccess(
+        driverResponse({
+          available: false,
+          gapMinutes: 60,
+          selfOverlap: false,
+          driverName: 'Ana Ruiz',
+          conflicts: [
+            { orderId: 42, at: new Date('2026-08-01T14:30:00').toISOString(), kind: 'DELIVERY', blocks: 'COLLECTION' },
+          ],
+        }),
+      ),
+    );
+    expect(await screen.findByRole('button', { name: `${DKEY}.viewOrder` })).toBeInTheDocument();
+
+    // Moving the delivery asks a different question, so the old answer is discarded immediately —
+    // not 400ms later when the next probe lands. Otherwise the form would keep refusing a slot the
+    // admin has already left.
+    setDateTime(byId(container, 'order-delivery-at'), '2026-08-03T09:00');
+    setDateTime(byId(container, 'order-pickup-at'), '2026-08-04T09:00');
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: `${DKEY}.viewOrder` })).toBeNull(),
+    );
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createOrder).toHaveBeenCalled());
+  }, 20000);
+
+  it('words a logistics 409 from the SERVER’s payload, not from the generic fallback', async () => {
+    const { container } = renderForm();
+    const handlers = await fillAndSubmit(container);
+
+    act(() =>
+      handlers.onError(
+        axiosError(409, 'Conflicto', {
+          driverConflict: {
+            orderId: 42,
+            at: new Date('2026-08-01T14:30:00').toISOString(),
+            kind: 'DELIVERY',
+            blocks: 'DELIVERY',
+            driverName: 'Ana Ruiz',
+            gapMinutes: 60,
+          },
+        }),
+      ),
+    );
+    // The server's own sentence, not "revisa los datos": it knows who, when and what gap it enforces.
+    expect(await screen.findByText(`${DKEY}.saveConflict`)).toBeInTheDocument();
+
+    // A payload without the name still words a sentence (blank rather than "undefined").
+    act(() =>
+      handlers.onError(
+        axiosError(409, 'Conflicto', {
+          driverConflict: {
+            orderId: 42,
+            at: new Date('2026-08-01T14:30:00').toISOString(),
+            kind: 'DELIVERY',
+            blocks: 'DELIVERY',
+            gapMinutes: 60,
+          },
+        }),
+      ),
+    );
+    expect(await screen.findByText(`${DKEY}.saveConflict`)).toBeInTheDocument();
+
+    act(() => handlers.onError(axiosError(409, 'Conflicto', { selfOverlap: { gapMinutes: 45 } })));
+    expect(await screen.findByText(`${DKEY}.saveSelfOverlap`)).toBeInTheDocument();
+  });
+
   it('surfaces a 400 inline and a 500 as a toast', async () => {
     const { container } = renderForm();
     const handlers = await fillAndSubmit(container);
@@ -799,9 +944,48 @@ describe('OrderForm (edit mode)', () => {
     expect(await screen.findByText(`${KEY}.errors.lineUnavailable`)).toBeInTheDocument();
   }, 20000);
 
+  it('excludes ITSELF from the driver probe — an order cannot block its own dates', async () => {
+    renderForm({ mode: 'edit', order: existingOrder });
+    await waitFor(() => expect(checkAvailability).toHaveBeenCalled());
+    // Without this the order would clash with the two blocks it already occupies, and every edit
+    // would open reporting a conflict with itself.
+    expect(lastProbeBody()).toMatchObject({ excludeOrderId: 12, assignedUserId: 5 });
+  }, 20000);
+
+  it('applies NO stock cap to an order that reserves nothing — paperwork, not a claim', async () => {
+    // Cancelled or finished: the server moves no stock for this edit and can never 409 on it, so
+    // the form must not cap either. It used to clamp the input's `max`, quote a ceiling in the
+    // hint, and silently REDUCE the historical quantity to today's shelf on the next probe.
+    const finished = { ...existingOrder, holdsInventory: false } as unknown as OrderDetail;
+    const { container } = renderForm({ mode: 'edit', order: finished });
+    await waitFor(() => expect(checkAvailability).toHaveBeenCalled());
+
+    act(() => availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 2 }])));
+
+    expect((byId(container, 'order-line-quantity-0') as HTMLInputElement).value).toBe('25');
+    expect(byId(container, 'order-line-quantity-0')).not.toHaveAttribute('max');
+    expect(warning).not.toHaveBeenCalled();
+    expect(screen.queryByText(`${KEY}.availability.count`)).not.toBeInTheDocument();
+
+    // And it still SAVES: the resolver adds no line error for a quantity above the shelf.
+    await userEvent.click(screen.getByRole('button', { name: `${EKEY}.actions.submit` }));
+    await waitFor(() => expect(updateOrder).toHaveBeenCalled());
+  }, 20000);
+
+  it('keeps capping a LIVE order — the exception is the exception', async () => {
+    const { container } = renderForm({ mode: 'edit', order: existingOrder });
+    await waitFor(() => expect(checkAvailability).toHaveBeenCalled());
+
+    act(() => availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 2 }])));
+
+    expect((byId(container, 'order-line-quantity-0') as HTMLInputElement).value).toBe('2');
+    expect(warning).toHaveBeenCalled();
+  }, 20000);
+
   it('backs out to the ORDER, not the agenda — you came from the order', async () => {
     const { navigateTo } = renderForm({ mode: 'edit', order: existingOrder });
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.cancel` }));
     expect(navigateTo).toHaveBeenCalledWith('/panel/pedidos/12');
   });
 });
+

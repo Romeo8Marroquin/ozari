@@ -449,14 +449,9 @@ export class OrderNotFoundError extends Error {
   }
 }
 
-/** Another confirmed order has a logistics event too close to this one (the single-vehicle
- *  spacing rule) — also a `409`; the admin is blocked exactly like a client (owner decision). */
-export class OrderSpacingConflictError extends Error {
-  constructor(readonly conflictAt: Date) {
-    super("order spacing conflict");
-    this.name = "OrderSpacingConflictError";
-  }
-}
+// The logistics-event conflict ("we can't be there") lives in `logistics/` — it is a rule about a
+// DRIVER's day, not about goods, and mixing it with the stock conflict above is the single easiest
+// way to make both confusing. See `OrderDriverConflictError` / `OrderSelfOverlapError`.
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -588,34 +583,11 @@ export function buildRentedInWindowWhere(
   };
 }
 
-/**
- * The `services` filter selecting any order with a logistics event closer than `spacingMinutes` to
- * ANY of the new order's events (its delivery, and its pickup when it has one) — the global
- * single-vehicle rule (§2): the system must BLOCK the admin too. Exclusive bounds: exactly the
- * spacing apart is allowed ("minimum 1 hour BETWEEN"). Cancelled orders don't block; completed
- * ones need no exclusion — their events sit in the past, so time proximity filters them naturally.
- *
- * `excludeServiceId` drops ONE order from the check — what an EDIT needs: an order's own delivery and
- * pickup are always within the spacing of themselves, so without this every edit would collide with
- * the order it is editing.
- */
-export function buildSpacingConflictWhere(
-  events: Date[],
-  spacingMinutes: number,
-  excludeServiceId?: number,
-): Prisma.ServiceWhereInput {
-  const delta = spacingMinutes * 60 * 1000;
-  const ranges = events.map((event) => ({
-    gt: new Date(event.getTime() - delta),
-    lt: new Date(event.getTime() + delta),
-  }));
-  return {
-    isActive: true,
-    cancelledAt: null,
-    ...(excludeServiceId !== undefined && { id: { not: excludeServiceId } }),
-    OR: ranges.flatMap((range) => [{ deliveryAt: range }, { pickupAt: range }]),
-  };
-}
+// The logistics-event conflict rule used to live here as `buildSpacingConflictWhere` — a GLOBAL
+// "N minutes between any two events anywhere" filter with no owner, which silently assumed one van.
+// It now lives in `logistics/` as a per-DRIVER rule (`buildDriverConflictWhere` + `refineConflicts`),
+// numerically identical today and additive for vehicles, trips and distance-aware gaps. Read
+// `EPIC-2-DRIVER-AVAILABILITY.md` before touching it, and never reintroduce a global variant here.
 
 // ── Stock across the lifecycle ───────────────────────────────────────────────────────────────────
 

@@ -38,7 +38,14 @@ import SectionReveal from '../products/SectionReveal';
 import ClientRegistryModal from './ClientRegistryModal';
 import { CHANNEL_INPUT_MODE, contactChannelKind } from '@constants/Regex';
 import ContactChannelIcon from './ContactChannelIcon';
-import type { ClientRegistry, OrderDetail, OrderStockConflictItem } from './order.types';
+import type {
+  ClientRegistry,
+  DriverAvailability,
+  OrderDetail,
+  OrderLogisticsConflictData,
+  OrderStockConflictItem,
+} from './order.types';
+import { formatDateTime } from './orderDayGroups';
 import {
   billedDaysFromStrings,
   estimateLineSubtotal,
@@ -48,7 +55,9 @@ import {
   lineUnitPrice,
 } from './orderEstimate';
 import {
+  appendDriverConflictErrors,
   appendLineAvailabilityErrors,
+  gapLabelKey,
   createOrderDefaultValues,
   createOrderRequiredPatterns,
   createOrderSchema,
@@ -74,6 +83,9 @@ const FORM_ID = 'create-order-form';
 const KEY = 'modules.panel.orders.create';
 /** The handful of strings an EDIT phrases differently; every field label is shared with create. */
 const EKEY = 'modules.panel.orders.edit';
+/** The logistics pad's OWN namespace — never under the stock keys. A product conflict is "we don't
+ *  have the units"; a driver conflict is "we can't be there", and mixing the two would confuse both. */
+const DKEY = 'modules.panel.orders.driverAvailability';
 const SECONDARY_COLOR = '#262626';
 
 interface OrderFormProps {
@@ -282,12 +294,25 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   const { checkAvailability } = useOrderAvailability();
   const isEdit = mode === 'edit' && order !== undefined;
   const isSaving = isCreating || isUpdating;
+  // Does this order still RESERVE goods? An order that was cancelled, or finished so its units are
+  // back on the shelf (or sold and gone), is pure paperwork on the server: its edit moves no stock
+  // and can never 409 on availability. The form has to mirror that, not merely tolerate it —
+  // otherwise it caps quantities and silently shrinks lines the API was about to accept. The driver
+  // half needs no flag: the probe already answers "free" for an order that occupies nobody's day.
+  const enforcesStock = !isEdit || order.holdsInventory;
 
   const [registryModalOpen, setRegistryModalOpen] = useState(false);
   const [formError, setFormError] = useState<string | undefined>(undefined);
   // Per-product takeable amounts for the current window (null = a rental with no pickup yet). Drives
   // the picker annotations + the line reconciliation; empty until a valid delivery date is set.
   const [availability, setAvailability] = useState<Map<number, number | null>>(new Map());
+  // Whether the assigned DRIVER can be there — the other half of the same probe. Stored WITH the
+  // window+assignee it answers, so a changed date invalidates it by derivation (below) instead of
+  // by a clearing effect: the answer stops applying the instant the question changes, not 400ms
+  // later when the next probe lands.
+  const [driverAnswer, setDriverAnswer] = useState<
+    { signature: string; value: DriverAvailability | undefined } | undefined
+  >(undefined);
 
   const catalog = catalogQuery.data;
   const products = useMemo(() => productsQuery.data ?? [], [productsQuery.data]);
@@ -300,6 +325,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   // refs are synced in an effect (validation only fires on user interaction, well after it commits).
   const availabilityRef = useRef(availability);
   const productsByIdRef = useRef(productsById);
+  const driverRef = useRef<DriverAvailability | undefined>(undefined);
   useEffect(() => {
     availabilityRef.current = availability;
     productsByIdRef.current = productsById;
@@ -311,17 +337,43 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     () => zodResolver(mode === 'edit' ? updateOrderSchema : createOrderSchema),
     [mode],
   );
+  // The configured gap, in words ("1 hora", "45 minutos") — never a hardcoded hour, because the
+  // admin can change the preference and copy that lies about a setting is worse than copy that omits it.
+  const gapText = useCallback(
+    (minutes: number): string => {
+      const { key, count } = gapLabelKey(minutes);
+      return t(`${DKEY}.${key}`, { count });
+    },
+    [t],
+  );
+  // Pure functions of the ANSWER's own data (who is busy, when, what gap was configured), so they
+  // depend on nothing but `t` and never have to be rebuilt as probes come and go.
+  const driverMessages = useMemo(
+    () => ({
+      conflict: (driverName: string, at: string): string =>
+        t(`${DKEY}.conflict`, { driver: driverName, time: formatDateTime(at) }),
+      selfOverlap: (gapMinutes: number): string =>
+        t(`${DKEY}.selfOverlap`, { gap: gapText(gapMinutes) }),
+    }),
+    [t, gapText],
+  );
   const resolver = useCallback<Resolver<CreateOrderFormType>>(
     async (values, context, options) => {
       const result = await zodResolve(values, context, options);
-      return appendLineAvailabilityErrors(
-        values,
-        result,
-        (productId) => takeableFor(productId, availabilityRef.current, productsByIdRef.current),
-        (available) => t(`${KEY}.errors.lineUnavailable`, { available }),
-      );
+      // Two live caps layered on the mirrored schema, each landing where its problem lives: the
+      // stock one on the offending LINE, the driver one on the DATES. The stock cap applies only
+      // while the order actually reserves something — the server's own stance.
+      const withLines = enforcesStock
+        ? appendLineAvailabilityErrors(
+            values,
+            result,
+            (productId) => takeableFor(productId, availabilityRef.current, productsByIdRef.current),
+            (available) => t(`${KEY}.errors.lineUnavailable`, { available }),
+          )
+        : result;
+      return appendDriverConflictErrors(driverRef.current, withLines, driverMessages);
     },
-    [zodResolve, t],
+    [zodResolve, t, driverMessages, enforcesStock],
   );
 
   // CREATE: the "Asignar a" select defaults to the CREATING admin (the token's userId), so a created
@@ -373,6 +425,19 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   const deliveryAddressValue = useWatch({ control, name: 'deliveryAddress' });
   const deliveryContactTypeId = useWatch({ control, name: 'deliveryContactTypeId' });
   const deliveryZoneId = useWatch({ control, name: 'deliveryZoneId' });
+  // WHOSE day the events would occupy — re-probed on every change, because the logistics pad is a
+  // question about that person, not about the business.
+  const assignedUserId = useWatch({ control, name: 'assignedUserId' });
+
+  // The exact question the driver answer belongs to. Deriving `driver` from it means a stale answer
+  // simply stops applying — nothing to clear, and no window where the form blocks a slot the admin
+  // has already moved away from.
+  const probeSignature = [deliveryAt, pickupAt, assignedUserId].join('|');
+  const driver =
+    driverAnswer?.signature === probeSignature ? driverAnswer.value : undefined;
+  useEffect(() => {
+    driverRef.current = driver;
+  }, [driver]);
 
   // Keep each line's isRental flag in sync with its picked product (the schema's pickup rule reads
   // it). Converges — only writes when the flag actually differs, so it never loops.
@@ -495,18 +560,40 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
           deliveryAt: delivery.toISOString(),
           ...(pickup && { pickupAt: pickup.toISOString() }),
           productIds,
+          // The driver half rides the SAME request: the form needs both answers on one keystroke,
+          // and an edit must exclude itself or it would always clash with its own two blocks.
+          ...(assignedUserId != null && { assignedUserId }),
+          ...(isEdit && { excludeOrderId: order.id }),
         },
         {
           onSuccess: (response) => {
             const list = response.data.data?.availability ?? [];
             setAvailability(new Map(list.map((item) => [item.productId, item.available])));
-            reconcileAvailability(new Map(list.map((item) => [item.productId, item.available])));
+            // Adjusting the picked lines is a WRITE to the admin's form, so it happens only where
+            // the cap is real. Editing an order that reserves nothing must never see its historical
+            // quantities quietly reduced to today's shelf.
+            if (enforcesStock) {
+              reconcileAvailability(new Map(list.map((item) => [item.productId, item.available])));
+            }
+            // Tagged with the question it answers, so a window changed mid-flight discards it.
+            setDriverAnswer({ signature: probeSignature, value: response.data.data?.driver });
           },
         },
       );
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [deliveryAt, pickupAt, products, checkAvailability, reconcileAvailability]);
+  }, [
+    deliveryAt,
+    pickupAt,
+    assignedUserId,
+    probeSignature,
+    isEdit,
+    order?.id,
+    products,
+    checkAvailability,
+    reconcileAvailability,
+    enforcesStock,
+  ]);
 
   const onRegistryCreated = (registry: ClientRegistry): void => {
     // Seed the picker cache so the new client appears immediately, then select it (the prefill
@@ -531,6 +618,25 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     });
   };
 
+  // The logistics half of a 409, worded from the SERVER's payload: which driver, when, and the gap
+  // it actually configured. Returns undefined when the conflict was about something else (stock),
+  // so the caller falls through to its normal inline/toast routing.
+  const describeLogisticsConflict = (
+    payload: OrderLogisticsConflictData | undefined,
+  ): string | undefined => {
+    if (payload?.selfOverlap) {
+      return t(`${DKEY}.saveSelfOverlap`, { gap: gapText(payload.selfOverlap.gapMinutes) });
+    }
+    if (payload?.driverConflict) {
+      return t(`${DKEY}.saveConflict`, {
+        driver: payload.driverConflict.driverName ?? '',
+        time: formatDateTime(payload.driverConflict.at),
+        gap: gapText(payload.driverConflict.gapMinutes),
+      });
+    }
+    return undefined;
+  };
+
   const onSubmit = (data: CreateOrderFormType): void => {
     if (isSaving) return;
     setFormError(undefined);
@@ -539,11 +645,21 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     // because the endpoints validate against the same contract. Only the destination differs: a new
     // order lands on the agenda, an edited one returns to the order you were looking at.
     const onError = (error: unknown): void => {
-      // A stock 409 carries structured conflicts — surface them per-line AND in the banner.
+      // A 409 says WHICH rule refused, and each one lands somewhere different: stock conflicts map
+      // onto the offending lines' quantities, a logistics one is about the dates and gets its own
+      // sentence in the banner (the generic "revisa los datos" would waste what the server told us).
       if (axios.isAxiosError(error) && getStatus(error) === 409) {
-        const conflicts = (error.response?.data as { data?: { conflicts?: OrderStockConflictItem[] } })
-          ?.data?.conflicts;
-        if (conflicts?.length) applyStockConflicts(conflicts);
+        const payload = (
+          error.response?.data as {
+            data?: { conflicts?: OrderStockConflictItem[] } & OrderLogisticsConflictData;
+          }
+        )?.data;
+        if (payload?.conflicts?.length) applyStockConflicts(payload.conflicts);
+        const logistics = describeLogisticsConflict(payload);
+        if (logistics) {
+          setFormError(logistics);
+          return;
+        }
       }
       const { inline, toast } = toFormError(error, t(`${KEY}.errors.submitFallback`));
       if (inline) setFormError(inline);
@@ -677,6 +793,10 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     if (fee != null) setValue('deliveryAmount', String(fee), { shouldValidate: true });
   };
 
+  // The order the driver's day is already taken by, if any — the one thing the admin may want to
+  // open. Absent for a self-overlap: there is no other order to look at, only two dates to move.
+  const clashingOrderId = driver?.conflicts?.[0]?.orderId;
+
   const usedProductIds = new Set(
     lineValues.map((line) => line.productId).filter((id): id is number => id != null),
   );
@@ -689,9 +809,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
       .map((product) => ({ value: product.id, label: product.name }));
   const canAddLine = lines.fields.length < products.length;
   // The takeable ceiling for a line's product — the window amount once probed, else the product's
-  // current availability. Caps the quantity input's `max` (the resolver enforces the same limit).
+  // current availability. Caps the quantity input's `max` (the resolver enforces the same limit),
+  // so it must be ABSENT wherever the cap isn't real: on an order that reserves nothing, a `max`
+  // would physically stop the admin from typing the number they are correcting the paperwork to,
+  // and the hint below would quote a ceiling that isn't one.
   const availableFor = (productId: number | null | undefined): number | undefined =>
-    productId == null ? undefined : takeableFor(productId, availability, productsById);
+    productId == null || !enforcesStock
+      ? undefined
+      : takeableFor(productId, availability, productsById);
   // A quiet hint under the quantity: how many of the picked product are takeable (the window amount
   // once dated, else its general availability). Empty until a product is chosen — and the field's own
   // "only N available" error replaces it — so the number surfaces once, right where it's relevant.
@@ -836,6 +961,18 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                         instructions={t(`${KEY}.fields.pickupAtHint`)}
                       />
                     </div>
+                    {/* The date fields already carry the message; this only offers the way OUT of
+                        it — the admin can look at the order that is in the way. Rendered only for
+                        a real conflict with an order (a self-overlap has nothing to open). */}
+                    {clashingOrderId !== undefined && (
+                      <button
+                        type="button"
+                        onClick={() => panelNavigate(`/panel/pedidos/${clashingOrderId}`)}
+                        className="reveal-item self-start rounded-chip px-2 py-1 text-sm font-medium text-charcoal/70 underline decoration-charcoal/30 underline-offset-4 transition-[color,background-color] duration-150 hover:bg-charcoal/[0.04] hover:text-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
+                      >
+                        {t(`${DKEY}.viewOrder`)}
+                      </button>
+                    )}
                   </div>
                 </SectionReveal>
               </Section>

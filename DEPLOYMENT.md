@@ -112,13 +112,17 @@ or a deploy and an apply overwrite each other — §6). The two **credentials** 
    ```json
    [
      {
-       "AllowedOrigins": ["http://localhost:5173", "https://ozari-c28.pages.dev"],
+       "AllowedOrigins": ["http://localhost:5173", "https://staging.partyrentalsgt.com"],
        "AllowedMethods": ["PUT"],
        "AllowedHeaders": ["content-type"],
        "MaxAgeSeconds": 3600
      }
    ]
    ```
+
+   > Updated 2026-07-31 for the custom-domain cutover (§3c). The old `https://ozari-c28.pages.dev`
+   > origin can stay listed while DNS rollback is still a possibility, and should be removed once
+   > `staging.partyrentalsgt.com` is the only way in — this list is the bucket's whole browser gate.
 
    Public **reads** don't need CORS (plain `<img>` tags aren't CORS requests). If a feature ever
    needs to `fetch` an image from the app origin (e.g. attaching a photo as a Web Share Level 2
@@ -164,6 +168,134 @@ trigger substitution) + Terraform, not in Secret Manager. `R2_TOKEN` is **not ne
 
 ---
 
+## 3c. Custom domains & first-party cookies (SESSION-CRITICAL)
+
+> **Why this is not cosmetic.** The 30-day refresh token lives in an HttpOnly cookie set by the API.
+> If the frontend and the API sit on **different registrable domains** (`*.pages.dev` vs
+> `*.run.app`), that cookie is a **third-party cookie**: Safari/iOS (all WebKit) and Firefox/Brave in
+> strict mode refuse to store or send it. The visible symptom is not an error — it is a user being
+> bounced to the login screen every time the 15-minute access token expires, with no way to silently
+> rehydrate. Desktop Chrome currently tolerates it, which is exactly why this hides until a driver
+> opens the app on an iPhone. **Serving both halves under one registrable domain fixes it at the
+> root** — the cookie becomes first-party and every browser keeps it.
+
+### The naming scheme
+
+| Environment | Frontend (`APP_HOST`) | API (`VITE_API_URL`) |
+|---|---|---|
+| **staging** | `https://staging.partyrentalsgt.com` ✅ live | `https://api-staging.partyrentalsgt.com` |
+| **production** (later) | `https://partyrentalsgt.com` | `https://api.partyrentalsgt.com` |
+| **local** | `http://localhost:5173` | *(none — Vite proxies `/api` → `localhost:3000`)* |
+
+Both halves of a pair share `partyrentalsgt.com`, so the cookie is first-party. **Keep every host to
+ONE label** (`api-staging.`, not `api.staging.`): Cloudflare's Universal SSL covers the apex plus a
+single subdomain level only, and a two-level host would need a paid advanced certificate.
+
+### Putting a domain in front of Cloud Run — the constraint
+
+**Cloud Run domain mappings are NOT available in `northamerica-south1`** (verified against Google's
+docs, 2026-07-31 — the feature exists only in `asia-east1`, `asia-northeast1`, `asia-southeast1`,
+`europe-north1`, `europe-west1`, `europe-west4`, `us-central1`, `us-east1`, `us-east4`, `us-west1`).
+So the mapping has to come from somewhere else:
+
+| Option | Cost | Notes |
+|---|---|---|
+| **Cloudflare proxy + Host-header override** ⭐ | **free** | DNS is already at Cloudflare. A proxied `CNAME` to the `run.app` host plus an **Origin Rule** rewriting the `Host` header (Cloud Run 404s on an unknown Host). Adds a Cloudflare hop — see the `trust proxy` note below. |
+| Global external Application LB + serverless NEG | ~US$18–25/mo | Google-native, Google-managed cert, Terraform-able. The forwarding rule bills hourly whether or not anyone visits — more than the rest of this infra costs. |
+| Move the service to a mapping-capable region | free | Native mapping, but re-creates the service (new URL, Terraform + trigger churn) and moves compute away from Guatemala. Only worth it if the region is being reconsidered anyway. |
+
+Recommended: **Cloudflare proxy** for staging. Revisit the LB if the Cloudflare hop ever gets in the
+way (mTLS, Cloud Armor, or if per-IP rate limiting proves unreliable).
+
+> **`trust proxy` / rate limiting.** `app.ts` sets `trust proxy = 1`, and the login + global rate
+> limiters key on `req.ip`. Adding Cloudflare inserts one more hop into `X-Forwarded-For`. **Verify
+> after cutover** (§3c.4): if `req.ip` ever resolves to a Cloudflare edge address, every visitor
+> shares one bucket and the limiter starts throttling the whole app at once. The fix is a
+> `keyGenerator` reading `CF-Connecting-IP` — do it only if the check shows it's needed.
+
+### 3c.1 — 🔒 Console steps (Cloudflare)
+
+1. **DNS** → add a record on `partyrentalsgt.com`:
+   - Type `CNAME`, Name `api-staging`, Target `ozari-api-694756660984.northamerica-south1.run.app`,
+     **Proxy status: Proxied** (orange cloud).
+2. **Rules → Origin Rules** → *Create rule*:
+   - Name: `api-staging → Cloud Run host`
+   - When incoming requests match: `Hostname` `equals` `api-staging.partyrentalsgt.com`
+   - Then: **Host Header** → *Rewrite to* → `ozari-api-694756660984.northamerica-south1.run.app`
+   - Deploy. *(Without this, Cloud Run receives an unknown `Host` and answers 404 for everything.)*
+3. **SSL/TLS** → *Overview* → encryption mode **Full (strict)** (Cloud Run presents a valid public
+   cert). If *Edge Certificates → Always Use HTTPS* interferes with issuance, turn it off until the
+   certificate is active, then back on.
+4. **R2** → bucket `ozari-assets-staging` → *Settings → CORS* → make `AllowedOrigins` match §3b.4
+   (the browser PUTs gallery photos straight to R2 from the app origin — a stale origin here breaks
+   every image upload with a preflight failure, while the rest of the app looks fine).
+5. **Pages** (project `ozari-c28`) → *Settings → Environment variables* → set
+   `VITE_API_URL = https://api-staging.partyrentalsgt.com` → **redeploy** (Vite inlines it at BUILD
+   time; an env change alone does nothing until the next build).
+6. *(Optional but recommended, now that staging lives on the brand domain)* **Rules → Transform Rules
+   → Modify Response Header** → when `Hostname equals staging.partyrentalsgt.com`, *set static*
+   `X-Robots-Tag: noindex, nofollow`. `public/robots.txt` ships `Allow: /` for the future marketing
+   site, so without this a crawler may index the staging app under your own domain. Header-level, so
+   it applies per host without forking the build.
+
+### 3c.2 — 🔒 Console steps (GCP)
+
+7. **Cloud Build** → *Triggers* → `ozari-api-dev` → *Edit* → **Substitution variables** →
+   `_APP_HOST = https://staging.partyrentalsgt.com`. *(Terraform owns this trigger — the repo
+   default in `variables.tf` now matches, so a later `terraform apply` won't fight it. If you prefer,
+   set `app_host` in `terraform.tfvars` and `terraform apply` instead of editing the console.)*
+8. **Redeploy the API** (push to `dev`, or re-run the trigger) so Cloud Run picks up the new
+   `APP_HOST`. Verify on the service's *Revisions → Variables* tab that `APP_HOST` is the new origin.
+
+> **Do these two in this order with step 5:** while `APP_HOST` still names the old origin, the API
+> **rejects** the new frontend with a CORS/API-key failure. If `staging.partyrentalsgt.com` is
+> already live and calls are failing, step 6 is the reason.
+
+### 3c.3 — What changes in the repo (already committed, no action)
+
+| Thing | Where | Why it must move in the same change |
+|---|---|---|
+| CSP `connect-src` | `ozari-app/index.html` | A CSP blocks what it doesn't name; the app looks dead. Lists both API hosts **and** the `run.app` host so a DNS rollback needs no rebuild. |
+| `_APP_HOST` fallback | `ozari-api/cloudbuild.yaml` | Used by manual builds when no trigger substitution overrides it. |
+| `app_host` default | `infrastructure/.../variables.tf` + `terraform.tfvars.example` | Terraform owns the trigger substitution; a stale default would revert the console edit on the next apply. |
+| Email logo | `ozari-api/src/config/app.ts` | Now **derived** from `APP_HOST` — nothing to edit, and it can't go stale again. |
+| `VITE_API_URL` | `ozari-app/.env.example` (local reference only) | Documents the value; the real one lives in Cloudflare Pages. |
+
+**Local development is deliberately untouched.** The dev server calls `/api` on its own origin (Vite
+proxies to `localhost:3000` — `client.ts` uses `/api` whenever `import.meta.env.DEV`), so: `'self'`
+already satisfies the CSP, no `VITE_API_URL` is read, `APP_HOST` stays `http://localhost:5173` in
+your local `.env`, and the cookie stays `SameSite=Lax; Secure=false` because `isDeployedEnvironment()`
+is false. Pointing your local API at the staging Neon database changes none of this — the database
+URL has nothing to do with origins.
+
+### 3c.4 — Acceptance test (the actual gate)
+
+1. `https://staging.partyrentalsgt.com` loads; DevTools **Console shows no CSP violation** and
+   **Network** shows calls going to `api-staging.partyrentalsgt.com` (not `run.app`).
+2. Sign in. In *Application → Cookies*, `refresh-token` is listed under
+   **`api-staging.partyrentalsgt.com`** with `HttpOnly`, `Secure`, `Path=/api/auth`.
+3. Upload a product photo (proves the R2 CORS origin from step 4).
+4. **On a real iPhone (Safari):** log in → background the tab for **>15 minutes** → reopen. The panel
+   must rehydrate **with no login screen**. Repeat in Firefox with Enhanced Tracking Protection on
+   *Strict*. If either bounces to login, the cookie is still third-party — stop and re-check that
+   both hosts really are under `partyrentalsgt.com`.
+5. Trigger a password-reset email and confirm the link and the logo point at
+   `staging.partyrentalsgt.com`.
+6. Hit any endpoint ~40 times in a minute from one browser; confirm you are limited and a *different*
+   device is not (the `trust proxy` note above).
+
+### 3c.5 — Optional hardening, once every environment is same-site
+
+`appConfig.cookieConfig` still sends `SameSite=None; Secure` in deployed environments. That is
+**correct and sufficient** — `None` is about *sending* the cookie cross-site, while the blocking that
+killed mobile sessions was about the cookie being *third-party*, which the shared domain has now
+fixed. Tightening to `Lax` buys a little defence-in-depth and is safe **only** once no deployed
+frontend talks to an API on another registrable domain (e.g. Pages preview deployments). It is a
+one-line change in `app.ts` — deliberately not bundled with the cutover, so that if sessions do
+misbehave there is exactly one variable in flight.
+
+---
+
 ## 4. The URL chicken-and-egg (read before Part 1)
 
 The backend needs the frontend origin; the frontend needs the backend URL:
@@ -181,9 +313,11 @@ So the order is **backend first, then frontend**:
 3. Put that backend URL into the frontend's `VITE_API_URL` (Cloudflare) → deploy the frontend → point
    the apex DNS at Cloudflare Pages.
 
-> **Email logo dependency (soft):** `appConfig.email.logoUrl` points at `<frontend-origin>/email-logo.png`.
-> Emails only render the logo once the **frontend is deployed** with that asset at the prod origin. Set
-> `logoUrl` to the prod origin (code config in `src/config/app.ts`) as part of the prod cutover.
+> **Email logo dependency (soft):** `appConfig.email.logoUrl` is **derived from `APP_HOST`**
+> (`<frontend-origin>/email-logo.png`) — there is nothing to edit per environment, and it can no
+> longer go stale when the frontend moves (it did: it still pointed at `pages.dev` after the move to
+> `staging.partyrentalsgt.com`). Emails render the logo once the **frontend is deployed** with that
+> asset at that origin; with `APP_HOST` unset it is `""` and the text wordmark carries the brand.
 
 ---
 
@@ -358,10 +492,12 @@ migrations into ONE baseline so prod starts clean and dev + prod share one histo
 | Terraform env dir | `envs/staging/` (adopts existing) | `envs/prod/` (creates fresh; no `imports.tf`) |
 | Cloud Build trigger branch | dev branch | `main` |
 | `NODE_ENV` | `staging` | `production` (disables `/api/docs`) |
-| `APP_HOST` | `https://ozari-c28.pages.dev` | apex domain, e.g. `https://partyrentalsgt.com` |
+| `APP_HOST` | `https://staging.partyrentalsgt.com` | apex domain, e.g. `https://partyrentalsgt.com` |
 | Secrets | staging set | **separate** values (esp. a distinct Resend key + `ENCRYPTION_KEY`) |
-| Frontend `VITE_API_URL` | staging Cloud Run URL | prod backend URL |
-| Email `logoUrl` | staging pages.dev asset | prod frontend origin |
+| Frontend `VITE_API_URL` | `https://api-staging.partyrentalsgt.com` | `https://api.partyrentalsgt.com` |
+| Frontend CSP `connect-src` | already lists both API hosts (`index.html`) | same file — no per-env build |
+| R2 CORS `AllowedOrigins` | localhost + staging origin | **prod origin only — never localhost** (§3b.4) |
+| Email `logoUrl` | *derived from `APP_HOST`* | *derived — nothing to change* |
 
 ---
 

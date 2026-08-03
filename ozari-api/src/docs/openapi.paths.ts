@@ -1056,9 +1056,11 @@ export const paths: OpenAPIV3.PathsObject = {
         "inherits this). Creates a CONFIRMED order (stock freezes immediately — no reservation " +
         "step) for a walk-in client registry. Everything racy runs in ONE transaction under " +
         "product row locks: rental availability against the order's WINDOW, sale stock (which is " +
-        "decremented permanently), and the single-vehicle spacing rule (an admin preference, " +
-        "≥1h between any two logistics events — the admin is blocked too). Money is derived " +
-        "server-side from the product rows. Authenticated limiter (100/min).",
+        "decremented permanently), and the LOGISTICS PAD — each event occupies a block of its " +
+        "assigned DRIVER's day (±half the configured gap per side, so two events on one driver " +
+        "need the full gap between them), including the order's own delivery vs collection. The " +
+        "admin is blocked too. Money is derived server-side from the product rows. Authenticated " +
+        "limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       requestBody: bodyRef("CreateOrderRequest", {
         clientRegistryId: 3,
@@ -1125,9 +1127,12 @@ export const paths: OpenAPIV3.PathsObject = {
         "401": unauthorized(STALE_TOKEN_401),
         "403": adminOnly(),
         "409": errorResponse(
-          "The window cannot be satisfied: either some lines lack stock (the error's `data.conflicts` " +
-            "lists each `OrderStockConflictItem` — see that schema) or another order has a logistics " +
-            "event closer than the configured spacing.",
+          "The window cannot be satisfied, and `data` says WHICH rule refused — the three payloads " +
+            "are deliberately distinct, because they land on different fields: `conflicts` (a list " +
+            "of `OrderStockConflictItem`) = lines lacking stock → the line's quantity input; " +
+            "`driverConflict` (`DriverConflict` + `driverName` + `gapMinutes`) = the assigned " +
+            "driver already has an overlapping block → the date inputs; `selfOverlap` " +
+            "(`{ gapMinutes }`) = this order's own delivery and collection are too close together.",
           409,
           "Some products are not available for the requested dates",
         ),
@@ -1140,31 +1145,45 @@ export const paths: OpenAPIV3.PathsObject = {
   "/orders/availability": {
     post: {
       tags: ["Orders"],
-      summary: "Live per-window product availability (admin)",
+      summary: "Live per-window availability: goods AND driver (admin)",
       operationId: "getOrderAvailability",
       description:
-        "**Admin only.** The order form's live availability probe: for the requested products + " +
-        "window, returns each product's takeable amount so the picker can annotate amounts and " +
-        "reconcile picked lines. Rentals = fleet minus what's held in the window (`null` until a " +
-        "pickup is set); sales = current stock. Exact counts (the admin runs the business). Read-" +
-        "only + ADVISORY — the create path re-checks under the product lock. Authenticated limiter " +
-        "(100/min).",
+        "**Admin only.** The order form's live probe, answering both scheduling questions on one " +
+        "keystroke. **Goods:** each product's takeable amount for the window — rentals = fleet " +
+        "minus what's held (`null` until a pickup is set), sales = current stock; exact counts " +
+        "(the admin runs the business). **Driver:** sent only when the body carries an " +
+        "`assignedUserId` — whether either event would overlap a block already on that driver's " +
+        "day, plus whether the order's own two events are too close to each other. An `EDIT` " +
+        "passes `excludeOrderId` so both halves drop the order from their own counts, and a " +
+        "cancelled or already-performed order answers free in both — the probe asks exactly the " +
+        "question the save asks. Read-only + " +
+        "ADVISORY in both halves — create/edit re-derive everything under the product locks and " +
+        "that `409` is the authority. Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       requestBody: bodyRef("OrderAvailabilityRequest", {
         deliveryAt: EXAMPLE_DELIVERY_AT,
         pickupAt: EXAMPLE_PICKUP_AT,
         productIds: [3, 4],
+        assignedUserId: 2,
       }),
       responses: {
-        "200": dataResponse("Per-product availability for the window.", "OrderAvailabilityResponse", {
+        "200": dataResponse("Per-product availability for the window, plus the driver's.", "OrderAvailabilityResponse", {
           availability: [
             { productId: 3, available: 10 },
             { productId: 4, available: 120 },
           ],
+          driver: {
+            available: false,
+            gapMinutes: 60,
+            selfOverlap: false,
+            conflicts: [
+              { orderId: 42, at: EXAMPLE_DELIVERY_AT, kind: "DELIVERY", blocks: "DELIVERY" },
+            ],
+          },
         }),
         "400": errorResponse(
           "Validation failed (bad delivery/pickup datetime, pickup not after delivery, empty or " +
-            "invalid product ids).",
+            "invalid product ids, a non-id `assignedUserId`/`excludeOrderId`).",
           400,
           "The requested products are not valid",
         ),
@@ -1310,9 +1329,11 @@ export const paths: OpenAPIV3.PathsObject = {
         "Everything is re-derived, nothing trusted: prices come from the product rows and the new " +
         "billed window (so moving the dates re-bills the order), sale stock moves by the " +
         "DIFFERENCE and only while the order still holds it (`holdsSaleStock`), and rental " +
-        "availability plus the spacing rule are re-checked **excluding this order** — it is " +
-        "holding its own current lines and can never conflict with itself. An order whose status " +
-        "reserves nothing (finished, or cancelled) is a pure paperwork edit and can never 409.\n\n" +
+        "availability plus the logistics pad are re-checked **excluding this order** — it is " +
+        "holding its own current lines and already occupies its own blocks, so it can never " +
+        "conflict with itself. The pad is checked against the NEW assignee, so handing the order " +
+        "to another driver is validated against THAT driver's day. An order whose status reserves " +
+        "nothing (finished, or cancelled) is a pure paperwork edit as far as stock is concerned.\n\n" +
         "The lifecycle is untouched: an edit never moves the status, stamps an actual or writes " +
         "history — that is `POST /orders/{id}/advance`'s job alone. Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
@@ -1400,8 +1421,11 @@ export const paths: OpenAPIV3.PathsObject = {
           "Order not found",
         ),
         "409": errorResponse(
-          "Availability or the spacing rule refused the new state. A stock conflict carries " +
-            "`data.conflicts` (per line: requested vs actually available), the same shape as create.",
+          "Availability or the logistics pad refused the new state — `data` carries `conflicts`, " +
+            "`driverConflict` or `selfOverlap`, exactly the same three shapes as create. An order " +
+            "that reserves nothing (cancelled, or finished) and whose events have already happened " +
+            "can never reach this: its edit competes for no goods and occupies no driver, so it is " +
+            "pure paperwork.",
           409,
           "Some products are not available for the requested dates.",
         ),

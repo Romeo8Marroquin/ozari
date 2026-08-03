@@ -320,31 +320,31 @@ async function parseOrderBody(
     paymentMethodId = rawPaymentMethodId as number;
   }
 
-  // Assignment (OPTIONAL here — the controller defaults it to the creating admin, so an order is
-  // never left unassigned): when present it must be an ACTIVE "deliverable" staff member. The role
-  // set is `ASSIGNABLE_ROLES` (Admin + Driver today) — widen there to open assignment to new roles.
-  let assignedUserId: number | undefined;
+  // Assignment — **REQUIRED** (Q-D2, owner decision 2026-07-30). It used to be optional, with the
+  // controller defaulting it to the creating admin: an unassigned order could not happen, but was
+  // still a state the code had to reason about. The logistics pad is a rule about a DRIVER's day,
+  // so every event needs an owner — requiring it here deletes the ambiguity instead of modelling
+  // it. It must be an ACTIVE "deliverable" staff member; the role set is `ASSIGNABLE_ROLES`
+  // (Admin + Driver today) — widen THERE to open assignment to new roles.
   const rawAssignedUserId = body["assignedUserId"];
-  if (rawAssignedUserId !== undefined && rawAssignedUserId !== null) {
-    const assignedUser =
-      typeof rawAssignedUserId === "number" &&
-      Number.isInteger(rawAssignedUserId) &&
-      rawAssignedUserId >= 1
-        ? await prismaClient.user.findFirst({
-            where: {
-              id: rawAssignedUserId,
-              isActive: true,
-              roleId: { in: [...ASSIGNABLE_ROLES] },
-            },
-            select: { id: true },
-          })
-        : null;
-    if (!assignedUser) {
-      reject("invalidAssignedUserId", { assignedUserId: rawAssignedUserId });
-      return null;
-    }
-    assignedUserId = rawAssignedUserId as number;
+  const assignedUser =
+    typeof rawAssignedUserId === "number" &&
+    Number.isInteger(rawAssignedUserId) &&
+    rawAssignedUserId >= 1
+      ? await prismaClient.user.findFirst({
+          where: {
+            id: rawAssignedUserId,
+            isActive: true,
+            roleId: { in: [...ASSIGNABLE_ROLES] },
+          },
+          select: { id: true },
+        })
+      : null;
+  if (!assignedUser) {
+    reject("invalidAssignedUserId", { assignedUserId: rawAssignedUserId });
+    return null;
   }
+  const assignedUserId = rawAssignedUserId as number;
 
   const validatedBody: CreateOrderRequestModel = {
     clientRegistryId: clientRegistryId as number,
@@ -423,10 +423,25 @@ const rejectAvailability = (res: Response, key: string, logParams: Record<string
 /** Sensible cap for a per-window availability probe — far above any real catalog page. */
 const MAX_AVAILABILITY_PRODUCTS = 200;
 
+/** An OPTIONAL positive-integer id on the probe body: absent stays absent, present must be a real
+ *  id. `null` counts as absent (a form clearing a select sends it). */
+const sanitizeOptionalId = (
+  value: unknown,
+): { ok: true; value: number | undefined } | { ok: false } => {
+  if (value === undefined || value === null) {
+    return { ok: true, value: undefined };
+  }
+  return typeof value === "number" && Number.isInteger(value) && value >= 1
+    ? { ok: true, value }
+    : { ok: false };
+};
+
 /**
- * `POST /orders/availability` — validates the live availability probe: a delivery datetime, an
- * OPTIONAL pickup (after delivery when present — omitting it means "no rental window yet"), and 1..N
- * product ids. Read-only, so no DB lookups here; the controller reads the products.
+ * `POST /orders/availability` — validates the live probe: a delivery datetime, an OPTIONAL pickup
+ * (after delivery when present — omitting it means "no rental window yet"), 1..N product ids, and
+ * the OPTIONAL driver half (`assignedUserId`, plus `excludeOrderId` when an EDIT is re-checking
+ * itself). The driver is not looked up here: the probe is read-only and advisory, and an unknown id
+ * simply finds no orders — the save's validator is where an invalid assignee is refused.
  */
 export const validateOrderAvailability = (req: Request, res: Response, next: NextFunction): void => {
   try {
@@ -471,7 +486,28 @@ export const validateOrderAvailability = (req: Request, res: Response, next: Nex
       productIds.push(id);
     }
 
-    req.body = { deliveryAt, pickupAt, productIds };
+    const assignedUserId = sanitizeOptionalId(body["assignedUserId"]);
+    if (!assignedUserId.ok) {
+      rejectAvailability(res, "invalidAssignedUserId", {
+        assignedUserId: body["assignedUserId"],
+      });
+      return;
+    }
+    const excludeOrderId = sanitizeOptionalId(body["excludeOrderId"]);
+    if (!excludeOrderId.ok) {
+      rejectAvailability(res, "invalidExcludeOrderId", {
+        excludeOrderId: body["excludeOrderId"],
+      });
+      return;
+    }
+
+    req.body = {
+      deliveryAt,
+      pickupAt,
+      productIds,
+      assignedUserId: assignedUserId.value,
+      excludeOrderId: excludeOrderId.value,
+    };
     next();
   } catch (error) {
     logger.error(i18next.t("orders.availability.validators.logs.validationError", { error }));

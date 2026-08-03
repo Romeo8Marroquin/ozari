@@ -33,9 +33,13 @@ variable "service_name" {
 }
 
 variable "app_host" {
+  # Staging's frontend is served from its own subdomain so the refresh cookie is FIRST-party with
+  # the API (`api-staging.` — same registrable domain), which is what keeps sessions alive on
+  # Safari/iOS. Changing it here means changing `cloudbuild.yaml`'s `_APP_HOST` fallback and the
+  # frontend CSP `connect-src` in the same commit (DEPLOYMENT.md §3c).
   description = "Allowed frontend origin (APP_HOST env var). No trailing slash."
   type        = string
-  default     = "https://ozari-c28.pages.dev"
+  default     = "https://staging.partyrentalsgt.com"
 }
 
 variable "node_env" {

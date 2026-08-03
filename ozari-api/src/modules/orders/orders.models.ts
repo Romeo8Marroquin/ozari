@@ -5,6 +5,7 @@ import type {
   ZoneCatalogOptionModel,
 } from "../products/products.models.js";
 import type { OrderActionModel } from "./lifecycle/lifecycle.models.js";
+import type { DriverAvailabilityModel } from "./logistics/logistics.models.js";
 
 /**
  * The two presentation views of the order list (the frontend's segmented control):
@@ -275,10 +276,14 @@ export interface CreateOrderRequestModel {
   depositAmount: number | undefined;
   /** How it will be paid (an active seeded method); optional — payment can be settled later. */
   paymentMethodId: number | undefined;
-  /** The staff member to assign the order to (an active Admin/Driver). Optional in the API: the
-   *  controller defaults it to the CREATING admin, so an order created here is never unassigned; the
-   *  form always sends it (its select defaults to the creator). */
-  assignedUserId: number | undefined;
+  /**
+   * The staff member the order is assigned to (an active Admin/Driver) — **required** (Q-D2, owner
+   * decision 2026-07-30). The column is nullable and the API used to default it to the creating
+   * admin, which made "unassigned" a state that could not happen but was still modelled. Since the
+   * logistics pad is a rule about a DRIVER's day, every event needs an owner: requiring it at the
+   * validator deletes the ambiguity instead of modelling it.
+   */
+  assignedUserId: number;
   lines: CreateOrderLineRequestModel[];
 }
 
@@ -302,6 +307,13 @@ export interface OrderAvailabilityRequestModel {
   /** Absent = no rental window yet — rentals return `null` (unknown until a pickup is set). */
   pickupAt: Date | undefined;
   productIds: number[];
+  /** The driver the order would be assigned to. Absent ⇒ the `driver` block is omitted entirely —
+   *  the form simply has nothing to say yet, and nagging about a field the admin has not reached
+   *  is worse than silence (EPIC-2-DRIVER-AVAILABILITY §4.4). */
+  assignedUserId: number | undefined;
+  /** The order being EDITED, excluded from the driver check: it already holds its own two events
+   *  and would otherwise always report a conflict with itself. */
+  excludeOrderId: number | undefined;
 }
 
 /** One product's availability for the requested window. */
@@ -314,4 +326,10 @@ export interface ProductAvailabilityModel {
 
 export interface OrderAvailabilityResponseModel {
   availability: ProductAvailabilityModel[];
+  /**
+   * Whether the assigned DRIVER can actually be there — a different question from "do we have the
+   * units", answered on the same keystroke because the form needs both. Absent when no
+   * `assignedUserId` was sent. Always shaped by `projectDriverAvailability`, never inline.
+   */
+  driver?: DriverAvailabilityModel;
 }

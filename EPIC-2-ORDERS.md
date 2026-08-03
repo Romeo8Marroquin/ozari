@@ -331,9 +331,18 @@ Original plan, for the record (author with `prisma migrate diff`, per CLAUDE.md 
 5. Orders list + detail + the dashboard (next actions + week agenda).
 6. Receipt/quote PDF.
 7. `.ics` for delivery/pickup (±30min padding).
-Defer: client self-service ordering, driver assignment UI beyond a simple picker, notifications
-engine (start with the hourly "ready?" reminder + per-delivery email), refunds/damages (Q-2),
-role-management UI, vehicles/routes/slots, FEL.
+8. **Notifications** — PULLED INTO the MVP (owner, 2026-07-30; was on the defer line below). Scope
+   stays the cheap one: the per-delivery reminder + a digest, admin-configurable cadence. **Blocked on
+   Q-B** (content + who gets notified).
+9. ✅ **Driver availability & the logistics pad (BUILT 2026-07-30)** — the ±30min padding of item 7 is
+   the SAME object as the old spacing rule, re-framed as "each event occupies a block of its DRIVER's
+   time". Built in full per **`EPIC-2-DRIVER-AVAILABILITY.md`** (read it before touching spacing,
+   assignment or the availability probe): `modules/orders/logistics/` is the engine,
+   `buildSpacingConflictWhere` is gone, the assignee is required, and the hole found while planning —
+   an order's own delivery and collection never checked against each other — is closed (`selfOverlap`).
+   The calendar half (§6 of that doc) rides with item 8.
+Defer: client self-service ordering, driver assignment UI beyond a simple picker, refunds/damages
+(Q-2), role-management UI, vehicles/routes/slots, FEL.
 
 ## 6. Doors that must stay open (never make these harder)
 
@@ -373,10 +382,11 @@ controller is the thing that would make this expensive.
 | Rule | State |
 |---|---|
 | **Goods conflict, future events** | ✅ Real. `buildRentedInWindowWhere` counts every line whose order's status holds: `OUT` unconditionally, `WINDOW` only when `serviceStart < windowEnd && serviceEnd > windowStart`. Re-checked INSIDE the create/update transaction under `SELECT … FOR UPDATE` product locks, so two concurrent bookings can't both pass. Edit excludes the order itself. |
-| **Physical-delivery conflict (spacing)** | ✅ Real, and it blocks the admin too. `buildSpacingConflictWhere` rejects any order with a logistics event closer than `orders.logisticsSpacingMinutes` to this order's delivery or pickup. Exclusive bounds (exactly the spacing apart is allowed). |
+| **Physical-delivery conflict (the logistics pad)** | ✅ Real, and it blocks the admin too. **Rewritten 2026-07-30 as a per-DRIVER rule** (`logistics/buildDriverConflictWhere` + `refineConflicts`, EPIC-2-DRIVER-AVAILABILITY): each event occupies `[at − gap/2, at + gap/2]` of its assignee's day and two blocks may not overlap — numerically identical to the old global `buildSpacingConflictWhere`, which is GONE. Exclusive bounds (exactly the gap apart is allowed). Also covers the order's own delivery vs collection (`selfOverlap`). |
 | **Spacing is parametrized** | ✅ `app_preferences.orders.logisticsSpacingMinutes` (60), read from the DB inside the transaction — never hardcoded. An admin screen can change it with zero code change. |
 | **Washing turnaround** | ✅ **Wired 2026-07-29.** `orders.turnaroundMinutes` (120) now widens the hold: a held row blocks while `serviceEnd > windowStart − turnaround`, so goods are not free the instant a billed window ends. Read with the spacing rule in ONE query (`loadOrderTimingPreferences`) by create, edit, reopen AND the availability probe — the probe must answer with the same rule the save enforces. `0` is a valid setting (no cleaning step) and restores the old behaviour exactly. |
-| **Per-driver anything** | ❌ Not modelled. Spacing is global — correct for one operator, wrong for two (see below). |
+| **Per-driver anything** | ✅ **Done 2026-07-30.** The pad is scoped to `assignedUserId`, so a second driver does not block the first; the assignee is required (Q-D2), so every event has an owner. |
+| **Nothing is checked for an order that reserves nothing** | ✅ **Done 2026-07-31** (EPIC-2-DRIVER-AVAILABILITY §4.5). `pendingLogisticsEvents` gives the pad the same stance the stock rules always had: an event occupies its driver from scheduling until it actually HAPPENS (its actual is stamped), or never if the order was cancelled. Editing a cancelled or finished order is therefore pure paperwork — no goods check, no driver check, no possible `409` — and a driver's completed morning stops reserving their afternoon. The same pass fixed the probe (it never excluded the edited order from the GOODS half, so it answered a stricter question than the save) and the form (which kept capping after the server had stopped). |
 | **Vehicles / capacity / geo** | ❌ Not modelled at all. |
 
 ### The turnaround gap (found + CLOSED, 2026-07-29)
@@ -406,22 +416,27 @@ id as the turnaround **and still type-checked**. Two adjacent `number` parameter
 
 | Door | What it touches | Verdict |
 |---|---|---|
-| **Multiple drivers** — spacing per driver, not globally | One optional `assigneeId` on `buildSpacingConflictWhere` + passing `body.assignedUserId` at its two call sites; a composite `(assigned_user_id, delivery_at)` index. `services.assignedUserId` already exists and is indexed. | **Cheap.** No model change. |
+| **Multiple drivers** — spacing per driver, not globally | ✅ **BUILT** exactly as predicted: the resource id moved into the `where` and the two call sites pass `body.assignedUserId`. No model change. A composite `(assigned_user_id, delivery_at)` index is the only thing left, and only once the table is big enough to want it. |
 | **Vehicles + capacity + fee multiplier** | New `vehicles` table + nullable `services.vehicleId`; spacing scopes by vehicle instead of driver (same parameter as above); capacity checked against the order's line volume — which needs a per-product volume/units field, a nullable column on `products`. | **Additive.** |
 | **Real locations + travel-time-aware spacing** | `Address.coordsKms` and `ClientRegistryAddress.coordsKms` already exist; the ORDER snapshots address TEXT only, so it needs a nullable `services.delivery_coords_kms` snapshot. Spacing then becomes "gap ≥ travel time" instead of a constant — still the same predicate, with a computed bound. | **Additive.** |
 | **Configurable turnaround, per-zone/per-product** | The global preference plus a nullable override column. | **Additive.** |
 | **"Listo" earlier/later than the turnaround** | Already free: `Listo` is a manual step and `readyAt` is stamped when pressed. Turnaround is only ever an availability floor and a reminder, never a gate on the button. | **No change.** |
 | **Per-EVENT assignment** (delivery by driver A, pickup by driver B) | ⚠️ The one real fork. Orders carry `deliveryAt`/`pickupAt` as **two columns**, not as first-class `service_logistics_events` rows (§2 anticipated rows; the MVP chose columns). Two nullable columns (`delivery_user_id`/`pickup_user_id`) absorb it cheaply; a full events table would mean migrating the agenda, spacing and sort. | **Decide before route optimization** — it is the only choice here that gets more expensive with time. |
 
-### Where a spacing conflict should surface (the "I don't know where to show it" question)
+### Where a logistics conflict surfaces (✅ ANSWERED + BUILT, 2026-07-30)
 
-It already surfaces: a `409` on create/edit, rendered inline in the order form's `FormError` banner
-(never a toast — it is a decision about the values in front of you). But unlike the STOCK conflict,
-which returns `data.conflicts` per line, the spacing 409 carries **only a message** — the error class
-holds `conflictAt` and the controller drops it. The natural next step (small, additive): project
-`{ conflictAt, orderId }` into the 409's `data` so the form can say *"choca con la entrega de las
-2:30 p. m."* and link it. That payload shape is also what a multi-driver version needs ("choca con
-una entrega de Ana"), so it is worth doing when multi-driver lands, if not before.
+The thin payload flagged here is fixed. The `409` now carries `data.driverConflict`
+(`{ orderId, at, kind, blocks, driverName, gapMinutes }`) or `data.selfOverlap` (`{ gapMinutes }`),
+and the probe answers the same question live in `data.driver` before the admin ever submits.
+
+Two rules came out of it, both load-bearing:
+
+1. **It never reuses `data.conflicts`.** That is the STOCK shape and it lands on a line's quantity
+   input. A driver conflict is about the DATES and lands on the delivery / pickup inputs — `blocks`
+   says which of the two — plus the form banner. Reusing one for the other was identified as the
+   single easiest way to make both confusing.
+2. **The copy formats `gapMinutes`** (`gapLabelKey` → "1 hora" / "45 minutos"). The gap is an admin
+   preference; copy that hardcodes an hour lies the moment they change it.
 
 ## 7. Reuse map (how it plugs into what exists)
 

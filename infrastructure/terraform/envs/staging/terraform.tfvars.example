@@ -11,7 +11,10 @@ region         = "northamerica-south1"
 environment    = "staging"
 
 service_name = "ozari-api"
-app_host     = "https://ozari-c28.pages.dev"
+# The FRONTEND origin, no trailing slash. Must be a subdomain of the SAME registrable domain the API
+# is served from (`api-staging.partyrentalsgt.com`), or the refresh cookie becomes third-party and
+# Safari/iOS drops the session after 15 minutes. See DEPLOYMENT.md §3c.
+app_host     = "https://staging.partyrentalsgt.com"
 node_env     = "staging"
 log_level    = "info"
 

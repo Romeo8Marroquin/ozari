@@ -243,7 +243,7 @@
           "invertedError": "El máximo de fotos no puede ser menor que el mínimo.",
           "logisticsSpacingMinutes": {
             "label": "Minutos entre eventos",
-            "help": "Margen mínimo entre una entrega o recolección y la de otro pedido. Aplica a todos los pedidos, sin excepción."
+            "help": "Margen mínimo entre dos eventos (entrega o recolección) del mismo responsable, incluidos los de un mismo pedido. Dos responsables distintos sí pueden coincidir en el mismo horario."
           },
           "turnaroundMinutes": {
             "label": "Minutos de lavado",
@@ -509,6 +509,17 @@
           },
           "successTitle": "Pedido actualizado",
           "successToast": "Los cambios del pedido se guardaron correctamente."
+        },
+        "driverAvailability": {
+          "conflict": "Ese horario se cruza con otro evento de {{driver}} ({{time}}).",
+          "selfOverlap": "La entrega y la recolección de este pedido están demasiado cerca. Deja al menos {{gap}} entre ambas.",
+          "saveConflict": "No fue posible guardar: {{driver}} ya tiene un evento el {{time}}. Debe haber al menos {{gap}} entre entregas y recolecciones.",
+          "saveSelfOverlap": "No fue posible guardar: deja al menos {{gap}} entre la entrega y la recolección de este pedido.",
+          "viewOrder": "Ver pedido",
+          "gapHours_one": "1 hora",
+          "gapHours_other": "{{count}} horas",
+          "gapMinutes_one": "1 minuto",
+          "gapMinutes_other": "{{count}} minutos"
         },
         "advance": {
           "title": "Mover pedido a “{{status}}”",

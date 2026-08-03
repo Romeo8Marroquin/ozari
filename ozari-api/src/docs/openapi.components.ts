@@ -946,6 +946,7 @@ export const schemas: Record<string, Schema> = {
       "deliveryName",
       "deliveryContact",
       "deliveryAddress",
+      "assignedUserId",
       "lines",
     ],
     description:
@@ -976,11 +977,11 @@ export const schemas: Record<string, Schema> = {
       },
       assignedUserId: {
         type: "integer",
-        nullable: true,
         description:
-          "Staff member to assign the order to (an active Admin/Driver — see `GET /orders/catalog` " +
-          "`assignableUsers`). Optional: DEFAULTS to the creating admin, so an order made here is " +
-          "never left unassigned.",
+          "Staff member the order is assigned to (an active Admin/Driver — see " +
+          "`GET /orders/catalog` `assignableUsers`). **Required**: each logistics event occupies a " +
+          "block of its DRIVER's day, so every event needs an owner (the API used to default this " +
+          "to the creating admin).",
         example: 2,
       },
       lines: {
@@ -1014,7 +1015,8 @@ export const schemas: Record<string, Schema> = {
     required: ["deliveryAt", "productIds"],
     description:
       "The live availability probe: a delivery datetime, an OPTIONAL pickup (after delivery when " +
-      "present — omit it when no rental window exists yet), and 1–200 product ids.",
+      "present — omit it when no rental window exists yet), 1–200 product ids, and the OPTIONAL " +
+      "driver half (`assignedUserId`, plus `excludeOrderId` when an edit re-checks itself).",
     properties: {
       deliveryAt: { type: "string", format: "date-time" },
       pickupAt: { type: "string", format: "date-time", nullable: true },
@@ -1023,6 +1025,70 @@ export const schemas: Record<string, Schema> = {
         minItems: 1,
         maxItems: 200,
         items: { type: "integer", example: 3 },
+      },
+      assignedUserId: {
+        type: "integer",
+        nullable: true,
+        description:
+          "The driver whose day would hold these events. Omit it and the response carries NO " +
+          "`driver` block — the form simply has nothing to say until the assignee is chosen.",
+        example: 2,
+      },
+      excludeOrderId: {
+        type: "integer",
+        nullable: true,
+        description:
+          "The order being EDITED, excluded from BOTH counts — it is holding its own rental units " +
+          "and occupies its own two blocks, so without this it would compete with itself and the " +
+          "probe would answer a stricter question than the save. Its tracking actuals are also " +
+          "read here: an order that was cancelled, or whose events already happened, occupies " +
+          "nothing and probes as free.",
+        example: 42,
+      },
+    },
+  },
+  DriverConflict: {
+    type: "object",
+    description:
+      "One real overlap on the driver's day: the OTHER order's event (`at`/`kind`) and WHICH of " +
+      "the checked order's own events it blocks — so the form can put the error on the right " +
+      "date input instead of on both. **Admin tier only.**",
+    properties: {
+      orderId: { type: "integer", example: 42 },
+      at: { type: "string", format: "date-time" },
+      kind: { type: "string", enum: ["DELIVERY", "COLLECTION"], example: "DELIVERY" },
+      blocks: { type: "string", enum: ["DELIVERY", "COLLECTION"], example: "COLLECTION" },
+    },
+  },
+  DriverAvailability: {
+    type: "object",
+    description:
+      "Whether the assigned driver can actually be there. Every field except `available` is " +
+      "**Admin tier**: a future client asking whether their window can be served learns only that " +
+      "it cannot — never a name, a count, an order, or that the business has one driver.",
+    properties: {
+      available: { type: "boolean", example: false },
+      gapMinutes: {
+        type: "integer",
+        description:
+          "The configured `orders.logisticsSpacingMinutes`, so copy quotes the real number " +
+          "instead of hardcoding \"1 hora\".",
+        example: 60,
+      },
+      selfOverlap: {
+        type: "boolean",
+        description:
+          "The order's OWN delivery and collection are closer than the gap — physically " +
+          "impossible for one driver, and never checked before this epic.",
+        example: false,
+      },
+      conflicts: { type: "array", items: schemaRef("DriverConflict") },
+      driverName: {
+        type: "string",
+        description:
+          "Who is already busy — sent even though the client picked the assignee, so the probe's " +
+          "copy and the save's `409` name the driver from ONE source.",
+        example: "Ana Ruiz",
       },
     },
   },
@@ -1040,6 +1106,7 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     properties: {
       availability: { type: "array", items: schemaRef("ProductAvailability") },
+      driver: schemaRef("DriverAvailability"),
     },
   },
   ClientRegistryContact: {
