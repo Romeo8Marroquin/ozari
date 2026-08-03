@@ -556,6 +556,8 @@ describe("describeActions", () => {
         // En ruta and Entregado both hold the units — walking between them reserves nothing new.
         inventoryEffect: "none",
         purgesEvidence: false,
+        // Confirming this step IS the delivery trip — what puts a "navigate there" button beside it.
+        tracksEvent: "DELIVERY",
       },
       {
         kind: "backward",
@@ -569,6 +571,7 @@ describe("describeActions", () => {
         inventoryEffect: "none",
         // En ruta demands no photos, so undoing it destroys nothing.
         purgesEvidence: false,
+        tracksEvent: null,
       },
       {
         kind: "disruptive",
@@ -582,8 +585,25 @@ describe("describeActions", () => {
         // …but cancelling from a holding step DOES free them.
         inventoryEffect: "release",
         purgesEvidence: false,
+        tracksEvent: null,
       },
     ]);
+  });
+
+  it("carries the tracked trip on the FORWARD move only — a rewind is desk work", () => {
+    // Rewinding OUT of Entregado targets a step that itself tracks nothing, so the null there is
+    // ambiguous. Rewinding out of Recolectado targets Entregado — a status that DOES track a trip —
+    // which is the only case that can prove the rule is about the KIND of move, not the target.
+    const actions = describeActions(
+      CATALOG,
+      order({ serviceStatusId: 4, deliveredAt: new Date("2026-08-01T15:00:00Z") }),
+      ADMIN,
+      globals,
+    );
+    const backward = actions.find((action) => action.kind === "backward");
+    expect(backward?.statusName).toBe("Entregado");
+    // Nobody drives anywhere to undo a tap, so no navigation is offered.
+    expect(backward?.tracksEvent).toBeNull();
   });
 
   it("rewinding INTO an evidence step never demands photos — but says it DESTROYS the ones it undoes", () => {

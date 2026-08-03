@@ -11,6 +11,7 @@ import getZodRequiredPatterns from '@utils/getZodRequiredPatterns';
 import { t } from 'i18next';
 import type { ResolverResult } from 'react-hook-form';
 import { z } from 'zod';
+import type { DriverAvailability } from './order.types';
 
 const KEY = 'modules.panel.orders.create.errors';
 
@@ -111,6 +112,9 @@ const baseCreateOrderSchema = z.object({
   // editable; the snapshot the API stores is the contact TEXT + the (editable) delivery fee.
   deliveryContactTypeId: z.number().nullable(),
   deliveryZoneId: z.number().nullable(),
+  // The OPTIONAL map pin beside the address. `nullable`, never required, and validated only for
+  // SHAPE — the picker can't produce an off-globe pair, and the API re-checks anyway.
+  deliveryCoords: z.object({ lat: z.number(), lng: z.number() }).nullable(),
   deliveryAddress: requiredText(
     ORDER_ADDRESS_MIN_LENGTH,
     ORDER_LONGTEXT_MAX_LENGTH,
@@ -128,9 +132,10 @@ const baseCreateOrderSchema = z.object({
   // `null` = the empty-selection sentinel: how it's paid is OPTIONAL (payment can settle later);
   // the select pre-fills from the client's preferred method. Never required.
   paymentMethodId: z.number().nullable(),
-  // Who the order is assigned to — REQUIRED here (the select defaults to the creating admin), so the
-  // form never produces an unassigned order. The backend treats it as optional (defaulting to the
-  // creator); this mirror is stricter on purpose. The options are the catalog's `assignableUsers`.
+  // Who the order is assigned to — REQUIRED, exactly like the backend validator (Q-D2, owner
+  // decision 2026-07-30: "unassigned" is deleted rather than modelled, because the logistics pad is
+  // a rule about a DRIVER's day). The select defaults to the creating admin, so the form never
+  // produces an unassigned order. The options are the catalog's `assignableUsers`.
   assignedUserId: z.number({ error: t(`${KEY}.requiredAssignee`) }),
   lines: z
     .array(
@@ -210,6 +215,9 @@ export const createOrderDefaultValues: CreateOrderFormType = {
   deliveryContactTypeId: null,
   deliveryZoneId: null,
   deliveryAddress: '',
+  // `null`, not `undefined`: RHF's `setValue`/`reset` IGNORE `undefined` and fall back to the
+  // default, so the empty-selection sentinel is null end to end (the products-form lesson).
+  deliveryCoords: null,
   description: '',
   comment: '',
   deliveryAmount: '',
@@ -229,6 +237,7 @@ export interface CreateOrderBody {
   deliveryName: string;
   deliveryContact: string;
   deliveryAddress: string;
+  deliveryCoords?: { lat: number; lng: number };
   description?: string;
   comment?: string;
   deliveryAmount?: number;
@@ -258,6 +267,9 @@ export function toCreateOrderBody(data: CreateOrderFormType): CreateOrderBody {
     deliveryName: data.deliveryName.trim(),
     deliveryContact: data.deliveryContact.trim(),
     deliveryAddress: data.deliveryAddress.trim(),
+    // Omitted entirely when there is no pin — the API treats absent and null alike, and sending
+    // `null` for the overwhelmingly common case would only make the payload noisier.
+    ...(data.deliveryCoords && { deliveryCoords: data.deliveryCoords }),
     ...(description && { description }),
     ...(comment && { comment }),
     ...(money(data.deliveryAmount) !== undefined && { deliveryAmount: money(data.deliveryAmount) }),
@@ -299,6 +311,7 @@ export function orderToFormValues(order: {
   clientName: string;
   deliveryContact: string;
   deliveryAddress: string;
+  deliveryCoords?: { lat: number; lng: number };
   description?: string;
   comment?: string;
   deliveryAmount?: number;
@@ -316,6 +329,9 @@ export function orderToFormValues(order: {
     deliveryName: order.clientName,
     deliveryContact: order.deliveryContact,
     deliveryAddress: order.deliveryAddress,
+    // The snapshot the order was saved with — an edit reopens on ITS pin, not on the registry's
+    // (which may have moved since), exactly like every other snapshot field here.
+    deliveryCoords: order.deliveryCoords ?? null,
     description: order.description ?? '',
     comment: order.comment ?? '',
     deliveryAmount: order.deliveryAmount != null ? String(order.deliveryAmount) : '',
@@ -354,6 +370,74 @@ export function takeableFor(
   const windowValue = windowAvailability.get(productId);
   if (windowValue != null) return windowValue;
   return products.get(productId)?.available;
+}
+
+// ── The logistics pad (driver availability) ──────────────────────────────────────────────────────
+
+/** The i18n leaf a gap of `minutes` reads as — whole hours say "1 hora", anything else stays in
+ *  minutes. Returned as `{ key, count }` so the caller interpolates with its own `t` (and the
+ *  contract checker sees a real plural key). NEVER hardcode "1 hora": the admin can change it. */
+export function gapLabelKey(minutes: number): { key: string; count: number } {
+  return minutes > 0 && minutes % 60 === 0
+    ? { key: 'gapHours', count: minutes / 60 }
+    : { key: 'gapMinutes', count: minutes };
+}
+
+/**
+ * The messages `appendDriverConflictErrors` needs. Both are FUNCTIONS OF THE ANSWER's own data —
+ * each clash names its own moment, and the gap is whatever the admin configured — so the caller
+ * memoizes them on `t` alone and never has to rebuild them per probe.
+ */
+export interface DriverConflictMessages {
+  conflict: (driverName: string, at: string) => string;
+  /** This order's own delivery and collection are too close together. */
+  selfOverlap: (gapMinutes: number) => string;
+}
+
+/**
+ * Layers the LIVE driver-availability answer onto the resolver result — the same shape as
+ * {@link appendLineAvailabilityErrors}, and for the same reason: it must survive every
+ * revalidation, which a `setError` would not.
+ *
+ * **Where it lands is the whole point.** A stock problem is about a LINE ("no hay unidades") and
+ * belongs on that line's quantity; a driver problem is about the DATES ("no podemos estar ahí") and
+ * belongs on the delivery / pickup inputs. `blocks` says which of the two events each conflict
+ * hits, so the message appears on the field the admin has to change — never on both. A self-overlap
+ * is about the pair, so it marks the pickup: that is the one the admin moves.
+ *
+ * Pure, and silent when there is nothing to say: an absent probe answer (never run, still in
+ * flight, or failed) leaves the result untouched — availability is advisory and the save's 409 is
+ * the real guard.
+ */
+export function appendDriverConflictErrors(
+  driver: DriverAvailability | undefined,
+  result: ResolverResult<CreateOrderFormType>,
+  messages: DriverConflictMessages,
+): ResolverResult<CreateOrderFormType> {
+  if (!driver || driver.available) return result;
+  const errors: Record<string, { type: string; message: string }> = {};
+  if (driver.selfOverlap) {
+    errors['pickupAt'] = {
+      type: 'driver',
+      message: messages.selfOverlap(driver.gapMinutes ?? 0),
+    };
+  }
+  (driver.conflicts ?? []).forEach((conflict) => {
+    const field = conflict.blocks === 'COLLECTION' ? 'pickupAt' : 'deliveryAt';
+    // A field already carrying a message keeps it: the schema's own errors (and the self-overlap,
+    // which is the more specific fault) are never overwritten by a later conflict.
+    if (!errors[field] && !(result.errors as Record<string, unknown>)[field]) {
+      errors[field] = {
+        type: 'driver',
+        message: messages.conflict(driver.driverName ?? '', conflict.at),
+      };
+    }
+  });
+  if (Object.keys(errors).length === 0) return result;
+  return {
+    values: {},
+    errors: { ...result.errors, ...errors },
+  } as ResolverResult<CreateOrderFormType>;
 }
 
 /**

@@ -24,6 +24,14 @@
            account host is deliberately not committed to this public file. NOTE: the BUCKET must
            also allow the app origins in its own CORS policy (DEPLOYMENT.md §3b.4) — CORS is a
            browser gate only; the real upload authorization is the presigned signature itself.
+         · connect-src ALSO lists every API origin the built app may call, because a CSP blocks what
+           it does not name and the failure looks like a dead app, not a config error. It must stay
+           in step with `VITE_API_URL` (Cloudflare Pages) — CHANGING THE API HOST MEANS CHANGING
+           THIS LINE, in the same commit. `'self'` covers local dev on its own: Vite proxies
+           `/api` → localhost:3000, so the browser only ever calls its own origin there.
+           The `run.app` entry is the ROLLBACK path during the custom-domain cutover (repointing DNS
+           must not need a frontend rebuild); drop it once `api-staging.` has been stable for a
+           while. See DEPLOYMENT.md §3c.
          · worker-src `blob:` = dev tooling (Vite) spawns blob workers; harmless — creating one
            requires already-executing script, which script-src restricts to 'self'. -->
 
@@ -34,7 +42,7 @@
         style-src 'self' 'unsafe-inline';
         script-src 'self';
         img-src 'self' data: blob: https://*.partyrentalsgt.com;
-        connect-src 'self' https://ozari-api-694756660984.northamerica-south1.run.app https://*.r2.cloudflarestorage.com;
+        connect-src 'self' https://api-staging.partyrentalsgt.com https://api.partyrentalsgt.com https://ozari-api-694756660984.northamerica-south1.run.app https://*.r2.cloudflarestorage.com;
         worker-src 'self' blob:;
         font-src 'self';
       "

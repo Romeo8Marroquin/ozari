@@ -1,4 +1,4 @@
-import { isDeployedEnvironment } from "./environment.js";
+import { getAppHost, isDeployedEnvironment } from "./environment.js";
 
 export const appConfig = {
   accessToken: {
@@ -74,12 +74,20 @@ export const appConfig = {
       security: "Party Rentals <seguridad@partyrentalsgt.com>",
     },
     // Hosted logo for the email header. MUST be a publicly reachable PNG (email clients block data:
-    // URIs and don't render SVG — Gmail strips both). Served from the frontend's `public/` — so it
-    // only renders once the frontend is DEPLOYED with `email-logo.png`; update this URL if the
-    // frontend moves to the apex domain (e.g. https://www.partyrentalsgt.com/email-logo.png). Set to
-    // "" to fall back to the text wordmark. Many clients block remote images by default, so the
-    // wordmark still carries the brand when the image doesn't load.
-    logoUrl: "https://ozari-c28.pages.dev/email-logo.png",
+    // URIs and don't render SVG — Gmail strips both). It is served from the FRONTEND's `public/`,
+    // so it always lives at `<frontend origin>/email-logo.png` — which is why this is **DERIVED
+    // from `APP_HOST`** instead of written down. A hardcoded host is a URL that goes stale in
+    // silence: it still pointed at the old `pages.dev` origin after the frontend moved to its own
+    // domain, so every email quietly rendered a broken image. Empty when `APP_HOST` is unset (local
+    // scripts, tests), which falls back to the text wordmark — and many clients block remote images
+    // anyway, so the wordmark always carries the brand when the image doesn't load.
+    //
+    // A getter, not a constant: `getAppHost()` reads `process.env` on each call by design (see
+    // `environment.ts`), and caching it at module load would defeat that.
+    get logoUrl(): string {
+      const host = getAppHost();
+      return host ? `${host}/email-logo.png` : "";
+    },
   },
 
   storage: {
@@ -138,7 +146,8 @@ export const appConfig = {
   // Most distinct products one order can carry (a hard input bound, far above any real party).
   maxOrderLines: 50,
   // Fallback when the `orders.logisticsSpacingMinutes` app preference is missing/corrupt — the
-  // seeded default (single-vehicle rule: ≥1h between any two logistics events).
+  // seeded default. It is the LOGISTICS PAD's gap: each event occupies ±half of it on its DRIVER's
+  // day, so two events of the same driver end up ≥1h apart (EPIC-2-DRIVER-AVAILABILITY §1).
   defaultLogisticsSpacingMinutes: 60,
   // Fallback when the `orders.turnaroundMinutes` app preference is missing/corrupt — the washing
   // period after a collection. Rental units stay unavailable for this long past an order's billed

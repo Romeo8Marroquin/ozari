@@ -256,7 +256,7 @@ async function seedAppPreferences(prisma: SeedPrismaClient): Promise<void> {
       valueType: "int",
       group: "orders",
       description:
-        "Minutos mínimos entre dos eventos logísticos (entrega/recolección) de órdenes distintas",
+        "Minutos mínimos entre dos eventos logísticos (entrega/recolección) del mismo responsable, incluidos los del propio pedido",
     },
     {
       key: "orders.turnaroundMinutes",

@@ -6,6 +6,7 @@ import { logger } from "@/config/logger.js";
 import { AuditAction, logAudit } from "@/config/auditLogger.js";
 import { isDeployedEnvironment } from "@/config/environment.js";
 import { decryptKms, encryptKms } from "@helpers/encryption.js";
+import { encodeCoords } from "@helpers/geo.js";
 import { type CustomRequest } from "@models/common/customRequestModel.js";
 import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
@@ -34,13 +35,20 @@ import {
 } from "./lifecycle/lifecycle.service.js";
 import { getStorage } from "@helpers/storage.js";
 import {
+  OrderDriverConflictError,
+  OrderSelfOverlapError,
+  assertDriverAvailable,
+  findDriverConflicts,
+  pendingLogisticsEvents,
+  projectDriverAvailability,
+  selfOverlap,
+} from "./logistics/logistics.service.js";
+import {
   ASSIGNABLE_ROLES,
   OrderNotFoundError,
-  OrderSpacingConflictError,
   OrderStockConflictError,
   buildOrderListWhere,
   buildRentedInWindowWhere,
-  buildSpacingConflictWhere,
   computeBilledDays,
   holdsSaleStock,
   loadOrderProjectionContext,
@@ -56,6 +64,60 @@ import {
   sortAgendaRows,
   type PricedOrderLineModel,
 } from "./orders.service.js";
+
+/**
+ * The two LOGISTICS-PAD refusals, answered identically by create and edit — a `409` whose `data`
+ * says WHICH rule refused and with what, so the form can put the message on the right date input
+ * and quote the configured gap instead of hardcoding "1 hora".
+ *
+ * Deliberately its own payload key, never `data.conflicts`: that shape belongs to the STOCK
+ * conflict and lands on a line's quantity. "We don't have the units" and "we can't be there" are
+ * different problems with different fixes, and reusing one for the other is the single easiest way
+ * to make both confusing (owner rule §2.4). Returns `true` when it answered the request.
+ */
+const sendLogisticsConflict = (
+  res: Response,
+  scope: "createOrder" | "updateOrder",
+  error: unknown,
+): boolean => {
+  if (error instanceof OrderSelfOverlapError) {
+    logger.warn(
+      i18next.t(`orders.${scope}.logs.selfOverlap`, { gap: error.gapMinutes }),
+    );
+    sendOzariError(
+      res,
+      HttpEnum.CONFLICT,
+      i18next.t(`orders.${scope}.selfOverlap`),
+      undefined,
+      { selfOverlap: { gapMinutes: error.gapMinutes } },
+    );
+    return true;
+  }
+  if (error instanceof OrderDriverConflictError) {
+    logger.warn(
+      i18next.t(`orders.${scope}.logs.driverConflict`, {
+        orderId: error.conflict.orderId,
+        conflictAt: error.conflict.at.toISOString(),
+        driver: error.driverName ?? "",
+      }),
+    );
+    sendOzariError(
+      res,
+      HttpEnum.CONFLICT,
+      i18next.t(`orders.${scope}.driverConflict`),
+      undefined,
+      {
+        driverConflict: {
+          ...error.conflict,
+          driverName: error.driverName,
+          gapMinutes: error.gapMinutes,
+        },
+      },
+    );
+    return true;
+  }
+  return false;
+};
 
 /**
  * `GET /orders` — the paginated order list behind the agenda/history views. **Admin only** (route
@@ -353,15 +415,14 @@ export const createOrder = async (
         throw new OrderStockConflictError(conflicts);
       }
 
-      // The single-vehicle spacing rule — the hour is an admin preference, never hardcoded.
-      const events = [body.deliveryAt, ...(body.pickupAt ? [body.pickupAt] : [])];
-      const spacingConflict = await tx.service.findFirst({
-        where: buildSpacingConflictWhere(events, timing.spacingMinutes),
-        select: { id: true, deliveryAt: true },
+      // The logistics pad: each event occupies a block of its DRIVER's day, and two blocks on the
+      // same driver may not overlap — including this order's OWN delivery and collection, which
+      // nothing checked before (§3.1). The gap is an admin preference, never hardcoded. A brand-new
+      // order has performed nothing, so every event it declares is pending.
+      await assertDriverAvailable(tx, pendingLogisticsEvents(body), {
+        gapMinutes: timing.spacingMinutes,
+        driverId: body.assignedUserId,
       });
-      if (spacingConflict) {
-        throw new OrderSpacingConflictError(spacingConflict.deliveryAt);
-      }
 
       // Sales consume stock permanently at confirmation (a sold unit never comes back).
       await Promise.all(
@@ -387,6 +448,10 @@ export const createOrder = async (
           deliveryNameKms: encryptKms(body.deliveryName),
           deliveryContactKms: encryptKms(body.deliveryContact),
           deliveryAddressKms: encryptKms(body.deliveryAddress),
+          // The pin travels with the text it belongs to — snapshotted, encrypted, and NULL when the
+          // admin never placed one (the overwhelmingly common case).
+          deliveryCoordsKms:
+            body.deliveryCoords !== undefined ? encryptKms(encodeCoords(body.deliveryCoords)) : null,
           description: body.description ?? null,
           comment: body.comment ?? null,
           deliveryAt: body.deliveryAt,
@@ -399,10 +464,10 @@ export const createOrder = async (
           deliveryAmount: body.deliveryAmount ?? null,
           depositAmount: body.depositAmount ?? null,
           paymentMethodId: body.paymentMethodId ?? null,
-          // Assignment: the chosen deliverable staff (validated as an active Admin/Driver), else the
-          // CREATING admin — so an order made here is never left unassigned. The admin's own orders
-          // then read as `isMine` on the agenda (Mis pedidos + the quick action).
-          assignedUserId: body.assignedUserId ?? byUserId,
+          // Assignment: the chosen deliverable staff, REQUIRED by the validator (Q-D2) — every
+          // event needs an owner, because the logistics pad is a rule about a driver's day. The
+          // admin's own orders read as `isMine` on the agenda (Mis pedidos + the quick action).
+          assignedUserId: body.assignedUserId,
           currencyId,
           // The configured entry point of the pipeline (today "Pendiente" — the `isInitial` row).
           serviceStatusId: initial.id,
@@ -474,17 +539,7 @@ export const createOrder = async (
       );
       return;
     }
-    if (error instanceof OrderSpacingConflictError) {
-      logger.warn(
-        i18next.t("orders.createOrder.logs.spacingConflict", {
-          conflictAt: error.conflictAt.toISOString(),
-        }),
-      );
-      sendOzariError(
-        res,
-        HttpEnum.CONFLICT,
-        i18next.t("orders.createOrder.spacingConflict"),
-      );
+    if (sendLogisticsConflict(res, "createOrder", error)) {
       return;
     }
     logger.error(i18next.t("orders.createOrder.logs.errorCreatingOrder", { error }));
@@ -648,13 +703,17 @@ export const updateOrder = async (
           }
           continue;
         }
+        if (!holdsSale) {
+          // Symmetric with the rental branch: the order reserves no sale units (it was cancelled,
+          // or the goods were delivered and are with the client), so the edit moves no stock at all
+          // — nothing can be short, and refusing the paperwork would fix nothing.
+          continue;
+        }
         // Sale: the shelf ALREADY has this order's decrement applied, so what it may take is the
         // remaining stock PLUS whatever it is currently holding of that product.
         const currentLine = currentByProduct.get(line.productId);
         const heldHere =
-          holdsSale && currentLine !== undefined && !currentLine.isRental
-            ? currentLine.quantity
-            : 0;
+          currentLine !== undefined && !currentLine.isRental ? currentLine.quantity : 0;
         const available = product.quantity + heldHere;
         if (available < line.quantity) {
           conflicts.push({
@@ -669,15 +728,17 @@ export const updateOrder = async (
         throw new OrderStockConflictError(conflicts);
       }
 
-      // The single-vehicle spacing rule, minus this order's own events.
-      const events = [body.deliveryAt, ...(body.pickupAt ? [body.pickupAt] : [])];
-      const spacingConflict = await tx.service.findFirst({
-        where: buildSpacingConflictWhere(events, timing.spacingMinutes, id),
-        select: { id: true, deliveryAt: true },
-      });
-      if (spacingConflict) {
-        throw new OrderSpacingConflictError(spacingConflict.deliveryAt);
-      }
+      // The logistics pad — the order as it STANDS (its actuals, its cancellation) with the NEW
+      // dates, minus itself: it already occupies its driver at exactly its own moments. Only the
+      // events still to be PERFORMED are checked, so a cancelled or delivered one asks the driver's
+      // day for nothing, exactly like the stock rules above; a half-finished rental is still
+      // checked on its collection. The assignee is the NEW one — an edit that hands the order to
+      // another driver is a question about THAT driver's day.
+      await assertDriverAvailable(
+        tx,
+        pendingLogisticsEvents({ ...order, deliveryAt: body.deliveryAt, pickupAt: body.pickupAt }),
+        { gapMinutes: timing.spacingMinutes, driverId: body.assignedUserId, excludeServiceId: id },
+      );
 
       // Sale stock moves by the DIFFERENCE, and only while the order still holds it. A product that
       // left the order gives its whole quantity back; a new one takes its whole quantity.
@@ -743,6 +804,10 @@ export const updateOrder = async (
           deliveryNameKms: encryptKms(body.deliveryName),
           deliveryContactKms: encryptKms(body.deliveryContact),
           deliveryAddressKms: encryptKms(body.deliveryAddress),
+          // The pin travels with the text it belongs to — snapshotted, encrypted, and NULL when the
+          // admin never placed one (the overwhelmingly common case).
+          deliveryCoordsKms:
+            body.deliveryCoords !== undefined ? encryptKms(encodeCoords(body.deliveryCoords)) : null,
           description: body.description ?? null,
           comment: body.comment ?? null,
           deliveryAt: body.deliveryAt,
@@ -753,9 +818,10 @@ export const updateOrder = async (
           deliveryAmount: body.deliveryAmount ?? null,
           depositAmount: body.depositAmount ?? null,
           paymentMethodId: body.paymentMethodId ?? null,
-          // Absent ⇒ the order keeps its current owner. An edit is not a reassignment, and silently
-          // moving it to whoever opened the form would be a real operational error.
-          assignedUserId: body.assignedUserId ?? order.assignedUserId,
+          // REQUIRED (Q-D2), and the edit form always sends the order's CURRENT assignee back — so
+          // saving an untouched form is not a silent reassignment, while deliberately changing the
+          // picker moves the order (and re-checks the new driver's day above).
+          assignedUserId: body.assignedUserId,
           currencyId,
         },
       });
@@ -806,13 +872,7 @@ export const updateOrder = async (
       );
       return;
     }
-    if (error instanceof OrderSpacingConflictError) {
-      logger.warn(
-        i18next.t("orders.updateOrder.logs.spacingConflict", {
-          conflictAt: error.conflictAt.toISOString(),
-        }),
-      );
-      sendOzariError(res, HttpEnum.CONFLICT, i18next.t("orders.updateOrder.spacingConflict"));
+    if (sendLogisticsConflict(res, "updateOrder", error)) {
       return;
     }
     logger.error(i18next.t("orders.updateOrder.logs.errorUpdatingOrder", { error }));
@@ -1042,12 +1102,26 @@ export const getOrdersCatalog = async (
 };
 
 /**
- * `POST /orders/availability` — the admin's live per-window availability probe (EPIC-2 §10.C): for
- * the requested products + window, return each product's takeable amount so the order form can
- * annotate the picker and reconcile picked lines. Rentals are fleet minus what's held in the window
- * (only computable once a pickup exists → `null` otherwise); sales are current stock (window-
- * independent). Exact counts — the ADMIN runs the business (§11.A); a Client tier would cap instead.
- * A pure read (no lock): a create still re-checks under the product lock, so this is advisory.
+ * `POST /orders/availability` — the admin's live per-window probe, answering the order form's TWO
+ * scheduling questions on one keystroke (EPIC-2 §10.C + EPIC-2-DRIVER-AVAILABILITY §4.3):
+ *
+ * - **Do we have the goods?** Per product, the takeable amount for the window, so the picker can
+ *   annotate amounts and reconcile picked lines. Rentals are fleet minus what's held in the window
+ *   (only computable once a pickup exists → `null` otherwise); sales are current stock. Exact
+ *   counts — the ADMIN runs the business (§11.A); a Client tier would cap instead.
+ * - **Can the driver be there?** Only when an `assignedUserId` is sent: whether either of the
+ *   order's events would overlap a block already on that driver's day, plus whether the order's own
+ *   delivery and collection are too close to each other. Shaped by `projectDriverAvailability`, so
+ *   a future client tier is a branch there rather than a new endpoint that leaks a name or a count.
+ *
+ * `excludeOrderId` (an EDIT re-checking itself) drops that order from BOTH counts — it holds its
+ * own rental units and occupies its driver at exactly its own two moments, and an order can never
+ * be unavailable because of itself. Its actuals also decide which of its events still occupy a day
+ * at all, so a finished or cancelled order probes as free, exactly as the save treats it.
+ *
+ * A pure read (no lock) and ADVISORY in both halves: create/edit re-derive everything under the
+ * product locks inside their transaction, and that `409` stays the authority. The probe exists so
+ * the admin does not fill in a form that cannot be saved.
  */
 export const getOrderAvailability = async (
   req: CustomRequest,
@@ -1064,9 +1138,21 @@ export const getOrderAvailability = async (
     const rentalIds = products
       .filter((product) => product.productBusinessTypeId === BusinessTypeEnum.RENT)
       .map((product) => product.id);
-    // The probe must answer with the SAME rule the create will enforce — washing period included —
-    // or the form would offer units the save then refuses.
-    const { turnaroundMinutes } = await loadOrderTimingPreferences(prismaClient);
+    // The probe must answer with the SAME rules the create will enforce — washing period and
+    // logistics gap included — or the form would offer what the save then refuses.
+    const { turnaroundMinutes, spacingMinutes } =
+      await loadOrderTimingPreferences(prismaClient);
+    // The order being EDITED, when there is one: its actuals decide which of its events still
+    // occupy a driver, and its id drops it from both counts. Without this the probe would answer a
+    // stricter question than the save — an edit competing with its own held units and its own two
+    // blocks — and the form would cap lines the server was about to accept.
+    const editing =
+      body.excludeOrderId !== undefined
+        ? await prismaClient.service.findUnique({
+            where: { id: body.excludeOrderId },
+            select: { deliveredAt: true, collectedAt: true, cancelledAt: true },
+          })
+        : null;
     const rentedRows =
       rentalIds.length > 0 && body.pickupAt
         ? await prismaClient.serviceDetail.groupBy({
@@ -1076,7 +1162,12 @@ export const getOrderAvailability = async (
               body.deliveryAt,
               body.pickupAt,
               holding,
-              { turnaroundMinutes },
+              {
+                turnaroundMinutes,
+                ...(body.excludeOrderId !== undefined && {
+                  excludeServiceId: body.excludeOrderId,
+                }),
+              },
             ),
             _sum: { quantity: true },
           })
@@ -1096,7 +1187,41 @@ export const getOrderAvailability = async (
       return { productId: product.id, available };
     });
 
-    const response: OrderAvailabilityResponseModel = { availability };
+    // The DRIVER half — only when the form has reached the assignee. Same two-step rule as the
+    // save: SQL widens by the maximum pad, `refineConflicts` decides.
+    let driver: OrderAvailabilityResponseModel["driver"];
+    if (body.assignedUserId !== undefined) {
+      const events = pendingLogisticsEvents({
+        deliveryAt: body.deliveryAt,
+        pickupAt: body.pickupAt,
+        ...(editing ?? {}),
+      });
+      const { conflicts, driverName } = await findDriverConflicts(
+        prismaClient,
+        events,
+        {
+          gapMinutes: spacingMinutes,
+          driverId: body.assignedUserId,
+          ...(body.excludeOrderId !== undefined && {
+            excludeServiceId: body.excludeOrderId,
+          }),
+        },
+      );
+      driver = projectDriverAvailability(
+        { role: req.user?.userRole ?? RolesEnum.Client },
+        {
+          conflicts,
+          selfOverlap: selfOverlap(events, spacingMinutes),
+          gapMinutes: spacingMinutes,
+          driverName,
+        },
+      );
+    }
+
+    const response: OrderAvailabilityResponseModel = {
+      availability,
+      ...(driver && { driver }),
+    };
     logger.info(i18next.t("orders.availability.logs.computed", { count: availability.length }));
     sendOzariSuccess(res, HttpEnum.OK, i18next.t("orders.availability.computed"), response);
   } catch (error) {

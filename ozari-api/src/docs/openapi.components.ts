@@ -638,6 +638,30 @@ export const schemas: Record<string, Schema> = {
           "stored objects.",
         example: false,
       },
+      tracksEvent: {
+        type: "string",
+        nullable: true,
+        enum: ["DELIVERY", "COLLECTION", null],
+        description:
+          "Which physical trip this move CONFIRMS, read from the target status's `tracksEvent` — " +
+          "so a client can offer navigation on exactly the steps where somebody drives somewhere, " +
+          "without knowing any status ids. `null` on every non-travel step and on every `backward`/" +
+          "`disruptive` move (undoing a tap is desk work, not a journey).",
+        example: "DELIVERY",
+      },
+    },
+  },
+  Coords: {
+    type: "object",
+    required: ["lat", "lng"],
+    description:
+      "A map pin. **Always optional**: the delivery ADDRESS TEXT is what the business runs on, and " +
+      "the pin only removes the last-hundred-metres ambiguity — every consumer must keep working " +
+      "when it is absent. Stored AES-encrypted like the address it belongs to, and rounded to 6 " +
+      "decimals (~11 cm) so a dragged pin's float noise never churns the snapshot.",
+    properties: {
+      lat: { type: "number", format: "double", minimum: -90, maximum: 90, example: 14.634915 },
+      lng: { type: "number", format: "double", minimum: -180, maximum: 180, example: -90.506883 },
     },
   },
   OrderStatusCatalogOption: {
@@ -849,6 +873,13 @@ export const schemas: Record<string, Schema> = {
           },
           deliveryContact: { type: "string", example: "WhatsApp 5555-1234" },
           deliveryAddress: { type: "string", example: "Zona 10, 4a avenida 5-55" },
+          deliveryCoords: {
+            allOf: [schemaRef("Coords")],
+            nullable: true,
+            description:
+              "The delivery's map pin, snapshotted at order time. Absent is normal — a client " +
+              "offering navigation falls back to searching `deliveryAddress`.",
+          },
           description: { type: "string", nullable: true },
           comment: { type: "string", nullable: true },
           deliveryAmount: {
@@ -946,6 +977,7 @@ export const schemas: Record<string, Schema> = {
       "deliveryName",
       "deliveryContact",
       "deliveryAddress",
+      "assignedUserId",
       "lines",
     ],
     description:
@@ -964,6 +996,14 @@ export const schemas: Record<string, Schema> = {
       deliveryName: { type: "string", minLength: 2, maxLength: 255, example: "María López" },
       deliveryContact: { type: "string", minLength: 2, maxLength: 255, example: "WhatsApp 5555-1234" },
       deliveryAddress: { type: "string", minLength: 5, maxLength: 500, example: "Zona 10, 4a avenida 5-55" },
+      deliveryCoords: {
+        allOf: [schemaRef("Coords")],
+        nullable: true,
+        description:
+          "OPTIONAL map pin for this delivery, snapshotted alongside the text. Omit it (or send " +
+          "null) when there is none — the address text remains authoritative either way. A " +
+          "malformed pair is a `400`, never a silently dropped field.",
+      },
       description: { type: "string", nullable: true, maxLength: 500 },
       comment: { type: "string", nullable: true, maxLength: 500 },
       deliveryAmount: { type: "number", nullable: true, example: 50 },
@@ -976,11 +1016,11 @@ export const schemas: Record<string, Schema> = {
       },
       assignedUserId: {
         type: "integer",
-        nullable: true,
         description:
-          "Staff member to assign the order to (an active Admin/Driver — see `GET /orders/catalog` " +
-          "`assignableUsers`). Optional: DEFAULTS to the creating admin, so an order made here is " +
-          "never left unassigned.",
+          "Staff member the order is assigned to (an active Admin/Driver — see " +
+          "`GET /orders/catalog` `assignableUsers`). **Required**: each logistics event occupies a " +
+          "block of its DRIVER's day, so every event needs an owner (the API used to default this " +
+          "to the creating admin).",
         example: 2,
       },
       lines: {
@@ -1014,7 +1054,8 @@ export const schemas: Record<string, Schema> = {
     required: ["deliveryAt", "productIds"],
     description:
       "The live availability probe: a delivery datetime, an OPTIONAL pickup (after delivery when " +
-      "present — omit it when no rental window exists yet), and 1–200 product ids.",
+      "present — omit it when no rental window exists yet), 1–200 product ids, and the OPTIONAL " +
+      "driver half (`assignedUserId`, plus `excludeOrderId` when an edit re-checks itself).",
     properties: {
       deliveryAt: { type: "string", format: "date-time" },
       pickupAt: { type: "string", format: "date-time", nullable: true },
@@ -1023,6 +1064,70 @@ export const schemas: Record<string, Schema> = {
         minItems: 1,
         maxItems: 200,
         items: { type: "integer", example: 3 },
+      },
+      assignedUserId: {
+        type: "integer",
+        nullable: true,
+        description:
+          "The driver whose day would hold these events. Omit it and the response carries NO " +
+          "`driver` block — the form simply has nothing to say until the assignee is chosen.",
+        example: 2,
+      },
+      excludeOrderId: {
+        type: "integer",
+        nullable: true,
+        description:
+          "The order being EDITED, excluded from BOTH counts — it is holding its own rental units " +
+          "and occupies its own two blocks, so without this it would compete with itself and the " +
+          "probe would answer a stricter question than the save. Its tracking actuals are also " +
+          "read here: an order that was cancelled, or whose events already happened, occupies " +
+          "nothing and probes as free.",
+        example: 42,
+      },
+    },
+  },
+  DriverConflict: {
+    type: "object",
+    description:
+      "One real overlap on the driver's day: the OTHER order's event (`at`/`kind`) and WHICH of " +
+      "the checked order's own events it blocks — so the form can put the error on the right " +
+      "date input instead of on both. **Admin tier only.**",
+    properties: {
+      orderId: { type: "integer", example: 42 },
+      at: { type: "string", format: "date-time" },
+      kind: { type: "string", enum: ["DELIVERY", "COLLECTION"], example: "DELIVERY" },
+      blocks: { type: "string", enum: ["DELIVERY", "COLLECTION"], example: "COLLECTION" },
+    },
+  },
+  DriverAvailability: {
+    type: "object",
+    description:
+      "Whether the assigned driver can actually be there. Every field except `available` is " +
+      "**Admin tier**: a future client asking whether their window can be served learns only that " +
+      "it cannot — never a name, a count, an order, or that the business has one driver.",
+    properties: {
+      available: { type: "boolean", example: false },
+      gapMinutes: {
+        type: "integer",
+        description:
+          "The configured `orders.logisticsSpacingMinutes`, so copy quotes the real number " +
+          "instead of hardcoding \"1 hora\".",
+        example: 60,
+      },
+      selfOverlap: {
+        type: "boolean",
+        description:
+          "The order's OWN delivery and collection are closer than the gap — physically " +
+          "impossible for one driver, and never checked before this epic.",
+        example: false,
+      },
+      conflicts: { type: "array", items: schemaRef("DriverConflict") },
+      driverName: {
+        type: "string",
+        description:
+          "Who is already busy — sent even though the client picked the assignee, so the probe's " +
+          "copy and the save's `409` name the driver from ONE source.",
+        example: "Ana Ruiz",
       },
     },
   },
@@ -1040,6 +1145,7 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     properties: {
       availability: { type: "array", items: schemaRef("ProductAvailability") },
+      driver: schemaRef("DriverAvailability"),
     },
   },
   ClientRegistryContact: {
@@ -1058,6 +1164,7 @@ export const schemas: Record<string, Schema> = {
       zone: { allOf: [schemaRef("ZoneOption")], nullable: true },
       address: { type: "string", example: "Zona 10, 4a avenida 5-55" },
       instructions: { type: "string", nullable: true },
+      coords: { allOf: [schemaRef("Coords")], nullable: true },
       domicilePrice: { type: "number", nullable: true, example: 50 },
       isFavorite: { type: "boolean", example: true },
     },
@@ -1290,6 +1397,7 @@ export const schemas: Record<string, Schema> = {
             zoneId: { type: "integer", nullable: true, example: 6 },
             address: { type: "string", minLength: 5, maxLength: 500 },
             instructions: { type: "string", nullable: true, maxLength: 500 },
+            coords: { allOf: [schemaRef("Coords")], nullable: true },
             domicilePrice: { type: "number", nullable: true },
             isFavorite: { type: "boolean" },
           },

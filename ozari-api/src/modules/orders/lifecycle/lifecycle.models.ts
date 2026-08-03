@@ -127,6 +127,16 @@ export interface OrderActionModel {
   /** True when accepting this move DESTROYS the photos of the step it undoes (a backward leg out of
    *  a step that demanded evidence). Warned about before it happens, never after. */
   purgesEvidence: boolean;
+  /**
+   * Which physical trip this move CONFIRMS, when it confirms one — read straight from the status's
+   * `tracksEvent`, so "is somebody about to drive somewhere?" stays a property of the machine rather
+   * than a list of status ids in the client. It is what puts a "navigate there" button beside the
+   * advance action, and only on the steps where driving is what actually happens.
+   *
+   * Only a FORWARD move carries it: rewinding Entregado is an admin fixing a mistaken tap at a desk,
+   * not a journey, and offering navigation there would be noise.
+   */
+  tracksEvent: TrackedEventEnum | null;
 }
 
 /** The global evidence bounds (from `app_preferences`, with `appConfig` fallbacks). */

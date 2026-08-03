@@ -1,3 +1,4 @@
+import type { CoordsModel } from "@helpers/geo.js";
 import type {
   CatalogOptionModel,
   PaginationMeta,
@@ -18,6 +19,9 @@ export interface CreateRegistryAddressRequestModel {
   zoneId?: number;
   address: string;
   instructions?: string;
+  /** The OPTIONAL map pin. The text stays authoritative — this only removes the last-hundred-metres
+   *  ambiguity, and the order that uses this address snapshots whatever is here at that moment. */
+  coords?: CoordsModel;
   /** Suggested delivery fee for this address (the order snapshots what was actually charged). */
   domicilePrice?: number;
   /** At most ONE may be true; when none is flagged the FIRST address becomes the favorite. */
@@ -54,6 +58,8 @@ export interface RegistryAddressResponseModel {
   zone: ZoneCatalogOptionModel | undefined;
   address: string;
   instructions: string | undefined;
+  /** The saved pin, when this address has one — absent is the normal case. */
+  coords: CoordsModel | undefined;
   domicilePrice: number | undefined;
   isFavorite: boolean;
 }

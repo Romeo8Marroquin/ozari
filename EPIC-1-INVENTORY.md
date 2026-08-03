@@ -232,15 +232,21 @@ as the default landing.
   it — do NOT ship mobile-facing MVP without this. (The 2026-07-16 refresh-reuse GRACE window fixed
   the other session killer — the lost-rotation-response nuke.) **Cutover checklist** — serve both
   under `partyrentalsgt.com` subdomains (first-party, same-site everywhere):
-  1. FE: add `app.partyrentalsgt.com` as the Cloudflare Pages custom domain.
-  2. API: put `api.partyrentalsgt.com` in front of Cloud Run. Check first whether Cloud Run
-     **domain mapping** is available in `northamerica-south1` (it's region-limited); if not, the
-     fallbacks are a global external HTTPS LB (~$18/mo) or a Cloudflare-proxied Worker/origin-rule
-     — decide by cost at cutover.
+  1. FE: add the Cloudflare Pages custom domain. ✅ **DONE — staging is on
+     `staging.partyrentalsgt.com`.**
+  2. API: put `api-staging.partyrentalsgt.com` in front of Cloud Run. ✅ **ANSWERED (2026-07-31):
+     Cloud Run domain mapping is NOT available in `northamerica-south1`** (it exists only in
+     asia-east1/northeast1/southeast1, europe-north1/west1/west4, us-central1/east1/east4/west1), so
+     the choice is a Cloudflare-proxied CNAME + an Origin Rule rewriting the `Host` header (free —
+     recommended) or a global external HTTPS LB (~$18–25/mo). **Full runbook: `DEPLOYMENT.md` §3c.**
   3. Config sweep, all in the same change: `APP_HOST` (Terraform `_APP_HOST` substitution +
      `cloud-run.tf`, no trailing slash — CORS + API-key origin check compare it to `Origin`),
-     Cloudflare Pages `VITE_API_URL`, and `appConfig.email.logoUrl` (the welcome/security emails
-     point at the FE origin for the logo PNG).
+     Cloudflare Pages `VITE_API_URL`, **the frontend CSP `connect-src` in `index.html`** (it names
+     the API host explicitly — a CSP blocks what it doesn't name, and the app just looks dead), and
+     **the R2 bucket's CORS `AllowedOrigins`** (browser uploads PUT straight to R2, so a stale origin
+     breaks every photo upload while the rest of the app works). `appConfig.email.logoUrl` is no
+     longer on this list — it is now DERIVED from `APP_HOST` (2026-07-31), because it silently kept
+     pointing at the old origin exactly like this checklist warned.
   4. Optional hardening once same-site: the refresh cookie no longer needs `SameSite=None` —
      tighten to `Lax`.
   5. **Acceptance test (the actual gate): a real iPhone/Safari.** Log in → background or close the

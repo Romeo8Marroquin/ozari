@@ -76,6 +76,8 @@ describe("validateCreateClientRegistry", () => {
         {
           address: "Casa en Hacienda Real, lote 5",
           instructions: "  Portón negro  ",
+          // A pin as a dragged map hands it over: far more precision than anyone needs.
+          coords: { lat: 14.634915123456, lng: -90.506882987654 },
           domicilePrice: 0.999,
           isFavorite: true,
         },
@@ -85,7 +87,13 @@ describe("validateCreateClientRegistry", () => {
     const body = req.body as {
       notes: string;
       contacts: Array<{ isPrincipal: boolean }>;
-      addresses: Array<{ isFavorite: boolean; domicilePrice?: number; zoneId?: number; instructions?: string }>;
+      addresses: Array<{
+        isFavorite: boolean;
+        domicilePrice?: number;
+        zoneId?: number;
+        instructions?: string;
+        coords?: { lat: number; lng: number };
+      }>;
     };
     expect(body.notes).toBe("cliente de siempre");
     expect(body.contacts[0]?.isPrincipal).toBe(false);
@@ -93,6 +101,8 @@ describe("validateCreateClientRegistry", () => {
     expect(body.addresses[0]).toMatchObject({ isFavorite: true, domicilePrice: 0.99 });
     expect(body.addresses[0]?.instructions).toBe("Portón negro");
     expect(body.addresses[0]?.zoneId).toBeUndefined();
+    // Rounded to ~11 cm at the door, so the float noise never reaches an encrypted snapshot.
+    expect(body.addresses[0]?.coords).toEqual({ lat: 14.634915, lng: -90.506883 });
   });
 
   it.each([
@@ -120,6 +130,13 @@ describe("validateCreateClientRegistry", () => {
     ["invalidAddress", { addresses: [{ address: "abc" }] }],
     ["invalidInstructions", { addresses: [{ address: "Zona 10, 4a avenida", instructions: 42 }] }],
     ["invalidDomicilePrice", { addresses: [{ address: "Zona 10, 4a avenida", domicilePrice: -1 }] }],
+    // A malformed pin is REFUSED, never silently dropped: to the admin who just placed it, a
+    // discarded coordinate is indistinguishable from the map being broken.
+    ["invalidCoords", { addresses: [{ address: "Zona 10, 4a avenida", coords: { lat: 91, lng: 0 } }] }],
+    [
+      "invalidCoords",
+      { addresses: [{ address: "Zona 10, 4a avenida", coords: "14.6,-90.5" }] },
+    ],
     [
       "multipleFavoriteAddresses",
       {

@@ -225,6 +225,30 @@ describe('OrderDetailPage', () => {
     expect(screen.queryByTestId('advance-modal')).not.toBeInTheDocument();
   });
 
+  it('offers navigation only on a step somebody actually DRIVES to', async () => {
+    // The condition is the machine's own `tracksEvent`, never a status id: on a travel step the
+    // button appears beside the advance action; on paperwork steps it would be noise.
+    setOrder({ data: order({ actions: [action({ kind: 'forward' })] }) });
+    const { unmount } = renderPage();
+    expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
+    unmount();
+
+    setOrder({
+      data: order({ actions: [action({ kind: 'forward', tracksEvent: 'DELIVERY' })] }),
+    });
+    renderPage();
+    expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
+  });
+
+  it('offers navigation to a DRIVER too — it is their button more than the admin’s', () => {
+    useHasRole.mockReturnValue(false);
+    setOrder({
+      data: order({ actions: [action({ kind: 'forward', tracksEvent: 'COLLECTION' })] }),
+    });
+    renderPage();
+    expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
+  });
+
   it('gives a NON-admin no admin powers: no status control, no delete', () => {
     useHasRole.mockReturnValue(false);
     setOrder({ data: order({ actions: [action({ kind: 'forward' })] }) });

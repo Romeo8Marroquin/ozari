@@ -2,9 +2,12 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineArrowPath, HiOutlineExclamationTriangle } from 'react-icons/hi2';
 import Button from '@components/Button';
+import CustomSelect from '@components/CustomSelect';
 import SkeletonFade from '@components/SkeletonFade';
 import Switch from '@components/Switch';
 import { getInitials } from '@utils/nameFormat';
+import { MAPS_APPS, type MapsAppPreference } from '@utils/mapLinks';
+import { getMapsAppPreference, setMapsAppPreference } from '@utils/mapsPreference';
 import { useMe } from '../hooks/useMe';
 import { staggerIn, staggerOut } from '../pageMotion';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
@@ -131,6 +134,9 @@ const SettingsPage: React.FC = () => {
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [mfaModalOpen, setMfaModalOpen] = useState(false);
   const [mfaDisableModalOpen, setMfaDisableModalOpen] = useState(false);
+  // Read ONCE into state: this is device-local storage, not server state, so there is nothing to
+  // fetch, revalidate or invalidate — the select simply owns it and writes through on change.
+  const [mapsApp, setMapsApp] = useState<MapsAppPreference>(() => getMapsAppPreference());
 
   const loading = isLoading && !me;
   // Only a COLD failure (no cached profile to show) becomes the error state; a failed background
@@ -259,6 +265,41 @@ const SettingsPage: React.FC = () => {
                   onDisable={() => setMfaDisableModalOpen(true)}
                 />
               </SkeletonFade>
+            }
+          />
+        </div>
+      </SettingsSection>
+
+      {/* ── This device ─────────────────────────────────────────────────────────────────
+          Deliberately in Ajustes (every role has it) rather than in the admin Preferencias screen:
+          which maps app to open is a fact about the PHONE, so a driver must be able to set it for
+          themselves without asking anyone. It is stored locally and survives logout. */}
+      <SettingsSection
+        title={t('modules.panel.settings.device.title')}
+        description={t('modules.panel.settings.device.description')}
+      >
+        <div className="divide-y divide-charcoal/[0.06]">
+          <SecurityRow
+            label={t('modules.panel.settings.device.mapsApp.label')}
+            description={t('modules.panel.settings.device.mapsApp.description')}
+            action={
+              <CustomSelect
+                id="settings-maps-app"
+                label={t('modules.panel.settings.device.mapsApp.selectLabel')}
+                value={mapsApp}
+                onChange={(event) => {
+                  const next = event.target.value as MapsAppPreference;
+                  setMapsApp(next);
+                  setMapsAppPreference(next);
+                }}
+                options={[
+                  { value: 'ask', label: t('modules.panel.settings.device.mapsApp.ask') },
+                  ...MAPS_APPS.map((app) => ({
+                    value: app,
+                    label: t(`components.openInMaps.apps.${app}`),
+                  })),
+                ]}
+              />
             }
           />
         </div>

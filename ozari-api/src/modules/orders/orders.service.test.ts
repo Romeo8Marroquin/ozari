@@ -11,7 +11,6 @@ import {
   ORDER_LIST_VIEWS,
   buildOrderListWhere,
   buildRentedInWindowWhere,
-  buildSpacingConflictWhere,
   computeBilledDays,
   computeNextActionAt,
   orderListOrderBy,
@@ -550,28 +549,8 @@ describe("loadOrderTimingPreferences", () => {
   });
 });
 
-describe("buildSpacingConflictWhere", () => {
-  it("builds an exclusive ±spacing range over BOTH event columns for every new event", () => {
-    const delivery = new Date("2026-08-01T14:00:00Z");
-    const where = buildSpacingConflictWhere([delivery], 60);
-    expect(where).toEqual({
-      isActive: true,
-      cancelledAt: null,
-      OR: [
-        { deliveryAt: { gt: new Date("2026-08-01T13:00:00Z"), lt: new Date("2026-08-01T15:00:00Z") } },
-        { pickupAt: { gt: new Date("2026-08-01T13:00:00Z"), lt: new Date("2026-08-01T15:00:00Z") } },
-      ],
-    });
-  });
-
-  it("a delivery + pickup pair produces four range conditions", () => {
-    const where = buildSpacingConflictWhere(
-      [new Date("2026-08-01T14:00:00Z"), new Date("2026-08-02T10:00:00Z")],
-      30,
-    );
-    expect((where.OR as unknown[]).length).toBe(4);
-  });
-});
+// The logistics-event conflict rule moved to `logistics/` when it stopped being a global "N minutes
+// between anything" filter and became a per-DRIVER one — its tests live in `logistics.service.test.ts`.
 
 describe("priceOrderLine", () => {
   const product = (overrides: Partial<OrderPricingProductModel> = {}): OrderPricingProductModel => ({
@@ -648,12 +627,30 @@ describe("projectOrderDetail", () => {
     });
     expect(detail.assignee).toBeUndefined();
     expect(detail.isMine).toBe(false);
+    // No pin is the NORMAL case — the maps button falls back to searching the address text.
+    expect(detail.deliveryCoords).toBeUndefined();
     expect(detail.deliveryAmount).toBeUndefined();
     expect(detail.description).toBeUndefined();
     expect(detail.comment).toBeUndefined();
     expect(detail.paidAt).toBeUndefined();
     expect(detail.cancelReason).toBeUndefined();
     expect(detail.discountReason).toBeUndefined();
+  });
+
+  it("decrypts the delivery PIN when the order has one, and ignores an unreadable value", () => {
+    const pinned = projectOrderDetail(
+      makeRichOrder({ deliveryCoordsKms: encryptKms("14.634915,-90.506883") }),
+      makeProjectionContext(),
+    );
+    expect(pinned.deliveryCoords).toEqual({ lat: 14.634915, lng: -90.506883 });
+
+    // A hand-edited or legacy value must read as "no pin" — a NaN would render nowhere on a map and
+    // deep-link a driver into the ocean, which is strictly worse than having no pin at all.
+    const corrupt = projectOrderDetail(
+      makeRichOrder({ deliveryCoordsKms: encryptKms("por la iglesia") }),
+      makeProjectionContext(),
+    );
+    expect(corrupt.deliveryCoords).toBeUndefined();
   });
 
   it("decrypts the assigned driver's name and maps the money breakdown", () => {

@@ -129,6 +129,15 @@ export function formatShortDate(iso: string): string {
 }
 
 /**
+ * A moment named in FULL (`2 ago, 2:30 p. m.`) — for copy that points at an event the reader is
+ * not currently looking at, like the order a driver conflict clashes with. The agenda can say just
+ * a time because its day heading already carries the date; a conflict message cannot.
+ */
+export function formatDateTime(iso: string): string {
+  return `${formatShortDate(iso)}, ${formatTime(iso)}`;
+}
+
+/**
  * The AGENDA grouping: split into MINE-first / the-rest owner bands (from the backend's `isMine`
  * flag; the list already arrives mine-first), each grouped by its NEXT-ACTION day. When only one
  * band has rows — a Driver (all theirs) or an Admin with nothing self-assigned — it collapses to a

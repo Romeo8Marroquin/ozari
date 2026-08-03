@@ -1,8 +1,10 @@
 import type { ResolverResult } from 'react-hook-form';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  appendDriverConflictErrors,
   appendLineAvailabilityErrors,
   createOrderDefaultValues,
+  gapLabelKey,
   createOrderRequiredPatterns,
   createOrderSchema,
   nowDateTimeLocal,
@@ -22,6 +24,8 @@ const FROZEN_NOW = new Date('2026-07-15T12:00:00').getTime();
 beforeAll(() => vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW));
 afterAll(() => vi.restoreAllMocks());
 
+const PIN = { lat: 14.634915, lng: -90.506883 };
+
 const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFormType => ({
   clientRegistryId: 3,
   eventTypeId: 1,
@@ -32,6 +36,8 @@ const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFor
   deliveryContactTypeId: null,
   deliveryZoneId: null,
   deliveryAddress: 'Zona 10, 4a avenida 5-55',
+  // No pin — the default state of nearly every order.
+  deliveryCoords: null,
   description: '',
   comment: '',
   deliveryAmount: '',
@@ -160,6 +166,14 @@ describe('createOrderSchema', () => {
 });
 
 describe('toCreateOrderBody', () => {
+  it('sends the map pin only when there IS one', () => {
+    // Absent, not null: most orders have no pin, and the payload should say nothing about it.
+    expect(toCreateOrderBody(validForm())).not.toHaveProperty('deliveryCoords');
+    expect(toCreateOrderBody(validForm({ deliveryCoords: PIN }))).toMatchObject({
+      deliveryCoords: PIN,
+    });
+  });
+
   it('maps a rental order to ISO dates, numeric lines, and truncated money', () => {
     const body = toCreateOrderBody(
       validForm({ deliveryAmount: '50.999', depositAmount: '100', description: '  nota  ', comment: '' }),
@@ -293,7 +307,108 @@ describe('appendLineAvailabilityErrors', () => {
   });
 });
 
+describe('gapLabelKey', () => {
+  it('reads whole hours as hours and everything else as minutes', () => {
+    expect(gapLabelKey(60)).toEqual({ key: 'gapHours', count: 1 });
+    expect(gapLabelKey(120)).toEqual({ key: 'gapHours', count: 2 });
+    expect(gapLabelKey(45)).toEqual({ key: 'gapMinutes', count: 45 });
+    expect(gapLabelKey(90)).toEqual({ key: 'gapMinutes', count: 90 });
+  });
+
+  it('does not call zero "0 horas"', () => {
+    // Defensive: a payload without a gap must not read as an hour-shaped sentence.
+    expect(gapLabelKey(0)).toEqual({ key: 'gapMinutes', count: 0 });
+  });
+});
+
+describe('appendDriverConflictErrors', () => {
+  const base = (): ResolverResult<CreateOrderFormType> => ({ values: {}, errors: {} });
+  const messages = {
+    conflict: (driverName: string, at: string) => `busy ${driverName} ${at}`,
+    selfOverlap: (gapMinutes: number) => `apart ${gapMinutes}`,
+  };
+  const conflict = (blocks: 'DELIVERY' | 'COLLECTION') => ({
+    orderId: 42,
+    at: '2026-08-01T14:30:00.000Z',
+    kind: 'DELIVERY' as const,
+    blocks,
+  });
+  const fieldErrors = (result: ResolverResult<CreateOrderFormType>) =>
+    result.errors as Record<string, { message?: string } | undefined>;
+
+  it('says nothing when there is no answer yet, or the driver is free', () => {
+    const result = base();
+    expect(appendDriverConflictErrors(undefined, result, messages)).toBe(result);
+    expect(appendDriverConflictErrors({ available: true }, result, messages)).toBe(result);
+    // An unavailable answer with nothing to report can't invent a message either.
+    expect(appendDriverConflictErrors({ available: false }, result, messages)).toBe(result);
+  });
+
+  it('lands a clash on the date field it actually blocks — never on both', () => {
+    const onPickup = appendDriverConflictErrors(
+      { available: false, driverName: 'Ana', conflicts: [conflict('COLLECTION')] },
+      base(),
+      messages,
+    );
+    expect(fieldErrors(onPickup)['pickupAt']?.message).toBe('busy Ana 2026-08-01T14:30:00.000Z');
+    expect(fieldErrors(onPickup)['deliveryAt']).toBeUndefined();
+
+    const onDelivery = appendDriverConflictErrors(
+      { available: false, driverName: 'Ana', conflicts: [conflict('DELIVERY')] },
+      base(),
+      messages,
+    );
+    expect(fieldErrors(onDelivery)['deliveryAt']?.message).toBeTruthy();
+    expect(fieldErrors(onDelivery)['pickupAt']).toBeUndefined();
+  });
+
+  it('marks the PICKUP for a self-overlap and keeps that message over a later clash', () => {
+    const out = appendDriverConflictErrors(
+      {
+        available: false,
+        selfOverlap: true,
+        gapMinutes: 60,
+        conflicts: [conflict('COLLECTION')],
+      },
+      base(),
+      messages,
+    );
+    // The order's own two events being impossible is the more specific fault — it wins the field.
+    expect(fieldErrors(out)['pickupAt']?.message).toBe('apart 60');
+  });
+
+  it('never overwrites a schema error already on the date', () => {
+    const withSchemaError: ResolverResult<CreateOrderFormType> = {
+      values: {},
+      errors: { deliveryAt: { type: 'custom', message: 'schema' } } as never,
+    };
+    const out = appendDriverConflictErrors(
+      { available: false, conflicts: [conflict('DELIVERY')] },
+      withSchemaError,
+      messages,
+    );
+    expect(fieldErrors(out)['deliveryAt']?.message).toBe('schema');
+  });
+
+  it('falls back to an empty name and a zero gap rather than printing "undefined"', () => {
+    // The client tier answers `{ available: false }` alone; the admin one always names the driver.
+    const out = appendDriverConflictErrors(
+      { available: false, selfOverlap: true, conflicts: [conflict('DELIVERY')] },
+      base(),
+      messages,
+    );
+    expect(fieldErrors(out)['pickupAt']?.message).toBe('apart 0');
+    expect(fieldErrors(out)['deliveryAt']?.message).toBe('busy  2026-08-01T14:30:00.000Z');
+  });
+});
+
 describe('orderToFormValues', () => {
+  it('reopens on the ORDER’s own pin, and on null when it had none', () => {
+    // The snapshot, not the registry's current pin — the venue may have been re-pinned since.
+    expect(orderToFormValues(order({ deliveryCoords: PIN })).deliveryCoords).toEqual(PIN);
+    expect(orderToFormValues(order()).deliveryCoords).toBeNull();
+  });
+
   /** The order as `GET /orders/:id` returns it — ISO instants, numbers, optional fields absent. */
   const order = (overrides: Record<string, unknown> = {}) =>
     ({

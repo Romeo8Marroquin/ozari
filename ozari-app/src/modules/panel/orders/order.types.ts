@@ -1,3 +1,5 @@
+import type { Coords } from '@utils/geo';
+
 /** A lookup pair as the backend projects it on an order (id + display name). */
 export interface OrderLookup {
   id: number;
@@ -42,6 +44,10 @@ export interface OrderAction {
   /** True when this move DESTROYS the photos of the step it undoes (a backward leg out of a step
    *  that demanded evidence) — warned about before it happens. */
   purgesEvidence: boolean;
+  /** Which physical trip this move confirms, from the status's own `tracksEvent`. Non-null ⇒ the
+   *  step is somebody DRIVING somewhere, which is exactly when a navigation button belongs beside
+   *  it. `null` on every desk-work move (rewind, cancel) and on steps nobody travels for. */
+  tracksEvent?: 'DELIVERY' | 'COLLECTION' | null;
 }
 
 /** @see OrderAction.inventoryEffect */
@@ -181,6 +187,8 @@ export interface RegistryAddress {
   zone?: ZoneOption;
   address: string;
   instructions?: string;
+  /** The saved map pin, when this address has one. Optional everywhere, forever. */
+  coords?: Coords;
   domicilePrice?: number;
   isFavorite: boolean;
 }
@@ -242,6 +250,8 @@ export interface OrderDetail extends OrderListItem {
   clientRegistryId?: number;
   deliveryContact: string;
   deliveryAddress: string;
+  /** The delivery's map pin, snapshotted at order time. Absent = navigate by the address text. */
+  deliveryCoords?: Coords;
   description?: string;
   comment?: string;
   deliveryAmount?: number;
@@ -274,11 +284,16 @@ export interface OrderStockConflictItem {
 
 // ── Live availability (`POST /orders/availability`) ──────────────────────────────────────────────
 
-/** The availability probe body — a delivery datetime, optional pickup, and the product ids to check. */
+/** The availability probe body — a delivery datetime, optional pickup, the product ids to check,
+ *  and the DRIVER half: who would carry it, and (when editing) which order to exclude. */
 export interface OrderAvailabilityBody {
   deliveryAt: string;
   pickupAt?: string;
   productIds: number[];
+  /** Absent ⇒ the response carries no `driver` block (the assignee hasn't been chosen yet). */
+  assignedUserId?: number;
+  /** The order being edited — it already occupies its own blocks and must not conflict with itself. */
+  excludeOrderId?: number;
 }
 
 /** One product's availability for the window: rentals = fleet minus held, sales = stock, `null` = a
@@ -288,6 +303,47 @@ export interface ProductAvailability {
   available: number | null;
 }
 
+/** Which physical act a logistics event is. */
+export type LogisticsEventKind = 'DELIVERY' | 'COLLECTION';
+
+/**
+ * One clash on the assigned driver's day: the OTHER order's event (`at`/`kind`) and WHICH of the
+ * order being edited its block collides with (`blocks`) — so the message lands on the delivery or
+ * the pickup input, not on both. Admin tier only.
+ */
+export interface DriverConflict {
+  orderId: number;
+  at: string;
+  kind: LogisticsEventKind;
+  blocks: LogisticsEventKind;
+}
+
+/**
+ * Whether the assigned driver can actually be there — a different question from "do we have the
+ * units", so it never reuses the stock conflict's shape or its fields. Everything but `available`
+ * is Admin tier (a future client learns only that the slot is taken).
+ */
+export interface DriverAvailability {
+  available: boolean;
+  /** The configured minutes between two events — the copy formats this, never a hardcoded hour. */
+  gapMinutes?: number;
+  /** This order's own delivery and collection are too close together. */
+  selfOverlap?: boolean;
+  conflicts?: DriverConflict[];
+  /** Who is already busy — read from HERE, never from the local catalog, so the probe's copy and
+   *  the save's 409 can never name the driver differently. */
+  driverName?: string;
+}
+
 export interface OrderAvailabilityResponse {
   availability: ProductAvailability[];
+  /** Absent when the probe carried no assignee. */
+  driver?: DriverAvailability;
+}
+
+/** The `data` of a create/edit `409` raised by the LOGISTICS PAD. Deliberately separate keys from
+ *  the stock conflict's `conflicts`: they describe different problems and land on different fields. */
+export interface OrderLogisticsConflictData {
+  driverConflict?: DriverConflict & { driverName?: string; gapMinutes: number };
+  selfOverlap?: { gapMinutes: number };
 }

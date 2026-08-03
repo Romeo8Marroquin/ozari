@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { OrderListItem } from './order.types';
 import {
+  formatDateTime,
   formatDayLabel,
   formatShortDate,
   formatTime,
@@ -169,6 +170,12 @@ describe('formatDayLabel', () => {
 describe('time helpers', () => {
   it('formatTime renders an es-GT clock time', () => {
     expect(formatTime(new Date('2026-07-16T14:00:00').toISOString())).toMatch(/2:00/);
+  });
+
+  it('formatDateTime names the DAY too — copy about another order cannot rely on a heading', () => {
+    const label = formatDateTime(new Date('2026-07-16T14:30:00').toISOString());
+    expect(label).toMatch(/16/);
+    expect(label).toMatch(/2:30/);
   });
 
   it('isSameLocalDay compares local calendar days, not 24h windows', () => {

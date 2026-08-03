@@ -577,6 +577,9 @@ export function describeActions(
       purgesEvidence:
         kind === "backward" &&
         statusById(catalog, order.serviceStatusId)?.requiresEvidence === true,
+      // Forward only: rewinding or cancelling is desk work, and a "navigate there" button on either
+      // would be offering a trip nobody is about to make.
+      tracksEvent: kind === "forward" ? status.tracksEvent : null,
     };
   };
   return [

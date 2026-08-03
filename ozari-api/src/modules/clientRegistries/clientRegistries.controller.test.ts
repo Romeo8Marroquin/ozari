@@ -57,6 +57,8 @@ const makeRawRegistry = () => ({
       id: 1,
       addressKms: encryptKms("Zona 10, 4a avenida 5-55"),
       instructionsKms: encryptKms("Portón negro"),
+      // A saved pin — encrypted exactly like the text it belongs to.
+      coordsKms: encryptKms("14.634915,-90.506883"),
       domicilePrice: new Prisma.Decimal("50.00"),
       isFavorite: true,
       zone: { id: 6, name: "Zona 10", deliveryFee: new Prisma.Decimal("50.00") },
@@ -76,6 +78,8 @@ const makeRawRegistryNullables = () => ({
       id: 1,
       addressKms: encryptKms("Casa en Hacienda Real, lote 5"),
       instructionsKms: null,
+      // No pin — the normal case, and the one the whole feature has to stay usable without.
+      coordsKms: null,
       domicilePrice: null,
       isFavorite: true,
       zone: null,
@@ -84,6 +88,7 @@ const makeRawRegistryNullables = () => ({
       id: 2,
       addressKms: encryptKms("Zona 15, 2a calle 3-33"),
       instructionsKms: null,
+      coordsKms: null,
       domicilePrice: null,
       isFavorite: false,
       zone: { id: 8, name: "Zona 15", deliveryFee: null },
@@ -174,7 +179,12 @@ describe("createClientRegistry", () => {
     notes: "cliente de siempre",
     contacts: [{ contactTypeId: 1, value: "5555-1234", isPrincipal: true }],
     addresses: [
-      { zoneId: 6, address: "Zona 10, 4a avenida 5-55", isFavorite: true },
+      {
+        zoneId: 6,
+        address: "Zona 10, 4a avenida 5-55",
+        coords: { lat: 14.634915, lng: -90.506883 },
+        isFavorite: true,
+      },
       { address: "Casa en Hacienda Real, lote 5", isFavorite: false },
     ],
     preferredPaymentMethodId: 1,
@@ -199,6 +209,16 @@ describe("createClientRegistry", () => {
     // An address without a zone persists NULL (outside the seeded zones — e.g. Hacienda Real).
     expect(arg.data.addresses.create[0]).toMatchObject({ zoneId: 6, isFavorite: true });
     expect(arg.data.addresses.create[1]).toMatchObject({ zoneId: null, isFavorite: false });
+    // The pin is PII: encrypted like the address text, never stored as readable coordinates — and
+    // an address without one persists NULL rather than an empty string.
+    expect(arg.data.addresses.create[0]?.["coordsKms"]).not.toBe("14.634915,-90.506883");
+    expect(arg.data.addresses.create[0]?.["coordsKms"]).toEqual(expect.any(String));
+    expect(arg.data.addresses.create[1]?.["coordsKms"]).toBeNull();
+    // …and it survives the round trip: the projection decrypts and decodes it back to numbers.
+    expect(successData<ClientRegistryEnvelopeModel>().registry.addresses[0]?.coords).toEqual({
+      lat: 14.634915,
+      lng: -90.506883,
+    });
     expect((arg.data as { preferredPaymentMethodId: number }).preferredPaymentMethodId).toBe(1);
 
     expect(sendOzariSuccess).toHaveBeenCalledWith(

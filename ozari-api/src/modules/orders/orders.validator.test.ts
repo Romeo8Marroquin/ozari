@@ -60,6 +60,8 @@ const validBody = () => ({
   deliveryName: "María López",
   deliveryContact: "WhatsApp 5555-1234",
   deliveryAddress: "Zona 10, 4a avenida 5-55",
+  // Required since the logistics pad became a rule about a DRIVER's day (Q-D2).
+  assignedUserId: 5,
   lines: [
     { productId: 3, quantity: 25 },
     { productId: 4, quantity: 10 },
@@ -130,6 +132,10 @@ describe("validateCreateOrder", () => {
     ["invalidDeliveryName", { deliveryName: "x" }],
     ["invalidDeliveryContact", { deliveryContact: "" }],
     ["invalidDeliveryAddress", { deliveryAddress: "abc" }],
+    // The optional map pin: absent is fine (most orders), malformed is a clean 400 rather than a
+    // field that vanishes on save. Same `sanitizeCoords` door the registry validator uses.
+    ["invalidDeliveryCoords", { deliveryCoords: { lat: 0, lng: 181 } }],
+    ["invalidDeliveryCoords", { deliveryCoords: { lat: Number.NaN, lng: 0 } }],
     ["invalidDescription", { description: 42 }],
     ["invalidComment", { comment: 42 }],
     ["invalidDeliveryAmount", { deliveryAmount: -1 }],
@@ -153,10 +159,14 @@ describe("validateCreateOrder", () => {
     expectRejected("invalidPaymentMethodId");
   });
 
-  it("leaves the assignee undefined when absent (the controller defaults it to the creator)", async () => {
-    const { req, next } = await run(validBody());
-    expect(next).toHaveBeenCalled();
-    expect((req.body as Record<string, unknown>)["assignedUserId"]).toBeUndefined();
+  it("REJECTS an order with no assignee — every event needs an owner (Q-D2)", async () => {
+    // It used to default to the creating admin, which made "unassigned" a state that could not
+    // happen but still had to be reasoned about. The logistics pad is a rule about a driver's day,
+    // so the ambiguity is deleted here rather than modelled downstream.
+    const { assignedUserId, ...withoutAssignee } = validBody();
+    expect(assignedUserId).toBe(5);
+    await run(withoutAssignee);
+    expectRejected("invalidAssignedUserId");
   });
 
   it("accepts a valid deliverable assignee and puts it on the body", async () => {
@@ -335,6 +345,34 @@ describe("validateOrderAvailability", () => {
     expect(body["deliveryAt"]).toBeInstanceOf(Date);
     expect(body["pickupAt"]).toBeInstanceOf(Date);
     expect(body["productIds"]).toEqual([3, 4]);
+    // The driver half is optional: with no assignee, the probe answers about goods only.
+    expect(body["assignedUserId"]).toBeUndefined();
+    expect(body["excludeOrderId"]).toBeUndefined();
+  });
+
+  it("carries the driver half through: the assignee and the order an edit excludes", () => {
+    const { req, next } = runAvailability({
+      deliveryAt: DELIVERY,
+      pickupAt: PICKUP,
+      productIds: [3],
+      assignedUserId: 2,
+      excludeOrderId: 12,
+    });
+    expect(next).toHaveBeenCalled();
+    const body = req.body as Record<string, unknown>;
+    expect(body["assignedUserId"]).toBe(2);
+    expect(body["excludeOrderId"]).toBe(12);
+  });
+
+  it("reads a null assignee as 'not chosen yet', not as an error", () => {
+    // A select cleared back to its placeholder sends `null`; that is a form state, not a bad id.
+    const { req, next } = runAvailability({
+      deliveryAt: DELIVERY,
+      productIds: [3],
+      assignedUserId: null,
+    });
+    expect(next).toHaveBeenCalled();
+    expect((req.body as Record<string, unknown>)["assignedUserId"]).toBeUndefined();
   });
 
   it("treats an absent/empty/null pickup as 'no rental window yet'", () => {
@@ -353,6 +391,8 @@ describe("validateOrderAvailability", () => {
     ["invalidProductIds", { deliveryAt: DELIVERY, productIds: [] }],
     ["invalidProductIds", { deliveryAt: DELIVERY, productIds: "x" }],
     ["invalidProductIds", { deliveryAt: DELIVERY, productIds: [0] }],
+    ["invalidAssignedUserId", { deliveryAt: DELIVERY, productIds: [3], assignedUserId: "x" }],
+    ["invalidExcludeOrderId", { deliveryAt: DELIVERY, productIds: [3], excludeOrderId: 0 }],
   ])("rejects %s", (key, body) => {
     const { next } = runAvailability(body);
     expect(next).not.toHaveBeenCalled();
