@@ -24,6 +24,8 @@ const FROZEN_NOW = new Date('2026-07-15T12:00:00').getTime();
 beforeAll(() => vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW));
 afterAll(() => vi.restoreAllMocks());
 
+const PIN = { lat: 14.634915, lng: -90.506883 };
+
 const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFormType => ({
   clientRegistryId: 3,
   eventTypeId: 1,
@@ -34,6 +36,8 @@ const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFor
   deliveryContactTypeId: null,
   deliveryZoneId: null,
   deliveryAddress: 'Zona 10, 4a avenida 5-55',
+  // No pin — the default state of nearly every order.
+  deliveryCoords: null,
   description: '',
   comment: '',
   deliveryAmount: '',
@@ -162,6 +166,14 @@ describe('createOrderSchema', () => {
 });
 
 describe('toCreateOrderBody', () => {
+  it('sends the map pin only when there IS one', () => {
+    // Absent, not null: most orders have no pin, and the payload should say nothing about it.
+    expect(toCreateOrderBody(validForm())).not.toHaveProperty('deliveryCoords');
+    expect(toCreateOrderBody(validForm({ deliveryCoords: PIN }))).toMatchObject({
+      deliveryCoords: PIN,
+    });
+  });
+
   it('maps a rental order to ISO dates, numeric lines, and truncated money', () => {
     const body = toCreateOrderBody(
       validForm({ deliveryAmount: '50.999', depositAmount: '100', description: '  nota  ', comment: '' }),
@@ -391,6 +403,12 @@ describe('appendDriverConflictErrors', () => {
 });
 
 describe('orderToFormValues', () => {
+  it('reopens on the ORDER’s own pin, and on null when it had none', () => {
+    // The snapshot, not the registry's current pin — the venue may have been re-pinned since.
+    expect(orderToFormValues(order({ deliveryCoords: PIN })).deliveryCoords).toEqual(PIN);
+    expect(orderToFormValues(order()).deliveryCoords).toBeNull();
+  });
+
   /** The order as `GET /orders/:id` returns it — ISO instants, numbers, optional fields absent. */
   const order = (overrides: Record<string, unknown> = {}) =>
     ({

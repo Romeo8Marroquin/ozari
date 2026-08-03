@@ -5,6 +5,7 @@ import { logger } from "@/config/logger.js";
 import { AuditAction, logAudit } from "@/config/auditLogger.js";
 import { isDeployedEnvironment } from "@/config/environment.js";
 import { encryptKms } from "@helpers/encryption.js";
+import { encodeCoords } from "@helpers/geo.js";
 import { appConfig } from "@/config/app.js";
 import { type CustomRequest } from "@models/common/customRequestModel.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
@@ -116,6 +117,9 @@ export const createClientRegistry = async (
             addressKms: encryptKms(address.address),
             instructionsKms:
               address.instructions !== undefined ? encryptKms(address.instructions) : null,
+            // The pin is PII like the text it belongs to, so it is encrypted the same way — one
+            // `"lat,lng"` payload in, one ciphertext out.
+            coordsKms: address.coords !== undefined ? encryptKms(encodeCoords(address.coords)) : null,
             domicilePrice: address.domicilePrice ?? null,
             isFavorite: address.isFavorite === true,
           })),

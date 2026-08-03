@@ -638,6 +638,30 @@ export const schemas: Record<string, Schema> = {
           "stored objects.",
         example: false,
       },
+      tracksEvent: {
+        type: "string",
+        nullable: true,
+        enum: ["DELIVERY", "COLLECTION", null],
+        description:
+          "Which physical trip this move CONFIRMS, read from the target status's `tracksEvent` — " +
+          "so a client can offer navigation on exactly the steps where somebody drives somewhere, " +
+          "without knowing any status ids. `null` on every non-travel step and on every `backward`/" +
+          "`disruptive` move (undoing a tap is desk work, not a journey).",
+        example: "DELIVERY",
+      },
+    },
+  },
+  Coords: {
+    type: "object",
+    required: ["lat", "lng"],
+    description:
+      "A map pin. **Always optional**: the delivery ADDRESS TEXT is what the business runs on, and " +
+      "the pin only removes the last-hundred-metres ambiguity — every consumer must keep working " +
+      "when it is absent. Stored AES-encrypted like the address it belongs to, and rounded to 6 " +
+      "decimals (~11 cm) so a dragged pin's float noise never churns the snapshot.",
+    properties: {
+      lat: { type: "number", format: "double", minimum: -90, maximum: 90, example: 14.634915 },
+      lng: { type: "number", format: "double", minimum: -180, maximum: 180, example: -90.506883 },
     },
   },
   OrderStatusCatalogOption: {
@@ -849,6 +873,13 @@ export const schemas: Record<string, Schema> = {
           },
           deliveryContact: { type: "string", example: "WhatsApp 5555-1234" },
           deliveryAddress: { type: "string", example: "Zona 10, 4a avenida 5-55" },
+          deliveryCoords: {
+            allOf: [schemaRef("Coords")],
+            nullable: true,
+            description:
+              "The delivery's map pin, snapshotted at order time. Absent is normal — a client " +
+              "offering navigation falls back to searching `deliveryAddress`.",
+          },
           description: { type: "string", nullable: true },
           comment: { type: "string", nullable: true },
           deliveryAmount: {
@@ -965,6 +996,14 @@ export const schemas: Record<string, Schema> = {
       deliveryName: { type: "string", minLength: 2, maxLength: 255, example: "María López" },
       deliveryContact: { type: "string", minLength: 2, maxLength: 255, example: "WhatsApp 5555-1234" },
       deliveryAddress: { type: "string", minLength: 5, maxLength: 500, example: "Zona 10, 4a avenida 5-55" },
+      deliveryCoords: {
+        allOf: [schemaRef("Coords")],
+        nullable: true,
+        description:
+          "OPTIONAL map pin for this delivery, snapshotted alongside the text. Omit it (or send " +
+          "null) when there is none — the address text remains authoritative either way. A " +
+          "malformed pair is a `400`, never a silently dropped field.",
+      },
       description: { type: "string", nullable: true, maxLength: 500 },
       comment: { type: "string", nullable: true, maxLength: 500 },
       deliveryAmount: { type: "number", nullable: true, example: 50 },
@@ -1125,6 +1164,7 @@ export const schemas: Record<string, Schema> = {
       zone: { allOf: [schemaRef("ZoneOption")], nullable: true },
       address: { type: "string", example: "Zona 10, 4a avenida 5-55" },
       instructions: { type: "string", nullable: true },
+      coords: { allOf: [schemaRef("Coords")], nullable: true },
       domicilePrice: { type: "number", nullable: true, example: 50 },
       isFavorite: { type: "boolean", example: true },
     },
@@ -1357,6 +1397,7 @@ export const schemas: Record<string, Schema> = {
             zoneId: { type: "integer", nullable: true, example: 6 },
             address: { type: "string", minLength: 5, maxLength: 500 },
             instructions: { type: "string", nullable: true, maxLength: 500 },
+            coords: { allOf: [schemaRef("Coords")], nullable: true },
             domicilePrice: { type: "number", nullable: true },
             isFavorite: { type: "boolean" },
           },

@@ -46,6 +46,9 @@ const registryAddressSchema = z.object({
     t(`${KEY}.requiredAddress`),
     t(`${KEY}.invalidAddress`),
   ),
+  // The OPTIONAL map pin. `null` is the empty sentinel (RHF ignores `undefined` on setValue), and
+  // shape-only validation: the picker cannot produce an off-globe pair and the API re-checks.
+  coords: z.object({ lat: z.number(), lng: z.number() }).nullable(),
 });
 
 /**
@@ -98,7 +101,7 @@ export const createRegistryDefaultValues: CreateRegistryFormType = {
   // Start with ONE empty contact (≥1 required) and ONE empty address (the common walk-in has a
   // venue; the admin can remove it for an address-less client).
   contacts: [{ contactTypeId: null as unknown as number, value: '' }],
-  addresses: [{ zoneId: null, address: '' }],
+  addresses: [{ zoneId: null, address: '', coords: null }],
   principalContactIndex: 0,
   favoriteAddressIndex: 0,
   preferredPaymentMethodId: null,
@@ -108,7 +111,12 @@ export const createRegistryDefaultValues: CreateRegistryFormType = {
 export interface CreateRegistryBody {
   name: string;
   contacts: { contactTypeId: number; value: string; isPrincipal: boolean }[];
-  addresses: { zoneId?: number; address: string; isFavorite: boolean }[];
+  addresses: {
+    zoneId?: number;
+    address: string;
+    coords?: { lat: number; lng: number };
+    isFavorite: boolean;
+  }[];
   preferredPaymentMethodId?: number;
 }
 
@@ -123,6 +131,8 @@ export function toCreateRegistryBody(data: CreateRegistryFormType): CreateRegist
     addresses: data.addresses.map((address, index) => ({
       ...(address.zoneId != null && { zoneId: address.zoneId }),
       address: address.address.trim(),
+      // Omitted when unset — the API treats absent and null the same, and most addresses have none.
+      ...(address.coords && { coords: address.coords }),
       isFavorite: index === data.favoriteAddressIndex,
     })),
     ...(data.preferredPaymentMethodId != null && {

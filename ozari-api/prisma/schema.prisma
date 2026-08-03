@@ -625,9 +625,14 @@ model Service {
   clientRegistryId Int? @map("client_registry_id")
 
   // Snapshots (AES-encrypted like all PII): who receives, how to reach them, where to deliver.
-  deliveryNameKms    String @map("delivery_name_kms")
-  deliveryContactKms String @map("delivery_contact_kms")
-  deliveryAddressKms String @map("delivery_address_kms")
+  // `deliveryCoordsKms` is the OPTIONAL map pin ("lat,lng"), snapshotted for the same reason as the
+  // text: editing a registry address later must never move a past order's delivery. Nullable
+  // forever — the address text is what the business runs on, the pin only removes the last-hundred-
+  // metres ambiguity, and most walk-in orders will never have one.
+  deliveryNameKms    String  @map("delivery_name_kms")
+  deliveryContactKms String  @map("delivery_contact_kms")
+  deliveryAddressKms String  @map("delivery_address_kms")
+  deliveryCoordsKms  String? @map("delivery_coords_kms")
 
   description String?
   eventTypeId Int     @map("event_type_id")

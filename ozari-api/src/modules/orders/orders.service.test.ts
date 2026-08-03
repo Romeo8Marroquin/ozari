@@ -627,12 +627,30 @@ describe("projectOrderDetail", () => {
     });
     expect(detail.assignee).toBeUndefined();
     expect(detail.isMine).toBe(false);
+    // No pin is the NORMAL case — the maps button falls back to searching the address text.
+    expect(detail.deliveryCoords).toBeUndefined();
     expect(detail.deliveryAmount).toBeUndefined();
     expect(detail.description).toBeUndefined();
     expect(detail.comment).toBeUndefined();
     expect(detail.paidAt).toBeUndefined();
     expect(detail.cancelReason).toBeUndefined();
     expect(detail.discountReason).toBeUndefined();
+  });
+
+  it("decrypts the delivery PIN when the order has one, and ignores an unreadable value", () => {
+    const pinned = projectOrderDetail(
+      makeRichOrder({ deliveryCoordsKms: encryptKms("14.634915,-90.506883") }),
+      makeProjectionContext(),
+    );
+    expect(pinned.deliveryCoords).toEqual({ lat: 14.634915, lng: -90.506883 });
+
+    // A hand-edited or legacy value must read as "no pin" — a NaN would render nowhere on a map and
+    // deep-link a driver into the ocean, which is strictly worse than having no pin at all.
+    const corrupt = projectOrderDetail(
+      makeRichOrder({ deliveryCoordsKms: encryptKms("por la iglesia") }),
+      makeProjectionContext(),
+    );
+    expect(corrupt.deliveryCoords).toBeUndefined();
   });
 
   it("decrypts the assigned driver's name and maps the money breakdown", () => {

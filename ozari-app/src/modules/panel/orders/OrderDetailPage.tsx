@@ -14,6 +14,8 @@ import {
 import Button from '@components/Button';
 import ImageLightbox from '@components/ImageLightbox';
 import MorphSwap from '@components/MorphSwap';
+import OpenInMapsButton from '@components/OpenInMapsButton';
+import { orderDestination } from '@utils/mapLinks';
 import { Role } from '@constants/Roles';
 import { useHasRole } from '@hooks/useRole';
 import { getStatus } from '@utils/apiError';
@@ -242,6 +244,10 @@ const OrderDetailPage: React.FC = () => {
     </button>
   );
 
+  // Where "abrir en mapas" would send them: the order's own pin when it has one, else its address
+  // text. `undefined` when there is neither — then no button is rendered at all, because opening a
+  // maps app on an empty search is worse than not offering the action.
+  const mapsDestination = orderDestination(order?.deliveryAddress, order?.deliveryCoords);
   const forward = order?.actions.find((action) => action.kind === 'forward');
   const backward = order?.actions.find((action) => action.kind === 'backward');
   const disruptive = order?.actions.filter((action) => action.kind === 'disruptive') ?? [];
@@ -348,6 +354,16 @@ const OrderDetailPage: React.FC = () => {
                     >
                       {t(`${KEY}.actions.advance`, { status: forward.statusName })}
                     </Button>
+                  )}
+                  {/* Navigation sits beside the advance action, and ONLY when the next step is a
+                      trip somebody actually makes (`tracksEvent` — delivery or collection). On
+                      "Listo", or on a rewind, nobody is driving anywhere and the button would be
+                      noise. It rides the same `.state-flip` group, so it glides in and out with
+                      the rest of the action row as the order walks its pipeline. */}
+                  {forward?.tracksEvent && mapsDestination && (
+                    <span data-flip-id="open-in-maps" className="state-flip">
+                      <OpenInMapsButton destination={mapsDestination} />
+                    </span>
                   )}
                   {backward && (
                     <Button

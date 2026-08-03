@@ -5,6 +5,17 @@ import type { ReactNode } from 'react';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// The map picker is a lazy chunk that pulls in Leaflet, which needs real layout jsdom can't give.
+// Its own suite covers it; here it is stubbed to the one thing this form cares about — that a
+// confirmed pin lands in the submitted body.
+vi.mock('@components/LocationPicker', () => ({
+  default: ({ onConfirm }: { onConfirm: (coords: { lat: number; lng: number }) => void }) => (
+    <button type="button" onClick={() => onConfirm({ lat: 14.634915, lng: -90.506883 })}>
+      confirm-stub
+    </button>
+  ),
+}));
+
 // The four data hooks + the mutation drive every state — mock them.
 const { useOrdersCatalog } = vi.hoisted(() => ({ useOrdersCatalog: vi.fn() }));
 const { useOrderProducts } = vi.hoisted(() => ({ useOrderProducts: vi.fn() }));
@@ -170,6 +181,12 @@ const existingOrder = {
 } as unknown as OrderDetail;
 
 const byId = (container: HTMLElement, id: string) => container.querySelector(`#${id}`) as HTMLElement;
+
+/** Confirm a pin through the location field without loading Leaflet (see the mock at the top). */
+const pickLocation = async (): Promise<void> => {
+  await userEvent.click(screen.getByTestId('order-delivery-coords-open'));
+  await userEvent.click(await screen.findByRole('button', { name: 'confirm-stub' }));
+};
 const setDateTime = (input: HTMLElement, value: string) =>
   fireEvent.change(input, { target: { value } });
 
@@ -601,6 +618,29 @@ describe('OrderForm', () => {
     expect(byId(container, 'order-line-product-0')).toBeInTheDocument();
     expect(byId(container, 'order-line-product-1')).toBeInTheDocument();
     expect(warning).not.toHaveBeenCalled();
+  }, 20000);
+
+  it('carries an OPTIONAL map pin into the body, and omits it when none was set', async () => {
+    const { container } = renderForm();
+    await fillValid(container);
+
+    // Nothing chosen: the body says nothing about a pin at all.
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createOrder).toHaveBeenCalled());
+    expect(createOrder.mock.calls[0][0]).not.toHaveProperty('deliveryCoords');
+
+    await pickLocation();
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createOrder).toHaveBeenCalledTimes(2));
+    expect(createOrder.mock.calls[1][0]).toMatchObject({
+      deliveryCoords: { lat: 14.634915, lng: -90.506883 },
+    });
+
+    // …and removing it goes back to sending nothing, rather than leaving a pin nobody wants.
+    await userEvent.click(screen.getByTestId('order-delivery-coords-clear'));
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createOrder).toHaveBeenCalledTimes(3));
+    expect(createOrder.mock.calls[2][0]).not.toHaveProperty('deliveryCoords');
   }, 20000);
 
   it('submits a valid order → invalidates the list, toasts, and navigates', async () => {

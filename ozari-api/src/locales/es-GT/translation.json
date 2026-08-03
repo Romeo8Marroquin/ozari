@@ -1,4 +1,4 @@
-{
+﻿{
   "api": {
     "cors": {
       "origin": "CORS Origin: <{{-origin}}>",
@@ -429,6 +429,7 @@
         "invalidZoneId": "La zona de una dirección no es válida.",
         "invalidAddress": "Una dirección del cliente no es válida.",
         "invalidInstructions": "Las instrucciones de una dirección no son válidas.",
+        "invalidCoords": "La ubicación en el mapa de una dirección no es válida.",
         "invalidDomicilePrice": "El precio de envío de una dirección no es válido.",
         "multipleFavoriteAddresses": "Solo una dirección puede ser la favorita.",
         "invalidPreferredPaymentMethodId": "El método de pago preferido no es válido.",
@@ -448,6 +449,7 @@
           "invalidZoneId": "La zona <{{-zoneId}}> no es válida.",
           "invalidAddress": "La dirección <{{-address}}> no es válida.",
           "invalidInstructions": "Las instrucciones de una dirección no son válidas.",
+          "invalidCoords": "La ubicación <{{-coords}}> de una dirección no es válida.",
           "invalidDomicilePrice": "El precio de envío <{{-domicilePrice}}> no es válido.",
           "multipleFavoriteAddresses": "Direcciones favoritas duplicadas: <{{-favoriteCount}}>.",
           "invalidPreferredPaymentMethodId": "El método de pago preferido <{{-preferredPaymentMethodId}}> no es válido.",
@@ -595,6 +597,7 @@
         "invalidDeliveryName": "El nombre de quien recibe es requerido y debe ser válido.",
         "invalidDeliveryContact": "El contacto de entrega es requerido y debe ser válido.",
         "invalidDeliveryAddress": "La dirección de entrega es requerida y debe ser válida.",
+        "invalidDeliveryCoords": "La ubicación en el mapa de la entrega no es válida.",
         "invalidDescription": "La descripción del pedido debe ser válida.",
         "invalidComment": "El comentario del pedido debe ser válido.",
         "invalidDeliveryAmount": "El costo de envío no es válido.",
@@ -621,6 +624,7 @@
           "invalidDeliveryName": "El nombre de entrega <{{-deliveryName}}> no es válido.",
           "invalidDeliveryContact": "El contacto de entrega <{{-deliveryContact}}> no es válido.",
           "invalidDeliveryAddress": "La dirección de entrega no es válida.",
+          "invalidDeliveryCoords": "La ubicación de entrega <{{-deliveryCoords}}> no es válida.",
           "invalidDescription": "La descripción del pedido no es válida.",
           "invalidComment": "El comentario del pedido no es válido.",
           "invalidDeliveryAmount": "El costo de envío <{{-deliveryAmount}}> no es válido.",
@@ -665,6 +669,7 @@
         "invalidDeliveryName": "El nombre de quien recibe es requerido y debe ser válido.",
         "invalidDeliveryContact": "El contacto de entrega es requerido y debe ser válido.",
         "invalidDeliveryAddress": "La dirección de entrega es requerida y debe ser válida.",
+        "invalidDeliveryCoords": "La ubicación en el mapa de la entrega no es válida.",
         "invalidDescription": "La descripción del pedido debe ser válida.",
         "invalidComment": "El comentario del pedido debe ser válido.",
         "invalidDeliveryAmount": "El costo de envío no es válido.",
@@ -691,6 +696,7 @@
           "invalidDeliveryName": "El nombre de entrega <{{-deliveryName}}> no es válido.",
           "invalidDeliveryContact": "El contacto de entrega <{{-deliveryContact}}> no es válido.",
           "invalidDeliveryAddress": "La dirección de entrega no es válida.",
+          "invalidDeliveryCoords": "La ubicación de entrega <{{-deliveryCoords}}> no es válida.",
           "invalidDescription": "La descripción del pedido no es válida.",
           "invalidComment": "El comentario del pedido no es válido.",
           "invalidDeliveryAmount": "El costo de envío <{{-deliveryAmount}}> no es válido.",

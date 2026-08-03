@@ -112,6 +112,9 @@ const baseCreateOrderSchema = z.object({
   // editable; the snapshot the API stores is the contact TEXT + the (editable) delivery fee.
   deliveryContactTypeId: z.number().nullable(),
   deliveryZoneId: z.number().nullable(),
+  // The OPTIONAL map pin beside the address. `nullable`, never required, and validated only for
+  // SHAPE — the picker can't produce an off-globe pair, and the API re-checks anyway.
+  deliveryCoords: z.object({ lat: z.number(), lng: z.number() }).nullable(),
   deliveryAddress: requiredText(
     ORDER_ADDRESS_MIN_LENGTH,
     ORDER_LONGTEXT_MAX_LENGTH,
@@ -212,6 +215,9 @@ export const createOrderDefaultValues: CreateOrderFormType = {
   deliveryContactTypeId: null,
   deliveryZoneId: null,
   deliveryAddress: '',
+  // `null`, not `undefined`: RHF's `setValue`/`reset` IGNORE `undefined` and fall back to the
+  // default, so the empty-selection sentinel is null end to end (the products-form lesson).
+  deliveryCoords: null,
   description: '',
   comment: '',
   deliveryAmount: '',
@@ -231,6 +237,7 @@ export interface CreateOrderBody {
   deliveryName: string;
   deliveryContact: string;
   deliveryAddress: string;
+  deliveryCoords?: { lat: number; lng: number };
   description?: string;
   comment?: string;
   deliveryAmount?: number;
@@ -260,6 +267,9 @@ export function toCreateOrderBody(data: CreateOrderFormType): CreateOrderBody {
     deliveryName: data.deliveryName.trim(),
     deliveryContact: data.deliveryContact.trim(),
     deliveryAddress: data.deliveryAddress.trim(),
+    // Omitted entirely when there is no pin — the API treats absent and null alike, and sending
+    // `null` for the overwhelmingly common case would only make the payload noisier.
+    ...(data.deliveryCoords && { deliveryCoords: data.deliveryCoords }),
     ...(description && { description }),
     ...(comment && { comment }),
     ...(money(data.deliveryAmount) !== undefined && { deliveryAmount: money(data.deliveryAmount) }),
@@ -301,6 +311,7 @@ export function orderToFormValues(order: {
   clientName: string;
   deliveryContact: string;
   deliveryAddress: string;
+  deliveryCoords?: { lat: number; lng: number };
   description?: string;
   comment?: string;
   deliveryAmount?: number;
@@ -318,6 +329,9 @@ export function orderToFormValues(order: {
     deliveryName: order.clientName,
     deliveryContact: order.deliveryContact,
     deliveryAddress: order.deliveryAddress,
+    // The snapshot the order was saved with — an edit reopens on ITS pin, not on the registry's
+    // (which may have moved since), exactly like every other snapshot field here.
+    deliveryCoords: order.deliveryCoords ?? null,
     description: order.description ?? '',
     comment: order.comment ?? '',
     deliveryAmount: order.deliveryAmount != null ? String(order.deliveryAmount) : '',

@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { appConfig } from "@/config/app.js";
 import { decryptKms } from "@helpers/encryption.js";
+import { decodeCoords } from "@helpers/geo.js";
 import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { RentTimeUnitEnum } from "@models/enums/rentTimeUnitEnum.js";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
@@ -383,6 +384,13 @@ export function projectOrderDetail(
     clientRegistryId: order.clientRegistryId ?? undefined,
     deliveryContact: decryptKms(order.deliveryContactKms),
     deliveryAddress: decryptKms(order.deliveryAddressKms),
+    // Total by construction: an unreadable pin projects as "no pin", so the maps button silently
+    // falls back to the address text instead of the detail page failing to render. The guard is
+    // TRUTHINESS, not `!== null`: an absent column (an older row read through a narrower select)
+    // and an empty ciphertext must both mean "no pin" rather than reach `decryptKms`.
+    deliveryCoords: order.deliveryCoordsKms
+      ? decodeCoords(decryptKms(order.deliveryCoordsKms))
+      : undefined,
     description: order.description ?? undefined,
     comment: order.comment ?? undefined,
     deliveryAmount: toMoney(order.deliveryAmount),

@@ -10,6 +10,16 @@ vi.mock('./useCreateClientRegistry', () => ({ useCreateClientRegistry }));
 const { success, error } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock('@components/notifications/notify', () => ({ notify: { success, error } }));
 
+// The picker is a lazy chunk pulling in Leaflet (real layout, not jsdom). Its own suite covers it;
+// here it is stubbed to the one thing this modal cares about — a confirmed pin reaching the body.
+vi.mock('@components/LocationPicker', () => ({
+  default: ({ onConfirm }: { onConfirm: (coords: { lat: number; lng: number }) => void }) => (
+    <button type="button" onClick={() => onConfirm({ lat: 14.634915, lng: -90.506883 })}>
+      confirm-stub
+    </button>
+  ),
+}));
+
 import ClientRegistryModal from './ClientRegistryModal';
 
 const KEY = 'modules.panel.orders.registry';
@@ -89,7 +99,38 @@ describe('ClientRegistryModal', () => {
     expect(success).toHaveBeenCalledWith(`${KEY}.successToast`, { title: `${KEY}.successTitle` });
     expect(onCreated).toHaveBeenCalledWith(registry);
     expect(onClose).toHaveBeenCalled();
-  });
+    // Explicit timeout like its siblings: this modal types through a full form, and every address
+    // row now carries a location field too — comfortably under the default alone, but not while
+    // the whole suite runs in parallel.
+  }, 20000);
+
+  it('saves an address PIN on the client, so future orders start with it found', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderModal();
+
+    // Set the pin BEFORE submitting — `fillValid` ends by submitting.
+    await user.type(screen.getByPlaceholderText(`${KEY}.fields.namePlaceholder`), 'María López');
+    await user.selectOptions(screen.getAllByRole('combobox')[0] as HTMLElement, '1');
+    await user.type(screen.getByPlaceholderText(`${KEY}.fields.contactValuePlaceholder`), '5555-1234');
+    await user.type(
+      screen.getByPlaceholderText(`${KEY}.fields.addressPlaceholder`),
+      'Zona 10, 4a avenida 5-55',
+    );
+    await user.click(screen.getByTestId('registry-coords-0-open'));
+    await user.click(await screen.findByRole('button', { name: 'confirm-stub' }));
+    await user.click(screen.getByRole('button', { name: `${KEY}.submit` }));
+
+    await waitFor(() => expect(createRegistry).toHaveBeenCalled());
+    expect(createRegistry.mock.calls[0]?.[0].addresses[0]).toMatchObject({
+      coords: { lat: 14.634915, lng: -90.506883 },
+    });
+
+    // Removing it sends nothing again — a saved address with a wrong pin is worse than one without.
+    await user.click(screen.getByTestId('registry-coords-0-clear'));
+    await user.click(screen.getByRole('button', { name: `${KEY}.submit` }));
+    await waitFor(() => expect(createRegistry).toHaveBeenCalledTimes(2));
+    expect(createRegistry.mock.calls[1]?.[0].addresses[0]).not.toHaveProperty('coords');
+  }, 20000);
 
   it('captures multiple contacts/addresses with the chosen principal/favorite and a preferred method', async () => {
     const user = userEvent.setup({ delay: null });
@@ -222,5 +263,7 @@ describe('ClientRegistryModal', () => {
     const form = document.getElementById('create-registry-form') as HTMLFormElement;
     await act(async () => form.requestSubmit());
     expect(createRegistry).not.toHaveBeenCalled();
-  });
+    // Explicit timeout like its siblings: typing through the whole form is slow under a parallel
+    // suite, and every address row now carries a location field too.
+  }, 20000);
 });

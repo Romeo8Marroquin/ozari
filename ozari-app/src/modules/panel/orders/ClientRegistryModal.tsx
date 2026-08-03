@@ -8,6 +8,7 @@ import CustomInputForm from '@components/CustomInputForm';
 import CustomSelectForm from '@components/CustomSelectForm';
 import CustomTextareaForm from '@components/CustomTextareaForm';
 import FormError from '@components/FormError';
+import LocationField from '@components/LocationField';
 import Modal from '@components/Modal';
 import { notify } from '@components/notifications/notify';
 import Radio from '@components/Radio';
@@ -104,6 +105,7 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
   const contacts = useFieldArray({ control, name: 'contacts' });
   const addresses = useFieldArray({ control, name: 'addresses' });
   const contactValues = useWatch({ control, name: 'contacts' });
+  const addressValues = useWatch({ control, name: 'addresses' });
   const principalIndex = useWatch({ control, name: 'principalContactIndex' });
   const favoriteIndex = useWatch({ control, name: 'favoriteAddressIndex' });
   const { createRegistry, isPending } = useCreateClientRegistry();
@@ -322,7 +324,7 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
                   size="sm"
                   disabled={addresses.fields.length >= REGISTRY_MAX_ADDRESSES}
                   startIcon={<HiOutlinePlus className="size-3.5" />}
-                  onClick={() => addresses.append({ zoneId: null, address: '' })}
+                  onClick={() => addresses.append({ zoneId: null, address: '', coords: null })}
                 >
                   {t(`${KEY}.actions.addAddress`)}
                 </Button>
@@ -357,6 +359,16 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
                         placeholderOption={t(`${KEY}.fields.zonePlaceholder`)}
                         options={toOptions(zones)}
                         instructions={t(`${KEY}.fields.zoneHint`)}
+                      />
+                      {/* Saved on the CLIENT's address, so every future order for this venue starts
+                          with the pin already found — the order still snapshots its own copy. */}
+                      <LocationField
+                        id={`registry-coords-${index}`}
+                        value={addressValues?.[index]?.coords ?? undefined}
+                        onChange={(coords) =>
+                          setValue(`addresses.${index}.coords`, coords ?? null)
+                        }
+                        addressText={addressValues?.[index]?.address}
                       />
                     </div>
                     <button

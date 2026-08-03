@@ -89,6 +89,13 @@ export default defineConfig({
         // pages) — pure visual orchestration on top of the standard transition, verified by eye;
         // the components' begin/claim DECISIONS are what the unit tests pin.
         'src/modules/panel/products/productImageMorph.ts',
+        // The Leaflet glue for the location picker: creating the map, wiring tiles, panning. Leaflet
+        // measures real layout (container box, tile grid, scroll offsets) which jsdom does not
+        // provide, so a test here could only assert that our own mock was called. Everything that
+        // DECIDES anything — parsing a pasted link, validating a pin, building a maps deep link,
+        // choosing which app to open, when the button appears — lives in tested pure modules
+        // (`utils/geo`, `utils/geocode`, `utils/mapLinks`, `utils/mapsPreference`).
+        'src/components/leafletMap.ts',
       ],
     },
   },

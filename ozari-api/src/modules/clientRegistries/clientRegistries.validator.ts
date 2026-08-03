@@ -8,6 +8,7 @@ import { appConfig } from "@/config/app.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
 import { ContactTypeEnum } from "@models/enums/contactTypeEnum.js";
 import { emailRegex, isValidContactPhone } from "@helpers/regex.js";
+import { sanitizeCoords } from "@helpers/geo.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import {
   type CreateClientRegistryRequestModel,
@@ -191,6 +192,14 @@ export const validateCreateClientRegistry = async (
         }
         domicilePrice = Math.trunc(rawDomicilePrice * 100) / 100;
       }
+      // The map pin — optional everywhere. An ABSENT pin is the normal case, but a malformed one is
+      // rejected rather than dropped: silently discarding a coordinate the admin just placed would
+      // be indistinguishable, to them, from the map not working.
+      const coords = sanitizeCoords(rawAddress["coords"]);
+      if (!coords.ok) {
+        rejectCreate(res, "invalidCoords", { coords: rawAddress["coords"] });
+        return;
+      }
       const isFavorite = rawAddress["isFavorite"] === true;
       if (isFavorite) {
         favoriteCount += 1;
@@ -199,6 +208,7 @@ export const validateCreateClientRegistry = async (
         ...(zoneId !== undefined && { zoneId }),
         address,
         ...(instructions !== undefined && { instructions }),
+        ...(coords.value !== undefined && { coords: coords.value }),
         ...(domicilePrice !== undefined && { domicilePrice }),
         isFavorite,
       });

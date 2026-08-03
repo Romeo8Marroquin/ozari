@@ -1,3 +1,5 @@
+import type { Coords } from '@utils/geo';
+
 /** A lookup pair as the backend projects it on an order (id + display name). */
 export interface OrderLookup {
   id: number;
@@ -42,6 +44,10 @@ export interface OrderAction {
   /** True when this move DESTROYS the photos of the step it undoes (a backward leg out of a step
    *  that demanded evidence) — warned about before it happens. */
   purgesEvidence: boolean;
+  /** Which physical trip this move confirms, from the status's own `tracksEvent`. Non-null ⇒ the
+   *  step is somebody DRIVING somewhere, which is exactly when a navigation button belongs beside
+   *  it. `null` on every desk-work move (rewind, cancel) and on steps nobody travels for. */
+  tracksEvent?: 'DELIVERY' | 'COLLECTION' | null;
 }
 
 /** @see OrderAction.inventoryEffect */
@@ -181,6 +187,8 @@ export interface RegistryAddress {
   zone?: ZoneOption;
   address: string;
   instructions?: string;
+  /** The saved map pin, when this address has one. Optional everywhere, forever. */
+  coords?: Coords;
   domicilePrice?: number;
   isFavorite: boolean;
 }
@@ -242,6 +250,8 @@ export interface OrderDetail extends OrderListItem {
   clientRegistryId?: number;
   deliveryContact: string;
   deliveryAddress: string;
+  /** The delivery's map pin, snapshotted at order time. Absent = navigate by the address text. */
+  deliveryCoords?: Coords;
   description?: string;
   comment?: string;
   deliveryAmount?: number;

@@ -6,6 +6,7 @@ import { logger } from "@/config/logger.js";
 import { AuditAction, logAudit } from "@/config/auditLogger.js";
 import { isDeployedEnvironment } from "@/config/environment.js";
 import { decryptKms, encryptKms } from "@helpers/encryption.js";
+import { encodeCoords } from "@helpers/geo.js";
 import { type CustomRequest } from "@models/common/customRequestModel.js";
 import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
@@ -447,6 +448,10 @@ export const createOrder = async (
           deliveryNameKms: encryptKms(body.deliveryName),
           deliveryContactKms: encryptKms(body.deliveryContact),
           deliveryAddressKms: encryptKms(body.deliveryAddress),
+          // The pin travels with the text it belongs to — snapshotted, encrypted, and NULL when the
+          // admin never placed one (the overwhelmingly common case).
+          deliveryCoordsKms:
+            body.deliveryCoords !== undefined ? encryptKms(encodeCoords(body.deliveryCoords)) : null,
           description: body.description ?? null,
           comment: body.comment ?? null,
           deliveryAt: body.deliveryAt,
@@ -799,6 +804,10 @@ export const updateOrder = async (
           deliveryNameKms: encryptKms(body.deliveryName),
           deliveryContactKms: encryptKms(body.deliveryContact),
           deliveryAddressKms: encryptKms(body.deliveryAddress),
+          // The pin travels with the text it belongs to — snapshotted, encrypted, and NULL when the
+          // admin never placed one (the overwhelmingly common case).
+          deliveryCoordsKms:
+            body.deliveryCoords !== undefined ? encryptKms(encodeCoords(body.deliveryCoords)) : null,
           description: body.description ?? null,
           comment: body.comment ?? null,
           deliveryAt: body.deliveryAt,

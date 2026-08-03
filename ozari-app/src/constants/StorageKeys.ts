@@ -12,4 +12,9 @@ export enum StorageKeys {
   // purpose: it must survive a refresh / navigating away and back, but a closed tab shouldn't
   // resurrect a weeks-old half-form. User-scoped → cleared by `clearAuthState` on logout.
   PRODUCT_CREATE_DRAFT = 'app_product_create_draft',
+  // Which maps app "abrir en mapas" should use. localStorage, and DELIBERATELY on the globals side
+  // of the state taxonomy (like DEVICE_UUID and the language): it describes the DEVICE, not the
+  // account — the phone either has Waze installed or it doesn't, whoever signs in on it. Clearing
+  // it on logout would make a shared delivery phone re-ask every single shift.
+  MAPS_APP = 'app_maps_app',
 }

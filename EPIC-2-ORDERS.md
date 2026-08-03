@@ -412,6 +412,33 @@ additive. One API note: `buildRentedInWindowWhere`'s trailing arguments are an *
 because when the turnaround was first added positionally an existing call silently passed its order
 id as the turnaround **and still type-checked**. Two adjacent `number` parameters is a trap.
 
+### 6c. MAP LOCATIONS & NAVIGATION (✅ BUILT 2026-08-03)
+
+**The rule: a pin is optional metadata on an address, and the address TEXT stays authoritative.**
+Every surface must keep working without one — most walk-in orders will never have a pin, and a
+feature that quietly becomes required would block order creation over a nicety.
+
+| Question | Answer |
+|---|---|
+| Where does the pin live? | On the registry ADDRESS (reusable, prefills the form) **and** snapshotted on the ORDER (`services.delivery_coords_kms`) — the same doctrine as the contact/address text: editing a registry address later must never move a past order's delivery. |
+| Who picks it? | The admin, in a dialog: search (Nominatim), pan the map, or paste a link/coordinates. Never a map embedded in the form — it invites fiddling instead of finishing, and on a phone it pushes the fields off screen. |
+| Who navigates? | **Always an external app.** We hand Google/Waze/Apple a universal `https://` link and get out of the way; no turn-by-turn, ever. |
+| Which app? | A **device-local** preference in Ajustes, available to every role (a driver sets it on their own phone) — not an admin preference, and not cleared on logout. |
+| When does the button show? | When the next forward action's status declares `tracksEvent` — i.e. when somebody is actually about to drive. Derived from the lifecycle machine, so a new travel step needs no client change. |
+
+**Dependency choice (free/permissive only, per the owner's constraint):** Leaflet (BSD-2) + OSM
+tiles + Nominatim — no API key, no signup, no billing account, nothing to renew. `react-leaflet` was
+**rejected**: it is Hippocratic 2.1, which is not OSI-approved and carries use restrictions;
+wrapping Leaflet directly is ~60 lines and fits the GSAP/modal lifecycle better anyway. Google Maps
+was rejected for requiring a billing account. The trade-off accepted: OSM's POI coverage in
+Guatemala is thinner than Google's, so the flow is **search the street → drag the pin**, which
+street-level OSM data serves well. Tile attribution is the LICENCE — it is rendered, not optional.
+
+**Doors left open:** travel-time-aware spacing (EPIC-2-DRIVER-AVAILABILITY §5) now has real
+coordinates to read the day it is built; a zone/geofence check could compare a pin against a zone
+polygon; a client-facing "confirm your location" step reuses the same picker with a different
+projection. None of them are built, and none are made harder.
+
 ### Cost of each future door (all additive unless marked)
 
 | Door | What it touches | Verdict |

@@ -1,4 +1,5 @@
 import type { CurrencyModel } from "@/models/common/currencyModel.js";
+import type { CoordsModel } from "@helpers/geo.js";
 import type {
   CatalogOptionModel,
   PaginationMeta,
@@ -146,6 +147,9 @@ export interface OrderDetailResponseModel extends OrderListItemResponseModel {
   /** Decrypted snapshots captured at order time (never live registry/user data). */
   deliveryContact: string;
   deliveryAddress: string;
+  /** The delivery's map pin, when one was set — what the driver's "open in maps" button uses.
+   *  Absent is normal and never blocking: the button falls back to searching the address text. */
+  deliveryCoords: CoordsModel | undefined;
   description: string | undefined;
   comment: string | undefined;
   /** Fee actually charged for this delivery (admin-set, distance-based); absent = no fee. */
@@ -268,6 +272,9 @@ export interface CreateOrderRequestModel {
   deliveryName: string;
   deliveryContact: string;
   deliveryAddress: string;
+  /** The OPTIONAL map pin for this delivery, snapshotted like the text beside it (editing the
+   *  registry address later must never move a past order). Absent = navigate by the text. */
+  deliveryCoords: CoordsModel | undefined;
   description: string | undefined;
   comment: string | undefined;
   /** Delivery fee actually charged — admin-set, distance-based (free inside Hacienda Real). */

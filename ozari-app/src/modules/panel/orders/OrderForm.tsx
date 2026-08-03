@@ -16,6 +16,7 @@ import CustomInputForm from '@components/CustomInputForm';
 import CustomSelect from '@components/CustomSelect';
 import CustomSelectForm from '@components/CustomSelectForm';
 import CustomTextareaForm from '@components/CustomTextareaForm';
+import LocationField from '@components/LocationField';
 import FormError from '@components/FormError';
 import { notify } from '@components/notifications/notify';
 import { QueryKeys } from '@constants/QueryKeys';
@@ -423,6 +424,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   const deliveryAmountRaw = useWatch({ control, name: 'deliveryAmount' });
   const deliveryContactValue = useWatch({ control, name: 'deliveryContact' });
   const deliveryAddressValue = useWatch({ control, name: 'deliveryAddress' });
+  const deliveryCoords = useWatch({ control, name: 'deliveryCoords' });
   const deliveryContactTypeId = useWatch({ control, name: 'deliveryContactTypeId' });
   const deliveryZoneId = useWatch({ control, name: 'deliveryZoneId' });
   // WHOSE day the events would occupy — re-probed on every change, because the logistics pad is a
@@ -481,6 +483,10 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
       setValue('deliveryContactTypeId', contact.contactType.id);
     }
     if (address) setValue('deliveryAddress', address.address, { shouldValidate: true });
+    // The saved address's pin comes along with its text — the two describe the same place, and
+    // prefilling one without the other would leave the order pointing at the wrong pair. `null`
+    // (not undefined) so an address WITHOUT a pin actively clears a previous client's.
+    setValue('deliveryCoords', address?.coords ?? null);
     // Delivery zone (drives the fee suggestion; editable) + the fee itself: the favorite address's
     // explicit price, else its zone's default fee — clear when neither exists so a prior client's
     // fee never lingers. All editable afterwards.
@@ -781,6 +787,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     if (!address) return;
     setValue('deliveryAddress', address.address, { shouldValidate: true });
     setValue('deliveryZoneId', address.zone?.id ?? null);
+    // The pin travels with the text — see the prefill effect. A saved address with no pin CLEARS
+    // whatever was there, so the order never keeps a pin belonging to a different place.
+    setValue('deliveryCoords', address.coords ?? null);
     const fee = address.domicilePrice ?? address.zone?.deliveryFee;
     if (fee != null) setValue('deliveryAmount', String(fee), { shouldValidate: true });
   };
@@ -1146,6 +1155,16 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                         label={t(`${KEY}.fields.deliveryAddressLabel`)}
                         placeholder={t(`${KEY}.fields.deliveryAddressPlaceholder`)}
                         aria-label={t(`${KEY}.fields.deliveryAddressLabel`)}
+                      />
+                    </div>
+                    {/* The OPTIONAL pin, directly under the text it belongs to — the two describe
+                        the same place, and separating them would invite them to disagree. */}
+                    <div className="reveal-item">
+                      <LocationField
+                        id="order-delivery-coords"
+                        value={deliveryCoords ?? undefined}
+                        onChange={(coords) => setValue('deliveryCoords', coords ?? null)}
+                        addressText={deliveryAddressValue}
                       />
                     </div>
                     {/* Delivery zone (for a one-off venue) — suggests the zone's fee, editable below. */}

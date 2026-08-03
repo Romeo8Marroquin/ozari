@@ -10,6 +10,7 @@ import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { RentTimeUnitEnum } from "@models/enums/rentTimeUnitEnum.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
+import { sanitizeCoords } from "@helpers/geo.js";
 import {
   type CreateOrderLineRequestModel,
   type CreateOrderRequestModel,
@@ -277,6 +278,13 @@ async function parseOrderBody(
     reject("invalidDeliveryAddress", { deliveryAddress: body["deliveryAddress"] });
     return null;
   }
+  // The map pin — optional, and the TEXT above stays authoritative. Shared with the registry
+  // validator through `sanitizeCoords`, so the two doors accept exactly the same values.
+  const deliveryCoords = sanitizeCoords(body["deliveryCoords"]);
+  if (!deliveryCoords.ok) {
+    reject("invalidDeliveryCoords", { deliveryCoords: body["deliveryCoords"] });
+    return null;
+  }
 
   const description = sanitizeOptionalText(body["description"], 500);
   if (!description.ok) {
@@ -354,6 +362,7 @@ async function parseOrderBody(
     deliveryName,
     deliveryContact,
     deliveryAddress,
+    deliveryCoords: deliveryCoords.value,
     description: description.value,
     comment: comment.value,
     deliveryAmount: deliveryAmount.value,

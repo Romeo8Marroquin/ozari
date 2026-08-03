@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { decryptKms } from "@helpers/encryption.js";
+import { decodeCoords } from "@helpers/geo.js";
 import { type ClientRegistryResponseModel } from "./clientRegistries.models.js";
 
 /**
@@ -23,6 +24,7 @@ export const richRegistryInclude = {
       id: true,
       addressKms: true,
       instructionsKms: true,
+      coordsKms: true,
       domicilePrice: true,
       isFavorite: true,
       // `deliveryFee` = the zone's DEFAULT fee the order form suggests (a per-address
@@ -70,6 +72,10 @@ export function projectClientRegistry(
       address: decryptKms(address.addressKms),
       instructions:
         address.instructionsKms !== null ? decryptKms(address.instructionsKms) : undefined,
+      // `decodeCoords` is total: a corrupt or legacy value reads as "no pin" rather than as a NaN
+      // that would render nowhere on a map and deep-link a driver into the ocean. Guarded by
+      // truthiness so an absent column or an empty ciphertext never reaches `decryptKms`.
+      coords: address.coordsKms ? decodeCoords(decryptKms(address.coordsKms)) : undefined,
       domicilePrice: address.domicilePrice !== null ? Number(address.domicilePrice) : undefined,
       isFavorite: address.isFavorite,
     })),

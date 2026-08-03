@@ -107,6 +107,24 @@ afterEach(() => {
 });
 
 describe('SettingsPage', () => {
+  it('lets ANY role set this device’s maps app, and remembers it locally', async () => {
+    // In Ajustes, not the admin Preferencias screen: which maps app to open is a fact about the
+    // phone in someone's hand, so a driver has to be able to set it without asking anyone.
+    localStorage.clear();
+    setMe({ data: { fullName: 'Romeo Marroquín', email: 'r@example.com' } });
+    renderPage();
+
+    const select = screen.getByLabelText(
+      'modules.panel.settings.device.mapsApp.selectLabel',
+    ) as HTMLSelectElement;
+    expect(select.value).toBe('ask');
+
+    await userEvent.selectOptions(select, 'waze');
+    expect(select.value).toBe('waze');
+    // Written straight through to local storage — no server round trip, nothing to invalidate.
+    expect(localStorage.getItem('app_maps_app')).toBe(JSON.stringify('waze'));
+  });
+
   it('shows the loading skeletons (no cached profile yet)', () => {
     setMe({ data: undefined, isLoading: true, isFetching: true });
     renderPage();
