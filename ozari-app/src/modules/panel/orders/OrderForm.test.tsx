@@ -51,11 +51,28 @@ const { newRegistry } = vi.hoisted(() => ({
   },
 }));
 vi.mock('./ClientRegistryModal', () => ({
-  default: ({ open, onCreated, onClose }: { open: boolean; onCreated: (r: unknown) => void; onClose: () => void }) =>
+  default: ({
+    open,
+    onCreated,
+    onClose,
+    registry,
+  }: {
+    open: boolean;
+    onCreated: (r: unknown) => void;
+    onClose: () => void;
+    registry?: { id: number; name: string };
+  }) =>
     open ? (
       <>
         <button type="button" onClick={() => onCreated(newRegistry)}>
           stub-registry-create
+        </button>
+        {/* Echoes back the registry it was OPENED on, renamed — exactly what an edit hands over. */}
+        <button
+          type="button"
+          onClick={() => onCreated({ ...registry, name: `${registry?.name ?? ''} (editado)` })}
+        >
+          stub-registry-edit
         </button>
         <button type="button" onClick={onClose}>
           stub-registry-close
@@ -490,6 +507,31 @@ describe('OrderForm', () => {
     expect(updater(undefined)).toEqual([newRegistry]);
   });
 
+  it('turns the client button into EDIT once a client is chosen, and replaces that row in the cache', async () => {
+    const user = userEvent.setup();
+    const { container, setData } = renderForm();
+    // Nothing selected ⇒ the button creates.
+    expect(screen.getByRole('button', { name: `${KEY}.actions.newClient` })).toBeInTheDocument();
+
+    await user.selectOptions(byId(container, 'order-client'), '3');
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: `${KEY}.actions.editClient` })).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole('button', { name: `${KEY}.actions.newClient` })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.editClient` }));
+    await user.click(screen.getByRole('button', { name: 'stub-registry-edit' }));
+
+    // An EDIT replaces the row in place — the same client must never appear twice in the picker.
+    const calls = setData.mock.calls;
+    const updater = calls[calls.length - 1]?.[1] as (prev?: ClientRegistry[]) => ClientRegistry[];
+    const other = { ...registry, id: 99, name: 'Otro Cliente' };
+    const next = updater([other, registry]);
+    expect(next).toHaveLength(2);
+    expect(next[0]).toBe(other); // every OTHER row is left exactly as it was
+    expect(next[1]?.name).toBe('María López (editado)');
+  });
+
   it('adds and removes product lines (both dates are always available)', async () => {
     const user = userEvent.setup();
     const { container } = renderForm();
@@ -662,7 +704,9 @@ describe('OrderForm', () => {
     expect(invalidate).toHaveBeenCalled();
     expect(success).toHaveBeenCalledWith(`${KEY}.successToast`, { title: `${KEY}.successTitle` });
     expect(navigateTo).toHaveBeenCalledWith('/panel/pedidos');
-  });
+    // Explicit timeout like every other test that runs `fillAndSubmit`: it types through the whole
+    // form, which exceeds the 5s default whenever the machine is busy.
+  }, 20000);
 
   it('maps a stock 409 onto the offending line and shows the banner', async () => {
     const { container } = renderForm();
@@ -675,7 +719,7 @@ describe('OrderForm', () => {
     );
     expect(await screen.findByText(`${KEY}.errors.lineUnavailable`)).toBeInTheDocument();
     expect(screen.getByText('Sin disponibilidad')).toBeInTheDocument();
-  });
+  }, 20000);
 
   it('probes the DRIVER half too, and puts a clash on the date field with a way out', async () => {
     const user = userEvent.setup({ delay: null });
@@ -801,7 +845,7 @@ describe('OrderForm', () => {
 
     act(() => handlers.onError(axiosError(409, 'Conflicto', { selfOverlap: { gapMinutes: 45 } })));
     expect(await screen.findByText(`${DKEY}.saveSelfOverlap`)).toBeInTheDocument();
-  });
+  }, 20000);
 
   it('surfaces a 400 inline and a 500 as a toast', async () => {
     const { container } = renderForm();

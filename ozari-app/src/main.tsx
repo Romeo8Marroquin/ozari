@@ -90,9 +90,11 @@ if (import.meta.env.DEV) {
 }
 
 /**
- * DEV-only preview of the error screens, decided here — ABOVE the router — so the app's route
- * redirects can't strip it. Load `/#preview-crash` or `/#preview-maintenance` (a full reload) to see
- * them; the action clears the hash and reloads back into the app. Compiled out of production.
+ * DEV-only preview of the full-screen surfaces, decided here — ABOVE the router — so the app's route
+ * redirects can't strip it. Load `/#preview-crash`, `/#preview-maintenance` or `/#preview-loader`
+ * (a full reload) to see them; the error screens' action clears the hash and reloads back into the
+ * app. The loader is otherwise near-impossible to inspect: the router only shows it after a route has
+ * been pending for a second. Compiled out of production.
  */
 function devErrorPreview(): ErrorScreenVariant | null {
   if (!import.meta.env.DEV) return null;
@@ -102,10 +104,13 @@ function devErrorPreview(): ErrorScreenVariant | null {
 }
 
 const previewVariant = devErrorPreview();
+const previewLoader = import.meta.env.DEV && window.location.hash === '#preview-loader';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {previewVariant ? (
+    {previewLoader ? (
+      <PageLoader />
+    ) : previewVariant ? (
       <ErrorScreen
         variant={previewVariant}
         onAction={() => {

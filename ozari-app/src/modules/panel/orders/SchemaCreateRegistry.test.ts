@@ -9,8 +9,9 @@ import {
 
 const validForm = (overrides: Partial<CreateRegistryFormType> = {}): CreateRegistryFormType => ({
   name: 'María López',
+  notes: '',
   contacts: [{ contactTypeId: 1, value: '5555-1234' }],
-  addresses: [{ zoneId: 6, address: 'Zona 10, 4a avenida 5-55' , coords: null }],
+  addresses: [{ zoneId: 6, address: 'Zona 10, 4a avenida 5-55' , coords: null, instructions: '' }],
   principalContactIndex: 0,
   favoriteAddressIndex: 0,
   preferredPaymentMethodId: null,
@@ -22,7 +23,7 @@ describe('createRegistrySchema', () => {
 
   it('accepts a valid registry (with a zone, without a zone, and with NO addresses)', () => {
     expect(parse(validForm()).success).toBe(true);
-    expect(parse(validForm({ addresses: [{ zoneId: null, address: 'Hacienda Real lote 5' , coords: null }] })).success).toBe(true);
+    expect(parse(validForm({ addresses: [{ zoneId: null, address: 'Hacienda Real lote 5' , coords: null, instructions: '' }] })).success).toBe(true);
     expect(parse(validForm({ addresses: [] })).success).toBe(true);
   });
 
@@ -34,8 +35,8 @@ describe('createRegistrySchema', () => {
           { contactTypeId: 3, value: 'maria@example.com' },
         ],
         addresses: [
-          { zoneId: 6, address: 'Zona 10, 4a avenida 5-55' , coords: null },
-          { zoneId: null, address: 'Hacienda Real lote 5' , coords: null },
+          { zoneId: 6, address: 'Zona 10, 4a avenida 5-55' , coords: null, instructions: '' },
+          { zoneId: null, address: 'Hacienda Real lote 5' , coords: null, instructions: '' },
         ],
         principalContactIndex: 1,
         favoriteAddressIndex: 1,
@@ -73,7 +74,7 @@ describe('createRegistrySchema', () => {
     expect(parse(validForm({ name: 'x' })).success).toBe(false);
     expect(parse(validForm({ contacts: [{ contactTypeId: null as unknown as number, value: '5555' }] })).success).toBe(false);
     expect(parse(validForm({ contacts: [{ contactTypeId: 1, value: '' }] })).success).toBe(false);
-    expect(parse(validForm({ addresses: [{ zoneId: 6, address: 'abc' , coords: null }] })).success).toBe(false);
+    expect(parse(validForm({ addresses: [{ zoneId: 6, address: 'abc' , coords: null, instructions: '' }] })).success).toBe(false);
   });
 
   it('exposes required-field patterns', () => {
@@ -86,14 +87,28 @@ describe('toCreateRegistryBody', () => {
     const body = toCreateRegistryBody(
       validForm({
         addresses: [
-          { zoneId: 6, address: 'Zona 10, 4a avenida 5-55', coords: { lat: 14.634915, lng: -90.506883 } },
-          { zoneId: null, address: 'Hacienda Real lote 5', coords: null },
+          { zoneId: 6, address: 'Zona 10, 4a avenida 5-55', coords: { lat: 14.634915, lng: -90.506883 }, instructions: '' },
+          { zoneId: null, address: 'Hacienda Real lote 5', coords: null, instructions: '' },
         ],
       }),
     );
     expect(body.addresses[0]).toMatchObject({ coords: { lat: 14.634915, lng: -90.506883 } });
     // Absent rather than null — an address without a pin says nothing about one.
     expect(body.addresses[1]).not.toHaveProperty('coords');
+  });
+
+  it('sends how-to-get-in instructions only when they were written', () => {
+    const body = toCreateRegistryBody(
+      validForm({
+        addresses: [
+          { zoneId: 6, address: 'Zona 10, 4a avenida 5-55', coords: null, instructions: '  Portón negro  ' },
+          { zoneId: null, address: 'Hacienda Real lote 5', coords: null, instructions: '   ' },
+        ],
+      }),
+    );
+    expect(body.addresses[0]).toMatchObject({ instructions: 'Portón negro' });
+    // Whitespace is not an instruction — it is omitted, not stored as a blank.
+    expect(body.addresses[1]).not.toHaveProperty('instructions');
   });
 
   it('maps the chosen principal/favorite indexes onto the arrays and trims text', () => {
@@ -105,8 +120,8 @@ describe('toCreateRegistryBody', () => {
           { contactTypeId: 3, value: 'maria@example.com' },
         ],
         addresses: [
-          { zoneId: 6, address: '  Zona 10, 4a avenida 5-55  ' , coords: null },
-          { zoneId: null, address: 'Hacienda Real lote 5' , coords: null },
+          { zoneId: 6, address: '  Zona 10, 4a avenida 5-55  ' , coords: null, instructions: '' },
+          { zoneId: null, address: 'Hacienda Real lote 5' , coords: null, instructions: '' },
         ],
         principalContactIndex: 1,
         favoriteAddressIndex: 1,
@@ -127,7 +142,7 @@ describe('toCreateRegistryBody', () => {
 
   it('omits the zone and the preferred method when none is chosen', () => {
     const body = toCreateRegistryBody(
-      validForm({ addresses: [{ zoneId: null, address: 'Hacienda Real lote 5' , coords: null }], preferredPaymentMethodId: null }),
+      validForm({ addresses: [{ zoneId: null, address: 'Hacienda Real lote 5' , coords: null, instructions: '' }], preferredPaymentMethodId: null }),
     );
     expect(body.addresses[0]).toEqual({ address: 'Hacienda Real lote 5', isFavorite: true });
     expect(body.preferredPaymentMethodId).toBeUndefined();

@@ -36,6 +36,7 @@ const EXPECTED_OPERATIONS: ReadonlyArray<readonly [string, string]> = [
   ["/orders/evidence/upload-url", "post"],
   ["/client-registries", "get"],
   ["/client-registries", "post"],
+  ["/client-registries/{id}", "put"],
   ["/preferences", "get"],
   ["/preferences/settings", "put"],
   ["/preferences/catalogs/{catalog}", "post"],

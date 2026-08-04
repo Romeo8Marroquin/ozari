@@ -7,6 +7,10 @@ const { createRegistry } = vi.hoisted(() => ({ createRegistry: vi.fn() }));
 const { useCreateClientRegistry } = vi.hoisted(() => ({ useCreateClientRegistry: vi.fn() }));
 vi.mock('./useCreateClientRegistry', () => ({ useCreateClientRegistry }));
 
+const { updateRegistry } = vi.hoisted(() => ({ updateRegistry: vi.fn() }));
+const { useUpdateClientRegistry } = vi.hoisted(() => ({ useUpdateClientRegistry: vi.fn() }));
+vi.mock('./useUpdateClientRegistry', () => ({ useUpdateClientRegistry }));
+
 const { success, error } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock('@components/notifications/notify', () => ({ notify: { success, error } }));
 
@@ -21,6 +25,7 @@ vi.mock('@components/LocationPicker', () => ({
 }));
 
 import ClientRegistryModal from './ClientRegistryModal';
+import type { ClientRegistry } from './order.types';
 
 const KEY = 'modules.panel.orders.registry';
 const contactTypes = [{ id: 1, name: 'WhatsApp' }, { id: 2, name: 'Teléfono' }, { id: 3, name: 'Correo electrónico' }];
@@ -70,6 +75,7 @@ const axiosError = (status: number, message?: string) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   useCreateClientRegistry.mockReturnValue({ createRegistry, isPending: false });
+  useUpdateClientRegistry.mockReturnValue({ updateRegistry, isPending: false });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -243,7 +249,9 @@ describe('ClientRegistryModal', () => {
 
     act(() => handlers.onError(axiosError(500)));
     expect(error).toHaveBeenCalled();
-  });
+    // Explicit timeout like every other test that runs `fillValid`: it types through the whole form,
+    // which is slow under the parallel suite.
+  }, 20000);
 
   it('blocks submit until the required fields are valid', async () => {
     renderModal();
@@ -266,4 +274,110 @@ describe('ClientRegistryModal', () => {
     // Explicit timeout like its siblings: typing through the whole form is slow under a parallel
     // suite, and every address row now carries a location field too.
   }, 20000);
+
+  describe('edit mode', () => {
+    const existing: ClientRegistry = {
+      id: 7,
+      name: 'María López',
+      notes: 'Cliente frecuente',
+      contacts: [
+        { id: 11, contactType: { id: 1, name: 'WhatsApp' }, value: '5555-1234', isPrincipal: false },
+        { id: 12, contactType: { id: 2, name: 'Teléfono' }, value: '4444-5678', isPrincipal: true },
+      ],
+      addresses: [
+        {
+          id: 21,
+          zone: { id: 6, name: 'Zona 10' },
+          address: 'Zona 10, 4a avenida 5-55',
+          instructions: 'Portón negro',
+          coords: { lat: 14.634915, lng: -90.506883 },
+          isFavorite: true,
+        },
+      ],
+      preferredPaymentMethod: { id: 2, name: 'Transferencia' },
+      createdAt: 'x',
+    };
+
+    const renderEdit = (onCreated = vi.fn(), onClose = vi.fn(), registry = existing) => {
+      render(
+        <ClientRegistryModal
+          open
+          onClose={onClose}
+          onCreated={onCreated}
+          registry={registry}
+          contactTypes={contactTypes}
+          zones={zones}
+          paymentMethods={paymentMethods}
+        />,
+      );
+      return { onCreated, onClose };
+    };
+
+    it('prefills every field the body carries and saves the SAME shape through the update door', async () => {
+      const { onCreated, onClose } = renderEdit();
+      expect(screen.getByText(`${KEY}.editTitle`)).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: `${KEY}.submitEdit` }));
+      await waitFor(() => expect(updateRegistry).toHaveBeenCalled());
+      expect(createRegistry).not.toHaveBeenCalled();
+
+      // Saving an UNTOUCHED edit form must send back exactly what is stored — including the notes
+      // and the arrival instructions, which a full-state save would otherwise erase.
+      expect(updateRegistry.mock.calls[0][0]).toEqual({
+        id: 7,
+        body: {
+          name: 'María López',
+          notes: 'Cliente frecuente',
+          contacts: [
+            { contactTypeId: 1, value: '5555-1234', isPrincipal: false },
+            { contactTypeId: 2, value: '4444-5678', isPrincipal: true },
+          ],
+          addresses: [
+            {
+              zoneId: 6,
+              address: 'Zona 10, 4a avenida 5-55',
+              coords: { lat: 14.634915, lng: -90.506883 },
+              instructions: 'Portón negro',
+              isFavorite: true,
+            },
+          ],
+          preferredPaymentMethodId: 2,
+        },
+      });
+
+      const handlers = updateRegistry.mock.calls[0][1] as Handlers;
+      act(() => handlers.onSuccess({ data: { data: { registry: existing } } }));
+      expect(success).toHaveBeenCalledWith(`${KEY}.updatedToast`, { title: `${KEY}.updatedTitle` });
+      expect(onCreated).toHaveBeenCalledWith(existing);
+      expect(onClose).toHaveBeenCalled();
+    }, 20000);
+
+    it('falls back to the first row when the API flagged no principal/favorite, and to empty optionals', async () => {
+      renderEdit(vi.fn(), vi.fn(), {
+        id: existing.id,
+        name: existing.name,
+        createdAt: existing.createdAt,
+        contacts: [{ id: 11, contactType: { id: 1, name: 'WhatsApp' }, value: '5555-1234', isPrincipal: false }],
+        addresses: [{ id: 21, address: 'Hacienda Real lote 5', isFavorite: false }],
+      });
+
+      await userEvent.click(screen.getByRole('button', { name: `${KEY}.submitEdit` }));
+      await waitFor(() => expect(updateRegistry).toHaveBeenCalled());
+      expect(updateRegistry.mock.calls[0][0].body).toEqual({
+        name: 'María López',
+        contacts: [{ contactTypeId: 1, value: '5555-1234', isPrincipal: true }],
+        addresses: [{ address: 'Hacienda Real lote 5', isFavorite: true }],
+      });
+    }, 20000);
+
+    it('surfaces an update failure the same way a create failure is surfaced', async () => {
+      renderEdit();
+      await userEvent.click(screen.getByRole('button', { name: `${KEY}.submitEdit` }));
+      await waitFor(() => expect(updateRegistry).toHaveBeenCalled());
+      const handlers = updateRegistry.mock.calls[0][1] as Handlers;
+
+      act(() => handlers.onError(axiosError(400, 'Datos inválidos')));
+      expect(await screen.findByText('Datos inválidos')).toBeInTheDocument();
+    }, 20000);
+  });
 });

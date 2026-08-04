@@ -371,7 +371,33 @@ driver provably does NOT block the first (the test that proves the reframing did
   occupies) and the form (`enforcesStock` from `order.holdsInventory`). A new cap added to any one
   of them without the other two re-creates the bug: a form that refuses what the server accepts.
 
-### 10.1 Known gap, deliberately left (2026-07-30)
+### 10.2 Giving work BACK to a driver (✅ BUILT 2026-08-04 — closes §10.1)
+
+A reopen or a rewind is the mirror of the occupancy rule (§4.5): it makes an event PENDING again, so
+the order starts occupying its driver at a moment it had released. If that slot was promised to
+somebody else meanwhile, the tap has quietly double-booked the day. `POST /orders/:id/advance` now
+re-checks the pad for exactly those moves, answering the SAME `data.driverConflict` / `data.selfOverlap`
+payload as create and edit — through the same `sendLogisticsConflict`, so the three doors can never
+word the refusal differently.
+
+Two rules make it safe rather than annoying:
+
+- **Only moves that give work back are checked** (`reopen`, `backward`). A forward move can only ever
+  stamp an actual, which REMOVES occupancy — there is nothing to re-check.
+- **Only UPCOMING events are checked** (`upcomingLogisticsEvents`). The pad governs the future; the
+  past is a record, not a schedule. Rewinding a long-finished order, or reopening one whose dates have
+  passed, can never be refused — the admin cannot move time, so a historical clash would be a dead
+  end with no possible correction. A candidate still BLOCKS with all its pending events, including
+  overdue ones, which is right: work that hasn't happened yet still occupies its driver.
+
+The check runs inside the same transaction, before any write, and against the state the WHOLE walk
+lands on — a multi-step admin jump that rewinds several steps is evaluated once, on its final shape.
+
+**Possible refinement, not built:** the advance dialog surfaces the refusal through its normal inline
+banner with the server's sentence. It could name the clashing order and offer "Ver pedido" the way
+the order form does, by reading `data.driverConflict` — worth doing if it ever proves confusing.
+
+### 10.1 Known gap, deliberately left (2026-07-30) — CLOSED, see §10.2
 
 **Reopening a cancelled order does not re-check the driver's day.** `POST /orders/:id/advance`'s
 reopen leg re-checks GOODS (`reclaimOrderStock` — the units may have been promised to someone else

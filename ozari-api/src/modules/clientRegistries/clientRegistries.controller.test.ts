@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import {
   createClientRegistry,
   getClientRegistries,
+  updateClientRegistry,
 } from "./clientRegistries.controller.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
@@ -111,12 +112,106 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
 const buildReq = (
   query: Record<string, unknown> = {},
   body: Record<string, unknown> = {},
+  params: Record<string, unknown> = {},
 ): CustomRequest =>
-  ({ query, body, user: { userRole: 2, userId: 1 } }) as unknown as CustomRequest;
+  ({ query, body, params, user: { userRole: 2, userId: 1 } }) as unknown as CustomRequest;
 
 const successData = <T>(): T => (sendOzariSuccess as Mock).mock.calls[0]?.[3] as T;
 
 beforeEach(() => vi.clearAllMocks());
+
+describe("updateClientRegistry", () => {
+  /** The update runs in a transaction that wipes the attribute rows, then rewrites the registry. */
+  const mockUpdateTx = (existing: { id: number } | null = { id: 3 }) => {
+    const tx = {
+      clientRegistryContact: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      clientRegistryAddress: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      clientRegistry: { update: vi.fn().mockResolvedValue(makeRawRegistry()) },
+    };
+    (getPrismaClient as Mock).mockResolvedValue({
+      clientRegistry: { findFirst: vi.fn().mockResolvedValue(existing) },
+      $transaction: vi.fn(async (callback: (t: typeof tx) => unknown) => callback(tx)),
+    });
+    return tx;
+  };
+
+  const body = () => ({
+    name: "María López",
+    contacts: [{ contactTypeId: 1, value: "5555-1234", isPrincipal: true }],
+    addresses: [
+      {
+        zoneId: 6,
+        address: "Zona 10, 4a avenida 5-55",
+        instructions: "Portón negro",
+        coords: { lat: 14.634915, lng: -90.506883 },
+        isFavorite: true,
+      },
+    ],
+    preferredPaymentMethodId: 1,
+  });
+
+  it("REPLACES the attribute rows — nothing points at them, so a diff would buy nothing", async () => {
+    const tx = mockUpdateTx();
+    await updateClientRegistry(buildReq({}, body(), { id: "3" }), {} as Response);
+
+    // Old rows out, new rows in, inside ONE transaction: a reader can never catch the client with
+    // half its contacts.
+    expect(tx.clientRegistryContact.deleteMany).toHaveBeenCalledWith({
+      where: { clientRegistryId: 3 },
+    });
+    expect(tx.clientRegistryAddress.deleteMany).toHaveBeenCalledWith({
+      where: { clientRegistryId: 3 },
+    });
+
+    const arg = (tx.clientRegistry.update as Mock).mock.calls[0]?.[0] as {
+      data: { nameKms: string; addresses: { create: Array<Record<string, unknown>> } };
+    };
+    // Every PII field is re-encrypted, never stored as plaintext.
+    expect(arg.data.nameKms).not.toBe("María López");
+    expect(arg.data.addresses.create[0]?.["instructionsKms"]).not.toBe("Portón negro");
+    expect(arg.data.addresses.create[0]?.["coordsKms"]).toEqual(expect.any(String));
+    expect(sendOzariSuccess).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.OK,
+      "clientRegistries.updateRegistry.registryUpdated",
+      expect.anything(),
+    );
+  });
+
+  it("answers 404 for a malformed id and for one that does not exist", async () => {
+    mockUpdateTx();
+    await updateClientRegistry(buildReq({}, body(), { id: "abc" }), {} as Response);
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.NOT_FOUND,
+      "clientRegistries.updateRegistry.registryNotFound",
+    );
+
+    vi.clearAllMocks();
+    const tx = mockUpdateTx(null);
+    await updateClientRegistry(buildReq({}, body(), { id: "99" }), {} as Response);
+    // Nothing is deleted before the row is known to exist.
+    expect(tx.clientRegistryContact.deleteMany).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.NOT_FOUND,
+      "clientRegistries.updateRegistry.registryNotFound",
+    );
+  });
+
+  it("responds 500 when the write fails", async () => {
+    (getPrismaClient as Mock).mockResolvedValue({
+      clientRegistry: { findFirst: vi.fn().mockResolvedValue({ id: 3 }) },
+      $transaction: vi.fn().mockRejectedValue(new Error("db down")),
+    });
+    await updateClientRegistry(buildReq({}, body(), { id: "3" }), {} as Response);
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      "clientRegistries.updateRegistry.errorUpdatingRegistry",
+    );
+  });
+});
 
 describe("getClientRegistries", () => {
   it("returns the decrypted, projected page with pagination", async () => {

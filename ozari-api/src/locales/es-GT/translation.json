@@ -411,6 +411,16 @@
         "errorFetchingRegistries": "Error al obtener los registros de clientes: {{-error}}."
       }
     },
+    "updateRegistry": {
+      "registryUpdated": "Cliente actualizado correctamente.",
+      "registryNotFound": "El cliente no existe.",
+      "errorUpdatingRegistry": "Ha ocurrido un error al actualizar el cliente.",
+      "logs": {
+        "registryUpdated": "Cliente <{{-id}}> actualizado.",
+        "registryNotFound": "Cliente <{{-id}}> no encontrado al actualizar.",
+        "errorUpdatingRegistry": "Error actualizando el cliente: {{-error}}."
+      }
+    },
     "createRegistry": {
       "registryCreated": "Cliente registrado exitosamente.",
       "errorCreatingRegistry": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
@@ -535,6 +545,8 @@
       "invalid": "El pedido ya cambió de estado. Actualice la vista e intente de nuevo.",
       "evidence": "Las fotos de evidencia requeridas para este paso no están completas.",
       "stockConflict": "No hay disponibilidad para reactivar este pedido: algunos productos ya están comprometidos.",
+      "driverConflict": "El responsable asignado ya tiene otro evento demasiado cerca de ese horario.",
+      "selfOverlap": "La entrega y la recolección de este pedido están demasiado cerca entre sí.",
       "errorAdvancing": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "validators": {
         "invalidToStatusId": "El estado destino del pedido no es válido.",
@@ -555,6 +567,8 @@
         "invalid": "Transición inválida en el pedido <{{-id}}>: {{-detail}}.",
         "evidence": "Evidencia insuficiente al avanzar el pedido <{{-id}}>: {{-detail}}.",
         "stockConflict": "Conflicto de disponibilidad al reactivar el pedido: {{-conflicts}}.",
+        "driverConflict": "Conflicto de agenda al mover el pedido: <{{-driver}}> ya tiene un evento en <{{-conflictAt}}> (pedido <{{-orderId}}>).",
+        "selfOverlap": "La entrega y la recolección del pedido a mover están a menos de <{{-gap}}> minutos.",
         "evidenceCleanupFailed": "No se pudieron borrar de R2 las fotos de un paso deshecho: {{-error}}.",
         "errorAdvancing": "Error al avanzar el pedido: {{-error}}."
       }

@@ -1720,6 +1720,75 @@ export const paths: OpenAPIV3.PathsObject = {
     },
   },
 
+  "/client-registries/{id}": {
+    put: {
+      tags: ["Orders"],
+      summary: "Edit a walk-in client registry",
+      operationId: "updateClientRegistry",
+      description:
+        "**STRICTLY Admin.** DECLARATIVE: the body is the registry's FINAL state and is validated " +
+        "by the very same contract as create (the identical middleware, so the two cannot drift). " +
+        "Contacts and addresses are REPLACED, not diffed — nothing holds a foreign key to them " +
+        "(an order records the contact/address TEXT it agreed, never a reference), so past orders " +
+        "are untouched by construction. Editing a client today never rewrites where an order that " +
+        "already happened was delivered. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "integer", minimum: 1 },
+          example: 3,
+        },
+      ],
+      requestBody: bodyRef("CreateClientRegistryRequest", {
+        name: EXAMPLE_CLIENT_NAME,
+        contacts: [{ contactTypeId: 1, value: "5555-1234", isPrincipal: true }],
+        addresses: [
+          {
+            zoneId: 6,
+            address: EXAMPLE_ORDER_ADDRESS,
+            instructions: "Portón negro, preguntar por el guardia",
+            isFavorite: true,
+          },
+        ],
+        preferredPaymentMethodId: 1,
+      }),
+      responses: {
+        "200": dataResponse("The updated registry (the list's shape).", "ClientRegistryResponse", {
+          registry: {
+            id: 3,
+            name: EXAMPLE_CLIENT_NAME,
+            contacts: [
+              { id: 9, contactType: { id: 1, name: "WhatsApp" }, value: "5555-1234", isPrincipal: true },
+            ],
+            addresses: [
+              {
+                id: 9,
+                zone: { id: 6, name: "Zona 10" },
+                address: EXAMPLE_ORDER_ADDRESS,
+                instructions: "Portón negro, preguntar por el guardia",
+                isFavorite: true,
+              },
+            ],
+            createdAt: EXAMPLE_ORDER_CREATED_AT,
+          },
+        }, "Registry updated"),
+        "400": errorResponse(
+          "Validation failed — the same rules as create.",
+          400,
+          "The client requires at least one contact method",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse("The registry does not exist (or the id is malformed).", 404, "Client not found"),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
   "/health/check": {
     get: {
       tags: ["System"],

@@ -644,6 +644,14 @@ describe("projectOrderDetail", () => {
     );
     expect(pinned.deliveryCoords).toEqual({ lat: 14.634915, lng: -90.506883 });
 
+    // …and the arrival instructions beside it — the one delivery field the DRIVER reads.
+    const guided = projectOrderDetail(
+      makeRichOrder({ deliveryInstructionsKms: encryptKms("Portón negro") }),
+      makeProjectionContext(),
+    );
+    expect(guided.deliveryInstructions).toBe("Portón negro");
+    expect(pinned.deliveryInstructions).toBeUndefined();
+
     // A hand-edited or legacy value must read as "no pin" — a NaN would render nowhere on a map and
     // deep-link a driver into the ocean, which is strictly worse than having no pin at all.
     const corrupt = projectOrderDetail(

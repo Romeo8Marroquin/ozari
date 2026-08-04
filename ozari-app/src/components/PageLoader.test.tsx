@@ -26,9 +26,16 @@ afterEach(() => {
 
 describe('PageLoader', () => {
   it('renders the branded full-screen loader (static under reduced motion)', () => {
-    render(<PageLoader />);
+    const { container } = render(<PageLoader />);
     // The brand mark is exposed as a labelled image (a role="img" wrapper around the inline LogoMark).
     expect(screen.getByRole('img')).toHaveAccessibleName('components.pageLoader.logo');
+    // The loading STATE is announced, not drawn — a line of text that flashes in and out on a fast
+    // route is noise, but a screen reader must still be told something is happening.
+    expect(screen.getByRole('status')).toHaveTextContent('components.pageLoader.loading');
+    // It wears the shared app canvas (never its own colour wash) and names the mark, which is what
+    // gives its view-transition exit its own curve.
+    expect(container.querySelector('.app-canvas')).toBeInTheDocument();
+    expect(container.querySelector('.page-loader-mark')).toBeInTheDocument();
   });
 
   it('plays the staggered entrance when motion is allowed', () => {

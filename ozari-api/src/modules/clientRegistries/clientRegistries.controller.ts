@@ -162,3 +162,125 @@ export const createClientRegistry = async (
     );
   }
 };
+
+/**
+ * `PUT /client-registries/:id` — edit a walk-in client. **DECLARATIVE**, like the product and order
+ * updates: the body is the registry's FINAL state, validated by the very same contract as create
+ * (the identical middleware, so the two can never drift apart).
+ *
+ * Contacts and addresses are REPLACED rather than diffed, and that is safe precisely because of the
+ * snapshot doctrine: an order records the contact/address TEXT it agreed, never a foreign key to
+ * these rows. Nothing points at them, they are pure attribute rows (the NO-TRASH rule says such rows
+ * hard-delete), and the client sends its whole list every time — so a diff would be machinery
+ * without a beneficiary. Past orders are untouched by construction.
+ *
+ * What it deliberately does NOT do: reach into orders. Editing a client's address today must never
+ * rewrite where an order that already happened was delivered.
+ */
+export const updateClientRegistry = async (
+  req: CustomRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const id = Number(req.params["id"]);
+    if (!Number.isInteger(id) || id < 1) {
+      logger.warn(
+        i18next.t("clientRegistries.updateRegistry.logs.registryNotFound", {
+          id: req.params["id"],
+        }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.NOT_FOUND,
+        i18next.t("clientRegistries.updateRegistry.registryNotFound"),
+      );
+      return;
+    }
+
+    const body = req.body as CreateClientRegistryRequestModel;
+    const prismaClient = await getPrismaClient();
+    const existing = await prismaClient.clientRegistry.findFirst({
+      where: { id, isActive: true },
+      select: { id: true },
+    });
+    if (!existing) {
+      logger.warn(
+        i18next.t("clientRegistries.updateRegistry.logs.registryNotFound", { id }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.NOT_FOUND,
+        i18next.t("clientRegistries.updateRegistry.registryNotFound"),
+      );
+      return;
+    }
+
+    // ONE transaction: the old attribute rows leave and the new ones arrive together, so a reader
+    // can never catch the client with half its contacts.
+    const updated = await prismaClient.$transaction(async (tx) => {
+      await tx.clientRegistryContact.deleteMany({ where: { clientRegistryId: id } });
+      await tx.clientRegistryAddress.deleteMany({ where: { clientRegistryId: id } });
+      return tx.clientRegistry.update({
+        where: { id },
+        data: {
+          nameKms: encryptKms(body.name),
+          notesKms: body.notes !== undefined ? encryptKms(body.notes) : null,
+          preferredPaymentMethodId: body.preferredPaymentMethodId ?? null,
+          contacts: {
+            create: body.contacts.map((contact) => ({
+              contactTypeId: contact.contactTypeId,
+              valueKms: encryptKms(contact.value),
+              isPrincipal: contact.isPrincipal === true,
+            })),
+          },
+          addresses: {
+            create: body.addresses.map((address) => ({
+              zoneId: address.zoneId ?? null,
+              addressKms: encryptKms(address.address),
+              instructionsKms:
+                address.instructions !== undefined ? encryptKms(address.instructions) : null,
+              coordsKms:
+                address.coords !== undefined ? encryptKms(encodeCoords(address.coords)) : null,
+              domicilePrice: address.domicilePrice ?? null,
+              isFavorite: address.isFavorite === true,
+            })),
+          },
+        },
+        include: richRegistryInclude,
+      });
+    });
+
+    logger.info(
+      i18next.t("clientRegistries.updateRegistry.logs.registryUpdated", { id }),
+    );
+    if (isDeployedEnvironment()) {
+      logAudit({
+        action: AuditAction.ADMIN_ACTION,
+        ...(req.user && { userId: req.user.userId }),
+        ...(req.ip && { ipAddress: req.ip }),
+        resource: `ClientRegistry ID ${id}`,
+        success: true,
+        metadata: { operation: "CLIENT_REGISTRY_UPDATED" },
+      });
+    }
+
+    const response: ClientRegistryEnvelopeModel = {
+      registry: projectClientRegistry(updated),
+    };
+    sendOzariSuccess(
+      res,
+      HttpEnum.OK,
+      i18next.t("clientRegistries.updateRegistry.registryUpdated"),
+      response,
+    );
+  } catch (error) {
+    logger.error(
+      i18next.t("clientRegistries.updateRegistry.logs.errorUpdatingRegistry", { error }),
+    );
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("clientRegistries.updateRegistry.errorUpdatingRegistry"),
+    );
+  }
+};

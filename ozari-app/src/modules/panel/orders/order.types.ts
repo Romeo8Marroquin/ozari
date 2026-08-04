@@ -186,9 +186,10 @@ export interface RegistryAddress {
   id: number;
   zone?: ZoneOption;
   address: string;
-  instructions?: string;
   /** The saved map pin, when this address has one. Optional everywhere, forever. */
   coords?: Coords;
+  /** Saved "how to get in" for this address — prefills the order, which then owns its own copy. */
+  instructions?: string;
   domicilePrice?: number;
   isFavorite: boolean;
 }
@@ -252,6 +253,8 @@ export interface OrderDetail extends OrderListItem {
   deliveryAddress: string;
   /** The delivery's map pin, snapshotted at order time. Absent = navigate by the address text. */
   deliveryCoords?: Coords;
+  /** How to get in on arrival — the one delivery field the DRIVER reads rather than the admin. */
+  deliveryInstructions?: string;
   description?: string;
   comment?: string;
   deliveryAmount?: number;

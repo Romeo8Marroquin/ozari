@@ -28,6 +28,7 @@ import {
   type CreateRegistryFormType,
 } from './SchemaCreateRegistry';
 import { useCreateClientRegistry } from './useCreateClientRegistry';
+import { useUpdateClientRegistry } from './useUpdateClientRegistry';
 
 const FORM_ID = 'create-registry-form';
 const KEY = 'modules.panel.orders.registry';
@@ -36,12 +37,46 @@ const SECONDARY_COLOR = '#262626';
 interface ClientRegistryModalProps {
   open: boolean;
   onClose: () => void;
-  /** Called with the freshly-created registry so the caller can cache + select it. */
+  /** Called with the saved registry (created OR updated) so the caller can cache + select it. */
   onCreated: (registry: ClientRegistry) => void;
+  /** Present ⇒ EDIT that client instead of creating one. The form prefills from it and saves with
+   *  `PUT`, whose body is the same final-state shape as create. */
+  registry?: ClientRegistry | undefined;
   contactTypes: CatalogOption[];
   zones: CatalogOption[];
   paymentMethods: CatalogOption[];
 }
+
+/**
+ * An existing registry → the form's values. The mirror of {@link toCreateRegistryBody}: everything
+ * the form owns is restored, so saving an untouched form sends back exactly what is stored.
+ *
+ * The principal/favorite radios are INDEXES here but flags on the wire, so they are recovered by
+ * finding the flagged row — falling back to the first, which is the same defaulting the API applies.
+ */
+const registryToFormValues = (registry: ClientRegistry): CreateRegistryFormType => ({
+  name: registry.name,
+  notes: registry.notes ?? '',
+  contacts: registry.contacts.map((contact) => ({
+    contactTypeId: contact.contactType.id,
+    value: contact.value,
+  })),
+  addresses: registry.addresses.map((address) => ({
+    zoneId: address.zone?.id ?? null,
+    address: address.address,
+    coords: address.coords ?? null,
+    instructions: address.instructions ?? '',
+  })),
+  principalContactIndex: Math.max(
+    registry.contacts.findIndex((contact) => contact.isPrincipal),
+    0,
+  ),
+  favoriteAddressIndex: Math.max(
+    registry.addresses.findIndex((address) => address.isFavorite),
+    0,
+  ),
+  preferredPaymentMethodId: registry.preferredPaymentMethod?.id ?? null,
+});
 
 const toOptions = (rows: CatalogOption[]) => rows.map((row) => ({ value: row.id, label: row.name }));
 
@@ -91,6 +126,7 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
   open,
   onClose,
   onCreated,
+  registry,
   contactTypes,
   zones,
   paymentMethods,
@@ -108,7 +144,10 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
   const addressValues = useWatch({ control, name: 'addresses' });
   const principalIndex = useWatch({ control, name: 'principalContactIndex' });
   const favoriteIndex = useWatch({ control, name: 'favoriteAddressIndex' });
-  const { createRegistry, isPending } = useCreateClientRegistry();
+  const { createRegistry, isPending: isCreating } = useCreateClientRegistry();
+  const { updateRegistry, isPending: isUpdating } = useUpdateClientRegistry();
+  const isEdit = registry !== undefined;
+  const isPending = isCreating || isUpdating;
   const [formError, setFormError] = useState<string | undefined>(undefined);
 
   // Row entrance animates only for rows added AFTER the modal is open — the default rows present on
@@ -136,10 +175,18 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
     latestAddresses.current = addresses.fields;
   }, [addresses.fields]);
 
-  // A fresh form each time the dialog opens — clear typed values + field errors on close.
-  useEffect(() => {
-    if (!open) reset();
-  }, [open, reset]);
+  // A fresh form each time the dialog opens: on close it clears, and on OPEN it loads either the
+  // client being edited or the empty defaults. Keyed on `open` so reopening after an edit never
+  // shows the previous client's values.
+  //
+  // LAYOUT effect, deliberately, and it earns both halves of that: it runs BEFORE paint, so the
+  // default single contact/address the form mounts with is never seen behind a prefilled edit; and it
+  // runs BEFORE the passive `rowAnimReady` flip, so the prefilled rows mount while the gate is still
+  // false and ride the modal's own reveal instead of each animating in as if just added.
+  useLayoutEffect(() => {
+    if (open) reset(registry ? registryToFormValues(registry) : createRegistryDefaultValues);
+    else reset();
+  }, [open, registry, reset]);
 
   // Closing clears the inline banner too, so a stale error never greets the next open.
   const close = useCallback((): void => {
@@ -177,24 +224,34 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
   const onSubmit = (data: CreateRegistryFormType): void => {
     if (isPending) return;
     setFormError(undefined);
-    createRegistry(toCreateRegistryBody(data), {
-      onSuccess: (response) => {
-        const registry = response.data.data?.registry;
+    // ONE body builder for both doors: the API validates create and edit with the same middleware,
+    // so the client has no second contract that could drift.
+    const body = toCreateRegistryBody(data);
+    const handlers = {
+      onSuccess: (response: { data: { data?: { registry?: ClientRegistry } } }) => {
+        const saved = response.data.data?.registry;
         /* v8 ignore next 4 -- a 2xx always carries the registry; the guard is defensive */
-        if (!registry) {
+        if (!saved) {
           notify.error(t('errors.generic'));
           return;
         }
-        notify.success(t(`${KEY}.successToast`), { title: t(`${KEY}.successTitle`) });
-        onCreated(registry);
+        notify.success(t(`${KEY}.${isEdit ? 'updatedToast' : 'successToast'}`), {
+          title: t(`${KEY}.${isEdit ? 'updatedTitle' : 'successTitle'}`),
+        });
+        onCreated(saved);
         close();
       },
-      onError: (error) => {
+      onError: (error: unknown) => {
         const { inline, toast } = toFormError(error, t(`${KEY}.errors.submitFallback`));
         if (inline) setFormError(inline);
         if (toast) notify.error(toast);
       },
-    });
+    };
+    if (registry) {
+      updateRegistry({ id: registry.id, body }, handlers);
+      return;
+    }
+    createRegistry(body, handlers);
   };
 
   const requiredPatternsValue = useMemo(
@@ -208,8 +265,8 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
       onClose={close}
       size="xl"
       locked={isPending}
-      title={t(`${KEY}.title`)}
-      description={t(`${KEY}.description`)}
+      title={t(`${KEY}.${isEdit ? 'editTitle' : 'title'}`)}
+      description={t(`${KEY}.${isEdit ? 'editDescription' : 'description'}`)}
       footer={
         <>
           <Button
@@ -223,7 +280,7 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
             {t(`${KEY}.cancel`)}
           </Button>
           <Button type="submit" form={FORM_ID} color={SECONDARY_COLOR} fullWidth loading={isPending} className="sm:w-auto">
-            {t(`${KEY}.submit`)}
+            {t(`${KEY}.${isEdit ? 'submitEdit' : 'submit'}`)}
           </Button>
         </>
       }
@@ -324,7 +381,9 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
                   size="sm"
                   disabled={addresses.fields.length >= REGISTRY_MAX_ADDRESSES}
                   startIcon={<HiOutlinePlus className="size-3.5" />}
-                  onClick={() => addresses.append({ zoneId: null, address: '', coords: null })}
+                  onClick={() =>
+                    addresses.append({ zoneId: null, address: '', coords: null, instructions: '' })
+                  }
                 >
                   {t(`${KEY}.actions.addAddress`)}
                 </Button>
@@ -360,6 +419,15 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
                         options={toOptions(zones)}
                         instructions={t(`${KEY}.fields.zoneHint`)}
                       />
+                      {/* What a pin cannot say: how to get IN once you are there. */}
+                      <CustomInputForm<CreateRegistryFormType>
+                        id={`registry-instructions-${index}`}
+                        name={`addresses.${index}.instructions`}
+                        type="text"
+                        optionalLabel
+                        label={t(`${KEY}.fields.instructionsLabel`)}
+                        placeholder={t(`${KEY}.fields.instructionsPlaceholder`)}
+                      />
                       {/* Saved on the CLIENT's address, so every future order for this venue starts
                           with the pin already found — the order still snapshots its own copy. */}
                       <LocationField
@@ -391,7 +459,7 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
             </div>
 
             {/* Preferred payment method — optional; pre-selects the order's method. */}
-            <div className="modal-stagger">
+            <div className="modal-stagger flex flex-col gap-5">
               <CustomSelectForm<CreateRegistryFormType>
                 id="registry-preferred-payment"
                 name="preferredPaymentMethodId"
@@ -399,6 +467,18 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
                 label={t(`${KEY}.fields.preferredPaymentLabel`)}
                 placeholderOption={t(`${KEY}.fields.preferredPaymentPlaceholder`)}
                 options={toOptions(paymentMethods)}
+              />
+              {/* Anything about the CLIENT that isn't an address or a phone. Collected here because
+                  the save is full-state: a field the API stores but the form never showed would be
+                  erased the first time somebody edited the client. */}
+              <CustomTextareaForm<CreateRegistryFormType>
+                id="registry-notes"
+                name="notes"
+                autoGrow
+                optionalLabel
+                label={t(`${KEY}.fields.notesLabel`)}
+                placeholder={t(`${KEY}.fields.notesPlaceholder`)}
+                aria-label={t(`${KEY}.fields.notesLabel`)}
               />
             </div>
 

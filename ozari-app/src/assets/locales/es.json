@@ -1,4 +1,4 @@
-{
+﻿{
   "app": {
     "localStorageSaveError": "Error al almacenar el item {{key}} en el almacenamiento local.",
     "localStorageReadError": "Error al leer el item {{key}} del almacenamiento local."
@@ -82,7 +82,8 @@
       "rememberHint": "Puedes cambiarla luego en Ajustes."
     },
     "pageLoader": {
-      "logo": "Logo Party Rentals"
+      "logo": "Logo Party Rentals",
+      "loading": "Cargando"
     },
     "customInput": {
       "requiredField": "*",
@@ -447,6 +448,7 @@
             "name": "Quien recibe",
             "contact": "Contacto",
             "address": "Dirección de entrega",
+            "instructions": "Cómo llegar o entrar",
             "eventType": "Tipo de evento",
             "description": "Descripción",
             "comment": "Comentario"
@@ -678,7 +680,9 @@
             "deliveryContactLabel": "Contacto",
             "deliveryContactPlaceholder": "Teléfono, WhatsApp o correo",
             "deliveryAddressLabel": "Dirección de entrega",
-            "deliveryAddressPlaceholder": "Dirección completa del evento",
+            "deliveryInstructionsLabel": "Cómo llegar o entrar",
+          "deliveryInstructionsPlaceholder": "Ej. portón negro, preguntar por el guardia",
+          "deliveryAddressPlaceholder": "Dirección completa del evento",
             "deliveryZoneLabel": "Zona de entrega",
             "deliveryZonePlaceholder": "Sin zona",
             "deliveryZoneHint": "Opcional. Define el costo de envío sugerido según la zona.",
@@ -716,6 +720,7 @@
           },
           "actions": {
             "newClient": "Nuevo cliente",
+            "editClient": "Editar cliente",
             "addLine": "Agregar producto",
             "removeLine": "Quitar producto",
             "cancel": "Cancelar",
@@ -744,7 +749,8 @@
             "requiredDeliveryContact": "El contacto es requerido.",
             "invalidDeliveryContact": "El contacto no es válido.",
             "requiredDeliveryAddress": "La dirección es requerida.",
-            "invalidDeliveryAddress": "La dirección no es válida.",
+            "invalidDeliveryInstructions": "Las indicaciones son demasiado largas.",
+        "invalidDeliveryAddress": "La dirección no es válida.",
             "invalidDescription": "La descripción no es válida.",
             "invalidComment": "El comentario no es válido.",
             "invalidDeliveryAmount": "El costo de envío no es válido.",
@@ -755,10 +761,15 @@
         "registry": {
           "title": "Nuevo cliente",
           "description": "Registra un cliente para tus pedidos por teléfono o WhatsApp.",
+          "editTitle": "Editar cliente",
+          "editDescription": "Actualiza los datos, contactos y direcciones de este cliente.",
           "cancel": "Cancelar",
           "submit": "Guardar cliente",
+          "submitEdit": "Guardar cambios",
           "successTitle": "Cliente registrado",
           "successToast": "El cliente se registró correctamente.",
+          "updatedTitle": "Cliente actualizado",
+          "updatedToast": "Los datos del cliente se guardaron correctamente.",
           "fields": {
             "nameLabel": "Nombre del cliente",
             "namePlaceholder": "Nombre del responsable",
@@ -776,8 +787,12 @@
             "zoneLabel": "Zona",
             "zonePlaceholder": "Sin zona",
             "zoneHint": "Opcional. Útil para clientes dentro de las zonas de la ciudad.",
+          "instructionsLabel": "Cómo llegar o entrar",
+          "instructionsPlaceholder": "Ej. portón negro, preguntar por el guardia",
             "preferredPaymentLabel": "Método de pago preferido",
-            "preferredPaymentPlaceholder": "Sin preferencia"
+            "preferredPaymentPlaceholder": "Sin preferencia",
+            "notesLabel": "Notas del cliente",
+            "notesPlaceholder": "Ej. cliente frecuente, pide factura"
           },
           "actions": {
             "addContact": "Agregar contacto",
@@ -798,7 +813,9 @@
             "tooManyAddresses": "Demasiadas direcciones.",
             "requiredAddress": "La dirección es requerida.",
             "invalidAddress": "La dirección no es válida.",
-            "submitFallback": "No pudimos registrar al cliente. Revisa los datos e intenta de nuevo."
+            "invalidInstructions": "Las indicaciones son demasiado largas.",
+            "invalidNotes": "Las notas son demasiado largas.",
+            "submitFallback": "No pudimos guardar al cliente. Revisa los datos e intenta de nuevo."
           }
         }
       },

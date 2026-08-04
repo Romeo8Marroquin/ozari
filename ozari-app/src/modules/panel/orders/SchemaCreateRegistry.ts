@@ -49,6 +49,12 @@ const registryAddressSchema = z.object({
   // The OPTIONAL map pin. `null` is the empty sentinel (RHF ignores `undefined` on setValue), and
   // shape-only validation: the picker cannot produce an off-globe pair and the API re-checks.
   coords: z.object({ lat: z.number(), lng: z.number() }).nullable(),
+  // How to actually GET IN once you are there — "portón negro", "preguntar por el guardia". The API
+  // has always accepted it; the form simply never asked. It is what a pin cannot tell a driver.
+  instructions: z
+    .string()
+    .trim()
+    .max(ORDER_LONGTEXT_MAX_LENGTH, t(`${KEY}.invalidInstructions`)),
 });
 
 /**
@@ -66,6 +72,10 @@ const baseCreateRegistrySchema = z.object({
     t(`${KEY}.requiredName`),
     t(`${KEY}.invalidName`),
   ),
+  // Free-form notes about the client. The form MUST carry every field the body carries: the save is
+  // declarative full-state, so a field the API accepts but the form never collects would be wiped
+  // clean on every edit.
+  notes: z.string().trim().max(ORDER_LONGTEXT_MAX_LENGTH, t(`${KEY}.invalidNotes`)),
   contacts: z
     .array(registryContactSchema)
     .min(1, t(`${KEY}.requiredContacts`))
@@ -98,10 +108,11 @@ export type CreateRegistryFormType = z.infer<typeof createRegistrySchema>;
 
 export const createRegistryDefaultValues: CreateRegistryFormType = {
   name: '',
+  notes: '',
   // Start with ONE empty contact (≥1 required) and ONE empty address (the common walk-in has a
   // venue; the admin can remove it for an address-less client).
   contacts: [{ contactTypeId: null as unknown as number, value: '' }],
-  addresses: [{ zoneId: null, address: '', coords: null }],
+  addresses: [{ zoneId: null, address: '', coords: null, instructions: '' }],
   principalContactIndex: 0,
   favoriteAddressIndex: 0,
   preferredPaymentMethodId: null,
@@ -110,11 +121,13 @@ export const createRegistryDefaultValues: CreateRegistryFormType = {
 /** The `POST /client-registries` body — contacts/addresses with the chosen principal/favorite flags. */
 export interface CreateRegistryBody {
   name: string;
+  notes?: string;
   contacts: { contactTypeId: number; value: string; isPrincipal: boolean }[];
   addresses: {
     zoneId?: number;
     address: string;
     coords?: { lat: number; lng: number };
+    instructions?: string;
     isFavorite: boolean;
   }[];
   preferredPaymentMethodId?: number;
@@ -123,6 +136,7 @@ export interface CreateRegistryBody {
 export function toCreateRegistryBody(data: CreateRegistryFormType): CreateRegistryBody {
   return {
     name: data.name.trim(),
+    ...(data.notes.trim() !== '' && { notes: data.notes.trim() }),
     contacts: data.contacts.map((contact, index) => ({
       contactTypeId: contact.contactTypeId,
       value: contact.value.trim(),
@@ -133,6 +147,7 @@ export function toCreateRegistryBody(data: CreateRegistryFormType): CreateRegist
       address: address.address.trim(),
       // Omitted when unset — the API treats absent and null the same, and most addresses have none.
       ...(address.coords && { coords: address.coords }),
+      ...(address.instructions.trim() !== '' && { instructions: address.instructions.trim() }),
       isFavorite: index === data.favoriteAddressIndex,
     })),
     ...(data.preferredPaymentMethodId != null && {

@@ -1,8 +1,8 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
-vi.mock('@api/client', () => ({ api: { get, post } }));
+const { get, post, put } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn() }));
+vi.mock('@api/client', () => ({ api: { get, post, put } }));
 
 import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from '@utils/storage';
@@ -12,6 +12,7 @@ import { useClientRegistries } from './useClientRegistries';
 import { useOrderProducts } from './useOrderProducts';
 import { useCreateOrder } from './useCreateOrder';
 import { useCreateClientRegistry } from './useCreateClientRegistry';
+import { useUpdateClientRegistry } from './useUpdateClientRegistry';
 
 beforeEach(() => {
   Storage.set(StorageKeys.TOKEN, 'test-token');
@@ -100,5 +101,16 @@ describe('useCreateClientRegistry', () => {
     result.current.createRegistry(body);
     await waitFor(() => expect(post).toHaveBeenCalled());
     expect(post).toHaveBeenCalledWith('/client-registries', body, { skipErrorNotification: true });
+  });
+});
+
+describe('useUpdateClientRegistry', () => {
+  it('puts the SAME body shape at the row’s url, with skipErrorNotification', async () => {
+    put.mockResolvedValue({ data: { data: { registry: { id: 3 } } } });
+    const { result } = renderHook(() => useUpdateClientRegistry(), { wrapper: createQueryWrapper() });
+    const body = { name: 'María', contacts: [], addresses: [] };
+    result.current.updateRegistry({ id: 3, body });
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put).toHaveBeenCalledWith('/client-registries/3', body, { skipErrorNotification: true });
   });
 });

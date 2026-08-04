@@ -263,6 +263,54 @@ body {
   }
 }
 
+/* ── The app CANVAS — the one full-screen surface ────────────────────────────────────────
+   Every whole-viewport surface wears this: the auth screens (`SesionLayout`) and the route
+   loader (`PageLoader`). It is deliberately near-NEUTRAL — the brand colour appears as small,
+   contained accents (a card's gradient band, a spinner arc, a focus ring), never as a wash. A
+   saturated full-bleed gradient reads as a splash screen from a different product, and it makes
+   every hand-off to a real screen (the near-white panel, a white auth card) a visible colour pop.
+   `--canvas-edge` is that gradient's END tone: the colour the document canvas must be repainted
+   with so an over-scrolled strip (mobile keyboards shrink only the visual viewport) is
+   indistinguishable from the design. Change one, change the other. */
+:root {
+  --canvas-edge: #e7e0e8;
+}
+.app-canvas {
+  background: radial-gradient(120% 120% at 50% 0%, #faf7fa 0%, #efeaf0 58%, var(--canvas-edge) 100%);
+}
+
+/* ── The route loader's EXIT ─────────────────────────────────────────────────────────────
+   `PageLoader` is the router's `defaultPendingComponent`: React unmounts it the frame the route
+   commits, so it can never own a GSAP exit the way a panel page does. Its exit is the router's
+   view transition — and this is where we SHAPE it. Naming the loader's mark lifts it out of the
+   root snapshot so it gets its own curve (settle back and dissolve) while the root cross-fade
+   handles the background, which is now the same canvas on both sides and therefore invisible.
+   There is no `-new(page-loader)` — nothing on the destination carries the name — so only the
+   outgoing mark animates. Browsers without view transitions simply cut, which is the old behaviour. */
+.page-loader-mark {
+  view-transition-name: page-loader;
+}
+::view-transition-group(page-loader) {
+  animation-duration: 0.34s;
+}
+::view-transition-old(page-loader) {
+  animation: page-loader-out 0.34s cubic-bezier(0.4, 0, 1, 1) both;
+}
+@keyframes page-loader-out {
+  to {
+    opacity: 0;
+    scale: 0.94;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The dissolve stays (a cut is harsher than a fade); the movement goes. */
+  @keyframes page-loader-out {
+    to {
+      opacity: 0;
+    }
+  }
+}
+
 /* ── Panel history-back view-transition opt-out ──────────────────────────────────────────
    Tagged by the popstate listener in main.tsx for panel→panel BROWSER/DEVICE back navigations:
    in-app panel moves already disable the router's view transition (`viewTransition: false` — the
