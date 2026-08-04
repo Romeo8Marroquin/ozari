@@ -75,9 +75,9 @@ import {
  * different problems with different fixes, and reusing one for the other is the single easiest way
  * to make both confusing (owner rule §2.4). Returns `true` when it answered the request.
  */
-const sendLogisticsConflict = (
+export const sendLogisticsConflict = (
   res: Response,
-  scope: "createOrder" | "updateOrder",
+  scope: "createOrder" | "updateOrder" | "advance",
   error: unknown,
 ): boolean => {
   if (error instanceof OrderSelfOverlapError) {
@@ -452,6 +452,10 @@ export const createOrder = async (
           // admin never placed one (the overwhelmingly common case).
           deliveryCoordsKms:
             body.deliveryCoords !== undefined ? encryptKms(encodeCoords(body.deliveryCoords)) : null,
+          deliveryInstructionsKms:
+            body.deliveryInstructions !== undefined
+              ? encryptKms(body.deliveryInstructions)
+              : null,
           description: body.description ?? null,
           comment: body.comment ?? null,
           deliveryAt: body.deliveryAt,
@@ -808,6 +812,10 @@ export const updateOrder = async (
           // admin never placed one (the overwhelmingly common case).
           deliveryCoordsKms:
             body.deliveryCoords !== undefined ? encryptKms(encodeCoords(body.deliveryCoords)) : null,
+          deliveryInstructionsKms:
+            body.deliveryInstructions !== undefined
+              ? encryptKms(body.deliveryInstructions)
+              : null,
           description: body.description ?? null,
           comment: body.comment ?? null,
           deliveryAt: body.deliveryAt,

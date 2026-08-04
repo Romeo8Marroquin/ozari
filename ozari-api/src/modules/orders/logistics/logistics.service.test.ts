@@ -12,6 +12,7 @@ import {
   maxPadMinutes,
   padMinutesFor,
   pendingLogisticsEvents,
+  upcomingLogisticsEvents,
   projectDriverAvailability,
   refineConflicts,
   selfOverlap,
@@ -118,6 +119,52 @@ describe("pendingLogisticsEvents", () => {
         pickupAt: at("2026-08-02T10:00:00Z"),
         cancelledAt: at("2026-07-20T10:00:00Z"),
       }),
+    ).toEqual([]);
+  });
+});
+
+describe("upcomingLogisticsEvents", () => {
+  const now = at("2026-08-01T12:00:00Z");
+
+  it("checks only what is still AHEAD — the past is a record, not a schedule", () => {
+    // Rewinding a long-finished order must never be refused: the admin cannot move time, so a clash
+    // between two past events would be a dead end with no possible correction.
+    expect(
+      upcomingLogisticsEvents(
+        {
+          deliveryAt: at("2026-07-30T14:00:00Z"),
+          pickupAt: at("2026-08-02T10:00:00Z"),
+        },
+        now,
+      ),
+    ).toEqual([{ at: at("2026-08-02T10:00:00Z"), kind: "COLLECTION" }]);
+  });
+
+  it("has nothing to check once every event is behind us", () => {
+    expect(
+      upcomingLogisticsEvents(
+        { deliveryAt: at("2026-07-30T14:00:00Z"), pickupAt: at("2026-07-31T10:00:00Z") },
+        now,
+      ),
+    ).toEqual([]);
+  });
+
+  it("still drops what already happened, and everything when cancelled", () => {
+    expect(
+      upcomingLogisticsEvents(
+        {
+          deliveryAt: at("2026-08-01T14:00:00Z"),
+          pickupAt: at("2026-08-02T10:00:00Z"),
+          collectedAt: at("2026-08-01T09:00:00Z"),
+        },
+        now,
+      ),
+    ).toEqual([{ at: at("2026-08-01T14:00:00Z"), kind: "DELIVERY" }]);
+    expect(
+      upcomingLogisticsEvents(
+        { deliveryAt: at("2026-08-01T14:00:00Z"), cancelledAt: now },
+        now,
+      ),
     ).toEqual([]);
   });
 });

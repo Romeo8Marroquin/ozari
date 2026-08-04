@@ -880,6 +880,12 @@ export const schemas: Record<string, Schema> = {
               "The delivery's map pin, snapshotted at order time. Absent is normal — a client " +
               "offering navigation falls back to searching `deliveryAddress`.",
           },
+          deliveryInstructions: {
+            type: "string",
+            nullable: true,
+            description: "How to get in on arrival, as agreed for THIS order.",
+            example: "Portón negro, preguntar por el guardia",
+          },
           description: { type: "string", nullable: true },
           comment: { type: "string", nullable: true },
           deliveryAmount: {
@@ -1003,6 +1009,16 @@ export const schemas: Record<string, Schema> = {
           "OPTIONAL map pin for this delivery, snapshotted alongside the text. Omit it (or send " +
           "null) when there is none — the address text remains authoritative either way. A " +
           "malformed pair is a `400`, never a silently dropped field.",
+      },
+      deliveryInstructions: {
+        type: "string",
+        nullable: true,
+        maxLength: 500,
+        description:
+          "How to get IN on arrival (\"portón negro\", \"preguntar por el guardia\") — what a pin " +
+          "cannot express, and the one delivery field the DRIVER reads. Prefilled by the form from " +
+          "the chosen client address, then freely edited per order and snapshotted like the rest.",
+        example: "Portón negro, preguntar por el guardia",
       },
       description: { type: "string", nullable: true, maxLength: 500 },
       comment: { type: "string", nullable: true, maxLength: 500 },

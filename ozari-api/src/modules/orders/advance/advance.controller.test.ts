@@ -113,6 +113,9 @@ function mockTx(order: ReturnType<typeof rawOrder> | null = rawOrder()) {
       findFirst: vi.fn().mockResolvedValue(order),
       update: vi.fn().mockResolvedValue({}),
       findUniqueOrThrow: vi.fn().mockResolvedValue(rawOrder()),
+      // The driver-conflict candidate query: only reached when a move GIVES WORK BACK (reopen or
+      // rewind) and the order still has upcoming events.
+      findMany: vi.fn().mockResolvedValue([]),
     },
     // Backward steps look up (and destroy) the photos of the step being undone.
     serviceEvidence: {
@@ -354,6 +357,84 @@ describe("advanceOrder", () => {
     expect(tx.product.update).toHaveBeenCalledWith({
       where: { id: 4 },
       data: { quantity: { increment: 10 } },
+    });
+  });
+
+  describe("giving work back to a driver", () => {
+    /** Far enough ahead that these stay UPCOMING however long this suite lives. */
+    const FUTURE_DELIVERY = new Date("2030-08-01T14:00:00.000Z");
+    const FUTURE_PICKUP = new Date("2030-08-02T10:00:00.000Z");
+
+    it("refuses a REOPEN when the driver's day has filled up meanwhile", async () => {
+      const tx = mockTx(
+        rawOrder({
+          serviceStatusId: 2,
+          serviceStatus: { id: 2, name: "Cancelado" },
+          cancelledAt: new Date("2030-07-20T10:00:00.000Z"),
+          assignedUserId: 5,
+          deliveryAt: FUTURE_DELIVERY,
+          pickupAt: FUTURE_PICKUP,
+          serviceDetails: [],
+        }),
+      );
+      // Somebody else was promised that hour while this order was cancelled.
+      tx.service.findMany.mockResolvedValue([
+        {
+          id: 99,
+          deliveryAt: new Date("2030-08-01T14:20:00.000Z"),
+          pickupAt: null,
+          deliveredAt: null,
+          collectedAt: null,
+          assignedUser: { fullNameKms: encryptKms("Ana Ruiz") },
+        },
+      ]);
+
+      await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
+
+      // Refused BEFORE any write — the same payload shape create and edit answer with.
+      expect(tx.service.update).not.toHaveBeenCalled();
+      expect(sendOzariError).toHaveBeenCalledWith(
+        expect.anything(),
+        HttpEnum.CONFLICT,
+        "orders.advance.driverConflict",
+        undefined,
+        expect.objectContaining({
+          driverConflict: expect.objectContaining({ orderId: 99, driverName: "Ana Ruiz" }),
+        }),
+      );
+    });
+
+    it("never asks about a move whose events are all in the PAST", async () => {
+      // Rewinding a long-finished order is record-keeping. The admin cannot move time, so refusing
+      // it over a historical clash would be a dead end with no possible correction.
+      const tx = mockTx(
+        rawOrder({
+          serviceStatusId: 4,
+          serviceStatus: { id: 4, name: "Recolectado" },
+          assignedUserId: 5,
+          deliveryAt: new Date("2020-01-01T14:00:00.000Z"),
+          pickupAt: new Date("2020-01-02T10:00:00.000Z"),
+          deliveredAt: new Date("2020-01-01T14:05:00.000Z"),
+          collectedAt: new Date("2020-01-02T10:05:00.000Z"),
+        }),
+      );
+
+      await advanceOrder(buildReq({ toStatusId: 3 }), {} as Response);
+
+      expect(tx.service.findMany).not.toHaveBeenCalled();
+      expect(tx.service.update).toHaveBeenCalled();
+    });
+
+    it("leaves FORWARD moves alone — they only ever stamp actuals", async () => {
+      const tx = mockTx(
+        rawOrder({ assignedUserId: 5, deliveryAt: FUTURE_DELIVERY, pickupAt: FUTURE_PICKUP }),
+      );
+
+      await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
+
+      // Confirming a step can only REMOVE occupancy, so there is nothing to re-check.
+      expect(tx.service.findMany).not.toHaveBeenCalled();
+      expect(sendOzariSuccess).toHaveBeenCalled();
     });
   });
 

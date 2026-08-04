@@ -150,6 +150,8 @@ export interface OrderDetailResponseModel extends OrderListItemResponseModel {
   /** The delivery's map pin, when one was set — what the driver's "open in maps" button uses.
    *  Absent is normal and never blocking: the button falls back to searching the address text. */
   deliveryCoords: CoordsModel | undefined;
+  /** How to get in on arrival, as agreed for THIS order. Shown to whoever opens the order. */
+  deliveryInstructions: string | undefined;
   description: string | undefined;
   comment: string | undefined;
   /** Fee actually charged for this delivery (admin-set, distance-based); absent = no fee. */
@@ -275,6 +277,9 @@ export interface CreateOrderRequestModel {
   /** The OPTIONAL map pin for this delivery, snapshotted like the text beside it (editing the
    *  registry address later must never move a past order). Absent = navigate by the text. */
   deliveryCoords: CoordsModel | undefined;
+  /** How to get IN once there — prefilled from the chosen address, freely editable per order
+   *  (a venue's gate instructions are often specific to THIS event). */
+  deliveryInstructions: string | undefined;
   description: string | undefined;
   comment: string | undefined;
   /** Delivery fee actually charged — admin-set, distance-based (free inside Hacienda Real). */

@@ -439,6 +439,44 @@ coordinates to read the day it is built; a zone/geofence check could compare a p
 polygon; a client-facing "confirm your location" step reuses the same picker with a different
 projection. None of them are built, and none are made harder.
 
+### 6d. ARRIVAL INSTRUCTIONS + EDITING A CLIENT IN PLACE (✅ BUILT 2026-08-04)
+
+Two gaps that only showed up once the pin existed, both closed the same way — by making the ORDER
+carry its own copy and by letting the admin fix the client where they are already standing.
+
+**The rule (the snapshot doctrine, applied one more time): a pin says WHERE, not HOW TO GET IN.**
+"Portón negro, preguntar por el guardia" is a real delivery instruction that no coordinate can carry,
+so it lives in three places with a clear ownership chain:
+- `client_registry_addresses.instructions` — the SAVED default per address (the API always accepted
+  it; the modal simply never asked). Now collected in `ClientRegistryModal`.
+- `services.delivery_instructions_kms` — the ORDER's own encrypted snapshot (migration
+  `20260804000000_order_delivery_instructions`, nullable/additive). Prefilled from the chosen address
+  and then **independent**: editing the client's address later never rewrites a past order, and one
+  party at that venue can need "entrar por atrás" without changing the client's default.
+- The form field prefills alongside the pin. A saved address WITHOUT instructions **clears** the
+  field, for the same reason it clears the pin: the order must never keep details belonging to a
+  different place.
+
+**Editing the client from the order form.** The "Nuevo cliente" button becomes **"Editar cliente"**
+the moment a client is selected — same button, same dialog, one extra prop. The admin is already
+looking at that client; sending them to another screen to fix a phone number would be the long way
+round. Backed by **`PUT /client-registries/:id`** (Admin-only), which shares the create validator
+deliberately — the body is the registry's FINAL state, so the two doors can never drift. Contacts and
+addresses are **replaced, not diffed**: nothing FKs to them (orders snapshot the text), so a diff
+would be machinery bought for no invariant.
+
+Two consequences worth stating, because both are the kind of thing that ships silently:
+- **A full-state save means the FORM must carry every field the BODY carries.** `notes` was accepted
+  by the API and never collected by the modal, so the first edit of any client would have erased it.
+  It is now a field. Any future registry column must land in both halves in the same commit.
+- **The picker cache is patched by id, not prepended.** `onRegistrySaved` replaces the matching row on
+  an edit and prepends only when the id is new — a blind prepend would show the same client twice.
+
+**Doors left open:** a dedicated client-management screen (list/search/delete registries) is still
+unbuilt; the modal only reaches the client attached to the order in front of you. `notes` is a plain
+textarea today — if it ever becomes operational data (allergies, access codes), it wants its own
+fields, not more free text.
+
 ### Cost of each future door (all additive unless marked)
 
 | Door | What it touches | Verdict |
@@ -559,6 +597,13 @@ justifies it. Three layers, smallest-first:
   dedup (`optionsFor` hides already-picked products) + the max-lines cap. **Recommended first
   improvement.** (Today's native select already dedups + caps + is accessible; the combobox is a
   polish, not a correctness fix.)
+- **✅ Owner decision, 2026-08-04: the native select STAYS for now.** The catalog is small enough that
+  scrolling it is not a real cost, so the combobox is deferred rather than dropped. **The trigger to
+  revisit** — any one of these, not all: the catalog passes ~60 active products; an admin says they
+  scroll to find a product; or the picker starts being used on a phone routinely (a long native
+  select is far worse on touch). At ~a few hundred products the DATA choice changes too — swap the
+  single `GET` for a typeahead endpoint, in that order: combobox first (client-side, cheap), server
+  search only when one payload genuinely stops being reasonable.
 
 ### 10.B The "cart" flow (medium-term) — owner's idea for speed
 - **Shape**: an admin adds products (+ qty) from the catalog grid/detail into a client-side **cart**

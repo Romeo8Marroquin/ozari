@@ -135,6 +135,9 @@ describe("validateCreateOrder", () => {
     // The optional map pin: absent is fine (most orders), malformed is a clean 400 rather than a
     // field that vanishes on save. Same `sanitizeCoords` door the registry validator uses.
     ["invalidDeliveryCoords", { deliveryCoords: { lat: 0, lng: 181 } }],
+    // How to get in on arrival — optional, but not a dumping ground.
+    ["invalidDeliveryInstructions", { deliveryInstructions: 42 }],
+    ["invalidDeliveryInstructions", { deliveryInstructions: "x".repeat(501) }],
     ["invalidDeliveryCoords", { deliveryCoords: { lat: Number.NaN, lng: 0 } }],
     ["invalidDescription", { description: 42 }],
     ["invalidComment", { comment: 42 }],

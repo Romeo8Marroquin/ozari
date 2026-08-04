@@ -6,6 +6,7 @@ import type { Resolver } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import {
   HiOutlineArrowPath,
+  HiOutlinePencilSquare,
   HiOutlinePlus,
   HiOutlineTrash,
   HiOutlineUserPlus,
@@ -487,6 +488,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     // prefilling one without the other would leave the order pointing at the wrong pair. `null`
     // (not undefined) so an address WITHOUT a pin actively clears a previous client's.
     setValue('deliveryCoords', address?.coords ?? null);
+    // Arrival instructions travel with the address for the same reason the pin does — and an
+    // address WITHOUT them clears whatever a previous client's left behind.
+    setValue('deliveryInstructions', address?.instructions ?? '');
     // Delivery zone (drives the fee suggestion; editable) + the fee itself: the favorite address's
     // explicit price, else its zone's default fee — clear when neither exists so a prior client's
     // fee never lingers. All editable afterwards.
@@ -601,12 +605,17 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     enforcesStock,
   ]);
 
-  const onRegistryCreated = (registry: ClientRegistry): void => {
-    // Seed the picker cache so the new client appears immediately, then select it (the prefill
-    // effect fills the snapshots).
-    queryClient.setQueryData<ClientRegistry[]>([QueryKeys.CLIENT_REGISTRIES], (prev) =>
-      prev ? [registry, ...prev] : [registry],
-    );
+  const onRegistrySaved = (registry: ClientRegistry): void => {
+    // Patch the picker cache so the client is current immediately — REPLACING the row when it was an
+    // edit (the same id must not appear twice), prepending when it's new. Then select it: on a create
+    // that's what makes the prefill effect fill the snapshots; on an edit the id is already selected,
+    // so nothing moves and the order keeps the snapshot texts it owns.
+    queryClient.setQueryData<ClientRegistry[]>([QueryKeys.CLIENT_REGISTRIES], (prev) => {
+      if (!prev) return [registry];
+      const index = prev.findIndex((row) => row.id === registry.id);
+      if (index === -1) return [registry, ...prev];
+      return prev.map((row) => (row.id === registry.id ? registry : row));
+    });
     setValue('clientRegistryId', registry.id, { shouldValidate: true });
   };
 
@@ -787,9 +796,11 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     if (!address) return;
     setValue('deliveryAddress', address.address, { shouldValidate: true });
     setValue('deliveryZoneId', address.zone?.id ?? null);
-    // The pin travels with the text — see the prefill effect. A saved address with no pin CLEARS
-    // whatever was there, so the order never keeps a pin belonging to a different place.
+    // The pin and the arrival instructions travel with the text — see the prefill effect. A saved
+    // address without them CLEARS what was there, so the order never keeps details belonging to a
+    // different place.
     setValue('deliveryCoords', address.coords ?? null);
+    setValue('deliveryInstructions', address.instructions ?? '');
     const fee = address.domicilePrice ?? address.zone?.deliveryFee;
     if (fee != null) setValue('deliveryAmount', String(fee), { shouldValidate: true });
   };
@@ -918,15 +929,24 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                         options={registries.map((r) => ({ value: r.id, label: r.name }))}
                       />
                     </div>
+                    {/* ONE button, two acts: with a client chosen it EDITS that client, otherwise it
+                        creates one. The admin is already looking at the client here, so sending them
+                        to a separate screen to fix a phone number would be the long way round. */}
                     <Button
                       variant="soft"
                       color={SECONDARY_COLOR}
                       size="sm"
-                      startIcon={<HiOutlineUserPlus className="size-4" />}
+                      startIcon={
+                        selectedRegistry ? (
+                          <HiOutlinePencilSquare className="size-4" />
+                        ) : (
+                          <HiOutlineUserPlus className="size-4" />
+                        )
+                      }
                       onClick={() => setRegistryModalOpen(true)}
                       className="shrink-0 sm:mt-0.5"
                     >
-                      {t(`${KEY}.actions.newClient`)}
+                      {t(selectedRegistry ? `${KEY}.actions.editClient` : `${KEY}.actions.newClient`)}
                     </Button>
                   </div>
                 </SectionReveal>
@@ -1157,6 +1177,20 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                         aria-label={t(`${KEY}.fields.deliveryAddressLabel`)}
                       />
                     </div>
+                    {/* How to get IN once there — prefilled from the client's saved address, then
+                        owned by the order (a venue's gate is often specific to THIS event). It is
+                        the one delivery field the DRIVER reads, so it sits with the address. */}
+                    <div className="reveal-item">
+                      <CustomTextareaForm<CreateOrderFormType>
+                        id="order-delivery-instructions"
+                        name="deliveryInstructions"
+                        autoGrow
+                        optionalLabel
+                        label={t(`${KEY}.fields.deliveryInstructionsLabel`)}
+                        placeholder={t(`${KEY}.fields.deliveryInstructionsPlaceholder`)}
+                        aria-label={t(`${KEY}.fields.deliveryInstructionsLabel`)}
+                      />
+                    </div>
                     {/* The OPTIONAL pin, directly under the text it belongs to — the two describe
                         the same place, and separating them would invite them to disagree. */}
                     <div className="reveal-item">
@@ -1294,7 +1328,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
       <ClientRegistryModal
         open={registryModalOpen}
         onClose={() => setRegistryModalOpen(false)}
-        onCreated={onRegistryCreated}
+        registry={selectedRegistry}
+        onCreated={onRegistrySaved}
         contactTypes={catalog?.contactTypes ?? []}
         zones={catalog?.zones ?? []}
         paymentMethods={catalog?.paymentMethods ?? []}

@@ -29,6 +29,11 @@ import {
   richOrderInclude,
   toLifecycleOrder,
 } from "../orders.service.js";
+import { sendLogisticsConflict } from "../orders.controller.js";
+import {
+  assertDriverAvailable,
+  upcomingLogisticsEvents,
+} from "../logistics/logistics.service.js";
 import { type OrderDetailEnvelopeModel } from "../orders.models.js";
 import {
   type AdvanceOrderRequestModel,
@@ -144,6 +149,51 @@ export const advanceOrder = async (
         now,
         ...(body.reason !== undefined && { reason: body.reason }),
       });
+
+      // ── The driver's day, for the moves that GIVE WORK BACK ────────────────────────────────────
+      // Reopening a cancelled order, or rewinding out of a step that had already been confirmed,
+      // makes an event PENDING again — so the order starts occupying its driver at a moment it had
+      // released. If that slot was promised to somebody else meanwhile, saying so now is the whole
+      // point: the alternative is a driver double-booked by a tap that looked like paperwork.
+      //
+      // Checked ONCE, against the state the whole walk lands on (a jump can rewind several steps),
+      // and BEFORE any write — like every other refusal in this module. Forward moves only ever
+      // stamp actuals, which can never add occupancy, so they are skipped entirely.
+      //
+      // Only UPCOMING events count (`upcomingLogisticsEvents`): rewinding an order whose dates have
+      // passed is pure record-keeping and must never be blocked by a clash nobody can now fix.
+      const givesWorkBack = steps.some(
+        (step) => step.kind === "reopen" || step.kind === "backward",
+      );
+      if (givesWorkBack && order.assignedUserId !== null) {
+        const after = steps.reduce(
+          (state, step) => ({ ...state, ...step.data }),
+          {
+            deliveredAt: order.deliveredAt,
+            collectedAt: order.collectedAt,
+            cancelledAt: order.cancelledAt,
+          } as Record<string, unknown>,
+        );
+        const { spacingMinutes } = await loadOrderTimingPreferences(tx);
+        await assertDriverAvailable(
+          tx,
+          upcomingLogisticsEvents(
+            {
+              deliveryAt: order.deliveryAt,
+              pickupAt: order.pickupAt,
+              deliveredAt: after["deliveredAt"] as Date | null,
+              collectedAt: after["collectedAt"] as Date | null,
+              cancelledAt: after["cancelledAt"] as Date | null,
+            },
+            now,
+          ),
+          {
+            gapMinutes: spacingMinutes,
+            driverId: order.assignedUserId,
+            excludeServiceId: id,
+          },
+        );
+      }
 
       const storage = getStorage();
       const stockLines = order.serviceDetails.map((line) => ({
@@ -271,6 +321,12 @@ export const advanceOrder = async (
       response,
     );
   } catch (error) {
+    // Giving work back to a driver whose day has since filled up — the SAME payload shape create and
+    // edit answer with (`data.driverConflict` / `data.selfOverlap`), through the same function, so
+    // the three doors can never describe the refusal differently.
+    if (sendLogisticsConflict(res, "advance", error)) {
+      return;
+    }
     if (error instanceof OrderStockConflictError) {
       // Reopening a cancelled order whose goods have since been promised elsewhere: the same
       // structured 409 the create flow answers, so the UI can name each line and its real count.

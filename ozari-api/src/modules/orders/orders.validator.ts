@@ -285,6 +285,15 @@ async function parseOrderBody(
     reject("invalidDeliveryCoords", { deliveryCoords: body["deliveryCoords"] });
     return null;
   }
+  // How to get in on arrival — optional, and the only delivery field the DRIVER reads rather than
+  // the admin. Prefilled from the client's address by the form, then freely edited per order.
+  const deliveryInstructions = sanitizeOptionalText(body["deliveryInstructions"], 500);
+  if (!deliveryInstructions.ok) {
+    reject("invalidDeliveryInstructions", {
+      deliveryInstructions: body["deliveryInstructions"],
+    });
+    return null;
+  }
 
   const description = sanitizeOptionalText(body["description"], 500);
   if (!description.ok) {
@@ -363,6 +372,7 @@ async function parseOrderBody(
     deliveryContact,
     deliveryAddress,
     deliveryCoords: deliveryCoords.value,
+    deliveryInstructions: deliveryInstructions.value,
     description: description.value,
     comment: comment.value,
     deliveryAmount: deliveryAmount.value,

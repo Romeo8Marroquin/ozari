@@ -38,6 +38,7 @@ const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFor
   deliveryAddress: 'Zona 10, 4a avenida 5-55',
   // No pin — the default state of nearly every order.
   deliveryCoords: null,
+  deliveryInstructions: '',
   description: '',
   comment: '',
   deliveryAmount: '',
@@ -172,6 +173,16 @@ describe('toCreateOrderBody', () => {
     expect(toCreateOrderBody(validForm({ deliveryCoords: PIN }))).toMatchObject({
       deliveryCoords: PIN,
     });
+  });
+
+  it('sends the arrival instructions only when written, trimmed', () => {
+    expect(toCreateOrderBody(validForm())).not.toHaveProperty('deliveryInstructions');
+    expect(toCreateOrderBody(validForm({ deliveryInstructions: '   ' }))).not.toHaveProperty(
+      'deliveryInstructions',
+    );
+    expect(
+      toCreateOrderBody(validForm({ deliveryInstructions: '  Portón negro  ' })),
+    ).toMatchObject({ deliveryInstructions: 'Portón negro' });
   });
 
   it('maps a rental order to ISO dates, numeric lines, and truncated money', () => {

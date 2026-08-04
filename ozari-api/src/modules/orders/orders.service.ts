@@ -391,6 +391,9 @@ export function projectOrderDetail(
     deliveryCoords: order.deliveryCoordsKms
       ? decodeCoords(decryptKms(order.deliveryCoordsKms))
       : undefined,
+    deliveryInstructions: order.deliveryInstructionsKms
+      ? decryptKms(order.deliveryInstructionsKms)
+      : undefined,
     description: order.description ?? undefined,
     comment: order.comment ?? undefined,
     deliveryAmount: toMoney(order.deliveryAmount),

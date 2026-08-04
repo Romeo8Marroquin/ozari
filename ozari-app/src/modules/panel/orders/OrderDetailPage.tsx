@@ -448,6 +448,12 @@ const OrderDetailPage: React.FC = () => {
                 <Fact label={t(`${KEY}.client.name`)} value={order.clientName} />
                 <Fact label={t(`${KEY}.client.contact`)} value={order.deliveryContact} />
                 <Fact label={t(`${KEY}.client.address`)} value={order.deliveryAddress} />
+                {/* Directly under the address: this is what the person standing at the gate needs,
+                    and it is the only delivery detail written FOR the driver. */}
+                <Fact
+                  label={t(`${KEY}.client.instructions`)}
+                  value={order.deliveryInstructions}
+                />
                 <Fact label={t(`${KEY}.client.eventType`)} value={order.eventType.name} />
                 <Fact label={t(`${KEY}.client.description`)} value={order.description} />
                 <Fact label={t(`${KEY}.client.comment`)} value={order.comment} />

@@ -63,6 +63,27 @@ export function pendingLogisticsEvents(
 }
 
 /**
+ * The events a save or a lifecycle move must be CHECKED against — the pending ones still ahead of
+ * `now`.
+ *
+ * **The pad governs the future; the past is a record, not a schedule.** An overdue or historical
+ * event still OCCUPIES its driver (candidates keep using {@link pendingLogisticsEvents}), but
+ * refusing a write because two past events overlap would be a dead end: the admin cannot move time,
+ * so there would be no way to correct the paperwork at all. This is what makes rewinding a
+ * long-finished order — or reopening one whose dates have passed — always possible.
+ *
+ * The asymmetry is deliberate, and it reads correctly in the one case that matters: an order still
+ * waiting on an overdue delivery blocks a NEW job an hour from now, because that work genuinely has
+ * not been done yet.
+ */
+export function upcomingLogisticsEvents(
+  order: OrderScheduleModel,
+  now: Date,
+): LogisticsEventModel[] {
+  return pendingLogisticsEvents(order).filter((event) => event.at > now);
+}
+
+/**
  * How much of the driver's day one event occupies on each side of itself.
  *
  * Today: half the configured gap, both sides, for every event — so two events need the FULL gap

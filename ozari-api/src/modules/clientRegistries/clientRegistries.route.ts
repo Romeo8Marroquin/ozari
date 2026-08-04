@@ -5,6 +5,7 @@ import { RolesEnum } from "@models/enums/rolesEnum.js";
 import {
   createClientRegistry,
   getClientRegistries,
+  updateClientRegistry,
 } from "./clientRegistries.controller.js";
 import { validateCreateClientRegistry } from "./clientRegistries.validator.js";
 
@@ -17,5 +18,10 @@ const router: RouterType = Router();
 const adminOnly = isGrantedRoles([RolesEnum.Admin]);
 router.get("/", verifyJwt, adminOnly, getClientRegistries);
 router.post("/", verifyJwt, adminOnly, validateCreateClientRegistry, createClientRegistry);
+// The EDIT reuses the create validator ON PURPOSE — the body is the registry's final state, so the
+// contract is identical and sharing the middleware is the strongest possible guarantee that the two
+// can never drift. (Its rejection messages therefore live under the `createRegistry` namespace; the
+// sentences the admin reads are the same either way.)
+router.put("/:id", verifyJwt, adminOnly, validateCreateClientRegistry, updateClientRegistry);
 
 export default router;

@@ -3,7 +3,8 @@ import { Outlet } from '@tanstack/react-router';
 import gsap from 'gsap';
 import { useLayoutEffect, useRef } from 'react';
 
-/** Where the auth background gradient ENDS — the tone any over-scrolled canvas strip must wear. */
+/** Where the app canvas ENDS — the tone any over-scrolled document strip must wear. Kept in step
+ *  with `--canvas-edge` in `index.css`, which the `.app-canvas` gradient itself reads. */
 const GRADIENT_EDGE = '#e7e0e8';
 
 const SesionLayout: React.FC = () => {
@@ -44,11 +45,7 @@ const SesionLayout: React.FC = () => {
   return (
     <section
       ref={container}
-      style={{
-        background:
-          'radial-gradient(120% 120% at 50% 0%, #faf7fa 0%, #efeaf0 58%, #e7e0e8 100%)',
-      }}
-      className="relative px-6 py-6 sm:px-0 w-full min-h-dvh overflow-auto flex items-center"
+      className="app-canvas relative px-6 py-6 sm:px-0 w-full min-h-dvh overflow-auto flex items-center"
     >
       <div className="transition-container flex items-center w-full h-full">
         <Outlet />
