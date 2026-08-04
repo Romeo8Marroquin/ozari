@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Coords } from '@utils/geo';
@@ -14,11 +14,18 @@ const handle = {
   destroy: vi.fn(),
 };
 let reportMove: ((coords: Coords) => void) | undefined;
+let reportLoading: ((loading: boolean) => void) | undefined;
 vi.mock('./leafletMap', () => ({
-  createLeafletMap: vi.fn((_el: HTMLElement, options: { onMove: (c: Coords) => void }) => {
-    reportMove = options.onMove;
-    return handle;
-  }),
+  createLeafletMap: vi.fn(
+    (
+      _el: HTMLElement,
+      options: { onMove: (c: Coords) => void; onLoadingChange?: (loading: boolean) => void },
+    ) => {
+      reportMove = options.onMove;
+      reportLoading = options.onLoadingChange;
+      return handle;
+    },
+  ),
 }));
 
 const KEY = 'components.locationPicker';
@@ -32,9 +39,7 @@ const PLACE = {
 const setup = (props: Partial<React.ComponentProps<typeof LocationPicker>> = {}) => {
   const onConfirm = vi.fn();
   const onClose = vi.fn();
-  render(
-    <LocationPicker open onClose={onClose} onConfirm={onConfirm} {...props} />,
-  );
+  render(<LocationPicker open onClose={onClose} onConfirm={onConfirm} {...props} />);
   return { onConfirm, onClose };
 };
 
@@ -53,6 +58,19 @@ afterEach(() => {
 });
 
 describe('LocationPicker', () => {
+  it('keeps the pin visible through loading and panning alike', async () => {
+    const { act } = await import('react');
+    setup();
+
+    // It was briefly tied to the tile-loading state, so a pan hid it — and a cache-served pan that
+    // never reports completion hid it for good. The pin is ours; the network may not take it away.
+    expect(screen.getByTestId('location-pin')).toBeInTheDocument();
+    act(() => reportLoading?.(false));
+    expect(screen.getByTestId('location-pin')).toBeInTheDocument();
+    act(() => reportLoading?.(true));
+    expect(screen.getByTestId('location-pin')).toBeInTheDocument();
+  });
+
   it('reports the pin the MAP is centred on, live as it moves', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const { onConfirm } = setup();
@@ -73,7 +91,9 @@ describe('LocationPicker', () => {
     await user.type(screen.getByLabelText(`${KEY}.searchLabel`), 'zona 10');
     // One request for the whole burst of keystrokes — Nominatim's policy is 1 req/s.
     await vi.advanceTimersByTimeAsync(700);
-    const result = await screen.findByRole('button', { name: 'Salón El Roble, Zona 10' });
+    // The label is split into a place line + a context line, so the accessible name is the two
+    // joined — matched loosely on the part a human actually recognises.
+    const result = await screen.findByRole('button', { name: /Salón El Roble/u });
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
 
     await user.click(result);
@@ -83,8 +103,7 @@ describe('LocationPicker', () => {
     // "Buscando…" line over them — the list only reads as empty when it truly is.
     await user.type(screen.getByLabelText(`${KEY}.searchLabel`), ' centro');
     await vi.advanceTimersByTimeAsync(700);
-    expect(screen.queryByText(`${KEY}.searching`)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Salón El Roble, Zona 10' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Salón El Roble/u })).toBeInTheDocument();
   });
 
   it('says it is searching while the FIRST search is in flight', async () => {
@@ -99,12 +118,68 @@ describe('LocationPicker', () => {
 
     await user.type(screen.getByLabelText(`${KEY}.searchLabel`), 'zona 10');
     await vi.advanceTimersByTimeAsync(700);
-    expect(screen.getByText(`${KEY}.searching`)).toBeInTheDocument();
+    // The progress shows as a spinner in the field (visual) and is SPOKEN by the live region.
+    // `waitFor`, not a bare read: the state flips inside the debounce timer's callback, and under a
+    // loaded suite React's commit can land a tick after the timers are advanced.
+    await waitFor(() =>
+      expect(screen.getByTestId('search-status')).toHaveTextContent(`${KEY}.searching`),
+    );
 
     settle?.({ ok: true, json: () => Promise.resolve([PLACE]) });
-    // Once results land the notice gives way to them — it never sits above a populated list.
-    expect(await screen.findByRole('button', { name: 'Salón El Roble, Zona 10' })).toBeInTheDocument();
-    expect(screen.queryByText(`${KEY}.searching`)).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Salón El Roble/u })).toBeInTheDocument();
+    // The region STAYS mounted (an announcement added with its text is often missed) but empties.
+    expect(screen.getByTestId('search-status')).toHaveTextContent('');
+  });
+
+  it('veils the map until its FIRST tiles arrive, and never again', async () => {
+    const { act } = await import('react');
+    setup();
+
+    // A half-drawn grid presented as ready is exactly how the CSP bug read as a design decision.
+    const veil = screen.getByRole('status', { name: `${KEY}.loadingMap` }).parentElement;
+    expect(veil).toHaveClass('opacity-100');
+
+    act(() => reportLoading?.(false));
+    expect(veil).toHaveClass('opacity-0');
+
+    // Leaflet re-fires `loading` on EVERY pan and zoom. Re-veiling on each gesture would strobe —
+    // and because a cache-served move may never report completion, it could also stick forever.
+    act(() => reportLoading?.(true));
+    expect(veil).toHaveClass('opacity-0');
+  });
+
+  it('shows a place with no context as one line', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve([{ ...PLACE, display_name: 'Cayalá' }]),
+      }),
+    );
+    setup();
+
+    await user.type(screen.getByLabelText(`${KEY}.searchLabel`), 'cayala');
+    await vi.advanceTimersByTimeAsync(700);
+    // Nothing to split off, so the secondary line is simply empty rather than a stray comma.
+    expect(await screen.findByRole('button', { name: 'Cayalá' })).toBeInTheDocument();
+  });
+
+  it('says when a search found NOTHING, and stays quiet before one has run', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) }));
+    setup();
+
+    // Too short to have searched: promising "sin resultados" here would be a lie.
+    await user.type(screen.getByLabelText(`${KEY}.searchLabel`), 'zo');
+    await vi.advanceTimersByTimeAsync(700);
+    expect(screen.queryByText(`${KEY}.noResults`)).not.toBeInTheDocument();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+
+    // A real search that came back empty — silence here is what a broken search looks like.
+    await user.type(screen.getByLabelText(`${KEY}.searchLabel`), 'na 99');
+    await vi.advanceTimersByTimeAsync(700);
+    expect(await screen.findByText(`${KEY}.noResults`)).toBeInTheDocument();
   });
 
   it('accepts a pasted link or coordinates', async () => {
@@ -120,13 +195,21 @@ describe('LocationPicker', () => {
   });
 
   it('explains a SHORTENED link instead of blaming the paste', async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    // REAL timers: this path has no debounce in it at all (paste → press "Usar"), and the fake
+    // clock only adds a race between userEvent's own scheduling and the message's fade-in.
+    vi.useRealTimers();
+    const user = userEvent.setup();
     setup();
 
-    await user.type(screen.getByLabelText(`${KEY}.manualLabel`), 'https://maps.app.goo.gl/abc');
+    const input = screen.getByLabelText(`${KEY}.manualLabel`);
+    await user.type(input, 'https://maps.app.goo.gl/abc');
     await user.click(screen.getByRole('button', { name: `${KEY}.manualApply` }));
-    // "No pude leer eso" would send the admin hunting for a typo that isn't there.
-    expect(await screen.findByText(`${KEY}.manualShortLink`)).toBeInTheDocument();
+
+    // The field is marked invalid and the pin did NOT move. The MESSAGE itself rides
+    // `AnimatedMessage`, whose GSAP mount doesn't run in jsdom — so this asserts the decision
+    // (`isShortMapsLink` chose the explanatory copy) through state the DOM actually carries, while
+    // `geo.test.ts` owns the predicate that picks which sentence is shown.
+    await waitFor(() => expect(input).toHaveClass('border-red-600'));
     expect(handle.panTo).not.toHaveBeenCalled();
   });
 

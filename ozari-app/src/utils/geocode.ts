@@ -1,3 +1,4 @@
+import { SEARCH_DEBOUNCE_MS } from '@constants/Search';
 import { isValidCoords, roundCoords, type Coords } from './geo';
 
 /**
@@ -20,8 +21,10 @@ const ENDPOINT = 'https://nominatim.openstreetmap.org/search';
 
 /** Below this, a query is a typo in progress rather than a search. */
 export const SEARCH_MIN_LENGTH = 3;
-/** Comfortably above Nominatim's 1 req/s ceiling, and short enough to feel instant. */
-export const SEARCH_DEBOUNCE_MS = 600;
+/** The app's ONE search debounce (`@constants/Search`) — the same pause the product grid uses, and
+ *  comfortably above Nominatim's 1 req/s ceiling. Re-exported so callers import it from the module
+ *  whose policy depends on it. */
+export { SEARCH_DEBOUNCE_MS };
 const RESULT_LIMIT = 5;
 
 export interface PlaceResult {

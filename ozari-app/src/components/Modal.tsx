@@ -6,6 +6,14 @@ import { prefersReducedMotion } from '@utils/motion';
 import { isFinePointerDevice } from '@utils/pointer';
 import { collectStaggerTargets, playStaggerIn, playStaggerOut } from './modalStagger';
 import { registerModal } from './modalRegistry';
+import { lockBodyScroll } from './bodyScrollLock';
+import {
+  getModalStackSize,
+  pushModal,
+  useIsCoveredModal,
+  useIsTopModal,
+  useOtherModalOpen,
+} from './modalStack';
 import OverlayScrollbar from './OverlayScrollbar';
 
 type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
@@ -48,6 +56,30 @@ export interface ModalProps {
    */
   panelRef?: React.RefObject<HTMLDivElement | null>;
 }
+
+/**
+ * THE HAND-OVER CURVES — why two scrims can overlap without the darkness changing.
+ *
+ * Scrims composite multiplicatively, not additively: with two 45% blacks at opacities `a` and `b`
+ * the result is `1 − (1 − 0.45a)(1 − 0.45b)`. A plain cross-fade (both at 0.5 halfway) therefore
+ * lands on `1 − 0.775² ≈ 0.40` against a single layer's `0.45` — the mid-fade LIGHTENING you can
+ * see, and no symmetric pair of curves removes it.
+ *
+ * Holding the product constant means the leaving scrim must satisfy
+ * `a = (1 − 0.55/(1 − 0.45b)) / 0.45` while the arriving one runs `b` linearly. Sampled every 10%
+ * that curve is 1.00, 0.94, 0.88, 0.81, 0.73, 0.65, 0.55, 0.44, 0.31, 0.17, 0 — it lingers, then
+ * drops away. These two béziers fit it to within ~3% of alpha (≈0.44 vs 0.45 at the worst point,
+ * imperceptible), which is why the leaving side gets `YIELD` and the returning side its mirror.
+ *
+ * Overlapping is deliberate, and the alternative was worse: swapping the scrims instantly keeps the
+ * background perfectly constant but the region over the modal BELOW has no scrim before and a full
+ * one after, so it snaps. A fade is genuinely needed there — it just has to be a complementary one.
+ */
+const SCRIM_YIELD_EASE = 'ease-[cubic-bezier(0.35,0.12,0.65,0.42)]';
+const SCRIM_RECLAIM_EASE = 'ease-[cubic-bezier(0.35,0.58,0.65,0.88)]';
+/** The arriving/leaving TOP scrim during a hand-over: linear, because the curves above are the
+ *  complement OF linear. Its partner does the shaping. */
+const SCRIM_HANDOVER_EASE = 'ease-linear';
 
 const SIZES: Record<ModalSize, string> = {
   sm: 'max-w-sm',
@@ -136,6 +168,36 @@ const Modal: React.FC<ModalProps> = ({
     return registerModal(() => handlers.current.onClose());
   }, [open]);
 
+  // …and with the modal STACK, which decides who draws the backdrop. Pushed/popped on `open` (not
+  // on mount/unmount): a closing modal must hand the scrim back the instant it starts leaving, so
+  // the one underneath fades in over the same 300ms rather than after it.
+  // A stable identity created ONCE. `useState`, not `useRef`: this is read during render (the
+  // subscriptions below), and reading a ref there is exactly what the compiler lint forbids.
+  const [stackId] = useState<object>(() => ({}));
+  useEffect(() => {
+    if (!open) return;
+    return pushModal(stackId);
+  }, [open, stackId]);
+  const isTopModal = useIsTopModal(stackId);
+  const covered = useIsCoveredModal(stackId);
+  const otherModalOpen = useOtherModalOpen(stackId);
+
+  /**
+   * Did this modal open ON TOP of another one, and has it been covered since? Both are captured by
+   * adjusting state during render (never in an effect, which would render the stale value first) —
+   * together they say which HALF of a hand-over this scrim is playing, and therefore which curve it
+   * has to follow. See the scrim note below.
+   */
+  const [wasOpen, setWasOpen] = useState(open);
+  const [tookOverScrim, setTookOverScrim] = useState(false);
+  const [wasCovered, setWasCovered] = useState(false);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    setTookOverScrim(open ? getModalStackSize() > 0 : false);
+    if (!open) setWasCovered(false);
+  }
+  if (covered && !wasCovered) setWasCovered(true);
+
   // Play the enter transition a frame after mount; unmount a beat after close (the timeout also
   // covers reduced-motion, where no transitionend would ever fire). Layered over the panel's own
   // rise/fade, the content blocks (`.modal-stagger`) do a subtle staggered reveal — and the exact
@@ -169,8 +231,8 @@ const Modal: React.FC<ModalProps> = ({
     if (!open) return;
     openerRef.current = document.activeElement as HTMLElement | null;
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    // Counted, so nested dialogs can't unlock the page out from under each other (see the helper).
+    const releaseScroll = lockBodyScroll();
 
     const raf = requestAnimationFrame(() => {
       const panel = panelRef.current;
@@ -212,12 +274,31 @@ const Modal: React.FC<ModalProps> = ({
     return () => {
       cancelAnimationFrame(raf);
       document.removeEventListener('keydown', onKeyDown);
-      document.body.style.overflow = previousOverflow;
+      releaseScroll();
       openerRef.current?.focus();
     };
   }, [open]);
 
   if (!mounted) return null;
+
+  /**
+   * Which half of a hand-over this scrim is playing — see the curve note at the top of the file.
+   * · COVERED: another modal just opened over it → yields on the complementary curve.
+   * · RECLAIMING: the modal above closed → returns on the mirror of it.
+   * · HAND-OVER: this scrim is the one arriving or leaving with another modal present → linear,
+   *   because its partner is the one doing the shaping.
+   * · Otherwise a modal is simply opening or closing ALONE: the original ease, and the lingering
+   *   `delay-150` that lets the scrim outlive its own panel's fade. Untouched by any of this.
+   */
+  const scrimMotion = covered
+    ? SCRIM_YIELD_EASE
+    : open && wasCovered
+      ? SCRIM_RECLAIM_EASE
+      : tookOverScrim || (!open && otherModalOpen)
+        ? SCRIM_HANDOVER_EASE
+        : shown
+          ? ''
+          : 'delay-150';
 
   const canDismiss = dismissible && !locked;
   const handleBackdrop = () => {
@@ -226,13 +307,26 @@ const Modal: React.FC<ModalProps> = ({
 
   return createPortal(
     <div className={`fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 ${shown ? '' : 'pointer-events-none'}`}>
-      {/* Scrim — same look as the mobile drawer's backdrop. */}
+      {/* Scrim — same look as the mobile drawer's backdrop, and drawn by the TOP modal only.
+          Stacking two doubled the black AND the blur, so every extra level dimmed the dialog you
+          can still see behind, as if it had been disabled (see `modalStack`).
+
+          A HAND-OVER IS A SWAP, NEVER A CROSS-FADE. Two 45% scrims fading through each other are
+          lightest exactly halfway: 1−(1−0.225)² ≈ 0.40 against a single layer's 0.45 — the dip you
+          can see as a flash. No pair of easing curves fixes that (and blur compounds worse), so the
+          scrims never overlap at all:
+          · `hidden` when not on top — instant, because an IDENTICAL scrim is already covering the
+            same pixels. Swapping two identical layers in one commit is invisible by construction.
+          · A modal that OPENED over another (`tookOverScrim`) starts its scrim at full opacity with
+            no transition, for the same reason: it is taking over, not arriving.
+          · A modal opening or closing ALONE keeps the original fade untouched — including the
+            lingering `delay-150` that lets the scrim outlive its panel on the way out. */}
       <div
         aria-hidden
         onClick={handleBackdrop}
-        className={`absolute inset-0 bg-charcoal/45 backdrop-blur-[3px] transition-opacity duration-300 motion-reduce:transition-none ${
-          shown ? 'opacity-100' : 'opacity-0 delay-150'
-        }`}
+        className={`absolute inset-0 bg-charcoal/45 backdrop-blur-[3px] transition-opacity duration-300 motion-reduce:transition-none ${scrimMotion} ${
+          shown && isTopModal ? 'opacity-100' : 'opacity-0'
+        } ${covered ? 'pointer-events-none' : ''}`}
       />
 
       <div

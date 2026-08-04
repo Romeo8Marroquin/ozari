@@ -13,6 +13,25 @@ import gsap from 'gsap';
 const CONTENT_SELECTOR = '.modal-stagger';
 const FOOTER_SELECTOR = '.modal-stagger-footer';
 
+/**
+ * The stagger is CAPPED, not per-item — the same rule the panel's page wave follows (`waveDelays`
+ * in `pageMotion`): the total spread is bounded, so a modal's entrance takes about the same time
+ * whether it has three blocks or seven.
+ *
+ * Without this the step is a flat 0.1s each and the sweep grows with the content: the location
+ * picker (title + description + five blocks) ran ~1.05s and read as sluggish next to a two-block
+ * confirm dialog, even though both use "the same" animation. Small modals keep exactly the timing
+ * they always had — the cap only ever tightens a long one.
+ */
+const IN_STEP = 0.1;
+const IN_SPREAD_BUDGET = 0.26;
+const OUT_STEP = 0.065;
+const OUT_SPREAD_BUDGET = 0.16;
+
+/** The per-item delay that keeps `count` items inside `budget`, never exceeding `step`. */
+const cappedStep = (count: number, step: number, budget: number): number =>
+  count > 1 ? Math.min(step, budget / (count - 1)) : step;
+
 export interface StaggerTargets {
   /** The content blocks, in DOM (top→bottom) order. */
   content: HTMLElement[];
@@ -34,7 +53,15 @@ export function playStaggerIn({ content, footer }: StaggerTargets): void {
     gsap.fromTo(
       content,
       { x: -20, autoAlpha: 0 },
-      { x: 0, autoAlpha: 1, duration: 0.4, ease: 'power3.out', stagger: 0.1, delay: 0.05, overwrite: true },
+      {
+        x: 0,
+        autoAlpha: 1,
+        duration: 0.4,
+        ease: 'power3.out',
+        stagger: cappedStep(content.length, IN_STEP, IN_SPREAD_BUDGET),
+        delay: 0.05,
+        overwrite: true,
+      },
     );
   }
   if (footer) {
@@ -58,7 +85,14 @@ export function playStaggerOut({ content, footer }: StaggerTargets, onComplete?:
   if (content.length) {
     timeline.to(
       content,
-      { x: -18, autoAlpha: 0, duration: 0.22, ease: 'power2.in', stagger: { each: 0.065, from: 'end' }, overwrite: true },
+      {
+        x: -18,
+        autoAlpha: 0,
+        duration: 0.22,
+        ease: 'power2.in',
+        stagger: { each: cappedStep(content.length, OUT_STEP, OUT_SPREAD_BUDGET), from: 'end' },
+        overwrite: true,
+      },
       0,
     );
   }

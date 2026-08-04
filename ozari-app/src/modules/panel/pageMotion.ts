@@ -996,11 +996,17 @@ export function animateHeightFrom(
 
 /**
  * A label ADAPTING to its new content: the box eases from the width it had to the width the new
- * label needs while the two labels CROSS-FADE through each other — the same read as a skeleton
- * morphing into its content, and the opposite of a swap (nothing ever blanks out, the size never
- * jumps, and old and new are visible together for a moment).
+ * label needs while the old label leaves and the new one arrives — the same read as a skeleton
+ * morphing into its content, and the opposite of a swap (the size never jumps, and the box is never
+ * empty for long enough to read as a blank).
  *
- * Both halves run on ONE timeline so the resize and the fade are the same gesture. The width target
+ * **The two labels do NOT overlap** (changed 2026-08-03): the outgoing copy is fully gone before the
+ * incoming one starts. They used to cross-fade, which is invisible on a short chip ("Pendiente" →
+ * "En ruta") but reads as double-vision the moment the strings are long — two lines of different
+ * text stacked on top of each other, which is exactly what a location field shows ("Sin ubicación
+ * (opcional)" → a coordinate pair). Sequencing costs ~0.1s and removes the artefact everywhere.
+ *
+ * Both halves run on ONE timeline so the resize and the fades are the same gesture. The width target
  * is `auto`, never a measured number: GSAP resolves the natural size at the start of the tween and
  * lands on `auto`, so an interrupted morph simply re-animates from wherever it stands — measuring
  * was what once locked a chip at a half-animated width and clipped it ("Entregad…") for good.
@@ -1037,25 +1043,27 @@ export function morphSwap({
         0,
       );
     }
+    // OUT first, IN after — never both at once (see the note above). The old copy leaves quickly
+    // (it is already stale information); the new one takes its time settling in.
+    const outDuration = outgoing ? 0.18 : 0;
     if (outgoing) {
       timeline.to(
         outgoing,
-        { autoAlpha: 0, duration: 0.24, ease: 'power2.in', overwrite: 'auto' },
+        { autoAlpha: 0, duration: outDuration, ease: 'power2.in', overwrite: 'auto' },
         0,
       );
     }
-    // The incoming label starts rising through as the old one leaves — overlapping, not queued.
     timeline.fromTo(
       incoming,
       { autoAlpha: 0 },
       {
         autoAlpha: 1,
-        duration: 0.3,
+        duration: 0.28,
         ease: PAGE_ENTER.ease,
         overwrite: 'auto',
         clearProps: 'opacity,visibility',
       },
-      0.08,
+      outDuration,
     );
   });
 }

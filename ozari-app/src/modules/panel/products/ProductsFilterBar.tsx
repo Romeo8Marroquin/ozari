@@ -8,6 +8,7 @@ import {
 import Button from '@components/Button';
 import CustomInput from '@components/CustomInput';
 import CustomSelect from '@components/CustomSelect';
+import { SEARCH_DEBOUNCE_MS } from '@constants/Search';
 import {
   hasActiveFilters,
   PRODUCT_LIST_ORDERS,
@@ -19,10 +20,11 @@ import { useProductCatalog } from './useProductCatalog';
 const KEY = 'modules.panel.products.filters';
 
 /**
- * How long typing settles before the search commits to the URL (and so to the query). Generous on
- * purpose: a short pause mid-phrase must NOT search yet (Enter is the "search now" fast path).
+ * How long typing settles before the search commits to the URL (and so to the query). Now the app's
+ * ONE search debounce (`@constants/Search`), shared with the location picker so every search box in
+ * the product has the same reflex. Re-exported for this module's existing consumers.
  */
-export const SEARCH_DEBOUNCE_MS = 600;
+export { SEARCH_DEBOUNCE_MS };
 
 const CLEAR_COLOR = '#262626';
 const PANEL_ID = 'products-filters-panel';

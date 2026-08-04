@@ -33,8 +33,11 @@ describe('LocationField', () => {
   it('says NO PIN plainly — an address without one is a finished address', async () => {
     render(<LocationField id="test" value={undefined} onChange={vi.fn()} />);
     expect(screen.getByText(`${KEY}.empty`)).toBeInTheDocument();
-    // Nothing to clear when there is nothing set.
-    expect(screen.queryByTestId('test-clear')).not.toBeInTheDocument();
+    // The clear button STAYS mounted so its column can ease open and shut instead of popping, but
+    // with nothing to clear it must be unreachable: no tab stop and nothing announced.
+    const clear = screen.getByTestId('test-clear');
+    expect(clear).toHaveAttribute('tabindex', '-1');
+    expect(clear).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('opens the picker and stores what it returns', async () => {
@@ -57,9 +60,9 @@ describe('LocationField', () => {
 
     await user.click(screen.getByTestId('test-open'));
     await user.click(await screen.findByRole('button', { name: 'close-stub' }));
-    // Closing is not a decision: nothing is written, and the dialog unmounts.
+    // Closing is not a decision: nothing is written. The dialog STAYS mounted (with `open=false`)
+    // so it can animate itself out — tearing it down here is what made closing blink.
     expect(onChange).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: 'confirm-stub' })).not.toBeInTheDocument();
   });
 
   it('shows the pin and lets it be REMOVED — a wrong pin is worse than none', async () => {

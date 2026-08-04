@@ -29,6 +29,16 @@
            in step with `VITE_API_URL` (Cloudflare Pages) — CHANGING THE API HOST MEANS CHANGING
            THIS LINE, in the same commit. `'self'` covers local dev on its own: Vite proxies
            `/api` → localhost:3000, so the browser only ever calls its own origin there.
+         · openstreetmap.org (BOTH lists) = the location picker: `tile.` serves the map images and
+           `nominatim.` answers the place search. Omitting them is exactly the failure this file
+           warns about and it shipped that way once (2026-08-03): a grey map with working zoom
+           buttons and a search box that silently returned nothing, which reads as "the map is
+           broken", never as "a header blocked it". Both are key-less and free — see
+           EPIC-2-ORDERS §6c for why no keyed provider is used.
+         · The API hosts are `api-staging.` / `api.` — ONE label each, never `api.staging.`:
+           Cloudflare's Universal SSL covers the apex plus a single subdomain level, so a two-level
+           host has no certificate and fails the TLS handshake before any of this matters
+           (DEPLOYMENT.md §3c). Both are listed here so a build serves either environment.
            The `run.app` entry is the ROLLBACK path during the custom-domain cutover (repointing DNS
            must not need a frontend rebuild); drop it once `api-staging.` has been stable for a
            while. See DEPLOYMENT.md §3c.
@@ -41,8 +51,8 @@
         default-src 'self';
         style-src 'self' 'unsafe-inline';
         script-src 'self';
-        img-src 'self' data: blob: https://*.partyrentalsgt.com;
-        connect-src 'self' https://api-staging.partyrentalsgt.com https://api.partyrentalsgt.com https://ozari-api-694756660984.northamerica-south1.run.app https://*.r2.cloudflarestorage.com;
+        img-src 'self' data: blob: https://*.partyrentalsgt.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org;
+        connect-src 'self' https://api-staging.partyrentalsgt.com https://api.partyrentalsgt.com https://ozari-api-694756660984.northamerica-south1.run.app https://*.r2.cloudflarestorage.com https://nominatim.openstreetmap.org;
         worker-src 'self' blob:;
         font-src 'self';
       "
