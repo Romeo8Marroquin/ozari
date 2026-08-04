@@ -7,6 +7,8 @@ import { buildMapsUrl, MAPS_APPS, type MapsApp, type MapsDestination } from '@ut
 import { getMapsAppPreference, setMapsAppPreference } from '@utils/mapsPreference';
 
 const KEY = 'components.openInMaps';
+/** The panel's charcoal for secondary actions — same as every other button in the action row. */
+const SECONDARY_COLOR = '#262626';
 
 interface OpenInMapsButtonProps {
   /** Where to navigate. The caller resolves pin-or-address (`orderDestination`) and renders NOTHING
@@ -53,9 +55,10 @@ const OpenInMapsButton: React.FC<OpenInMapsButtonProps> = ({ destination, size =
     <>
       <Button
         type="button"
-        variant="outline"
+        variant="soft"
+        color={SECONDARY_COLOR}
         size={size}
-        startIcon={<HiOutlineMap aria-hidden />}
+        startIcon={<HiOutlineMap aria-hidden className="size-4" />}
         onClick={handleClick}
         data-testid="open-in-maps"
       >
@@ -71,7 +74,13 @@ const OpenInMapsButton: React.FC<OpenInMapsButtonProps> = ({ destination, size =
       >
         <div className="flex flex-col gap-2">
           {MAPS_APPS.map((app) => (
-            <Button key={app} variant="outline" fullWidth onClick={() => openWith(app)}>
+            <Button
+              key={app}
+              variant="soft"
+              color={SECONDARY_COLOR}
+              fullWidth
+              onClick={() => openWith(app)}
+            >
               {t(`${KEY}.apps.${app}`)}
             </Button>
           ))}

@@ -18,16 +18,27 @@ import type { Coords } from '@utils/geo';
  * incidentally sidesteps Leaflet's broken default marker-icon URLs under a bundler.
  */
 
-/** OSM's community tiles: free and key-less, and their usage policy REQUIRES this attribution to
- *  be visible. Never remove it — it is the licence, not decoration. */
+/**
+ * OSM's community tiles: free and key-less.
+ *
+ * **The OpenStreetMap credit is MANDATORY** — ODbL requires visible attribution wherever the map is
+ * shown, so it is never removed. What IS optional is Leaflet's own "Leaflet |" prefix (a courtesy to
+ * the library, not a licence term) and the widget-style box it lives in. So the built-in control is
+ * turned OFF and the caller renders the credit in the app's own type (`LocationPicker`) — same
+ * obligation met, without a floating chip that reads as somebody else's UI inside our dialog.
+ */
 const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const TILE_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>';
 
 /** Guatemala City — where this business operates, so an admin with no pin yet starts somewhere
  *  useful instead of in the Atlantic (Leaflet's 0,0 default). */
 export const DEFAULT_CENTER: Coords = { lat: 14.634915, lng: -90.506883 };
-const DEFAULT_ZOOM = 16;
+/**
+ * The WHOLE city, not a street corner. With no pin yet the admin is orienting themselves ("which
+ * side of the city is this?"), and opening at street level shows a few anonymous blocks that could
+ * be anywhere — you have to zoom OUT before you can start. Zoom 12 frames the city and its
+ * surroundings, so the first gesture is always the useful one: zoom in toward the venue.
+ */
+const DEFAULT_ZOOM = 12;
 /** Close enough to read house numbers — what "the map jumped to my search result" should feel like. */
 const RESULT_ZOOM = 17;
 
@@ -48,7 +59,13 @@ export interface LeafletMapHandle {
  */
 export function createLeafletMap(
   container: HTMLElement,
-  options: { center?: Coords | undefined; onMove: (coords: Coords) => void },
+  options: {
+    center?: Coords | undefined;
+    onMove: (coords: Coords) => void;
+    /** Fires as tiles start/finish loading, so the caller can show that the map is still arriving
+     *  instead of leaving a half-drawn grid that looks like the CSP bug all over again. */
+    onLoadingChange?: ((loading: boolean) => void) | undefined;
+  },
 ): LeafletMapHandle {
   const map = L.map(container, {
     center: [options.center?.lat ?? DEFAULT_CENTER.lat, options.center?.lng ?? DEFAULT_CENTER.lng],
@@ -56,10 +73,16 @@ export function createLeafletMap(
     // The zoom control sits bottom-right in our layout so it never collides with the search field
     // or a phone's back gesture area.
     zoomControl: false,
-    attributionControl: true,
+    // Off by design — the caller renders the required OSM credit in our own type (see above).
+    attributionControl: false,
   });
-  L.tileLayer(TILE_URL, { attribution: TILE_ATTRIBUTION, maxZoom: 19 }).addTo(map);
+  const tiles = L.tileLayer(TILE_URL, { maxZoom: 19 }).addTo(map);
   L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  const onLoading = (): void => options.onLoadingChange?.(true);
+  const onLoad = (): void => options.onLoadingChange?.(false);
+  tiles.on('loading', onLoading);
+  tiles.on('load', onLoad);
 
   const report = (): void => {
     const { lat, lng } = map.getCenter();
@@ -80,6 +103,8 @@ export function createLeafletMap(
     invalidate: () => map.invalidateSize(),
     destroy: () => {
       map.off('move', report);
+      tiles.off('loading', onLoading);
+      tiles.off('load', onLoad);
       map.remove();
     },
   };

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Modal from './Modal';
 import { closeAllModals } from './modalRegistry';
@@ -75,6 +75,91 @@ describe('Modal', () => {
   ] as const)('applies the %s size class', (size, cls) => {
     render(<Modal open onClose={vi.fn()} size={size} aria-label="x" />);
     expect(screen.getByRole('dialog')).toHaveClass(cls);
+  });
+
+  describe('stacked modals — only the top one draws a backdrop', () => {
+    /** Scrims in DOM order: each modal portals its own, so index 0 is the first opened. Reached
+     *  through the dialogs themselves — the same relationship `getScrim` uses. */
+    const scrims = (): HTMLElement[] =>
+      Array.from(document.querySelectorAll('[role="dialog"]')).map(
+        (dialog) => dialog.parentElement?.firstElementChild as HTMLElement,
+      );
+
+    it('hands the scrim to the modal above, and takes it back on close', async () => {
+      const { rerender } = render(
+        <>
+          <Modal open onClose={vi.fn()} title="uno" />
+          <Modal open={false} onClose={vi.fn()} title="dos" />
+        </>,
+      );
+      // The scrim turns on a frame after mount (the enter transition), so every step waits.
+      await waitFor(() => expect(scrims()[0]).toHaveClass('opacity-100'));
+
+      // Opening a second dialog: two 45% blacks and two blurs would dim the first dialog — which
+      // the user can still see — as if it had been disabled.
+      rerender(
+        <>
+          <Modal open onClose={vi.fn()} title="uno" />
+          <Modal open onClose={vi.fn()} title="dos" />
+        </>,
+      );
+      // The two scrims play COMPLEMENTARY halves of one hand-over: #1 yields on the curve that
+      // holds the composite constant, #2 arrives linearly (its partner does the shaping). A plain
+      // cross-fade would dip to ~0.40 against a single layer's 0.45 and read as a flash.
+      expect(scrims()[0]).toHaveClass('opacity-0');
+      expect(scrims()[0]).toHaveClass('ease-[cubic-bezier(0.35,0.12,0.65,0.42)]');
+      expect(scrims()[0]).toHaveClass('pointer-events-none'); // never eats a click meant for #2
+      expect(scrims()[1]).toHaveClass('ease-linear');
+
+      // Closing the top: #1 RECLAIMS on the mirror curve, so the composite stays flat on the way
+      // back down too — and it is a real fade, because the area over #1's own panel goes from no
+      // scrim to a full one (swapping instantly there is what read as abrupt).
+      rerender(
+        <>
+          <Modal open onClose={vi.fn()} title="uno" />
+          <Modal open={false} onClose={vi.fn()} title="dos" />
+        </>,
+      );
+      expect(scrims()[0]).toHaveClass('opacity-100');
+      expect(scrims()[0]).toHaveClass('ease-[cubic-bezier(0.35,0.58,0.65,0.88)]');
+    });
+
+    it('keeps the page locked until the LAST nested modal closes', async () => {
+      // Each modal used to save/restore `body.overflow` itself, so with two open the outer one's
+      // cleanup ran first and the inner one then restored the `hidden` it had captured — leaving
+      // the page unscrollable behind a fully closed dialog.
+      const { rerender, unmount } = render(
+        <>
+          <Modal open onClose={vi.fn()} title="uno" />
+          <Modal open onClose={vi.fn()} title="dos" />
+        </>,
+      );
+      expect(document.body.style.overflow).toBe('hidden');
+
+      rerender(
+        <>
+          <Modal open onClose={vi.fn()} title="uno" />
+          <Modal open={false} onClose={vi.fn()} title="dos" />
+        </>,
+      );
+      expect(document.body.style.overflow).toBe('hidden'); // #1 is still open
+
+      unmount();
+      expect(document.body.style.overflow).toBe('');
+    });
+
+    it('leaves a LONE modal’s fade exactly as it was', async () => {
+      // Nothing about stacking may change how a single dialog appears or leaves: it still fades in,
+      // and its scrim still outlives the panel by the lingering delay on the way out.
+      const { rerender } = render(<Modal open onClose={vi.fn()} title="solo" />);
+      await waitFor(() => expect(scrims()[0]).toHaveClass('opacity-100'));
+      // No hand-over curve: a lone modal keeps the app's default ease.
+      expect(scrims()[0]).not.toHaveClass('ease-linear');
+
+      rerender(<Modal open={false} onClose={vi.fn()} title="solo" />);
+      expect(scrims()[0]).toHaveClass('delay-150');
+      expect(scrims()[0]).toHaveClass('transition-opacity');
+    });
   });
 
   describe('dismissal (dismissible)', () => {
