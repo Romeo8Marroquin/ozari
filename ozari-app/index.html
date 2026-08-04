@@ -35,6 +35,10 @@
            buttons and a search box that silently returned nothing, which reads as "the map is
            broken", never as "a header blocked it". Both are key-less and free — see
            EPIC-2-ORDERS §6c for why no keyed provider is used.
+         · The API hosts are `api-staging.` / `api.` — ONE label each, never `api.staging.`:
+           Cloudflare's Universal SSL covers the apex plus a single subdomain level, so a two-level
+           host has no certificate and fails the TLS handshake before any of this matters
+           (DEPLOYMENT.md §3c). Both are listed here so a build serves either environment.
            The `run.app` entry is the ROLLBACK path during the custom-domain cutover (repointing DNS
            must not need a frontend rebuild); drop it once `api-staging.` has been stable for a
            while. See DEPLOYMENT.md §3c.

@@ -198,14 +198,25 @@ docs, 2026-07-31 — the feature exists only in `asia-east1`, `asia-northeast1`,
 `europe-north1`, `europe-west1`, `europe-west4`, `us-central1`, `us-east1`, `us-east4`, `us-west1`).
 So the mapping has to come from somewhere else:
 
-| Option | Cost | Notes |
-|---|---|---|
-| **Cloudflare proxy + Host-header override** ⭐ | **free** | DNS is already at Cloudflare. A proxied `CNAME` to the `run.app` host plus an **Origin Rule** rewriting the `Host` header (Cloud Run 404s on an unknown Host). Adds a Cloudflare hop — see the `trust proxy` note below. |
-| Global external Application LB + serverless NEG | ~US$18–25/mo | Google-native, Google-managed cert, Terraform-able. The forwarding rule bills hourly whether or not anyone visits — more than the rest of this infra costs. |
-| Move the service to a mapping-capable region | free | Native mapping, but re-creates the service (new URL, Terraform + trigger churn) and moves compute away from Guatemala. Only worth it if the region is being reconsidered anyway. |
+Something in the middle must rewrite the `Host` header before the request reaches Google, because
+**DNS resolves, it does not redirect**: the browser still sends `Host: api-staging.…`, one IP serves
+every Cloud Run service, and that header is the only thing identifying yours. Unknown host ⇒ 404.
+(It must be a PROXY, not a redirect — a 3xx would land the browser back on `run.app` and re-create
+the third-party-cookie bug this whole exercise exists to fix.)
 
-Recommended: **Cloudflare proxy** for staging. Revisit the LB if the Cloudflare hop ever gets in the
-way (mTLS, Cloud Armor, or if per-IP rate limiting proves unreliable).
+| Option | Cost | Verdict |
+|---|---|---|
+| **Cloudflare Worker** ⭐ | **free** (100K req/day) | What we shipped. A proxied `CNAME` + a Worker route that rewrites the hostname on a subrequest — which carries BOTH the `Host` header and the SNI. |
+| Cloudflare Origin Rules / Snippets | **Pro, US$20/mo** | The "proper" declarative way — and the trap: the Host/SNI rewrite fields are visible on Free but paywalled on click. Snippets are Pro+ too. Don't plan around either on a Free zone. |
+| Global external Application LB + serverless NEG | ~US$18–25/mo | Google-native, Google-managed cert, Terraform-able. Bills hourly whether or not anyone visits — more than the rest of this infra costs. |
+| Move the service to a mapping-capable region | free | Native mapping, no proxy at all. **Worth a real look:** Neon lives in `us-east-1`, so `us-east4` would put compute next to the database (DB round trips ~1–5 ms instead of ~60–80 ms) *and* unlock domain mapping. Costs ~30 ms on the single client hop against saving that several times per request. Decide it on its own merits, not mid-cutover. |
+
+> **`trust proxy` / rate limiting.** `app.ts` sets `trust proxy = 1`, and the login + global rate
+> limiters key on `req.ip`. Cloudflare inserts one more hop into `X-Forwarded-For` (it forwards the
+> client and Google appends the Cloudflare edge, so `trust proxy = 1` should still resolve the real
+> client). **Verify after cutover** (§3c.4): if `req.ip` ever resolves to a Cloudflare address, every
+> visitor shares one bucket and the limiter throttles the whole app at once. The fix is a
+> `keyGenerator` reading `CF-Connecting-IP` — do it only if the check shows it's needed.
 
 > **`trust proxy` / rate limiting.** `app.ts` sets `trust proxy = 1`, and the login + global rate
 > limiters key on `req.ip`. Adding Cloudflare inserts one more hop into `X-Forwarded-For`. **Verify
@@ -218,11 +229,33 @@ way (mTLS, Cloud Armor, or if per-IP rate limiting proves unreliable).
 1. **DNS** → add a record on `partyrentalsgt.com`:
    - Type `CNAME`, Name `api-staging`, Target `ozari-api-694756660984.northamerica-south1.run.app`,
      **Proxy status: Proxied** (orange cloud).
-2. **Rules → Origin Rules** → *Create rule*:
-   - Name: `api-staging → Cloud Run host`
-   - When incoming requests match: `Hostname` `equals` `api-staging.partyrentalsgt.com`
-   - Then: **Host Header** → *Rewrite to* → `ozari-api-694756660984.northamerica-south1.run.app`
-   - Deploy. *(Without this, Cloud Run receives an unknown `Host` and answers 404 for everything.)*
+   ⚠️ **One label, with a hyphen.** `api.staging.…` is two levels; Universal SSL covers the apex plus
+   ONE, so Cloudflare flags *"this hostname is not covered by a certificate"* and every request dies
+   with `SSL alert 40 / handshake_failure` — before it ever reaches the Worker. Covering it would
+   mean Advanced Certificate Manager (~US$10/mo). The hyphen form is covered by the existing wildcard
+   immediately, with no issuance wait.
+2. **Workers & Pages → Create → Workers → Start with Hello World!**
+   - Name it `api-staging-proxy` → **Deploy** (the starter deploys first; the editor opens after).
+   - **`</> Edit code`** → replace everything with:
+     ```js
+     export default {
+       async fetch(request) {
+         const url = new URL(request.url);
+         url.hostname = 'ozari-api-694756660984.northamerica-south1.run.app';
+         return fetch(new Request(url, request));
+       },
+     };
+     ```
+   - **Deploy** again.
+   - **Domains → Custom Domains and Routes → Add Route** → zone `partyrentalsgt.com`, pattern
+     **`api-staging.partyrentalsgt.com/*`**.
+     ⚠️ The field pre-fills `*.partyrentalsgt.com/*` — that would swallow `staging.` too and proxy
+     the FRONTEND into the API. Replace it.
+     ⚠️ **Route, not Add Domain**: a Custom Domain creates its own DNS record and collides with the
+     CNAME above.
+   - Once verified, turn OFF the **Worker URL → Production** `…workers.dev` toggle, so the backend
+     isn't reachable through a second public address. (Leave it on while debugging — it exercises the
+     Worker independently of DNS and TLS.)
 3. **SSL/TLS** → *Overview* → encryption mode **Full (strict)** (Cloud Run presents a valid public
    cert). If *Edge Certificates → Always Use HTTPS* interferes with issuance, turn it off until the
    certificate is active, then back on.
@@ -270,6 +303,14 @@ URL has nothing to do with origins.
 
 ### 3c.4 — Acceptance test (the actual gate)
 
+0. **The API answers on its own hostname first** — check this before touching the frontend:
+   `https://api-staging.partyrentalsgt.com/api/health/check`.
+   Read the answer, it localises the fault precisely:
+   · **200** (with `x-api-key`) or **403** from OUR API ⇒ correct — a 403 means Express received it
+     and `validateApiKey` refused a direct browser hit, which is the intended behaviour.
+   · **404**, Google-styled ⇒ the Host rewrite isn't happening: the Worker route doesn't match.
+   · **SSL alert 40 / 525 / 526** ⇒ TLS, not routing: a two-level hostname (no certificate) or an
+     encryption mode below Full (strict).
 1. `https://staging.partyrentalsgt.com` loads; DevTools **Console shows no CSP violation** and
    **Network** shows calls going to `api-staging.partyrentalsgt.com` (not `run.app`).
 2. Sign in. In *Application → Cookies*, `refresh-token` is listed under
@@ -517,21 +558,37 @@ migrations into ONE baseline so prod starts clean and dev + prod share one histo
 
 ## 11. First-launch checklist (copy-paste)
 
+**Order matters.** The domain work is split in two on purpose: `APP_HOST` must be right *before* the
+frontend can talk to the API (CORS), and `VITE_API_URL` must be right *before* the frontend is built
+(Vite inlines it). Getting these backwards is the one way to end up with a "deployed" app that can't
+call its own backend.
+
 ```
-[ ] 0  Decide apex domain (APP_HOST), backend URL strategy, separate prod GCP project
+[ ] 0  Decide the host PAIR up front — frontend + api MUST share the registrable domain, and each
+       host must be ONE label (api.partyrentalsgt.com, never api.prod.partyrentalsgt.com — §3c)
+[ ] 0  Separate prod GCP project decided
 [ ] 1  Neon prod DB created; db-roles.sql run as owner; pooled(ozari_api)+direct(owner) URLs ready
 [ ] 2  Resend prod API key created
-[ ] 2b R2 bucket created + public read (custom domain) + API token (access key id/secret) — see §3b
+[ ] 2b R2 PROD bucket + public read + API token — CORS lists ONLY prod origins, never localhost (§3b)
 [ ] 3  JWT x2, ENCRYPTION_KEY (32B hex), API_KEY generated into local prod.env (gitignored)
-[ ] 4  envs/prod/ Terraform (state prefix ozari/prod, NODE_ENV=production, APP_HOST=apex, no imports.tf)
-[ ] 4  terraform init/plan/apply → containers, SAs, registry, Cloud Run shell, main-branch trigger
+[ ] 4  envs/prod/ Terraform (state prefix ozari/prod, NODE_ENV=production, app_host=FRONTEND origin,
+       no imports.tf) → init/plan/apply → containers, SAs, registry, Cloud Run shell, main trigger
 [ ] 5  load-secrets (prod) → all 7 secret versions added
-[ ] 6  First build on main → verify/build/migrate/deploy → record backend URL (+ optional api. mapping)
+[ ] 6  First build on main → verify/build/migrate/deploy → record the generated run.app URL
 [ ] 7  pnpm db:seed once against the fresh prod DB
-[ ] 8  Cloudflare Pages: VITE_API_URL=backend URL, apex custom domain, email-logo.png served
-[ ] 8  appConfig.email.logoUrl → prod origin (code + redeploy)
-[ ] 9  Verify: /api/health/check, /api/docs absent, register→login→reset smoke test, CORS
+[ ] 8  DNS: CNAME `api` → the prod run.app host, PROXIED (one label — Universal SSL covers it)
+[ ] 8  Worker `api-prod-proxy` (or reuse the pattern) + Route `api.partyrentalsgt.com/*`; disable its
+       workers.dev URL afterwards. SSL/TLS = Full (strict)   ← Origin Rules/Snippets are Pro-only
+[ ] 8  VERIFY the API on its own host BEFORE touching the frontend: /api/health/check (§3c.4 step 0)
+[ ] 9  Cloudflare Pages: custom domain = the prod frontend origin; email-logo.png served
+[ ] 9  Pages env VITE_API_URL=https://api.partyrentalsgt.com  → then TRIGGER A REBUILD (inlined!)
+[ ] 10 Confirm APP_HOST on the prod Cloud Run revision == the prod FRONTEND origin, no trailing slash
+[ ] 10 index.html CSP connect-src already lists api.partyrentalsgt.com — confirm before the build
+[ ] 11 Verify: /api/health/check, /api/docs ABSENT (NODE_ENV=production), register→login→reset smoke
+       test, a product photo upload (proves R2 CORS), and the §3c.4 iPhone >15min session gate
 ```
+
+`appConfig.email.logoUrl` is **no longer a checklist item** — it derives from `APP_HOST`.
 
 ---
 
