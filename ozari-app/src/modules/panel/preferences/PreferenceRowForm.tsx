@@ -5,6 +5,7 @@ import AnimatedMessage from '@components/AnimatedMessage';
 import CustomInput from '@components/CustomInput';
 import CustomSelect from '@components/CustomSelect';
 import Switch from '@components/Switch';
+import { BANK_KEYS, bankLabelKey } from './bankLogos';
 import type { CatalogKey, CatalogRow, CatalogRowBody, LookupRow } from './preference.types';
 
 const KEY = 'modules.panel.preferences';
@@ -12,6 +13,13 @@ const SECONDARY_COLOR = '#262626';
 const NAME_MIN = 2;
 const NAME_MAX = 100;
 const DESCRIPTION_MAX = 500;
+/** The bank account's own bounds, mirroring the backend registry's `extraFields`. */
+const ACCOUNT_TYPE_MIN = 2;
+const ACCOUNT_TYPE_MAX = 40;
+const ACCOUNT_NUMBER_MIN = 4;
+const ACCOUNT_NUMBER_MAX = 34;
+const HOLDER_MIN = 2;
+const HOLDER_MAX = 120;
 
 interface PreferenceRowFormProps {
   catalog: CatalogKey;
@@ -30,11 +38,14 @@ interface PreferenceRowFormProps {
  *
  * Which fields appear is driven by the CATALOG, mirroring the backend registry that decides which
  * extras each one accepts: an event type gets its lead time, a zone gets its municipality and fee,
- * everything else gets just the name, the note and the publication switch. Sending a field the
- * catalog doesn't declare would be dropped server-side anyway; not showing it is the honest half.
+ * a bank account gets its bank, type, number and holder, everything else gets just the name, the
+ * note and the publication switch. Sending a field the catalog doesn't declare would be dropped
+ * server-side anyway; not showing it is the honest half.
  *
- * Validation is local and mirrors the API's bounds (name 2–100, note ≤500) so the admin is corrected
- * as they type rather than by a round-trip. The API remains the authority.
+ * Validation is local and mirrors the API's bounds (name 2–100, note ≤500, and the bank account's
+ * own four) so the admin is corrected as they type rather than by a round-trip. The API remains the
+ * authority — including for the two encrypted fields, which are plain text on this side and become
+ * ciphertext the moment they are written.
  */
 const PreferenceRowForm: React.FC<PreferenceRowFormProps> = ({
   catalog,
@@ -57,7 +68,22 @@ const PreferenceRowForm: React.FC<PreferenceRowFormProps> = ({
   const [municipalityId, setMunicipalityId] = useState(
     row?.municipalityId !== undefined ? String(row.municipalityId) : '',
   );
+  // '' is "sin logo" — a REAL answer here, not an unfilled field: an account at a bank we ship no
+  // asset for is perfectly usable and simply prints as text.
+  const [bankKey, setBankKey] = useState(row?.bankKey ?? '');
+  const [accountType, setAccountType] = useState(row?.accountType ?? '');
+  const [accountNumber, setAccountNumber] = useState(row?.accountNumber ?? '');
+  const [holder, setHolder] = useState(row?.holder ?? '');
   const [touched, setTouched] = useState(false);
+
+  const isBank = catalog === 'bank-accounts';
+  /** A required bank text: the same bounds the API enforces, checked while the admin types. */
+  const bankTextError = (value: string, min: number, max: number): string | undefined => {
+    const length = value.trim().length;
+    return isBank && (length < min || length > max)
+      ? t(`${KEY}.rowForm.bankTextError`, { min, max })
+      : undefined;
+  };
 
   const trimmedName = name.trim();
   const nameError =
@@ -80,7 +106,20 @@ const PreferenceRowForm: React.FC<PreferenceRowFormProps> = ({
     catalog === 'zones' && municipalityId === ''
       ? t(`${KEY}.rowForm.municipalityError`)
       : undefined;
-  const invalid = Boolean(nameError ?? descriptionError ?? leadError ?? feeError ?? municipalityError);
+  const accountTypeError = bankTextError(accountType, ACCOUNT_TYPE_MIN, ACCOUNT_TYPE_MAX);
+  const accountNumberError = bankTextError(accountNumber, ACCOUNT_NUMBER_MIN, ACCOUNT_NUMBER_MAX);
+  const holderError = bankTextError(holder, HOLDER_MIN, HOLDER_MAX);
+  /** The first thing wrong, in field order — one message for the whole row (see the note below). */
+  const firstError =
+    nameError ??
+    descriptionError ??
+    leadError ??
+    feeError ??
+    municipalityError ??
+    accountTypeError ??
+    accountNumberError ??
+    holderError;
+  const invalid = firstError !== undefined;
 
   const submit = (): void => {
     setTouched(true);
@@ -95,6 +134,13 @@ const PreferenceRowForm: React.FC<PreferenceRowFormProps> = ({
         municipalityId: Number(municipalityId),
         // Empty stays NULL: "no fee configured" is a real state, distinct from a fee of zero.
         deliveryFee: fee.trim() === '' ? null : Number(fee.trim()),
+      }),
+      ...(isBank && {
+        // '' becomes null — "sin logo", which the API accepts as the legitimate answer it is.
+        bankKey: bankKey === '' ? null : bankKey,
+        accountType: accountType.trim(),
+        accountNumber: accountNumber.trim(),
+        holder: holder.trim(),
       }),
     });
   };
@@ -182,17 +228,61 @@ const PreferenceRowForm: React.FC<PreferenceRowFormProps> = ({
             />
           </>
         )}
+        {isBank && (
+          <>
+            {/* "Sin logo" is the placeholder AND a real selection, not a prompt to pick something
+                else — so it carries no error state and needs no "selecciona…" copy. */}
+            <CustomSelect
+              id="preference-row-bank"
+              label={t(`${KEY}.rowForm.bank`)}
+              aria-label={t(`${KEY}.rowForm.bank`)}
+              placeholderOption={t(`${KEY}.rowForm.bankNone`)}
+              value={bankKey}
+              disabled={busy}
+              onChange={(event) => setBankKey(event.target.value)}
+              options={BANK_KEYS.map((key) => ({ value: key, label: t(bankLabelKey(key)) }))}
+            />
+            <CustomInput
+              id="preference-row-account-type"
+              label={t(`${KEY}.rowForm.accountType`)}
+              aria-label={t(`${KEY}.rowForm.accountType`)}
+              placeholder={t(`${KEY}.rowForm.accountTypePlaceholder`)}
+              value={accountType}
+              disabled={busy}
+              onChange={(event) => setAccountType(event.target.value)}
+              error={showError(accountTypeError) !== undefined}
+            />
+            <CustomInput
+              id="preference-row-account-number"
+              label={t(`${KEY}.rowForm.accountNumber`)}
+              aria-label={t(`${KEY}.rowForm.accountNumber`)}
+              // `inputMode` only, never `type="number"`: account numbers carry dashes and leading
+              // zeros, both of which a numeric input would eat.
+              inputMode="numeric"
+              value={accountNumber}
+              disabled={busy}
+              onChange={(event) => setAccountNumber(event.target.value)}
+              error={showError(accountNumberError) !== undefined}
+            />
+            <CustomInput
+              id="preference-row-holder"
+              label={t(`${KEY}.rowForm.holder`)}
+              aria-label={t(`${KEY}.rowForm.holder`)}
+              value={holder}
+              disabled={busy}
+              onChange={(event) => setHolder(event.target.value)}
+              error={showError(holderError) !== undefined}
+            />
+          </>
+        )}
       </div>
 
       {/* ONE explanation for the whole row rather than a slot under each field: the offending field
-          is already marked red, and five reserved message lines in an inline editor would push the
-          rows below it around every time one appeared. */}
+          is already marked red, and a reserved message line under every field in an inline editor
+          would push the rows below it around every time one appeared. */}
       <AnimatedMessage
         id="preference-row-error"
-        {...(touched && {
-          errorMessage:
-            nameError ?? descriptionError ?? leadError ?? feeError ?? municipalityError,
-        })}
+        {...(touched && { errorMessage: firstError })}
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">

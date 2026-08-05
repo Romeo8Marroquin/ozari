@@ -10,6 +10,7 @@ describe('parsePreferencesSearch', () => {
   it('keeps a known group marker', () => {
     expect(parsePreferencesSearch({ grupo: 'pedidos' })).toEqual({ grupo: 'pedidos' });
     expect(parsePreferencesSearch({ grupo: 'productos' })).toEqual({ grupo: 'productos' });
+    expect(parsePreferencesSearch({ grupo: 'documentos' })).toEqual({ grupo: 'documentos' });
   });
 
   it('CLAMPS anything else to the default, as an empty search', () => {
@@ -28,6 +29,7 @@ describe('activePreferenceTab', () => {
     expect(activePreferenceTab({})).toBe('operation');
     expect(activePreferenceTab({ grupo: 'pedidos' })).toBe('orders');
     expect(activePreferenceTab({ grupo: 'productos' })).toBe('products');
+    expect(activePreferenceTab({ grupo: 'documentos' })).toBe('documents');
   });
 });
 

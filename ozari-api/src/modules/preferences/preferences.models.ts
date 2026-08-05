@@ -15,23 +15,38 @@ export interface PreferencesResponseModel {
  * One scalar setting, with the BOUNDS the API will enforce so the client can enforce the same ones
  * as the admin types. Deliberately no label or help text: those are copy, the frontend owns them
  * (the `colorKey` doctrine — the API ships tokens, never presentation).
+ *
+ * Discriminated by `type` so a client narrows once and has nothing left to guess: an `int` carries
+ * `min`/`max`, a `text` carries its length bounds and whether newlines are legal. `multiline` is a
+ * validation rule (the API rejects a newline in a business name), which is why it travels — it is
+ * not an instruction to draw a textarea, even though a client will reasonably read it as one.
  */
-export interface PreferenceSettingModel {
-  key: string;
-  /** Always an integer today; the field exists so a future bool/text setting needs no new shape. */
-  type: "int";
-  value: number;
-  min: number;
-  max: number;
-  /** Grouping token (`orders`, …) the screen lays its cards out by. */
-  group: string;
-}
+export type PreferenceSettingModel =
+  | {
+      key: string;
+      type: "int";
+      value: number;
+      min: number;
+      max: number;
+      /** Grouping token (`orders`, `documents`, …) the screen lays its cards out by. */
+      group: string;
+    }
+  | {
+      key: string;
+      type: "text";
+      value: string;
+      /** 0 = the empty value is a legitimate choice; ≥1 = the setting is required. */
+      minLength: number;
+      maxLength: number;
+      multiline: boolean;
+      group: string;
+    };
 
 /** `PUT /preferences/settings` — the FULL set, declarative like every other update in this codebase:
  *  what arrives is what the settings become. A partial body would make "unchanged" and "cleared"
  *  indistinguishable. */
 export interface UpdatePreferenceSettingsRequestModel {
-  settings: { key: string; value: number }[];
+  settings: { key: string; value: number | string }[];
 }
 
 /**
@@ -50,6 +65,17 @@ export interface PreferenceCatalogRowModel {
   deliveryFee?: number;
   /** Zones only — which municipality the zone belongs to. */
   municipalityId?: number;
+  /** Bank accounts only — which shipped logo the document prints. `null` = "sin logo", always a
+   *  legal answer, so an account at a bank we ship no asset for is still perfectly usable. */
+  bankKey?: string | null;
+  /** Bank accounts only — "Monetaria", "Ahorro"… Free text: bank product names vary, and a wrong
+   *  enum printed on a document is worse than the admin's own words. */
+  accountType?: string;
+  /** Bank accounts only — DECRYPTED from `account_number_kms`. Only ever leaves the server through
+   *  the Admin-only `/preferences` (EPIC-2-DOCUMENTS §6). */
+  accountNumber?: string;
+  /** Bank accounts only — DECRYPTED from `holder_kms`. */
+  holder?: string;
 }
 
 /**
@@ -72,6 +98,7 @@ export interface PreferenceCatalogsResponseModel {
   paymentMethods: PreferenceCatalogRowResponseModel[];
   productCategories: PreferenceCatalogRowResponseModel[];
   productDetailTypes: PreferenceCatalogRowResponseModel[];
+  bankAccounts: PreferenceCatalogRowResponseModel[];
 }
 
 /** A create/update body for any catalog — the validator narrows it to the fields THAT catalog
@@ -83,6 +110,12 @@ export interface CatalogRowRequestModel {
   minLeadHours?: number;
   deliveryFee?: number | null;
   municipalityId?: number;
+  bankKey?: string | null;
+  accountType?: string;
+  /** PLAINTEXT in transit, encrypted the moment it is written (`account_number_kms`). */
+  accountNumber?: string;
+  /** PLAINTEXT in transit, encrypted the moment it is written (`holder_kms`). */
+  holder?: string;
 }
 
 export interface PreferenceCatalogRowEnvelopeModel {

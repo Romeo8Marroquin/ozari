@@ -70,7 +70,8 @@
       "clear": "Quitar ubicación"
     },
     "openInMaps": {
-      "action": "Abrir en mapas",
+      "action": "Abrir mapa",
+      "openWith": "Abrir en {{app}}",
       "chooseTitle": "¿Con qué app quieres abrirlo?",
       "chooseDescription": "Se abrirá la navegación hacia la dirección del pedido.",
       "apps": {
@@ -79,7 +80,7 @@
         "apple": "Apple Mapas"
       },
       "remember": "Recordar mi elección en este dispositivo",
-      "rememberHint": "Puedes cambiarla luego en Ajustes."
+      "rememberHint": "Puedes cambiarla luego en ajustes."
     },
     "pageLoader": {
       "logo": "Logo Party Rentals",
@@ -250,9 +251,109 @@
         "preferences": "Preferencias",
         "settings": "Ajustes"
       },
+      "dashboard": {
+        "updated": {
+          "justNow": "Actualizado hace un momento",
+          "seconds_one": "Actualizado hace {{count}} segundo",
+          "seconds_other": "Actualizado hace {{count}} segundos",
+          "minutes_one": "Actualizado hace {{count}} minuto",
+          "minutes_other": "Actualizado hace {{count}} minutos",
+          "hours_one": "Actualizado hace {{count}} hora",
+          "hours_other": "Actualizado hace {{count}} horas"
+        },
+        "loadError": {
+          "title": "No pudimos cargar el panel",
+          "description": "Ocurrió un problema al obtener la información. Vuelve a intentarlo.",
+          "retry": "Reintentar"
+        },
+        "upNext": {
+          "title": "Lo siguiente",
+          "description": "Los próximos tres pedidos que necesitan tu atención, del más urgente al menos urgente.",
+          "emptyTitle": "Nada pendiente por ahora",
+          "emptyDescription": "No hay entregas ni recolecciones en cola. Cuando crees un pedido aparecerá aquí.",
+          "emptyAction": "Crear pedido",
+          "items_one": "{{count}} artículo",
+          "items_other": "{{count}} artículos",
+          "openAria": "Abrir el pedido de {{client}}",
+          "nextStep": "Marcar {{status}}",
+          "nextStepAria": "Acción rápida: {{step}}",
+          "pay": "Registrar pago",
+          "payAria": "Registrar el pago del pedido de {{client}}",
+          "kind": {
+            "DELIVERY": "Entrega",
+            "COLLECTION": "Recolección"
+          },
+          "countdown": {
+            "now": "Ahora",
+            "minutes_one": "En {{count}} minuto",
+            "minutes_other": "En {{count}} minutos",
+            "hours_one": "En {{count}} hora",
+            "hours_other": "En {{count}} horas",
+            "days_one": "En {{count}} día",
+            "days_other": "En {{count}} días",
+            "months_one": "En {{count}} mes",
+            "months_other": "En {{count}} meses",
+            "years_one": "En {{count}} año",
+            "years_other": "En {{count}} años"
+          },
+          "overdue": {
+            "minutes_one": "Atrasado {{count}} minuto",
+            "minutes_other": "Atrasado {{count}} minutos",
+            "hours_one": "Atrasado {{count}} hora",
+            "hours_other": "Atrasado {{count}} horas",
+            "days_one": "Atrasado {{count}} día",
+            "days_other": "Atrasado {{count}} días",
+            "months_one": "Atrasado {{count}} mes",
+            "months_other": "Atrasado {{count}} meses",
+            "years_one": "Atrasado {{count}} año",
+            "years_other": "Atrasado {{count}} años"
+          }
+        },
+        "today": {
+          "title": "Hoy",
+          "deliveries": "Entregas de hoy",
+          "collections": "Recolecciones de hoy",
+          "overdue": "Atrasados",
+          "overdueHint": "Eventos que ya pasaron",
+          "active": "Pedidos abiertos",
+          "activeHint": "Sin finalizar ni cancelar"
+        },
+        "month": {
+          "title": "Este mes",
+          "revenue": "Ingresos",
+          "orders": "Pedidos",
+          "averageOrder": "Ticket promedio",
+          "outstanding": "Por cobrar",
+          "cancelled": "Cancelados",
+          "outstandingHint_one": "{{count}} pedido sin pago registrado",
+          "outstandingHint_other": "{{count}} pedidos sin pago registrado",
+          "previous": "Mes anterior: {{value}}"
+        },
+        "stats": {
+          "delta": "{{value}}%",
+          "noComparison": "Sin comparación"
+        },
+        "trend": {
+          "title": "Ingresos por mes",
+          "description": "Los últimos doce meses, según la fecha de entrega."
+        },
+        "statusSplit": {
+          "title": "Pedidos en curso",
+          "description": "Dónde está cada pedido abierto en este momento.",
+          "centerLabel": "Abiertos",
+          "empty": "No hay pedidos en curso."
+        },
+        "topProducts": {
+          "title": "Lo más solicitado",
+          "description": "Los productos que más salieron este mes.",
+          "units_one": "{{count}} unidad",
+          "units_other": "{{count}} unidades",
+          "empty": "Aún no hay salidas registradas este mes."
+        }
+      },
       "preferences": {
         "title": "Preferencias del sistema",
-        "lead": "Reglas y catálogos que aplican a todo el negocio: los tiempos de la logística, la evidencia de cada paso y las listas que alimentan los formularios.",
+        "lead": "Reglas y catálogos que aplican a todo el negocio: los tiempos de la logística, la evidencia de cada paso, las listas que alimentan los formularios y los datos que llevan tus documentos.",
         "loading": "Cargando las preferencias",
         "error": {
           "title": "No fue posible cargar las preferencias",
@@ -263,7 +364,8 @@
           "label": "Grupos de preferencias",
           "operation": "Operación",
           "orders": "Pedidos",
-          "products": "Productos"
+          "products": "Productos",
+          "documents": "Documentos"
         },
         "groups": {
           "orders": {
@@ -273,6 +375,10 @@
           "evidence": {
             "title": "Evidencia",
             "description": "Cuántas fotos solicita cada paso que las requiere, y por cuánto tiempo se conservan."
+          },
+          "documents": {
+            "title": "Membrete",
+            "description": "Los datos del negocio que encabezan y cierran cada cotización y comprobante. Se imprimen tal como los escribas aquí."
           }
         },
         "settings": {
@@ -280,6 +386,9 @@
           "integerError": "El valor debe ser un número entero.",
           "rangeError": "El valor debe estar entre {{min}} y {{max}}.",
           "invertedError": "El máximo de fotos no puede ser menor que el mínimo.",
+          "requiredError": "Este campo es obligatorio.",
+          "lengthError": "El texto no puede exceder {{max}} caracteres.",
+          "singleLineError": "Este campo debe ocupar una sola línea.",
           "logisticsSpacingMinutes": {
             "label": "Minutos entre eventos",
             "help": "Margen mínimo entre dos eventos (entrega o recolección) del mismo responsable, incluidos los de un mismo pedido. Dos responsables distintos sí pueden coincidir en el mismo horario."
@@ -299,6 +408,22 @@
           "evidenceRetentionMonths": {
             "label": "Meses de retención",
             "help": "Antigüedad a partir de la cual pueden depurarse las fotos de pedidos terminados. Los pedidos y su historial se conservan siempre."
+          },
+          "businessName": {
+            "label": "Nombre del negocio",
+            "help": "Encabeza cada documento. Es lo primero que lee el cliente, así que conviene el nombre con el que te conocen."
+          },
+          "businessPhone": {
+            "label": "Teléfono de contacto",
+            "help": "Aparece al pie de cada documento. Puedes dejarlo vacío si prefieres que te contacten por otro medio."
+          },
+          "terms": {
+            "label": "Términos y condiciones",
+            "help": "Se imprimen al pie de la última página. Aquí van las condiciones de daños, la política de envío y cualquier otra nota que deba quedar por escrito."
+          },
+          "quoteValidityDays": {
+            "label": "Vigencia de la cotización",
+            "help": "Días que declara válidos una cotización. No caduca sola: es lo que se le informa al cliente."
           }
         },
         "catalogs": {
@@ -325,7 +450,15 @@
           "productDetailTypes": {
             "title": "Tipos de detalle",
             "description": "Las características que puede llevar un producto: color, material…"
+          },
+          "bankAccounts": {
+            "title": "Cuentas bancarias",
+            "description": "Las cuentas a las que puede depositar un cliente. Se imprimen al pie de los documentos y se guardan cifradas: solo tú puedes verlas desde esta pantalla."
           }
+        },
+        "banks": {
+          "banrural": "Banrural",
+          "bac": "BAC Credomatic"
         },
         "actions": {
           "add": "Agregar",
@@ -337,7 +470,8 @@
           "inactive": "Inactivo",
           "leadHours": "{{count}} h de antelación",
           "fee": "Q {{amount}}",
-          "noFee": "Sin tarifa"
+          "noFee": "Sin tarifa",
+          "account": "{{type}} ••{{tail}}"
         },
         "rowForm": {
           "name": "Nombre",
@@ -347,6 +481,12 @@
           "municipalityPlaceholder": "Selecciona un municipio",
           "fee": "Costo de envío",
           "feePlaceholder": "Sin configurar",
+          "bank": "Banco",
+          "bankNone": "Sin logo",
+          "accountType": "Tipo de cuenta",
+          "accountTypePlaceholder": "Monetaria, ahorro…",
+          "accountNumber": "Número de cuenta",
+          "holder": "A nombre de",
           "active": "Activo",
           "save": "Guardar",
           "cancel": "Cancelar",
@@ -354,7 +494,8 @@
           "descriptionError": "La nota no puede exceder {{max}} caracteres.",
           "leadError": "Indica un número entero de horas.",
           "feeError": "Indica un monto válido, o deja el campo vacío.",
-          "municipalityError": "Selecciona el municipio de la zona."
+          "municipalityError": "Selecciona el municipio de la zona.",
+          "bankTextError": "Este campo debe tener entre {{min}} y {{max}} caracteres."
         },
         "deleteRow": {
           "dismiss": "Volver",
@@ -412,7 +553,9 @@
           "unassigned": "Sin asignar",
           "openAria": "Ver el pedido de {{client}}",
           "nextStepAria": "Avanzar: {{step}}",
-          "nextStep": "Marcar “{{status}}”"
+          "nextStep": "Marcar “{{status}}”",
+          "pay": "Registrar pago",
+          "payAria": "Registrar el pago del pedido de {{client}}"
         },
         "detail": {
           "back": "Volver a pedidos",
@@ -441,7 +584,8 @@
             "cancel": "Cancelar pedido",
             "changeStatus": "Cambiar estado",
             "reopen": "Reactivar pedido",
-            "edit": "Editar pedido"
+            "edit": "Editar pedido",
+            "pay": "Registrar pago"
           },
           "client": {
             "title": "Cliente y entrega",
@@ -449,6 +593,8 @@
             "contact": "Contacto",
             "address": "Dirección de entrega",
             "instructions": "Cómo llegar o entrar",
+            "coords": "Ubicación en el mapa",
+            "noCoords": "Sin ubicación",
             "eventType": "Tipo de evento",
             "description": "Descripción",
             "comment": "Comentario"
@@ -694,8 +840,6 @@
             "deliveryAmountHint": "El costo depende de la zona o la distancia.",
             "depositAmountLabel": "Anticipo",
             "moneyPlaceholder": "0.00",
-            "paymentMethodLabel": "Método de pago",
-            "paymentMethodPlaceholder": "Sin especificar",
             "savedContactLabel": "Contacto guardado",
             "savedAddressLabel": "Dirección guardada",
             "savedCustom": "Personalizado"
@@ -721,6 +865,7 @@
           "actions": {
             "newClient": "Nuevo cliente",
             "editClient": "Editar cliente",
+            "pay": "Registrar pago",
             "addLine": "Agregar producto",
             "removeLine": "Quitar producto",
             "cancel": "Cancelar",
@@ -756,6 +901,21 @@
             "invalidDeliveryAmount": "El costo de envío no es válido.",
             "invalidDepositAmount": "El anticipo no es válido.",
             "submitFallback": "No pudimos crear el pedido. Revisa los datos e intenta de nuevo."
+          }
+        },
+        "payment": {
+          "title": "Registrar pago",
+          "description": "Confirma que recibiste el pago del pedido de {{client}}.",
+          "amountLabel": "Total del pedido",
+          "methodLabel": "Método de pago",
+          "methodPlaceholder": "Sin especificar",
+          "methodHint": "Opcional. Útil para tu control, no cambia el monto.",
+          "confirm": "Registrar pago",
+          "cancel": "Cancelar",
+          "successTitle": "Pago registrado",
+          "successToast": "Se registró el pago del pedido de {{client}}.",
+          "errors": {
+            "fallback": "No se pudo registrar el pago. Intenta de nuevo."
           }
         },
         "registry": {

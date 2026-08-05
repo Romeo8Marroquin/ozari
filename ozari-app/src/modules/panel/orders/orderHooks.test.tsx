@@ -13,6 +13,7 @@ import { useOrderProducts } from './useOrderProducts';
 import { useCreateOrder } from './useCreateOrder';
 import { useCreateClientRegistry } from './useCreateClientRegistry';
 import { useUpdateClientRegistry } from './useUpdateClientRegistry';
+import { usePayOrder } from './usePayOrder';
 
 beforeEach(() => {
   Storage.set(StorageKeys.TOKEN, 'test-token');
@@ -101,6 +102,29 @@ describe('useCreateClientRegistry', () => {
     result.current.createRegistry(body);
     await waitFor(() => expect(post).toHaveBeenCalled());
     expect(post).toHaveBeenCalledWith('/client-registries', body, { skipErrorNotification: true });
+  });
+});
+
+describe('usePayOrder', () => {
+  it('posts to the order’s payment door with skipErrorNotification', async () => {
+    post.mockResolvedValue({ data: { data: { order: { id: 12 } } } });
+    const { result } = renderHook(() => usePayOrder(), { wrapper: createQueryWrapper() });
+    result.current.payOrder({ orderId: 12, paymentMethodId: 2 });
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    // The id rides in the PATH; the body is only the optional method.
+    expect(post).toHaveBeenCalledWith(
+      '/orders/12/payment',
+      { paymentMethodId: 2 },
+      { skipErrorNotification: true },
+    );
+  });
+
+  it('sends an empty body when no method was chosen', async () => {
+    post.mockResolvedValue({ data: { data: { order: { id: 12 } } } });
+    const { result } = renderHook(() => usePayOrder(), { wrapper: createQueryWrapper() });
+    result.current.payOrder({ orderId: 12 });
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    expect(post).toHaveBeenCalledWith('/orders/12/payment', {}, { skipErrorNotification: true });
   });
 });
 

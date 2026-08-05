@@ -14,6 +14,7 @@ const order = (id: number): OrderListItem => ({
   id,
   clientName: `Cliente ${id}`,
   isRegistryClient: false,
+  isPaid: false,
   eventType: { id: 1, name: 'Evento familiar' },
   status: { id: 1, name: 'Pendiente' },
   paymentStatus: { id: 1, name: 'Pendiente' },

@@ -38,7 +38,7 @@ describe('buildMapsUrl', () => {
 });
 
 describe('orderDestination', () => {
-  it('prefers the pin, because it is the unambiguous one', () => {
+  it('is the pin, carrying the address as its human LABEL', () => {
     expect(orderDestination('Zona 10, 4a avenida', COORDS)).toEqual({
       kind: 'coords',
       coords: COORDS,
@@ -46,15 +46,16 @@ describe('orderDestination', () => {
     });
   });
 
-  it('uses the address text when there is no pin — the normal case', () => {
-    expect(orderDestination('Zona 10, 4a avenida', undefined)).toEqual({
-      kind: 'query',
-      query: 'Zona 10, 4a avenida',
-    });
+  it('still returns the pin when there is no address to label it with', () => {
+    expect(orderDestination(undefined, COORDS)).toEqual({ kind: 'coords', coords: COORDS });
   });
 
-  it('returns nothing when there is neither, so no button is offered', () => {
-    // Opening a maps app on an empty search is worse than not offering the action at all.
+  it('is NOTHING without a pin — an address text is not a destination (owner rule 2026-08-04)', () => {
+    // A walk-in address ("Test dirección", "Salón del club, entrada norte") is not reliably
+    // geocodable, so searching it opens a maps app somewhere unrelated while looking exactly as
+    // trustworthy as a real pin. Offering the button only when we can actually navigate makes its
+    // presence itself the information.
+    expect(orderDestination('Zona 10, 4a avenida', undefined)).toBeUndefined();
     expect(orderDestination(undefined, undefined)).toBeUndefined();
     expect(orderDestination('   ', undefined)).toBeUndefined();
   });

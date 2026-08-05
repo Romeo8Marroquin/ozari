@@ -1,4 +1,4 @@
-import { useParams } from '@tanstack/react-router';
+﻿import { useParams } from '@tanstack/react-router';
 import type { AxiosError } from 'axios';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -8,6 +8,7 @@ import {
   HiOutlineArrowUturnLeft,
   HiOutlineArrowRight,
   HiOutlinePencilSquare,
+  HiOutlineBanknotes,
   HiOutlineTrash,
   HiOutlineXMark,
 } from 'react-icons/hi2';
@@ -28,6 +29,7 @@ import SectionReveal from '../products/SectionReveal';
 import { formatTime } from './orderDayGroups';
 import OrderAdvanceModal from './OrderAdvanceModal';
 import OrderDeleteModal from './OrderDeleteModal';
+import OrderPaymentModal from './OrderPaymentModal';
 import OrderStatusModal from './OrderStatusModal';
 import { statusTone } from './statusTone';
 import { useOrder } from './useOrder';
@@ -174,6 +176,7 @@ const OrderDetailPage: React.FC = () => {
   const { data: order, isLoading, isError, error, isFetching, refetch } = useOrder(orderId);
   const { data: catalog } = useOrdersCatalog();
   const [advancing, setAdvancing] = useState<OrderAction | undefined>(undefined);
+  const [paying, setPaying] = useState(false);
   const [changingStatus, setChangingStatus] = useState(false);
   const [deleting, setDeleting] = useState(false);
   /** The evidence set being viewed full-size — ONE step's photos, never the whole order's. */
@@ -244,10 +247,19 @@ const OrderDetailPage: React.FC = () => {
     </button>
   );
 
-  // Where "abrir en mapas" would send them: the order's own pin when it has one, else its address
-  // text. `undefined` when there is neither — then no button is rendered at all, because opening a
-  // maps app on an empty search is worse than not offering the action.
+  // Where "abrir mapa" sends them — the order's own PIN, or nothing (see `orderDestination`).
   const mapsDestination = orderDestination(order?.deliveryAddress, order?.deliveryCoords);
+  // Is there still a trip to make? Navigation is offered while the order has somewhere left to go,
+  // which is NOT the same as "the next step stamps an actual". `tracksEvent` is DELIVERY on
+  // *Entregado* and COLLECTION on *Recolectado* — the steps that CONFIRM arrival — so gating on it
+  // hid the button through "En ruta", i.e. through exactly the moment the driver is leaving and
+  // needs directions. Derived from the tracked actuals, like every other pending-work rule.
+  const hasPendingTrip =
+    order != null &&
+    order.cancelledAt === undefined &&
+    order.readyAt === undefined &&
+    (order.deliveredAt === undefined ||
+      (order.pickupAt !== undefined && order.collectedAt === undefined));
   const forward = order?.actions.find((action) => action.kind === 'forward');
   const backward = order?.actions.find((action) => action.kind === 'backward');
   const disruptive = order?.actions.filter((action) => action.kind === 'disruptive') ?? [];
@@ -355,14 +367,33 @@ const OrderDetailPage: React.FC = () => {
                       {t(`${KEY}.actions.advance`, { status: forward.statusName })}
                     </Button>
                   )}
-                  {/* Navigation sits beside the advance action, and ONLY when the next step is a
-                      trip somebody actually makes (`tracksEvent` — delivery or collection). On
-                      "Listo", or on a rewind, nobody is driving anywhere and the button would be
-                      noise. It rides the same `.state-flip` group, so it glides in and out with
-                      the rest of the action row as the order walks its pipeline. */}
-                  {forward?.tracksEvent && mapsDestination && (
+                  {/* Navigation sits beside the advance action while the order still HAS a trip to
+                      make and carries a pin. Not gated on `tracksEvent`: that flag marks the step
+                      which CONFIRMS arrival (Entregado / Recolectado), so using it hid the button
+                      through "En ruta" — the exact moment the driver is leaving and needs it. It
+                      rides the same `.state-flip` group, so it glides in and out with the rest of
+                      the action row as the order walks its pipeline. */}
+                  {hasPendingTrip && mapsDestination && (
                     <span data-flip-id="open-in-maps" className="state-flip">
-                      <OpenInMapsButton destination={mapsDestination} />
+                      {/* `sm`, matching the advance button beside it — two actions in one row must
+                          share a height. */}
+                      <OpenInMapsButton destination={mapsDestination} size="sm" />
+                    </span>
+                  )}
+                  {/* Recording PAYMENT — its own axis, so it stands beside the lifecycle actions
+                      rather than inside them, and stays offered until the money is actually in.
+                      Full label here: the detail page has the room a scannable card does not. */}
+                  {isAdmin && !order.isPaid && (
+                    <span data-flip-id="pay-order" className="state-flip">
+                      <Button
+                        variant="soft"
+                        size="sm"
+                        color={SECONDARY_COLOR}
+                        startIcon={<HiOutlineBanknotes className="size-4" />}
+                        onClick={() => setPaying(true)}
+                      >
+                        {t(`${KEY}.actions.pay`)}
+                      </Button>
                     </span>
                   )}
                   {backward && (
@@ -453,6 +484,18 @@ const OrderDetailPage: React.FC = () => {
                 <Fact
                   label={t(`${KEY}.client.instructions`)}
                   value={order.deliveryInstructions}
+                />
+                {/* Whether this order has a PIN is a fact about it, so it is stated here rather than
+                    being inferable only from whether a button happens to be offered. Without this
+                    row a saved pin was invisible on any step that isn't a travel step, which reads
+                    exactly like the pin was never saved. */}
+                <Fact
+                  label={t(`${KEY}.client.coords`)}
+                  value={
+                    order.deliveryCoords
+                      ? `${order.deliveryCoords.lat}, ${order.deliveryCoords.lng}`
+                      : t(`${KEY}.client.noCoords`)
+                  }
                 />
                 <Fact label={t(`${KEY}.client.eventType`)} value={order.eventType.name} />
                 <Fact label={t(`${KEY}.client.description`)} value={order.description} />
@@ -749,6 +792,11 @@ const OrderDetailPage: React.FC = () => {
             action={advancing}
             onClose={() => setAdvancing(undefined)}
           />
+          {/* The same payment dialog the agenda and the dashboard open. */}
+          <OrderPaymentModal
+            order={paying ? order : undefined}
+            onClose={() => setPaying(false)}
+          />
           <OrderStatusModal
             order={changingStatus ? order : undefined}
             statuses={catalog?.serviceStatuses ?? []}
@@ -774,3 +822,4 @@ const OrderDetailPage: React.FC = () => {
 };
 
 export default OrderDetailPage;
+

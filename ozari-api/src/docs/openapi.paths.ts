@@ -48,6 +48,7 @@ const catalogParam: OpenAPIV3.ParameterObject = {
       "payment-methods",
       "product-categories",
       "product-detail-types",
+      "bank-accounts",
     ],
   },
   example: "event-types",
@@ -1059,8 +1060,11 @@ export const paths: OpenAPIV3.PathsObject = {
         "decremented permanently), and the LOGISTICS PAD — each event occupies a block of its " +
         "assigned DRIVER's day (±half the configured gap per side, so two events on one driver " +
         "need the full gap between them), including the order's own delivery vs collection. The " +
-        "admin is blocked too. Money is derived server-side from the product rows. Authenticated " +
-        "limiter (100/min).",
+        "admin is blocked too. Money is derived server-side from the product rows.\n\n" +
+        "**The payment METHOD is not part of this body.** `services.paymentMethodId` records how the " +
+        "order was actually paid, which has not happened at create time — accepting it here stored a " +
+        "prediction as a fact. `POST /orders/{id}/payment` is the only door that writes it. " +
+        "Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       requestBody: bodyRef("CreateOrderRequest", {
         clientRegistryId: 3,
@@ -1071,7 +1075,6 @@ export const paths: OpenAPIV3.PathsObject = {
         deliveryContact: EXAMPLE_ORDER_CONTACT,
         deliveryAddress: EXAMPLE_ORDER_ADDRESS,
         deliveryAmount: 50,
-        paymentMethodId: 1,
         assignedUserId: 2,
         lines: [{ productId: 3, quantity: 25 }],
       }),
@@ -1326,6 +1329,10 @@ export const paths: OpenAPIV3.PathsObject = {
         "endpoint. It is validated by the **same contract as create**, with one difference: the " +
         "delivery may stay on a date that has already passed (correcting yesterday's order), but " +
         "may never be MOVED into the past.\n\n" +
+        "**An edit never touches PAYMENT** — `paymentMethodId`, `paidAt` and `paymentStatusId` are " +
+        "absent from the body on purpose, exactly as it never touches the lifecycle. This endpoint " +
+        "rewrites what was AGREED; what HAPPENED belongs to its own door. Otherwise a declarative " +
+        "full-state save would erase a recorded payment every time somebody fixed a typo.\n\n" +
         "Everything is re-derived, nothing trusted: prices come from the product rows and the new " +
         "billed window (so moving the dates re-bills the order), sale stock moves by the " +
         "DIFFERENCE and only while the order still holds it (`holdsSaleStock`), and rental " +
@@ -1356,7 +1363,6 @@ export const paths: OpenAPIV3.PathsObject = {
         deliveryContact: EXAMPLE_ORDER_CONTACT,
         deliveryAddress: EXAMPLE_ORDER_ADDRESS,
         deliveryAmount: 50,
-        paymentMethodId: 1,
         assignedUserId: 2,
         lines: [{ productId: 3, quantity: 30 }],
       }),
@@ -1809,6 +1815,186 @@ export const paths: OpenAPIV3.PathsObject = {
       },
     },
   },
+  "/orders/{id}/payment": {
+    post: {
+      tags: ["Orders"],
+      summary: "Record that an order was paid (admin)",
+      operationId: "payOrder",
+      description:
+        "**STRICTLY Admin.** Stamps `paidAt`, moves the order's payment status to PAID, and records " +
+        "HOW it was paid when a method is supplied.\n\n" +
+        "**Deliberately its own door rather than a step of the lifecycle.** Payment and fulfilment " +
+        "are independent axes: a client can pay a deposit days before delivery, hand over cash at " +
+        "the door, or settle a week after collection. Folding it into the pipeline would impose an " +
+        "ordering the business does not have and would make 'delivered but unpaid' — the state the " +
+        "admin most needs to see — unrepresentable. It never touches the service status, the " +
+        "tracked actuals or stock.\n\n" +
+        "An order that is ALREADY paid answers **`409`, not a silent success**: it means the caller " +
+        "is looking at a stale screen, and re-stamping would overwrite the real payment date with " +
+        "the moment of the second tap.",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "integer", minimum: 1 },
+          example: 12,
+        },
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                paymentMethodId: {
+                  type: "integer",
+                  nullable: true,
+                  description:
+                    "OPTIONAL — an active `payment_methods` id. Omit it when the method was not " +
+                    "recorded (cash at the door frequently is not).",
+                  example: 1,
+                },
+              },
+            },
+          },
+        },
+      },
+      responses: {
+        "200": dataResponse(
+          "The updated order, in the detail shape.",
+          "OrderDetailResponse",
+          { order: { id: 12, isPaid: true } },
+          "Payment recorded",
+        ),
+        "400": errorResponse(
+          "The id or the payment method is malformed.",
+          400,
+          "The payment method is not valid",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse("No order with that id.", 404, "The order does not exist"),
+        "409": errorResponse(
+          "The order already has a payment recorded.",
+          409,
+          "This order already has a payment recorded",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/dashboard": {
+    get: {
+      tags: ["Dashboard"],
+      summary: "The admin home screen, in one call (admin)",
+      operationId: "getDashboard",
+      description:
+        "**STRICTLY Admin.** The whole home screen in a single round trip: the three orders the " +
+        "admin has to act on next, today's workload, this month against last month, what is still " +
+        "owed, a twelve-month revenue trend, the most-rented products and the live status split.\n\n" +
+        "**One call, one instant.** Every figure is computed against the same `generatedAt`, so the " +
+        "screen can never show a revenue total from one moment beside a counter from another — and " +
+        "on a scale-to-zero backend six separate aggregates would cost six round trips on top of a " +
+        "cold start.\n\n" +
+        "**`upNext` is three ORDERS, not three events.** Each order is represented by the single " +
+        "event it still has to perform: an order delivering at 14:00 and collecting at 14:30 " +
+        "occupies ONE slot showing the delivery, and the moment that delivery is confirmed the same " +
+        "order re-enters the queue carrying its collection and re-sorts against everyone else. Each " +
+        "item extends the ORDER LIST shape, so `actions` comes from the lifecycle engine already " +
+        "narrowed to this actor — the quick action here and the one on the agenda can never " +
+        "disagree. `event.isOverdue` and `event.minutesUntil` are computed server-side so a skewed " +
+        "device clock cannot contradict the server about what is late. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      responses: {
+        "200": dataResponse(
+          "The dashboard snapshot.",
+          "DashboardResponse",
+          {
+            dashboard: {
+              generatedAt: "2026-08-01T13:30:00.000Z",
+              upNext: [
+                {
+                  id: 12,
+                  clientName: EXAMPLE_CLIENT_NAME,
+                  isRegistryClient: true,
+                  eventType: { id: 1, name: EXAMPLE_EVENT_TYPE },
+                  status: { id: 1, name: "Pendiente", colorKey: "amber" },
+                  nextStatus: { id: 5, name: "En ruta" },
+                  actions: [
+                    {
+                      kind: "forward",
+                      statusId: 5,
+                      statusName: "En ruta",
+                      colorKey: "indigo",
+                      requiresEvidence: false,
+                      minEvidence: 1,
+                      maxEvidence: 10,
+                      requiresReason: false,
+                      inventoryEffect: "none",
+                      purgesEvidence: false,
+                      tracksEvent: null,
+                    },
+                  ],
+                  holdsInventory: true,
+                  paymentStatus: { id: 1, name: "Pendiente" },
+                  deliveryAt: "2026-08-01T14:00:00.000Z",
+                  pickupAt: "2026-08-02T10:00:00.000Z",
+                  assignee: { id: 2, name: "Romeo Marroquín" },
+                  isMine: true,
+                  itemCount: 25,
+                  totalAmount: 450,
+                  currency: { id: 1, iso4217Code: "GTQ", name: EXAMPLE_CURRENCY_NAME, symbol: "Q" },
+                  event: {
+                    kind: "DELIVERY",
+                    at: "2026-08-01T14:00:00.000Z",
+                    isOverdue: false,
+                    minutesUntil: 30,
+                  },
+                  deliveryAddress: EXAMPLE_ORDER_ADDRESS,
+                  deliveryCoords: { lat: 14.634915, lng: -90.506883 },
+                  deliveryInstructions: "Portón negro, preguntar por el guardia",
+                  deliveryContact: "5555-1234",
+                },
+              ],
+              today: { deliveries: 4, collections: 2, overdue: 1, active: 9 },
+              month: {
+                period: { from: "2026-08-01T06:00:00.000Z", to: "2026-09-01T06:00:00.000Z" },
+                revenue: { current: 12400, previous: 9800, deltaPercent: 26.5 },
+                orders: { current: 28, previous: 24, deltaPercent: 16.7 },
+                // No `deltaPercent` when the previous period was zero — see the schema note.
+                averageOrder: { current: 442.86, previous: 408.33, deltaPercent: 8.5 },
+                cancelled: { current: 3, previous: 5, deltaPercent: -40 },
+              },
+              outstanding: { amount: 3150, orders: 7 },
+              revenueTrend: [
+                { month: "2025-09", revenue: 0, orders: 0 },
+                { month: "2026-08", revenue: 12400, orders: 28 },
+              ],
+              topProducts: [
+                { productId: 3, name: "Silla Tiffany", quantity: 240, revenue: 4800 },
+              ],
+              statusSplit: [
+                { statusId: 1, name: "Pendiente", colorKey: "amber", count: 6 },
+                { statusId: 3, name: "Entregado", colorKey: "emerald", count: 3 },
+              ],
+              currency: { id: 1, iso4217Code: "GTQ", name: EXAMPLE_CURRENCY_NAME, symbol: "Q" },
+            },
+          },
+          "Dashboard fetched",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
   "/preferences": {
     get: {
       tags: ["Preferences"],
@@ -1905,11 +2091,11 @@ export const paths: OpenAPIV3.PathsObject = {
       summary: "Add a row to a manageable catalog (admin)",
       operationId: "createCatalogRow",
       description:
-        "**STRICTLY Admin.** One endpoint for all six manageable catalogs — `event-types`, " +
+        "**STRICTLY Admin.** One endpoint for all seven manageable catalogs — `event-types`, " +
         "`contact-types`, `zones`, `payment-methods`, `product-categories`, " +
-        "`product-detail-types` — driven by a registry that declares each one's extra fields, so an " +
-        "event type can never be sent a `deliveryFee` and a zone can't be saved without its " +
-        "municipality.\n\n" +
+        "`product-detail-types`, `bank-accounts` — driven by a registry that declares each one's " +
+        "extra fields, so an event type can never be sent a `deliveryFee`, a zone can't be saved " +
+        "without its municipality, and a bank account can't be saved without its holder.\n\n" +
         "**Anything not in that list answers `404`**, including the lookups deliberately kept " +
         "unmanageable (`user-roles`, `currencies`, `product-business-types`, `rent-time-units`, " +
         "`payment-status`, the geo tables): runtime code branches on their ids, so an admin adding " +

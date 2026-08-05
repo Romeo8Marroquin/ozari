@@ -46,7 +46,14 @@ export function useAdvanceOrder() {
         { skipErrorNotification: true },
       ),
     retry: false,
-    onSuccess: (_result, variables) => {
+    onSuccess: async (_result, variables) => {
+      // The DASHBOARD is cancelled BEFORE it is invalidated, and this order matters: the dashboard
+      // polls on an interval, so a GET issued a moment before this advance can still be in flight
+      // and would land AFTER it — writing a pre-move snapshot over the just-moved queue, which reads
+      // to the admin as "my tap was undone". `cancelQueries` aborts that in-flight read first; the
+      // invalidate then starts a fresh one that can only see the new state.
+      await queryClient.cancelQueries({ queryKey: [QueryKeys.DASHBOARD] });
+      void queryClient.invalidateQueries({ queryKey: [QueryKeys.DASHBOARD] });
       void queryClient.invalidateQueries({ queryKey: [QueryKeys.ORDERS] });
       // …and the DETAIL, whose status, actions, trail and evidence all just changed.
       void queryClient.invalidateQueries({

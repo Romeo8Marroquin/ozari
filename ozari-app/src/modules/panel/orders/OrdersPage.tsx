@@ -17,6 +17,7 @@ import { useGridListTransition } from '../products/useGridListTransition';
 import { formatDayLabel, groupAgenda, groupHistory, type OrderDayGroup } from './orderDayGroups';
 import type { OrderAction, OrderListItem } from './order.types';
 import OrderAdvanceModal from './OrderAdvanceModal';
+import OrderPaymentModal from './OrderPaymentModal';
 import OrdersViewSwitch from './OrdersViewSwitch';
 import OrderTicket from './OrderTicket';
 import OrderTicketSkeleton from './OrderTicketSkeleton';
@@ -88,6 +89,7 @@ const OrdersPage: React.FC = () => {
   const [advancing, setAdvancing] = useState<
     { order: OrderListItem; action: OrderAction } | undefined
   >(undefined);
+  const [payingOrder, setPayingOrder] = useState<OrderListItem | undefined>(undefined);
 
   const fetchedOrders = useMemo(() => data?.orders ?? [], [data]);
   const pagination = data?.pagination;
@@ -462,6 +464,9 @@ const OrdersPage: React.FC = () => {
                         // plays its own entrance) — never a raw router jump.
                         onOpen={(target) => panelNavigate(`/panel/pedidos/${target.id}`)}
                         onAdvance={(target, action) => setAdvancing({ order: target, action })}
+                        // Money is the ADMIN's: a driver reports what physically happened, so their
+                        // agenda simply never receives this handler and the action never appears.
+                        {...(canCreate && { onPay: setPayingOrder })}
                       />
                     )}
                   </SkeletonFade>
@@ -523,6 +528,9 @@ const OrdersPage: React.FC = () => {
       {/* The one confirm dialog for every lifecycle move. It asks for photos or a reason only when
           the offered action declares it, and refetches both views on success (an advance can move a
           row from the agenda into the history). */}
+      {/* The same payment dialog the dashboard and the detail open — one flow for recording money. */}
+      <OrderPaymentModal order={payingOrder} onClose={() => setPayingOrder(undefined)} />
+
       <OrderAdvanceModal
         order={advancing?.order}
         action={advancing?.action}

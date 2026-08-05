@@ -392,15 +392,16 @@ describe('OrderForm', () => {
     expect((byId(container, 'order-delivery-contact') as HTMLInputElement).value).toBe('5555-1234');
   });
 
-  it('autofills the delivery fee + preferred payment from the client and shows the saved-data pickers', async () => {
+  it('autofills the delivery fee from the client and shows the saved-data pickers', async () => {
     const user = userEvent.setup();
     const { container } = renderForm();
     await user.selectOptions(byId(container, 'order-client'), '3');
     await waitFor(() =>
       expect((byId(container, 'order-delivery-amount') as HTMLInputElement).value).toBe('50'),
     );
-    // Preferred payment method pre-selected.
-    expect((byId(container, 'order-payment-method') as HTMLSelectElement).value).toBe('1');
+    // The client's PREFERRED payment method is deliberately NOT applied: a preference is not a
+    // payment, and writing it here made every order claim a method nobody had used yet.
+    expect(container.querySelector('#order-payment-method')).toBeNull();
     // Contact channel + delivery zone pre-selected from the client (principal contact / favorite zone).
     expect((byId(container, 'order-delivery-contact-type') as HTMLSelectElement).value).toBe('1');
     expect(byId(container, 'order-delivery-contact')).toHaveAttribute('inputmode', 'tel');
@@ -473,14 +474,18 @@ describe('OrderForm', () => {
     expect((byId(container, 'order-delivery-address') as HTMLTextAreaElement).value).toBe('Zona 10, 4a avenida 5-55');
   });
 
-  it('lets the admin change the payment method, sending it on submit', async () => {
+  it('never asks for a payment METHOD — money is recorded when it arrives', async () => {
+    // The select is gone entirely (owner decision 2026-08-05): it collected a prediction and stored
+    // it as a fact, and being prefilled from the client's *preferred* method it stored a preference
+    // as one. "Registrar pago" asks once, when the money is actually observed.
     const { container } = renderForm();
+    expect(container.querySelector('#order-payment-method')).toBeNull();
+
     await fillValid(container);
-    await userEvent.selectOptions(byId(container, 'order-payment-method'), '2');
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
     await waitFor(() => expect(createOrder).toHaveBeenCalled());
-    expect(createOrder.mock.calls[0][0].paymentMethodId).toBe(2);
-  });
+    expect(createOrder.mock.calls[0][0]).not.toHaveProperty('paymentMethodId');
+  }, 20000);
 
   it('defaults the assignee to the current admin and lets it be reassigned to a driver', async () => {
     const { container } = renderForm();
@@ -492,7 +497,9 @@ describe('OrderForm', () => {
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
     await waitFor(() => expect(createOrder).toHaveBeenCalled());
     expect(createOrder.mock.calls[0][0].assignedUserId).toBe(5);
-  });
+    // Explicit timeout like every other test that types through this form: the 5s default
+    // is not enough once the whole suite runs in parallel.
+  }, 20000);
 
   it('creating a client through the modal seeds the picker cache (prepending the new client) and selects it', async () => {
     const user = userEvent.setup();
@@ -854,7 +861,9 @@ describe('OrderForm', () => {
     expect(await screen.findByText('Datos inválidos')).toBeInTheDocument();
     act(() => handlers.onError(axiosError(500)));
     expect(error).toHaveBeenCalled();
-  });
+    // Explicit timeout like every other test that types through this form: the 5s default
+    // is not enough once the whole suite runs in parallel.
+  }, 20000);
 
   it('cancel navigates back to the agenda', async () => {
     const { navigateTo } = renderForm();
@@ -869,14 +878,18 @@ describe('OrderForm', () => {
     const form = document.getElementById('create-order-form') as HTMLFormElement;
     await act(async () => form.requestSubmit());
     expect(createOrder).not.toHaveBeenCalled();
-  });
+    // Explicit timeout like every other test that types through this form: the 5s default
+    // is not enough once the whole suite runs in parallel.
+  }, 20000);
 
   it('a 409 without structured conflicts still shows the banner (no per-line mapping)', async () => {
     const { container } = renderForm();
     const handlers = await fillAndSubmit(container);
     act(() => handlers.onError(axiosError(409, 'Conflicto')));
     expect(await screen.findByText('Conflicto')).toBeInTheDocument();
-  });
+    // Explicit timeout like every other test that types through this form: the 5s default
+    // is not enough once the whole suite runs in parallel.
+  }, 20000);
 
   it('a conflict for a product not in the order is ignored for line mapping', async () => {
     const { container } = renderForm();
@@ -889,7 +902,9 @@ describe('OrderForm', () => {
     // The banner still shows; no line error is mapped (product 999 isn't in the order).
     expect(await screen.findByText('Conflicto')).toBeInTheDocument();
     expect(screen.queryByText(`${KEY}.errors.lineUnavailable`)).not.toBeInTheDocument();
-  });
+    // Explicit timeout like every other test that types through this form: the 5s default
+    // is not enough once the whole suite runs in parallel.
+  }, 20000);
 
   it('prefill tolerates a client with no contacts or addresses', async () => {
     const bare: ClientRegistry = { id: 7, name: 'Solo Nombre', contacts: [], addresses: [], createdAt: 'x' };
@@ -972,10 +987,12 @@ describe('OrderForm (edit mode)', () => {
       deliveryName: 'Cliente de la fiesta',
       deliveryAddress: 'Salón del club, entrada norte',
       deliveryAmount: 75,
-      paymentMethodId: 2,
       assignedUserId: 5,
       lines: [{ productId: 3, quantity: 25 }],
     });
+    // An edit can never rewrite how the order was PAID — the field is not in the body at all, so a
+    // full-state save cannot erase a recorded payment.
+    expect(payload.body).not.toHaveProperty('paymentMethodId');
 
     // The response IS the re-projected order: it seeds the detail cache so arriving back shows the
     // saved state with no flash of the values we just replaced…

@@ -21,6 +21,7 @@ import { Route as SesionSplatRouteImport } from './routes/sesion/$'
 import { Route as PanelProductosRouteImport } from './routes/panel/productos'
 import { Route as PanelPreferenciasRouteImport } from './routes/panel/preferencias'
 import { Route as PanelPedidosRouteImport } from './routes/panel/pedidos'
+import { Route as PanelInicioRouteImport } from './routes/panel/inicio'
 import { Route as PanelAjustesRouteImport } from './routes/panel/ajustes'
 import { Route as PanelSplatRouteImport } from './routes/panel/$'
 import { Route as PanelProductosNuevoRouteImport } from './routes/panel/productos_.nuevo'
@@ -90,6 +91,11 @@ const PanelPedidosRoute = PanelPedidosRouteImport.update({
   path: '/pedidos',
   getParentRoute: () => PanelRoute,
 } as any)
+const PanelInicioRoute = PanelInicioRouteImport.update({
+  id: '/inicio',
+  path: '/inicio',
+  getParentRoute: () => PanelRoute,
+} as any)
 const PanelAjustesRoute = PanelAjustesRouteImport.update({
   id: '/ajustes',
   path: '/ajustes',
@@ -140,6 +146,7 @@ export interface FileRoutesByFullPath {
   '/sesion': typeof SesionRouteWithChildren
   '/panel/$': typeof PanelSplatRoute
   '/panel/ajustes': typeof PanelAjustesRoute
+  '/panel/inicio': typeof PanelInicioRoute
   '/panel/pedidos': typeof PanelPedidosRoute
   '/panel/preferencias': typeof PanelPreferenciasRoute
   '/panel/productos': typeof PanelProductosRoute
@@ -161,6 +168,7 @@ export interface FileRoutesByTo {
   '/sesion': typeof SesionRouteWithChildren
   '/panel/$': typeof PanelSplatRoute
   '/panel/ajustes': typeof PanelAjustesRoute
+  '/panel/inicio': typeof PanelInicioRoute
   '/panel/pedidos': typeof PanelPedidosRoute
   '/panel/preferencias': typeof PanelPreferenciasRoute
   '/panel/productos': typeof PanelProductosRoute
@@ -184,6 +192,7 @@ export interface FileRoutesById {
   '/sesion': typeof SesionRouteWithChildren
   '/panel/$': typeof PanelSplatRoute
   '/panel/ajustes': typeof PanelAjustesRoute
+  '/panel/inicio': typeof PanelInicioRoute
   '/panel/pedidos': typeof PanelPedidosRoute
   '/panel/preferencias': typeof PanelPreferenciasRoute
   '/panel/productos': typeof PanelProductosRoute
@@ -208,6 +217,7 @@ export interface FileRouteTypes {
     | '/sesion'
     | '/panel/$'
     | '/panel/ajustes'
+    | '/panel/inicio'
     | '/panel/pedidos'
     | '/panel/preferencias'
     | '/panel/productos'
@@ -229,6 +239,7 @@ export interface FileRouteTypes {
     | '/sesion'
     | '/panel/$'
     | '/panel/ajustes'
+    | '/panel/inicio'
     | '/panel/pedidos'
     | '/panel/preferencias'
     | '/panel/productos'
@@ -251,6 +262,7 @@ export interface FileRouteTypes {
     | '/sesion'
     | '/panel/$'
     | '/panel/ajustes'
+    | '/panel/inicio'
     | '/panel/pedidos'
     | '/panel/preferencias'
     | '/panel/productos'
@@ -360,6 +372,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PanelPedidosRouteImport
       parentRoute: typeof PanelRoute
     }
+    '/panel/inicio': {
+      id: '/panel/inicio'
+      path: '/inicio'
+      fullPath: '/panel/inicio'
+      preLoaderRoute: typeof PanelInicioRouteImport
+      parentRoute: typeof PanelRoute
+    }
     '/panel/ajustes': {
       id: '/panel/ajustes'
       path: '/ajustes'
@@ -422,6 +441,7 @@ declare module '@tanstack/react-router' {
 interface PanelRouteChildren {
   PanelSplatRoute: typeof PanelSplatRoute
   PanelAjustesRoute: typeof PanelAjustesRoute
+  PanelInicioRoute: typeof PanelInicioRoute
   PanelPedidosRoute: typeof PanelPedidosRoute
   PanelPreferenciasRoute: typeof PanelPreferenciasRoute
   PanelProductosRoute: typeof PanelProductosRoute
@@ -437,6 +457,7 @@ interface PanelRouteChildren {
 const PanelRouteChildren: PanelRouteChildren = {
   PanelSplatRoute: PanelSplatRoute,
   PanelAjustesRoute: PanelAjustesRoute,
+  PanelInicioRoute: PanelInicioRoute,
   PanelPedidosRoute: PanelPedidosRoute,
   PanelPreferenciasRoute: PanelPreferenciasRoute,
   PanelProductosRoute: PanelProductosRoute,

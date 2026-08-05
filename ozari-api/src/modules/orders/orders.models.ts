@@ -73,6 +73,12 @@ export interface OrderListItemResponseModel {
    */
   holdsInventory: boolean;
   paymentStatus: OrderLookupModel;
+  /** Is the money in? Derived from `paidAt`, never from a payment-status id — so a client can offer
+   *  "record payment" from a fact rather than by comparing a lookup. */
+  isPaid: boolean;
+  /** The delivery PIN — the one delivery snapshot the lean list carries, so the agenda can offer
+   *  navigation on the same rule as the detail. The address TEXT stays on the detail only. */
+  deliveryCoords: CoordsModel | undefined;
   deliveryAt: Date;
   /** Absent = purchase-only order (no pickup event — Q-A, 2026-07-16). */
   pickupAt: Date | undefined;
@@ -287,7 +293,6 @@ export interface CreateOrderRequestModel {
   /** Anticipo (partial deposit) taken at creation, when any. */
   depositAmount: number | undefined;
   /** How it will be paid (an active seeded method); optional — payment can be settled later. */
-  paymentMethodId: number | undefined;
   /**
    * The staff member the order is assigned to (an active Admin/Driver) — **required** (Q-D2, owner
    * decision 2026-07-30). The column is nullable and the API used to default it to the creating

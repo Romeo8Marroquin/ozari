@@ -2,7 +2,11 @@ import React, { forwardRef } from 'react';
 import { twMerge } from 'tailwind-merge';
 
 type ButtonVariant = 'solid' | 'outline' | 'soft' | 'ghost';
-type ButtonSize = 'sm' | 'md' | 'lg';
+/** `xs` is the SUMMARY size — the action row of a scannable card (an agenda ticket, a dashboard
+ *  slot), where `sm`'s 44px would dominate a 4-line card. It exists so those rows can be shorter
+ *  WITHOUT any of them being hand-rolled: two buttons side by side must share a height, and the only
+ *  reliable way to guarantee that is for both to be this component. */
+type ButtonSize = 'xs' | 'sm' | 'md' | 'lg';
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   /** Emphasis. `solid` is the filled primary; the rest are progressively lighter. */
@@ -23,18 +27,21 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 const SIZES: Record<ButtonSize, string> = {
+  xs: 'h-9 gap-1.5 px-3 text-xs',
   sm: 'h-11 gap-1.5 px-3.5 text-sm',
   md: 'h-[52px] gap-2 px-5 text-[15px]',
   lg: 'h-[60px] gap-2 px-6 text-base',
 };
 
 const RADII: Record<ButtonSize, string> = {
+  xs: 'rounded-[10px]',
   sm: 'rounded-[10px]',
   md: 'rounded-[14px]',
   lg: 'rounded-[16px]',
 };
 
 const SPINNER: Record<ButtonSize, string> = {
+  xs: 'h-3.5 w-3.5',
   sm: 'h-4 w-4',
   md: 'h-[18px] w-[18px]',
   lg: 'h-5 w-5',

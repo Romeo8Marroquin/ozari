@@ -92,6 +92,51 @@ describe("validateUpdatePreferenceSettings", () => {
     expectRejected("invertedEvidenceRange");
   });
 
+  it("accepts a TEXT setting, trimmed", () => {
+    const { req, next } = run({
+      settings: [{ key: "documents.businessName", value: "  Alquileres El Sol  " }],
+    });
+    expect(next).toHaveBeenCalled();
+    expect((req.body as { settings: { value: string }[] }).settings[0]?.value).toBe(
+      "Alquileres El Sol",
+    );
+  });
+
+  it("lets an OPTIONAL text be cleared but never a required one", () => {
+    // `documents.terms` has `minLength: 0`, so "" is a real choice — a business that prints no
+    // terms. `documents.businessName` does not: an empty letterhead is a broken document.
+    expect(run({ settings: [{ key: "documents.terms", value: "" }] }).next).toHaveBeenCalled();
+
+    vi.clearAllMocks();
+    const { next } = run({ settings: [{ key: "documents.businessName", value: "" }] });
+    expect(next).not.toHaveBeenCalled();
+    expectRejected("invalidSettingText");
+  });
+
+  it("rejects a LINE BREAK in a single-line text, but keeps them in the terms", () => {
+    // A business name spanning two lines is not a name; the terms are a paragraph.
+    const { next } = run({
+      settings: [{ key: "documents.businessName", value: "Alquileres\nEl Sol" }],
+    });
+    expect(next).not.toHaveBeenCalled();
+    expectRejected("invalidSettingText");
+
+    vi.clearAllMocks();
+    expect(
+      run({ settings: [{ key: "documents.terms", value: "Primera línea.\nSegunda línea." }] }).next,
+    ).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a number where a string belongs", { key: "documents.businessName", value: 42 }],
+    ["an over-long value", { key: "documents.businessName", value: "x".repeat(121) }],
+    ["an over-long terms block", { key: "documents.terms", value: "x".repeat(1201) }],
+  ])("rejects %s", (_label, setting) => {
+    const { next } = run({ settings: [setting] });
+    expect(next).not.toHaveBeenCalled();
+    expectRejected("invalidSettingText");
+  });
+
   it("accepts an evidence range where max equals min", () => {
     const { next } = run({
       settings: [
@@ -209,6 +254,68 @@ describe("validateCatalogRow", () => {
       expect(rejected.next).not.toHaveBeenCalled();
       expectRejected("invalidExtraField");
     }
+  });
+
+  describe("bank accounts", () => {
+    const account = {
+      ...valid,
+      name: "Banrural monetaria",
+      bankKey: "banrural",
+      accountType: "  Monetaria  ",
+      accountNumber: "  3-456-78901-2  ",
+      holder: "Party Rentals GT, S.A.",
+    };
+
+    it("accepts a full account, trimming every text", async () => {
+      const { req, next } = await run("bank-accounts", account);
+      expect(next).toHaveBeenCalled();
+      expect(req.body).toEqual({
+        name: "Banrural monetaria",
+        description: "Con salón",
+        isActive: true,
+        bankKey: "banrural",
+        accountType: "Monetaria",
+        accountNumber: "3-456-78901-2",
+        holder: "Party Rentals GT, S.A.",
+      });
+    });
+
+    it("treats an absent bank as 'sin logo' rather than an error", async () => {
+      // Every bank must be usable, including the ones we ship no asset for — the account then
+      // simply prints as text.
+      for (const bankKey of [undefined, null, ""]) {
+        vi.clearAllMocks();
+        const { req, next } = await run("bank-accounts", { ...account, bankKey });
+        expect(next).toHaveBeenCalled();
+        expect((req.body as { bankKey: unknown }).bankKey).toBeNull();
+      }
+    });
+
+    it("rejects a bank token we ship no logo for", async () => {
+      // The token's only job is to name an asset, so an unknown one would save happily and then
+      // render nothing, with no error anywhere to explain why.
+      for (const bankKey of ["banrual", "industrial", 7]) {
+        vi.clearAllMocks();
+        const { next } = await run("bank-accounts", { ...account, bankKey });
+        expect(next).not.toHaveBeenCalled();
+        expectRejected("invalidExtraField");
+      }
+    });
+
+    it.each([
+      ["accountType", undefined],
+      ["accountType", "x"],
+      ["accountType", "x".repeat(41)],
+      ["accountNumber", undefined],
+      ["accountNumber", "123"],
+      ["accountNumber", "x".repeat(35)],
+      ["holder", undefined],
+      ["holder", 42],
+    ])("requires a valid %s", async (field, value) => {
+      const { next } = await run("bank-accounts", { ...account, [field]: value });
+      expect(next).not.toHaveBeenCalled();
+      expectRejected("invalidExtraField");
+    });
   });
 
   it("never sends a catalog a field it does not declare", async () => {

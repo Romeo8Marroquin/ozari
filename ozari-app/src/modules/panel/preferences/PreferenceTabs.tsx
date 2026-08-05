@@ -56,20 +56,29 @@ const PreferenceTabs: React.FC<{
   };
 
   const index = PREFERENCE_TABS.indexOf(tab);
+  const count = PREFERENCE_TABS.length;
 
   return (
     <div
       role="tablist"
       aria-label={t(`${KEY}.label`)}
-      className="relative grid w-full grid-cols-3 rounded-full bg-charcoal/5 p-1 sm:w-auto"
+      // The column count comes from the LIST, not a hardcoded `grid-cols-3`: adding a group is one
+      // entry in `PREFERENCE_TABS`, and a control that silently kept three columns would overflow
+      // its own pill.
+      style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
+      className="relative grid w-full rounded-full bg-charcoal/5 p-1 sm:w-auto"
       onKeyDown={onKeyDown}
     >
-      {/* The shared selection pill: one segment wide (minus the 4px inset), slid by its own width per
-          index. Decorative — the buttons carry the semantics. */}
+      {/* The shared selection pill: one segment wide (the track minus its 8px of padding, divided
+          by the segment count), slid by its own width per index. Decorative — the buttons carry the
+          semantics. */}
       <span
         aria-hidden
-        style={{ translate: `${index * 100}%` }}
-        className="pointer-events-none absolute inset-y-1 left-1 w-[calc(33.333%-0.1667rem)] rounded-full bg-white shadow-sm transition-[translate] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none"
+        style={{
+          width: `calc(${100 / count}% - ${8 / count}px)`,
+          translate: `${index * 100}%`,
+        }}
+        className="pointer-events-none absolute inset-y-1 left-1 rounded-full bg-white shadow-sm transition-[translate] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none"
       />
       {PREFERENCE_TABS.map((option, optionIndex) => {
         const selected = option === tab;

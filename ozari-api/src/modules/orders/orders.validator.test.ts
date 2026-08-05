@@ -143,23 +143,21 @@ describe("validateCreateOrder", () => {
     ["invalidComment", { comment: 42 }],
     ["invalidDeliveryAmount", { deliveryAmount: -1 }],
     ["invalidDepositAmount", { depositAmount: "x" }],
-    ["invalidPaymentMethodId", { paymentMethodId: "x" }],
   ])("rejects %s", async (key, patch) => {
     const { next } = await run({ ...validBody(), ...patch });
     expect(next).not.toHaveBeenCalled();
     expectRejected(key);
   });
 
-  it("accepts an order with a valid payment method and puts it on the body", async () => {
+  it("IGNORES a payment method — it is not part of an order's body (owner 2026-08-05)", async () => {
+    // `services.paymentMethodId` records how the order was actually PAID, which has not happened at
+    // create/edit time. Accepting it here stored a prediction as a fact (and, prefilled from the
+    // client's preferred method, stored a preference as one). `POST /orders/:id/payment` is the only
+    // door that writes it. A stale client sending it is simply dropped rather than rejected: the
+    // field is meaningless here, not malformed.
     const { req, next } = await run({ ...validBody(), paymentMethodId: 1 });
     expect(next).toHaveBeenCalled();
-    expect((req.body as Record<string, unknown>)["paymentMethodId"]).toBe(1);
-  });
-
-  it("rejects an unknown/inactive payment method via the DB", async () => {
-    mockPrisma({ paymentMethod: { findFirst: vi.fn().mockResolvedValue(null) } });
-    await run({ ...validBody(), paymentMethodId: 99 });
-    expectRejected("invalidPaymentMethodId");
+    expect(req.body).not.toHaveProperty("paymentMethodId");
   });
 
   it("REJECTS an order with no assignee — every event needs an owner (Q-D2)", async () => {

@@ -477,6 +477,51 @@ unbuilt; the modal only reaches the client attached to the order in front of you
 textarea today — if it ever becomes operational data (allergies, access codes), it wants its own
 fields, not more free text.
 
+### 6e. THE ADMIN DASHBOARD (✅ BUILT 2026-08-04) — `/panel/inicio`, §5 item 5
+
+The panel's front door, and the answer to §9's Q-C (the "week window" question dissolved: the screen
+is built around the **next three things**, not around a week — a week view belongs to the calendar
+slice that ships with notifications).
+
+**Three questions, in the order an owner asks them.** (1) *What do I do next?* — the three orders
+whose next event is soonest, each with the one action that moves it forward and a button that hands
+the address to the driver's maps app. (2) *How is today?* — deliveries, collections, what is late,
+what is open. (3) *How is the business?* — this month vs last, what is still owed, twelve months of
+revenue, what actually left the warehouse, and where the live orders are sitting.
+
+| Decision | Answer |
+|---|---|
+| One request or several? | **One.** Every figure must be a snapshot of the same instant, and six aggregates on a scale-to-zero backend are six round trips on a cold start. All queries in ONE `Promise.all`. |
+| What is an "up next" item? | An **ORDER**, represented by the single event it still owes — never a flat event list. Confirming a delivery re-enters the same order carrying its collection. |
+| How is it queried? | **Two narrow indexed queries** (not-delivered by `deliveryAt`; delivered-not-collected by `pickupAt`), merged. Exact, because each order matches exactly one set — ordering by `deliveryAt` alone would not be. |
+| Where do the actions come from? | The item **extends the order LIST projection**, so `actions` is the lifecycle engine's, already narrowed to the actor. It opens the same `OrderAdvanceModal` the agenda does. |
+| How fresh? | 60s poll (visible tabs only) + refetch on focus. **Not 10–30s** — that is ~2,300 needless requests/day keeping a billed instance warm for an unwatched tab. |
+| Acting on it? | The advance mutation **cancels** the dashboard read before invalidating it: a poll issued just before the tap would otherwise land after it and repaint the pre-move queue. |
+| Charts? | **Hand-rolled** (`components/charts/`), because a chart library's animation engine collides with the GSAP doctrine. Trigger to adopt `visx` (MIT) is written into `chartMath.ts`. |
+| Client dashboard? | A **separate route and lazy chunk** when it lands — never a role branch inside this component, so a non-admin never downloads this code. |
+
+**Doors left open:** the week calendar (ships with notifications + `.ics`); per-zone or per-driver
+breakdowns (the queries are already grouped, so both are one more `groupBy`); a cycle-time panel off
+`service_status_history` (§7 of the lifecycle doc — the substrate is already append-only).
+
+### 6f. PAYMENT IS ITS OWN AXIS (✅ CORRECTED 2026-08-05)
+
+The order form used to ask for a payment METHOD, prefilled from the client's preferred one. That was
+a modelling error, not just redundant UI: `services.paymentMethodId` records how the order was
+**actually paid**, so asking at create time stored a *prediction* as a fact — and prefilling it from
+a *preference* made every order claim a method nobody had used yet.
+
+| Question | Answer |
+|---|---|
+| Who writes `paymentMethodId`? | **Only `POST /orders/:id/payment`**, at the moment the money is observed. Removed from `parseOrderBody` (so create and edit both drop it), from the create write, and from the whole form/schema/body path. |
+| What does an order EDIT touch? | Never `paymentMethodId`, `paidAt` or `paymentStatusId` — the same boundary it has with the lifecycle. It rewrites what was AGREED; its own door records what HAPPENED. Otherwise a declarative full-state save erases a recorded payment on every typo fix. |
+| A stale client still sending it? | **Dropped, not rejected.** The field is meaningless here, not malformed — a 400 would be a lie about the request. |
+| What about the client's preferred method? | Kept as client INFORMATION (editable in the registry modal) and it pre-selects **nothing**. A payment method must be OBSERVED, not guessed: a pre-filled value that is usually right is exactly how wrong money data gets recorded at scale. |
+
+**Door left open:** if an *expected* method ever proves useful (chasing a transfer that never
+arrived), it is a NEW nullable column with its own name — never a reuse of the actual one. The whole
+point of this correction is that the two are different facts.
+
 ### Cost of each future door (all additive unless marked)
 
 | Door | What it touches | Verdict |

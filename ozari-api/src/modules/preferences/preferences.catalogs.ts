@@ -1,4 +1,7 @@
 import { Prisma } from "@prisma/client";
+import { i18next } from "@/config/i18n.js";
+import { logger } from "@/config/logger.js";
+import { decryptKms, encryptKms } from "@helpers/encryption.js";
 import type {
   CatalogRowRequestModel,
   PreferenceCatalogRowModel,
@@ -40,17 +43,37 @@ export type CatalogClient = Pick<
   | "address"
   | "product"
   | "productDetail"
+  | "bankAccount"
 >;
 
 /**
  * How an extra field is parsed. A discriminated union rather than one shape with optional bounds:
  * an `int` field is ALWAYS bounded (an unbounded lead time is not a thing anyone wants), and saying
  * so in the type means the parser has no "what if there's no maximum" branch to get wrong.
- * `money` accepts a nullable decimal; `ref` is an id that must exist and be published elsewhere.
+ * `money` accepts a nullable decimal; `ref` is an id that must exist and be published elsewhere;
+ * `text` is a bounded required string; `token` is one of a fixed list, or `null`.
  */
 export type CatalogFieldDefinition =
   | { name: keyof CatalogRowRequestModel; kind: "int"; min: number; max: number }
-  | { name: keyof CatalogRowRequestModel; kind: "money" | "ref" };
+  | { name: keyof CatalogRowRequestModel; kind: "text"; min: number; max: number }
+  | { name: keyof CatalogRowRequestModel; kind: "token"; options: readonly string[] }
+  | { name: keyof CatalogRowRequestModel; kind: "money" }
+  // `ref` is the ONLY kind that hits the database, which is why it is its own member rather than
+  // sharing one with `money`: the parser splits on exactly that line, so the four local kinds are
+  // decided synchronously and nothing else pays for the one lookup.
+  | { name: keyof CatalogRowRequestModel; kind: "ref" };
+
+/**
+ * The banks we ship a logo for (`ozari-app/src/assets/banks/`), and the ONLY values `bankKey`
+ * accepts besides `null`.
+ *
+ * Validated rather than left free-form precisely because the key's whole job is to name an asset:
+ * a typo'd `"banrual"` would save happily and then render nothing on the document, with no error
+ * anywhere to explain why. `null` — "sin logo" — is always legal, so an account at any other bank
+ * is fully usable; it simply prints as text. Mirrored on the frontend (`bankLogos.ts`): adding a
+ * bank means adding the asset and BOTH lists in the same commit.
+ */
+export const BANK_KEYS = ["banrural", "bac"] as const;
 
 export interface CatalogDefinition {
   /** The fields BEYOND `name`/`description`/`isActive`, which every catalog has. */
@@ -110,6 +133,63 @@ const baseData = (data: CatalogRowRequestModel) => ({
   name: data.name,
   description: data.description ?? null,
   isActive: data.isActive,
+});
+
+const BANK_SELECT = {
+  ...BASE_SELECT,
+  bankKey: true,
+  accountType: true,
+  accountNumberKms: true,
+  holderKms: true,
+} as const;
+
+/**
+ * A ciphertext → its plaintext, or `""` if it cannot be read.
+ *
+ * TOTAL on purpose, like `decodeCoords` is for a corrupt pin: `decryptKms` throws on a truncated
+ * or foreign-key ciphertext, and letting that escape would mean ONE damaged row 500s the entire
+ * preferences screen — which is the exact screen an admin would go to in order to fix or delete
+ * it. An unreadable account reads as blank and can be repaired; a screen that will not load can't.
+ * Logged, because a value we can no longer decrypt is never routine.
+ */
+const readSecret = (ciphertext: string): string => {
+  try {
+    return decryptKms(ciphertext);
+  } catch (error) {
+    logger.error(i18next.t("preferences.catalogs.logs.undecryptableBankField", { error }));
+    return "";
+  }
+};
+
+/** A bank account row → the uniform response shape, with both secrets decrypted. */
+const toBankRow = (row: {
+  id: number;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  bankKey: string | null;
+  accountType: string;
+  accountNumberKms: string;
+  holderKms: string;
+}): PreferenceCatalogRowModel => ({
+  ...toRow(row),
+  bankKey: row.bankKey,
+  accountType: row.accountType,
+  accountNumber: readSecret(row.accountNumberKms),
+  holder: readSecret(row.holderKms),
+});
+
+/** A validated bank body → the columns, encrypting the two that are PII the moment they are
+ *  written. The validator guarantees all four extras are present for this catalog; the fallbacks
+ *  exist only to satisfy the shared request type, which is optional-by-catalog. */
+const bankData = (data: CatalogRowRequestModel) => ({
+  ...baseData(data),
+  bankKey: data.bankKey ?? null,
+  /* v8 ignore start -- unreachable: the validator requires all three for `bank-accounts` */
+  accountType: data.accountType ?? "",
+  accountNumberKms: encryptKms(data.accountNumber ?? ""),
+  holderKms: encryptKms(data.holder ?? ""),
+  /* v8 ignore stop */
 });
 
 /** The set of ids something currently points at, across every relation the catalog declares. All the
@@ -404,6 +484,50 @@ export const PREFERENCE_CATALOGS = {
     ],
     countActive: (client) => client.productDetailType.count({ where: { isActive: true } }),
   },
+
+  "bank-accounts": {
+    extraFields: [
+      { name: "bankKey", kind: "token", options: BANK_KEYS },
+      { name: "accountType", kind: "text", min: 2, max: 40 },
+      { name: "accountNumber", kind: "text", min: 4, max: 34 },
+      { name: "holder", kind: "text", min: 2, max: 120 },
+    ],
+    // A business that only takes cash is a real configuration, and this catalog starts EMPTY on
+    // every database (unlike the others, nothing here is seeded — these are the owner's own
+    // accounts, which we could not invent).
+    minimumActive: 0,
+    list: async (client) =>
+      (
+        await client.bankAccount.findMany({ select: BANK_SELECT, orderBy: BY_NAME })
+      ).map(toBankRow),
+    find: async (client, id) => {
+      const row = await client.bankAccount.findUnique({ where: { id }, select: BANK_SELECT });
+      return row ? toBankRow(row) : null;
+    },
+    create: async (client, data) =>
+      toBankRow(
+        await client.bankAccount.create({ data: bankData(data), select: BANK_SELECT }),
+      ),
+    update: async (client, id, data) =>
+      toBankRow(
+        await client.bankAccount.update({ where: { id }, data: bankData(data), select: BANK_SELECT }),
+      ),
+    remove: async (client, id) => {
+      await client.bankAccount.delete({ where: { id } });
+    },
+    /* v8 ignore next 4 -- unreachable through the endpoint: `referencedBy` is empty, so a bank
+       account is never referenced and the delete always takes the hard-delete door. Declared
+       anyway because the interface requires it, and because the day something DOES point at an
+       account this is where the answer belongs. */
+    deactivate: async (client, id) => {
+      await client.bankAccount.update({ where: { id }, data: { isActive: false } });
+    },
+    // Deliberately EMPTY. Nothing holds a foreign key to a bank account: a document that was
+    // generated already carries its numbers as text, so removing an account can never orphan a
+    // record. The conditional NO-TRASH rule therefore always resolves to a hard delete here.
+    referencedBy: [],
+    countActive: (client) => client.bankAccount.count({ where: { isActive: true } }),
+  },
 } satisfies Record<string, CatalogDefinition>;
 
 export type CatalogKey = keyof typeof PREFERENCE_CATALOGS;
@@ -421,4 +545,5 @@ export const CATALOG_RESPONSE_KEYS = [
   ["paymentMethods", "payment-methods"],
   ["productCategories", "product-categories"],
   ["productDetailTypes", "product-detail-types"],
+  ["bankAccounts", "bank-accounts"],
 ] as const satisfies ReadonlyArray<readonly [string, CatalogKey]>;

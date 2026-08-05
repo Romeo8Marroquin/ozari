@@ -62,6 +62,7 @@ export const openApiDocument: OpenAPIV3.Document = {
     { name: "Account", description: "The signed-in user's own profile and password." },
     { name: "Products", description: "The product catalog (role-projected reads)." },
     { name: "Orders", description: "Orders — the agenda/history reads (Admin-only for now)." },
+    { name: "Dashboard", description: "The admin home screen — one aggregated snapshot per call." },
     { name: "Admin", description: "Administrative endpoints (role-gated)." },
     { name: "System", description: "Operational endpoints such as health checks." },
   ],

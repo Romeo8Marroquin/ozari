@@ -353,6 +353,39 @@ async function seedAppPreferences(prisma: SeedPrismaClient): Promise<void> {
       description:
         "Unidad de tiempo de alquiler por defecto en el formulario de productos (2 = Día)",
     },
+    // documents.* — el membrete de las cotizaciones y comprobantes (EPIC-2-DOCUMENTS §6). El
+    // teléfono y los términos nacen VACÍOS a propósito: inventar un número imprimiría uno
+    // equivocado en cada documento, y unos términos sin escribir son simplemente un documento sin
+    // ese párrafo. El administrador los llena en Preferencias → Documentos.
+    {
+      key: "documents.businessName",
+      value: "Party Rentals GT",
+      valueType: "text",
+      group: "documents",
+      description: "Nombre del negocio en el membrete de cotizaciones y comprobantes",
+    },
+    {
+      key: "documents.businessPhone",
+      value: "",
+      valueType: "text",
+      group: "documents",
+      description: "Teléfono de contacto al pie de los documentos",
+    },
+    {
+      key: "documents.terms",
+      value: "",
+      valueType: "text",
+      group: "documents",
+      description:
+        "Términos y condiciones impresos al pie de la última página de cada documento",
+    },
+    {
+      key: "documents.quoteValidityDays",
+      value: "15",
+      valueType: "int",
+      group: "documents",
+      description: "Días de vigencia que declara una cotización",
+    },
   ];
   for (const row of appPreferences) {
     await prisma.appPreference.upsert({

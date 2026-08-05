@@ -9,8 +9,16 @@ import { appConfig } from "@/config/app.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
-import { catalogByKey, type CatalogDefinition } from "./preferences.catalogs.js";
-import { PREFERENCE_SETTINGS, settingDefinitionFor } from "./preferences.service.js";
+import {
+  catalogByKey,
+  type CatalogDefinition,
+  type CatalogFieldDefinition,
+} from "./preferences.catalogs.js";
+import {
+  PREFERENCE_SETTINGS,
+  settingDefinitionFor,
+  type SettingDefinition,
+} from "./preferences.service.js";
 import type {
   CatalogRowRequestModel,
   UpdatePreferenceSettingsRequestModel,
@@ -35,6 +43,48 @@ const sanitizeText = (value: unknown, min: number, max: number): string | null =
   return trimmed.length >= min && trimmed.length <= max ? trimmed : null;
 };
 
+/** ONE setting's submitted value, checked against the arm of the registry it belongs to. Returns
+ *  either the value to store or the rejection key plus the params its log line names. */
+function parseSettingValue(
+  definition: SettingDefinition,
+  value: unknown,
+):
+  | { failure: null; value: number | string }
+  | { failure: string; params: Record<string, unknown>; value: never } {
+  const fail = (key: string, params: Record<string, unknown>) =>
+    ({ failure: key, params }) as { failure: string; params: Record<string, unknown>; value: never };
+
+  if (definition.type === "text") {
+    const text = sanitizeText(value, definition.minLength, definition.maxLength);
+    // A line break is only meaningful where the setting says it is: a business name spanning two
+    // lines is a broken letterhead rather than a name.
+    if (text === null || (!definition.multiline && /[\r\n]/.test(text))) {
+      return fail("invalidSettingText", {
+        key: definition.key,
+        length: typeof value === "string" ? value.trim().length : undefined,
+        min: definition.minLength,
+        max: definition.maxLength,
+      });
+    }
+    return { failure: null, value: text };
+  }
+
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < definition.min ||
+    value > definition.max
+  ) {
+    return fail("invalidSettingValue", {
+      key: definition.key,
+      value,
+      min: definition.min,
+      max: definition.max,
+    });
+  }
+  return { failure: null, value };
+}
+
 /**
  * `PUT /preferences/settings` — the whole editable set, each value an integer inside the bounds the
  * registry declares (the same bounds the client was handed by `GET /preferences`, so a rejection here
@@ -45,6 +95,10 @@ const sanitizeText = (value: unknown, min: number, max: number): string | null =
  *    client believe it saved something the system will never read;
  *  - the evidence pair must stay coherent (`max >= min`), because a status inheriting an inverted
  *    global range would be unsatisfiable — no photo count could ever pass.
+ *
+ * A `text` setting is checked against its own bounds instead: trimmed, within its length range, and
+ * — unless it declares `multiline` — free of line breaks, because a business name spanning two
+ * lines is not a name, it is a broken letterhead.
  */
 export const validateUpdatePreferenceSettings = (
   req: Request,
@@ -64,7 +118,7 @@ export const validateUpdatePreferenceSettings = (
     }
 
     const seen = new Set<string>();
-    const settings: { key: string; value: number }[] = [];
+    const settings: { key: string; value: number | string }[] = [];
     for (const raw of rawSettings as Array<Record<string, unknown>>) {
       const key = raw?.["key"];
       const value = raw?.["value"];
@@ -79,20 +133,18 @@ export const validateUpdatePreferenceSettings = (
         return;
       }
       seen.add(definition.key);
-      if (
-        typeof value !== "number" ||
-        !Number.isInteger(value) ||
-        value < definition.min ||
-        value > definition.max
-      ) {
-        reject(res, "invalidSettingValue", { key, value, min: definition.min, max: definition.max });
+
+      const parsed = parseSettingValue(definition, value);
+      if (parsed.failure) {
+        reject(res, parsed.failure, parsed.params);
         return;
       }
-      settings.push({ key: definition.key, value });
+      settings.push({ key: definition.key, value: parsed.value });
     }
 
     // Cross-field: the evidence range must stay satisfiable. Only checked when BOTH arrive, which
-    // the client always does — it sends the full set.
+    // the client always does — it sends the full set. Both are `int` settings, so the numeric reads
+    // below are total; a text value could never reach these two keys.
     const min = settings.find((setting) => setting.key === "orders.evidenceMinPhotos")?.value;
     const max = settings.find((setting) => setting.key === "orders.evidenceMaxPhotos")?.value;
     if (min !== undefined && max !== undefined && max < min) {
@@ -113,33 +165,82 @@ export const validateUpdatePreferenceSettings = (
   }
 };
 
-/** Parses ONE extra field per its declared kind, appending to `data`. Returns the rejection key on
- *  failure so the caller answers and stops. */
+/**
+ * The value an extra field parsed to, written onto the shared request object BY NAME.
+ *
+ * By name rather than per kind, which is what lets one `text` kind serve four different fields —
+ * the previous `data.minLeadHours = raw` style only worked while every kind had exactly one field,
+ * and adding the bank account's three strings is precisely what breaks that. `Object.assign` keeps
+ * it honest without a cast: the value union covers every field this model declares, and TypeScript
+ * simply cannot correlate a key held in a variable with that key's own value type.
+ */
+const assignExtra = (
+  data: CatalogRowRequestModel,
+  name: keyof CatalogRowRequestModel,
+  value: string | number | null,
+): void => {
+  Object.assign(data, { [name]: value });
+};
+
+/** The four field kinds decided WITHOUT touching the database. Returns the rejection key on failure
+ *  so the caller answers and stops. */
+function parseLocalExtraField(
+  field: Exclude<CatalogFieldDefinition, { kind: "ref" }>,
+  raw: unknown,
+  data: CatalogRowRequestModel,
+): string | null {
+  if (field.kind === "int") {
+    if (typeof raw !== "number" || !Number.isInteger(raw) || raw < field.min || raw > field.max) {
+      return "invalidExtraField";
+    }
+    assignExtra(data, field.name, raw);
+    return null;
+  }
+  if (field.kind === "text") {
+    const text = sanitizeText(raw, field.min, field.max);
+    if (text === null) {
+      return "invalidExtraField";
+    }
+    assignExtra(data, field.name, text);
+    return null;
+  }
+  if (field.kind === "token") {
+    // Absent/null is the "none of them" answer (a bank we ship no logo for), which is legal —
+    // but a value OUTSIDE the list is not, because the token's only job is to name a shipped asset
+    // and an unknown one would save happily and then render nothing.
+    if (raw === undefined || raw === null || raw === "") {
+      assignExtra(data, field.name, null);
+      return null;
+    }
+    if (typeof raw !== "string" || !field.options.includes(raw)) {
+      return "invalidExtraField";
+    }
+    assignExtra(data, field.name, raw);
+    return null;
+  }
+  // `money` — absent/null is meaningful for a fee: "not configured", which is NOT free (0).
+  if (raw === undefined || raw === null) {
+    assignExtra(data, field.name, null);
+    return null;
+  }
+  if (typeof raw !== "number" || Number.isNaN(raw) || raw < 0 || raw > appConfig.maxGlobalAmount) {
+    return "invalidExtraField";
+  }
+  assignExtra(data, field.name, Math.trunc(raw * 100) / 100);
+  return null;
+}
+
+/** Parses ONE extra field per its declared kind, appending to `data`. Only `ref` is asynchronous —
+ *  it is the one kind that has to ask the database whether the id it names is real and published. */
 async function parseExtraField(
   field: CatalogDefinition["extraFields"][number],
   raw: unknown,
   data: CatalogRowRequestModel,
 ): Promise<string | null> {
-  if (field.kind === "int") {
-    if (typeof raw !== "number" || !Number.isInteger(raw) || raw < field.min || raw > field.max) {
-      return "invalidExtraField";
-    }
-    data.minLeadHours = raw;
-    return null;
+  if (field.kind !== "ref") {
+    return parseLocalExtraField(field, raw, data);
   }
-  if (field.kind === "money") {
-    // Absent/null is meaningful for a fee: "not configured", which is NOT the same as free (0).
-    if (raw === undefined || raw === null) {
-      data.deliveryFee = null;
-      return null;
-    }
-    if (typeof raw !== "number" || Number.isNaN(raw) || raw < 0 || raw > appConfig.maxGlobalAmount) {
-      return "invalidExtraField";
-    }
-    data.deliveryFee = Math.trunc(raw * 100) / 100;
-    return null;
-  }
-  // `ref` — the id must exist AND be published, else a zone could point at a retired municipality.
+  // The id must exist AND be published, else a zone could point at a retired municipality.
   if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1) {
     return "invalidExtraField";
   }
@@ -151,7 +252,7 @@ async function parseExtraField(
   if (!municipality) {
     return "invalidExtraField";
   }
-  data.municipalityId = raw;
+  assignExtra(data, field.name, raw);
   return null;
 }
 

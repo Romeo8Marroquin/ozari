@@ -85,6 +85,10 @@ const TAB_SECTIONS: Record<PreferenceTab, readonly PreferenceSection[]> = {
     { kind: 'catalog', catalog: 'product-categories', field: 'productCategories', minimumActive: 1, skeletonRows: 3 },
     { kind: 'catalog', catalog: 'product-detail-types', field: 'productDetailTypes', minimumActive: 0, skeletonRows: 2 },
   ],
+  documents: [
+    { kind: 'settings', group: 'documents', skeletonRows: 4 },
+    { kind: 'catalog', catalog: 'bank-accounts', field: 'bankAccounts', minimumActive: 0, skeletonRows: 2 },
+  ],
 };
 
 /** A section's title/description i18n leaf — settings groups and catalogs live under different maps. */

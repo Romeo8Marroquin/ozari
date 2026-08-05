@@ -10,13 +10,21 @@ import {
 } from './navConfig';
 
 describe('PANEL_NAV', () => {
-  it('lists only the built modules (products + orders + preferences + settings), all reachable', () => {
+  it('lists only the built modules (dashboard + products + orders + preferences + settings), all reachable', () => {
     expect(PANEL_NAV.map((item) => item.to)).toEqual([
+      '/panel/inicio',
       '/panel/productos',
       '/panel/pedidos',
       '/panel/preferencias',
       '/panel/ajustes',
     ]);
+  });
+
+  it('keeps the DASHBOARD strictly Admin — it aggregates the whole business', () => {
+    const visibleTo = (role: Role) => filterNavByRole(PANEL_NAV, role).map((i) => i.to);
+    expect(visibleTo(Role.Admin)).toContain('/panel/inicio');
+    expect(visibleTo(Role.Driver)).not.toContain('/panel/inicio');
+    expect(visibleTo(Role.Client)).not.toContain('/panel/inicio');
   });
 
   it('restricts products to Admin + Client — a Driver never sees the products tab (Epic-2A)', () => {
@@ -26,6 +34,7 @@ describe('PANEL_NAV', () => {
       '/panel/ajustes',
     ]);
     expect(filterNavByRole(PANEL_NAV, Role.Admin).map((i) => i.to)).toEqual([
+      '/panel/inicio',
       '/panel/productos',
       '/panel/pedidos',
       '/panel/preferencias',
@@ -92,8 +101,10 @@ describe('panelSectionFor', () => {
 });
 
 describe('panelHomeFor', () => {
-  it('lands each role on its first visible tab: products for Admin/Client, the agenda for a Driver', () => {
-    expect(panelHomeFor(Role.Admin)).toBe('/panel/productos');
+  it('lands each role on its first visible tab: the dashboard for an Admin, products for a Client, the agenda for a Driver', () => {
+    // The dashboard is the Admin's front door; every other role skips it by the same role filter
+    // that hides the tab, so nobody is bounced off a screen they can't see.
+    expect(panelHomeFor(Role.Admin)).toBe('/panel/inicio');
     expect(panelHomeFor(Role.Client)).toBe('/panel/productos');
     expect(panelHomeFor(Role.Driver)).toBe('/panel/pedidos');
   });

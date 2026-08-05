@@ -4,6 +4,7 @@ import {
   HiOutlineClipboardDocumentList,
   HiOutlineCog6Tooth,
   HiOutlineCube,
+  HiOutlineSquares2X2,
 } from 'react-icons/hi2';
 import { Role } from '@constants/Roles';
 
@@ -16,6 +17,7 @@ import { Role } from '@constants/Roles';
  * param paths, so `PanelLayout`'s two router calls carry a localized cast for it.
  */
 export type PanelPath =
+  | '/panel/inicio'
   | '/panel/productos'
   | '/panel/productos/nuevo'
   | `/panel/productos/${number}`
@@ -69,10 +71,24 @@ export const ORDERS_ROLES: readonly Role[] = [Role.Admin, Role.Driver];
  */
 export const PREFERENCES_ROLES: readonly Role[] = [Role.Admin];
 
-// The nav shows ONLY built modules: Products + Orders (the agenda) + Settings. A dashboard lands
-// later; until then `/panel` defaults to the first tab the role can see — products for Admin/Client,
-// the orders agenda for a Driver (deliveries are their whole job; see `panelHomeFor`).
+/**
+ * The roles allowed into the DASHBOARD — **Admin only**. Unlike `/orders`, this guard does not widen
+ * by adding row scoping: the screen aggregates the whole business (revenue, every client's next
+ * delivery, what is owed), and a driver's or a client's home is a genuinely different question about
+ * different data. When those land they get their OWN route and their own lazy chunk, so a non-admin
+ * never downloads this screen's code — the role split is a code-splitting boundary, not a runtime
+ * branch inside one component (owner decision 2026-08-04).
+ */
+export const DASHBOARD_ROLES: readonly Role[] = [Role.Admin];
+
+// The nav shows ONLY built modules: Dashboard (Admin) + Products + Orders (the agenda) +
+// Preferences (Admin) + Settings. `/panel` defaults to the first tab the role can see — the
+// dashboard for an Admin, products for a Client, the orders agenda for a Driver (deliveries are
+// their whole job; see `panelHomeFor`).
 export const PANEL_NAV: PanelNavItem[] = [
+  // First, so `panelHomeFor` lands an Admin on the dashboard — the panel's front door. Every other
+  // role skips it by the same role filter and keeps the home it had.
+  { to: '/panel/inicio', icon: HiOutlineSquares2X2, labelKey: 'dashboard', roles: DASHBOARD_ROLES },
   { to: '/panel/productos', icon: HiOutlineCube, labelKey: 'products', roles: PRODUCTS_ROLES },
   { to: '/panel/pedidos', icon: HiOutlineClipboardDocumentList, labelKey: 'orders', roles: ORDERS_ROLES },
   { to: '/panel/preferencias', icon: HiOutlineAdjustmentsHorizontal, labelKey: 'preferences', roles: PREFERENCES_ROLES },
@@ -80,8 +96,9 @@ export const PANEL_NAV: PanelNavItem[] = [
 ];
 
 /**
- * Where bare `/panel` lands for `role`: the first nav tab the role is allowed to see (products for
- * Admin/Client, the orders agenda for a Driver), falling back to settings if the role somehow
+ * Where bare `/panel` lands for `role`: the first nav tab the role is allowed to see (the dashboard
+ * for an Admin, products for a Client, the orders agenda for a Driver), falling back to settings if
+ * the role somehow
  * matches nothing. Keeps the default-landing rule derived from the SAME role-visibility source as
  * the sidebar, so the two can never disagree.
  */

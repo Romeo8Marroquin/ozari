@@ -37,6 +37,7 @@ const base = (overrides: Partial<OrderListItem> = {}): OrderListItem => ({
   id: 12,
   clientName: 'María López',
   isRegistryClient: false,
+  isPaid: false,
   eventType: { id: 1, name: 'Evento familiar' },
   status: { id: 1, name: 'Pendiente', colorKey: 'amber' },
   paymentStatus: { id: 1, name: 'Pendiente' },
@@ -75,6 +76,61 @@ const chipOf = (label: string): HTMLElement => {
 };
 
 describe('OrderTicket', () => {
+  /** A pinned order — the pin is NOT in the shared fixture: most tests here assert on "the" button,
+   *  and a navigation action in every one of them would only obscure what they are checking. */
+  const PIN = { lat: 14.634915, lng: -90.506883 };
+
+  it('offers navigation on the SAME rule as the detail and the dashboard', () => {
+    // The agenda used to be the odd one out — the lean list carried no pin, so the button the other
+    // two surfaces showed simply could not exist here.
+    const { unmount } = render(<OrderTicket order={{ ...base(), deliveryCoords: PIN }} />);
+    expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
+    unmount();
+
+    // No pin ⇒ nothing to navigate to.
+    const { unmount: second } = render(<OrderTicket order={base()} />);
+    expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
+    second();
+
+    // Finished ⇒ no trip left to make, pin or no pin.
+    render(
+      <OrderTicket
+        order={{ ...base(), deliveryCoords: PIN, readyAt: '2026-08-02T12:00:00.000Z' }}
+      />,
+    );
+    expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
+  });
+
+  it('the payment action never opens the order behind it', async () => {
+    const onOpen = vi.fn();
+    const onPay = vi.fn();
+    render(<OrderTicket order={base()} onOpen={onOpen} onPay={onPay} />);
+
+    await userEvent.click(
+      // This file's `t` mock appends interpolation values (`key|value`), so match the key loosely.
+      screen.getByRole('button', { name: /modules\.panel\.orders\.ticket\.payAria/ }),
+    );
+    expect(onPay).toHaveBeenCalledTimes(1);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('the maps action opens the app chooser, not the order', async () => {
+    const onOpen = vi.fn();
+    render(<OrderTicket order={{ ...base(), deliveryCoords: PIN }} onOpen={onOpen} />);
+
+    const maps = screen.getByTestId('open-in-maps');
+    // Keyboard activation must not bubble to the card-link either — the same guard as the click.
+    maps.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(onOpen).not.toHaveBeenCalled();
+
+    await userEvent.click(maps);
+    // With no saved preference the chooser opens — which also makes the rest of the card inert, so
+    // this has to be asserted on its own rather than alongside another click.
+    expect(await screen.findByText('components.openInMaps.chooseTitle')).toBeInTheDocument();
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
   it('renders the client, event type, item count key, status, and formatted total', () => {
     render(<OrderTicket order={base()} />);
     expect(screen.getByText('María López')).toBeInTheDocument();

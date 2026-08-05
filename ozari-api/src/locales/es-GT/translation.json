@@ -1,4 +1,4 @@
-﻿{
+{
   "api": {
     "cors": {
       "origin": "CORS Origin: <{{-origin}}>",
@@ -527,6 +527,26 @@
         "error": "Error al calcular disponibilidad: {{-error}}."
       }
     },
+    "payOrder": {
+      "paid": "Pago registrado exitosamente.",
+      "notFound": "El pedido no existe o ya no está disponible.",
+      "alreadyPaid": "Este pedido ya tiene un pago registrado.",
+      "invalidMethod": "El método de pago no es válido.",
+      "errorPaying": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidId": "El identificador del pedido no es válido.",
+        "invalidMethod": "El método de pago no es válido.",
+        "logs": {
+          "invalidId": "Identificador de pedido inválido al registrar el pago.",
+          "invalidMethod": "Método de pago inválido al registrar el pago."
+        }
+      },
+      "logs": {
+        "paid": "Pago registrado para el pedido {{id}}.",
+        "alreadyPaid": "El pedido {{id}} ya tenía un pago registrado.",
+        "error": "Error al registrar el pago: {{-error}}."
+      }
+    },
     "deleteOrder": {
       "orderDeleted": "Pedido eliminado permanentemente.",
       "orderNotFound": "El pedido no existe o ya no está disponible.",
@@ -616,7 +636,6 @@
         "invalidComment": "El comentario del pedido debe ser válido.",
         "invalidDeliveryAmount": "El costo de envío no es válido.",
         "invalidDepositAmount": "El anticipo no es válido.",
-        "invalidPaymentMethodId": "El método de pago no es válido.",
         "invalidAssignedUserId": "El responsable asignado es requerido y debe ser válido.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
@@ -643,7 +662,6 @@
           "invalidComment": "El comentario del pedido no es válido.",
           "invalidDeliveryAmount": "El costo de envío <{{-deliveryAmount}}> no es válido.",
           "invalidDepositAmount": "El anticipo <{{-depositAmount}}> no es válido.",
-          "invalidPaymentMethodId": "El método de pago <{{-paymentMethodId}}> no es válido.",
           "invalidAssignedUserId": "El responsable asignado <{{-assignedUserId}}> no es válido.",
           "validationError": "Error validando la creación del pedido: {{-error}}."
         }
@@ -688,7 +706,6 @@
         "invalidComment": "El comentario del pedido debe ser válido.",
         "invalidDeliveryAmount": "El costo de envío no es válido.",
         "invalidDepositAmount": "El anticipo no es válido.",
-        "invalidPaymentMethodId": "El método de pago no es válido.",
         "invalidAssignedUserId": "El responsable asignado es requerido y debe ser válido.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
@@ -715,7 +732,6 @@
           "invalidComment": "El comentario del pedido no es válido.",
           "invalidDeliveryAmount": "El costo de envío <{{-deliveryAmount}}> no es válido.",
           "invalidDepositAmount": "El anticipo <{{-depositAmount}}> no es válido.",
-          "invalidPaymentMethodId": "El método de pago <{{-paymentMethodId}}> no es válido.",
           "invalidAssignedUserId": "El responsable asignado <{{-assignedUserId}}> no es válido.",
           "validationError": "Error validando la actualización del pedido: {{-error}}."
         }
@@ -727,6 +743,16 @@
         "driverConflict": "Conflicto de agenda al actualizar pedido: <{{-driver}}> ya tiene un evento en <{{-conflictAt}}> (pedido <{{-orderId}}>).",
         "selfOverlap": "La entrega y la recolección del pedido a actualizar están a menos de <{{-gap}}> minutos.",
         "errorUpdatingOrder": "Error al actualizar el pedido: {{-error}}."
+      }
+    }
+  },
+  "dashboard": {
+    "getDashboard": {
+      "success": "Panel obtenido exitosamente.",
+      "unavailable": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "error": "Error al obtener el panel: {{-error}}.",
+        "noCurrency": "No hay ninguna moneda configurada; no se puede construir el panel."
       }
     }
   },
@@ -765,6 +791,7 @@
         "rowDeactivated": "Elemento <{{-id}}> desactivado en el catálogo <{{-catalog}}> por estar referenciado.",
         "rowNotFound": "El elemento <{{-id}}> del catálogo <{{-catalog}}> no existe.",
         "unknownCatalog": "El catálogo <{{-catalog}}> no es administrable.",
+        "undecryptableBankField": "No fue posible descifrar un dato de una cuenta bancaria; se devuelve vacío: {{-error}}.",
         "lastActive": "Se intentó dejar el catálogo <{{-catalog}}> sin elementos activos.",
         "errorCreating": "Error al crear el elemento del catálogo: {{-error}}.",
         "errorUpdating": "Error al actualizar el elemento del catálogo: {{-error}}.",
@@ -776,6 +803,7 @@
       "unknownSetting": "Una de las preferencias enviadas no es configurable.",
       "duplicateSetting": "Una preferencia no puede repetirse.",
       "invalidSettingValue": "El valor de una preferencia está fuera del rango permitido.",
+      "invalidSettingText": "El texto de una preferencia no es válido.",
       "invertedEvidenceRange": "El máximo de fotos no puede ser menor que el mínimo.",
       "unknownCatalog": "El catálogo solicitado no existe.",
       "invalidName": "El nombre es requerido y debe ser válido.",
@@ -788,6 +816,7 @@
         "unknownSetting": "La preferencia <{{-key}}> no es configurable.",
         "duplicateSetting": "La preferencia <{{-key}}> está repetida.",
         "invalidSettingValue": "El valor <{{-value}}> de <{{-key}}> está fuera de [<{{-min}}>, <{{-max}}>].",
+        "invalidSettingText": "El texto de <{{-key}}> (longitud <{{-length}}>) está fuera de [<{{-min}}>, <{{-max}}>] o contiene saltos de línea no permitidos.",
         "invertedEvidenceRange": "Rango de fotos invertido: mínimo <{{-min}}>, máximo <{{-max}}>.",
         "unknownCatalog": "El catálogo <{{-catalog}}> no es administrable.",
         "invalidName": "El nombre <{{-name}}> no es válido.",

@@ -19,6 +19,7 @@ import type { AppError } from "./models/common/error.js";
 
 import authRouter from "./modules/auth/auth.route.js";
 import clientRegistriesRouter from "./modules/clientRegistries/clientRegistries.route.js";
+import dashboardRouter from "./modules/dashboard/dashboard.route.js";
 import ordersRouter from "./modules/orders/orders.route.js";
 import preferencesRouter from "./modules/preferences/preferences.route.js";
 import productsRouter from "./modules/products/products.route.js";
@@ -247,6 +248,11 @@ function configureRoutes(app: Express): void {
   // System preferences (scalar settings + the manageable seeded catalogs) - authenticated limiter;
   // STRICTLY Admin inside the router, every route
   apiRouter.use("/preferences", rateLimiters["authenticated"], preferencesRouter);
+
+  // The admin home screen - authenticated limiter; STRICTLY Admin inside the router. Deliberately on
+  // the lenient tier: the panel re-reads it on every focus and on a slow interval, exactly like /me,
+  // and the credential tier would starve it
+  apiRouter.use("/dashboard", rateLimiters["authenticated"], dashboardRouter);
 
   // Mount API router at base path
   app.use(appConfig.basePath, apiRouter);

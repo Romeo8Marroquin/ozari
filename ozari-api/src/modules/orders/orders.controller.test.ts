@@ -473,7 +473,7 @@ const buildCreateReq = (body: ReturnType<typeof createBody>): CustomRequest =>
 describe("createOrder", () => {
   it("creates a confirmed mixed order: server-side pricing, encrypted snapshots, sale decrement, audit row", async () => {
     const tx = mockCreateTx();
-    const body = { ...createBody(), paymentMethodId: 2 };
+    const body = createBody();
     await createOrder(buildCreateReq(body), {} as Response);
 
     expect(tx.$queryRaw).toHaveBeenCalled();
@@ -488,7 +488,6 @@ describe("createOrder", () => {
       eventTypeId: 1,
       totalAmount: 385,
       deliveryAmount: 50,
-      paymentMethodId: 2,
       serviceStatusId: 1,
       paymentStatusId: 1,
       assignedUserId: 1,
@@ -730,6 +729,21 @@ const buildUpdateReq = (
   ({ body, query: {}, params: { id }, user: { userRole: 2, userId: 1 } }) as unknown as CustomRequest;
 
 describe("updateOrder", () => {
+  it("NEVER touches payment — a typo fix must not erase a recorded one", async () => {
+    // The same boundary the lifecycle has: this endpoint rewrites what was AGREED, while what
+    // HAPPENED (a move, a payment) belongs to its own door. A declarative full-state save that
+    // included these would wipe `paidAt` every time somebody corrected an address.
+    const tx = mockUpdateTx({ order: makeRawRichOrder() });
+    await updateOrder(buildUpdateReq(createBody()), {} as Response);
+
+    const updateArg = (tx.service.update as Mock).mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(updateArg.data).not.toHaveProperty("paymentMethodId");
+    expect(updateArg.data).not.toHaveProperty("paidAt");
+    expect(updateArg.data).not.toHaveProperty("paymentStatusId");
+  });
+
   it("re-prices from the NEW window, reconciles the lines by product, and moves sale stock by the DIFFERENCE", async () => {
     const tx = mockUpdateTx({ order: { ...makeRawRichOrder(), serviceDetails: [
       makeRawRichOrder().serviceDetails[0] as object,

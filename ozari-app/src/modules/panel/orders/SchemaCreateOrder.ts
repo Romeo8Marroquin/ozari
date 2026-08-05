@@ -135,9 +135,8 @@ const baseCreateOrderSchema = z.object({
     .refine((v) => v.trim().length <= ORDER_LONGTEXT_MAX_LENGTH, t(`${KEY}.invalidComment`)),
   deliveryAmount: moneyField(t(`${KEY}.invalidDeliveryAmount`)),
   depositAmount: moneyField(t(`${KEY}.invalidDepositAmount`)),
-  // `null` = the empty-selection sentinel: how it's paid is OPTIONAL (payment can settle later);
-  // the select pre-fills from the client's preferred method. Never required.
-  paymentMethodId: z.number().nullable(),
+  // NOTE — no `paymentMethodId` (owner decision 2026-08-05). It records how the order was actually
+  // PAID, which has not happened while this form is open; it is collected once, by "Registrar pago".
   // Who the order is assigned to — REQUIRED, exactly like the backend validator (Q-D2, owner
   // decision 2026-07-30: "unassigned" is deleted rather than modelled, because the logistics pad is
   // a rule about a DRIVER's day). The select defaults to the creating admin, so the form never
@@ -229,7 +228,6 @@ export const createOrderDefaultValues: CreateOrderFormType = {
   comment: '',
   deliveryAmount: '',
   depositAmount: '',
-  paymentMethodId: null,
   // null = unset; the form overrides it with the current admin's id (from the token) on mount.
   assignedUserId: null as unknown as number,
   lines: [],
@@ -250,7 +248,6 @@ export interface CreateOrderBody {
   comment?: string;
   deliveryAmount?: number;
   depositAmount?: number;
-  paymentMethodId?: number;
   assignedUserId: number;
   lines: { productId: number; quantity: number }[];
 }
@@ -285,7 +282,6 @@ export function toCreateOrderBody(data: CreateOrderFormType): CreateOrderBody {
     ...(comment && { comment }),
     ...(money(data.deliveryAmount) !== undefined && { deliveryAmount: money(data.deliveryAmount) }),
     ...(money(data.depositAmount) !== undefined && { depositAmount: money(data.depositAmount) }),
-    ...(data.paymentMethodId != null && { paymentMethodId: data.paymentMethodId }),
     assignedUserId: data.assignedUserId,
     lines: data.lines.map((line) => ({
       productId: line.productId,
@@ -349,7 +345,6 @@ export function orderToFormValues(order: {
     comment: order.comment ?? '',
     deliveryAmount: order.deliveryAmount != null ? String(order.deliveryAmount) : '',
     depositAmount: order.depositAmount != null ? String(order.depositAmount) : '',
-    paymentMethodId: order.paymentMethod?.id ?? null,
     assignedUserId: order.assignee?.id as unknown as number,
     lines: order.lines.map((line) => ({
       productId: line.productId,

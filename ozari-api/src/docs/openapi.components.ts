@@ -1024,12 +1024,6 @@ export const schemas: Record<string, Schema> = {
       comment: { type: "string", nullable: true, maxLength: 500 },
       deliveryAmount: { type: "number", nullable: true, example: 50 },
       depositAmount: { type: "number", nullable: true, example: 100 },
-      paymentMethodId: {
-        type: "integer",
-        nullable: true,
-        description: "How it will be paid (an active seeded method); optional — payment can settle later.",
-        example: 1,
-      },
       assignedUserId: {
         type: "integer",
         description:
@@ -1219,20 +1213,37 @@ export const schemas: Record<string, Schema> = {
     description:
       "One scalar setting with the BOUNDS the API enforces, so a client can enforce the same ones " +
       "while the admin types (the mirrored-validation doctrine, applied to settings). Deliberately " +
-      "carries no label or help text: that is copy, and the frontend owns it.",
+      "carries no label or help text: that is copy, and the frontend owns it.\n\n" +
+      "**Discriminated by `type`.** An `int` carries `min`/`max`; a `text` carries `minLength`/" +
+      "`maxLength` and `multiline`. `multiline: false` is a RULE, not a rendering hint — the API " +
+      "rejects a line break in such a value, because a business name spanning two lines is a " +
+      "broken letterhead rather than a name.",
+    required: ["key", "type", "value", "group"],
     properties: {
       key: { type: "string", example: "orders.turnaroundMinutes" },
-      type: {
-        type: "string",
-        enum: ["int"],
-        description: "Always an integer today; the field exists so a future bool/text setting needs no new shape.",
+      type: { type: "string", enum: ["int", "text"], example: "int" },
+      value: {
+        oneOf: [{ type: "integer" }, { type: "string" }],
+        description: "An integer for `type: int`, a string for `type: text`.",
+        example: 120,
       },
-      value: { type: "integer", example: 120 },
-      min: { type: "integer", example: 0 },
-      max: { type: "integer", example: 1440 },
+      min: { type: "integer", description: "`int` only.", example: 0 },
+      max: { type: "integer", description: "`int` only.", example: 1440 },
+      minLength: {
+        type: "integer",
+        description: "`text` only. 0 = the empty value is a legitimate choice; ≥1 = required.",
+        example: 2,
+      },
+      maxLength: { type: "integer", description: "`text` only.", example: 120 },
+      multiline: {
+        type: "boolean",
+        description: "`text` only. False ⇒ line breaks are rejected.",
+        example: false,
+      },
       group: {
         type: "string",
-        description: "Grouping token (`orders`, `evidence`) the screen lays its cards out by.",
+        description:
+          "Grouping token (`orders`, `evidence`, `documents`) the screen lays its cards out by.",
         example: "orders",
       },
     },
@@ -1265,6 +1276,32 @@ export const schemas: Record<string, Schema> = {
         example: 50,
       },
       municipalityId: { type: "integer", description: "Zones only.", example: 4 },
+      bankKey: {
+        type: "string",
+        nullable: true,
+        enum: ["banrural", "bac", null],
+        description:
+          "Bank accounts only — a TOKEN naming the logo a document prints, never a bank name. " +
+          "`null` = \"sin logo\", always legal, so an account at any other bank is still usable.",
+        example: "banrural",
+      },
+      accountType: {
+        type: "string",
+        description: "Bank accounts only — \"Monetaria\", \"Ahorro\"… Free text: bank product names vary.",
+        example: "Monetaria",
+      },
+      accountNumber: {
+        type: "string",
+        description:
+          "Bank accounts only — DECRYPTED from `account_number_kms`. Stored AES-256-GCM encrypted " +
+          "at rest and returned only through this Admin-only endpoint.",
+        example: "3-456-78901-2",
+      },
+      holder: {
+        type: "string",
+        description: "Bank accounts only — DECRYPTED from `holder_kms`.",
+        example: "Party Rentals GT, S.A.",
+      },
       isReferenced: {
         type: "boolean",
         description:
@@ -1276,6 +1313,188 @@ export const schemas: Record<string, Schema> = {
       },
     },
   },
+  StatComparison: {
+    type: "object",
+    required: ["current", "previous"],
+    description:
+      "A figure paired with the same figure for the period before it. `deltaPercent` is **absent " +
+      "when `previous` is 0** — every '+100%' or '+∞%' on a month that started from nothing is a " +
+      "lie dressed as insight, so the client renders 'sin comparación' instead.",
+    properties: {
+      current: { type: "number", example: 12400 },
+      previous: { type: "number", example: 9800 },
+      deltaPercent: { type: "number", nullable: true, example: 26.5 },
+    },
+  },
+
+  UpNextItem: {
+    allOf: [
+      schemaRef("OrderListItem"),
+      {
+        type: "object",
+        description:
+          "An order in the up-next queue, represented by the single event it still has to perform. " +
+          "It EXTENDS the list item so `actions` comes from the same lifecycle projection the " +
+          "agenda uses, and adds the delivery snapshots a driver needs to actually get there.",
+        properties: {
+          event: {
+            type: "object",
+            required: ["kind", "at", "isOverdue", "minutesUntil"],
+            properties: {
+              kind: { type: "string", enum: ["DELIVERY", "COLLECTION"] },
+              at: { type: "string", format: "date-time", example: "2026-08-01T14:00:00.000Z" },
+              isOverdue: {
+                type: "boolean",
+                description:
+                  "Its time has passed and it still has not happened — measured from the ACTUALS, " +
+                  "never from a status id.",
+                example: false,
+              },
+              minutesUntil: {
+                type: "integer",
+                description:
+                  "Whole minutes until `at`, negative once overdue. Computed against the payload's " +
+                  "`generatedAt` so a skewed device clock cannot contradict the server.",
+                example: 30,
+              },
+            },
+          },
+          deliveryAddress: { type: "string", example: "Zona 10, 4a avenida 5-55" },
+          deliveryCoords: { allOf: [schemaRef("Coords")], nullable: true },
+          deliveryInstructions: { type: "string", nullable: true, example: "Portón negro" },
+          deliveryContact: { type: "string", example: "5555-1234" },
+        },
+      },
+    ],
+  },
+
+  DashboardResponse: {
+    type: "object",
+    description:
+      "The admin home screen. Every figure is a snapshot of the same `generatedAt` instant — the " +
+      "whole point of answering it in one call rather than six.",
+    properties: {
+      dashboard: {
+        type: "object",
+        properties: {
+          generatedAt: { type: "string", format: "date-time" },
+          upNext: {
+            type: "array",
+            description:
+              "The next THREE ORDERS — not three events. An order delivering at 14:00 and " +
+              "collecting at 14:30 occupies one slot showing the delivery; confirming that delivery " +
+              "puts the same order back in the queue carrying its collection, re-sorted against " +
+              "everyone else. Ties break on id so the queue never reshuffles on a refetch.",
+            items: schemaRef("UpNextItem"),
+          },
+          today: {
+            type: "object",
+            properties: {
+              deliveries: { type: "integer", example: 4 },
+              collections: { type: "integer", example: 2 },
+              overdue: {
+                type: "integer",
+                description: "Pending events whose time has already passed.",
+                example: 1,
+              },
+              active: {
+                type: "integer",
+                description: "Orders neither finished nor cancelled.",
+                example: 9,
+              },
+            },
+          },
+          month: {
+            type: "object",
+            properties: {
+              period: {
+                type: "object",
+                description: "Half-open `[from, to)`, so an order on a boundary belongs to one month.",
+                properties: {
+                  from: { type: "string", format: "date-time" },
+                  to: { type: "string", format: "date-time" },
+                },
+              },
+              revenue: schemaRef("StatComparison"),
+              orders: schemaRef("StatComparison"),
+              averageOrder: schemaRef("StatComparison"),
+              cancelled: {
+                allOf: [schemaRef("StatComparison")],
+                description:
+                  "Orders CANCELLED this month, scoped by delivery date like every figure here. " +
+                  "Excluded from `revenue`/`orders` (they are neither income nor work in progress) " +
+                  "and counted separately, because a cancellation is the one number on this screen " +
+                  "that reports work LOST rather than done.",
+              },
+            },
+          },
+          outstanding: {
+            type: "object",
+            description:
+              "Money on non-cancelled, unpaid orders, net of deposits. Clamped per order at zero — " +
+              "a deposit larger than its total is a slip and must not shrink the headline figure.",
+            properties: {
+              amount: { type: "number", example: 3150 },
+              orders: { type: "integer", example: 7 },
+            },
+          },
+          revenueTrend: {
+            type: "array",
+            description:
+              "Twelve months ending with the current (partial) one, oldest first. Months with no " +
+              "business are present as explicit zeros — a gap must read as 'nothing happened', " +
+              "never as a missing bar.",
+            items: {
+              type: "object",
+              properties: {
+                month: { type: "string", example: "2026-08" },
+                revenue: { type: "number", example: 12400 },
+                orders: { type: "integer", example: 28 },
+              },
+            },
+          },
+          topProducts: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                productId: { type: "integer", example: 3 },
+                name: { type: "string", example: "Silla Tiffany" },
+                quantity: { type: "integer", example: 240 },
+                revenue: { type: "number", example: 4800 },
+              },
+            },
+          },
+          statusSplit: {
+            type: "array",
+            description: "Live orders per lifecycle status, busiest first.",
+            items: {
+              type: "object",
+              properties: {
+                statusId: { type: "integer", example: 1 },
+                name: { type: "string", example: "Pendiente" },
+                colorKey: { type: "string", nullable: true, example: "amber" },
+                count: { type: "integer", example: 6 },
+              },
+            },
+          },
+          currency: {
+            type: "object",
+            description:
+              "The reporting currency — the newest live order's. The business is single-currency; " +
+              "if that ever changes, every total here has to become per-currency.",
+            properties: {
+              id: { type: "integer", example: 1 },
+              iso4217Code: { type: "string", example: "GTQ" },
+              name: { type: "string", example: "Quetzal Guatemalteco" },
+              symbol: { type: "string", example: "Q" },
+            },
+          },
+        },
+      },
+    },
+  },
+
   PreferencesResponse: {
     type: "object",
     properties: {
@@ -1290,6 +1509,7 @@ export const schemas: Record<string, Schema> = {
           paymentMethods: { type: "array", items: schemaRef("CatalogRow") },
           productCategories: { type: "array", items: schemaRef("CatalogRow") },
           productDetailTypes: { type: "array", items: schemaRef("CatalogRow") },
+          bankAccounts: { type: "array", items: schemaRef("CatalogRow") },
         },
       },
       municipalities: {
@@ -1322,7 +1542,14 @@ export const schemas: Record<string, Schema> = {
           required: ["key", "value"],
           properties: {
             key: { type: "string", example: "orders.turnaroundMinutes" },
-            value: { type: "integer", example: 180 },
+            value: {
+              oneOf: [{ type: "integer" }, { type: "string" }],
+              description:
+                "Must match the setting's declared `type`: an integer inside `[min, max]`, or a " +
+                "string trimmed into `[minLength, maxLength]` (and free of line breaks unless the " +
+                "setting is `multiline`).",
+              example: 180,
+            },
           },
         },
       },
@@ -1355,6 +1582,39 @@ export const schemas: Record<string, Schema> = {
         type: "integer",
         description: "`zones` only, REQUIRED there — must be an active municipality.",
         example: 4,
+      },
+      bankKey: {
+        type: "string",
+        nullable: true,
+        enum: ["banrural", "bac", null],
+        description:
+          "`bank-accounts` only. `null`/omitted/`\"\"` = \"sin logo\". Any OTHER value is rejected: " +
+          "the token's only job is to name a logo we ship, so an unknown one would save happily " +
+          "and then render nothing, with no error to explain it.",
+        example: "banrural",
+      },
+      accountType: {
+        type: "string",
+        minLength: 2,
+        maxLength: 40,
+        description: "`bank-accounts` only, REQUIRED there.",
+        example: "Monetaria",
+      },
+      accountNumber: {
+        type: "string",
+        minLength: 4,
+        maxLength: 34,
+        description:
+          "`bank-accounts` only, REQUIRED there. Sent in PLAINTEXT and encrypted the moment it is " +
+          "written (`account_number_kms`).",
+        example: "3-456-78901-2",
+      },
+      holder: {
+        type: "string",
+        minLength: 2,
+        maxLength: 120,
+        description: "`bank-accounts` only, REQUIRED there. Encrypted at rest (`holder_kms`).",
+        example: "Party Rentals GT, S.A.",
       },
     },
   },

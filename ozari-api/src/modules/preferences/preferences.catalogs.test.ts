@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
+import { encryptKms } from "@helpers/encryption.js";
 import {
+  BANK_KEYS,
   CATALOG_RESPONSE_KEYS,
   catalogByKey,
   isRowReferenced,
@@ -11,10 +13,15 @@ import {
 
 /**
  * The registry is a TABLE, so it is tested as one: every closure of every catalog is driven, rather
- * than trusting that the six entries were written alike. A copy-paste slip in one entry — the wrong
- * `where` on a delete, a missing reference check, an extra field dropped on update — is exactly the
- * bug this shape invites, and the only thing that catches it is exercising each entry.
+ * than trusting that the seven entries were written alike. A copy-paste slip in one entry — the
+ * wrong `where` on a delete, a missing reference check, an extra field dropped on update — is
+ * exactly the bug this shape invites, and the only thing that catches it is exercising each entry.
  */
+
+// Set at MODULE scope rather than in a `beforeAll`: the bank fixtures below are built while this
+// module is evaluated, which happens before any hook runs.
+process.env["ENCRYPTION_KEY"] =
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 /** A lookup row as the catalogs select it, plus whatever extras a catalog asks for. */
 const row = (id: number, extras: Record<string, unknown> = {}) => ({
@@ -25,10 +32,18 @@ const row = (id: number, extras: Record<string, unknown> = {}) => ({
   ...extras,
 });
 
-/** The extras each catalog's SELECT returns, so `find`/`create`/`update` resolve realistically. */
+/** The extras each catalog's SELECT returns, so `find`/`create`/`update` resolve realistically.
+ *  The bank account's two secrets are REAL ciphertexts, so the round trip is exercised rather than
+ *  stubbed — the encryption is the whole reason that catalog owns its own closures. */
 const EXTRAS: Partial<Record<CatalogKey, Record<string, unknown>>> = {
   "event-types": { minLeadHours: 24 },
   zones: { deliveryFee: new Prisma.Decimal("50.00"), municipalityId: 4 },
+  "bank-accounts": {
+    bankKey: "banrural",
+    accountType: "Monetaria",
+    accountNumberKms: encryptKms("3-456-78901-2"),
+    holderKms: encryptKms("Party Rentals GT, S.A."),
+  },
 };
 
 /**
@@ -68,6 +83,7 @@ function mockClient(
     paymentMethod: delegate,
     productCategory: delegate,
     productDetailType: delegate,
+    bankAccount: delegate,
     municipality: referencing,
     service: referencing,
     clientRegistry: referencing,
@@ -88,6 +104,10 @@ const body = {
   minLeadHours: 48,
   municipalityId: 4,
   deliveryFee: 75,
+  bankKey: "bac",
+  accountType: "Ahorro",
+  accountNumber: "9-876-54321-0",
+  holder: "Party Rentals GT, S.A.",
 };
 
 const CATALOG_KEYS = Object.keys(PREFERENCE_CATALOGS) as CatalogKey[];
@@ -106,6 +126,7 @@ describe("PREFERENCE_CATALOGS", () => {
       "payment-methods",
       "product-categories",
       "product-detail-types",
+      "bank-accounts",
     ]);
     for (const forbidden of [
       "user-roles",
@@ -133,6 +154,8 @@ describe("PREFERENCE_CATALOGS", () => {
     expect(PREFERENCE_CATALOGS["zones"].minimumActive).toBe(0);
     expect(PREFERENCE_CATALOGS["payment-methods"].minimumActive).toBe(0);
     expect(PREFERENCE_CATALOGS["product-detail-types"].minimumActive).toBe(0);
+    // A business that only takes cash is a real configuration.
+    expect(PREFERENCE_CATALOGS["bank-accounts"].minimumActive).toBe(0);
   });
 
   describe.each(CATALOG_KEYS)("%s", (key) => {
@@ -181,12 +204,24 @@ describe("PREFERENCE_CATALOGS", () => {
       });
     });
 
-    it("answers whether the row is referenced, and counts the active ones", async () => {
+    /** Whether anything in the system can point AT this catalog at all. A catalog that declares no
+     *  referencing relation (bank accounts) has a genuinely different contract — "never referenced,
+     *  therefore always hard-deleted" — so it is asserted below rather than run through rules about
+     *  rows being in use, which for it would only ever be vacuously false. */
+    const referencable = catalog.referencedBy.length > 0;
+
+    it("counts the active rows", async () => {
+      await expect(catalog.countActive(mockClient(key, { count: 5 }))).resolves.toBe(5);
+    });
+
+    it("answers whether the row is referenced", async () => {
       await expect(isRowReferenced(catalog, mockClient(key, { usedIds: [] }), 1)).resolves.toBe(
         false,
       );
+      // …and for a catalog nothing can point at, the answer stays false even then — which is what
+      // makes its delete unconditionally a real delete.
       await expect(isRowReferenced(catalog, mockClient(key, { usedIds: [1] }), 1)).resolves.toBe(
-        true,
+        referencable,
       );
       // A row nobody points at stays deletable even when OTHER rows are in use.
       await expect(isRowReferenced(catalog, mockClient(key, { usedIds: [4] }), 1)).resolves.toBe(
@@ -196,13 +231,14 @@ describe("PREFERENCE_CATALOGS", () => {
       await expect(isRowReferenced(catalog, mockClient(key, { usedIds: [null] }), 1)).resolves.toBe(
         false,
       );
-      await expect(catalog.countActive(mockClient(key, { count: 5 }))).resolves.toBe(5);
     });
 
     it("reads the used ids for the WHOLE catalog in one pass", async () => {
       // One `GROUP BY` per relation answers for every row — the list must never cost a query per row.
       const client = mockClient(key, { usedIds: [2, 2, null, 7] });
-      await expect(referencedIdsOf(catalog, client)).resolves.toEqual(new Set([2, 7]));
+      await expect(referencedIdsOf(catalog, client)).resolves.toEqual(
+        referencable ? new Set([2, 7]) : new Set(),
+      );
       expect(client.referencing.groupBy).toHaveBeenCalledTimes(catalog.referencedBy.length);
     });
   });
@@ -274,6 +310,79 @@ describe("catalog extras", () => {
   it("zones find a missing row as null", async () => {
     await expect(
       PREFERENCE_CATALOGS["zones"].find(mockClient("zones", { found: null }), 99),
+    ).resolves.toBeNull();
+  });
+});
+
+describe("bank accounts", () => {
+  const catalog = PREFERENCE_CATALOGS["bank-accounts"];
+
+  it("ENCRYPTS the number and the holder on the way in, and decrypts them on the way out", async () => {
+    const client = mockClient("bank-accounts");
+    await catalog.create(client, body);
+    const written = client.delegate.create.mock.calls[0]?.[0].data;
+
+    // The two secrets must not be recognisable in what reaches the database — that is the entire
+    // reason this catalog owns its own closures instead of using the shared ones.
+    expect(written.accountNumberKms).not.toContain("9-876-54321-0");
+    expect(written.holderKms).not.toContain("Party Rentals GT");
+    expect(written).not.toHaveProperty("accountNumber");
+    expect(written).not.toHaveProperty("holder");
+    // …and the ADMIN still reads the plaintext back, because that is the point of encrypting
+    // rather than hashing: these numbers get printed on a document.
+    expect((await catalog.list(client))[0]).toMatchObject({
+      bankKey: "banrural",
+      accountType: "Monetaria",
+      accountNumber: "3-456-78901-2",
+      holder: "Party Rentals GT, S.A.",
+    });
+    expect(await catalog.find(client, 1)).toMatchObject({ accountNumber: "3-456-78901-2" });
+  });
+
+  it("carries every field through the UPDATE door too", async () => {
+    const client = mockClient("bank-accounts");
+    await catalog.update(client, 1, { ...body, bankKey: null });
+    const written = client.delegate.update.mock.calls[0]?.[0].data;
+    // `null` is a real answer — "sin logo" — not a missing field, so it must be WRITTEN as null
+    // rather than left at whatever the row held before.
+    expect(written).toMatchObject({ bankKey: null, accountType: "Ahorro" });
+    expect(written.accountNumberKms).not.toContain("9-876-54321-0");
+  });
+
+  it("reads an UNDECRYPTABLE value as empty instead of failing the whole screen", async () => {
+    // A damaged ciphertext must not 500 the preferences endpoint: that is the exact screen an admin
+    // would open to repair or delete the row. Blank is recoverable; a screen that won't load isn't.
+    const client = mockClient("bank-accounts");
+    client.delegate.findMany.mockResolvedValue([
+      row(1, {
+        bankKey: null,
+        accountType: "Monetaria",
+        accountNumberKms: "not-a-real-ciphertext",
+        holderKms: encryptKms("Intacto"),
+      }),
+    ]);
+    expect((await catalog.list(client))[0]).toMatchObject({
+      accountNumber: "",
+      // The other field is untouched — one damaged column does not blank the row.
+      holder: "Intacto",
+    });
+  });
+
+  it("is referenced by NOTHING, so a delete is always a real delete", () => {
+    // Nothing holds a FK to a bank account (a generated document already carries its numbers as
+    // text), which is what makes the conditional NO-TRASH rule collapse to the hard-delete door.
+    expect(catalog.referencedBy).toEqual([]);
+  });
+
+  it("ships a bank token for every logo, and only those", () => {
+    // The token names an ASSET. Mirrored on the frontend (`bankLogos.ts`) — adding a bank means the
+    // file, this list and that one, in the same commit.
+    expect([...BANK_KEYS]).toEqual(["banrural", "bac"]);
+  });
+
+  it("finds a missing row as null", async () => {
+    await expect(
+      catalog.find(mockClient("bank-accounts", { found: null }), 99),
     ).resolves.toBeNull();
   });
 });

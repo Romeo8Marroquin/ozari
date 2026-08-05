@@ -59,7 +59,7 @@ function usePreferencesCache() {
 export function useUpdatePreferenceSettings() {
   const patch = usePreferencesCache();
   const mutation = useMutation({
-    mutationFn: (settings: { key: string; value: number }[]) =>
+    mutationFn: (settings: { key: string; value: number | string }[]) =>
       api.put<OzariSuccessResponse<PreferenceSettingsEnvelope>>(
         '/preferences/settings',
         { settings },
@@ -101,6 +101,7 @@ export const CATALOG_FIELD: Record<CatalogKey, keyof PreferencesResponse['catalo
   'payment-methods': 'paymentMethods',
   'product-categories': 'productCategories',
   'product-detail-types': 'productDetailTypes',
+  'bank-accounts': 'bankAccounts',
 };
 
 /** Rows sorted the way the API returns them: published first, then by name — so a row that was just

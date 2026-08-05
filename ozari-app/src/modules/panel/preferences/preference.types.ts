@@ -1,14 +1,31 @@
-/** One scalar setting, with the BOUNDS the API enforces so this side can enforce the same ones as
- *  the admin types. No label or help text: that is copy, and this side owns it (per key, in i18n). */
-export interface PreferenceSetting {
-  key: string;
-  type: 'int';
-  value: number;
-  min: number;
-  max: number;
-  /** Grouping token (`orders`, `evidence`) the screen lays its cards out by. */
-  group: string;
-}
+/**
+ * One scalar setting, with the BOUNDS the API enforces so this side can enforce the same ones as
+ * the admin types. No label or help text: that is copy, and this side owns it (per key, in i18n).
+ *
+ * Discriminated by `type`, mirroring the API: an `int` carries `min`/`max`, a `text` carries its
+ * length bounds and whether newlines are legal. `multiline` is a validation RULE the API also
+ * enforces — this side just happens to render the field it describes as a textarea.
+ */
+export type PreferenceSetting =
+  | {
+      key: string;
+      type: 'int';
+      value: number;
+      min: number;
+      max: number;
+      /** Grouping token (`orders`, `evidence`, `documents`) the screen lays its cards out by. */
+      group: string;
+    }
+  | {
+      key: string;
+      type: 'text';
+      value: string;
+      /** 0 ⇒ empty is a legitimate choice; ≥1 ⇒ the setting is required. */
+      minLength: number;
+      maxLength: number;
+      multiline: boolean;
+      group: string;
+    };
 
 /** A plain reference row a FORM picks from (the municipalities a zone belongs to). Not manageable
  *  here, so it carries no reference flag — there is no delete to describe. */
@@ -30,6 +47,16 @@ export interface CatalogRow extends LookupRow {
   deliveryFee?: number;
   /** Zones only. */
   municipalityId?: number;
+  /** Bank accounts only — a TOKEN naming a logo we ship, never a bank name. `null` = "sin logo",
+   *  always available, so any bank can be entered without an asset. */
+  bankKey?: string | null;
+  /** Bank accounts only — "Monetaria", "Ahorro"… */
+  accountType?: string;
+  /** Bank accounts only — decrypted server-side. This Admin-only screen is the one place it is
+   *  readable, because it is where the admin edits it. */
+  accountNumber?: string;
+  /** Bank accounts only — decrypted server-side. */
+  holder?: string;
   /**
    * Does anything already point at this row? Lets the delete confirmation state the ACTUAL outcome —
    * destroyed, or unpublished so existing records keep resolving their names — instead of hedging
@@ -52,7 +79,8 @@ export type CatalogKey =
   | 'zones'
   | 'payment-methods'
   | 'product-categories'
-  | 'product-detail-types';
+  | 'product-detail-types'
+  | 'bank-accounts';
 
 export interface PreferenceCatalogs {
   eventTypes: CatalogRow[];
@@ -61,6 +89,7 @@ export interface PreferenceCatalogs {
   paymentMethods: CatalogRow[];
   productCategories: CatalogRow[];
   productDetailTypes: CatalogRow[];
+  bankAccounts: CatalogRow[];
 }
 
 export interface PreferencesResponse {
@@ -82,6 +111,10 @@ export interface CatalogRowBody {
   minLeadHours?: number;
   deliveryFee?: number | null;
   municipalityId?: number;
+  bankKey?: string | null;
+  accountType?: string;
+  accountNumber?: string;
+  holder?: string;
 }
 
 export interface CatalogRowEnvelope {
