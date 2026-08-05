@@ -316,27 +316,11 @@ async function parseOrderBody(
     return null;
   }
 
-  // Payment method (optional — payment can be settled later): when present it must be an ACTIVE
-  // seeded method.
-  let paymentMethodId: number | undefined;
-  const rawPaymentMethodId = body["paymentMethodId"];
-  if (rawPaymentMethodId !== undefined && rawPaymentMethodId !== null) {
-    const paymentMethod =
-      typeof rawPaymentMethodId === "number" &&
-      Number.isInteger(rawPaymentMethodId) &&
-      rawPaymentMethodId >= 1
-        ? await prismaClient.paymentMethod.findFirst({
-            where: { id: rawPaymentMethodId, isActive: true },
-            select: { id: true },
-          })
-        : null;
-    if (!paymentMethod) {
-      reject("invalidPaymentMethodId", { paymentMethodId: rawPaymentMethodId });
-      return null;
-    }
-    paymentMethodId = rawPaymentMethodId as number;
-  }
-
+  // NOTE — the payment METHOD is deliberately NOT part of this body (owner decision 2026-08-05).
+  // `services.paymentMethodId` records HOW the order was actually paid, and at create/edit time that
+  // has not happened yet: asking for it here collected a prediction and stored it as a fact, and
+  // prefilling it from the client's *preferred* method stored a preference as one. It is written by
+  // exactly one door now, `POST /orders/:id/payment`, at the moment the money is observed.
   // Assignment — **REQUIRED** (Q-D2, owner decision 2026-07-30). It used to be optional, with the
   // controller defaulting it to the creating admin: an unassigned order could not happen, but was
   // still a state the code had to reason about. The logistics pad is a rule about a DRIVER's day,
@@ -377,7 +361,6 @@ async function parseOrderBody(
     comment: comment.value,
     deliveryAmount: deliveryAmount.value,
     depositAmount: depositAmount.value,
-    paymentMethodId,
     assignedUserId,
     lines,
   };

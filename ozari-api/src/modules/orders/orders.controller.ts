@@ -467,7 +467,8 @@ export const createOrder = async (
           totalAmount,
           deliveryAmount: body.deliveryAmount ?? null,
           depositAmount: body.depositAmount ?? null,
-          paymentMethodId: body.paymentMethodId ?? null,
+          // `paymentMethodId` is deliberately NOT set here: it records how the order was actually
+          // paid, which has not happened yet. It stays NULL until `POST /orders/:id/payment`.
           // Assignment: the chosen deliverable staff, REQUIRED by the validator (Q-D2) — every
           // event needs an owner, because the logistics pad is a rule about a driver's day. The
           // admin's own orders read as `isMine` on the agenda (Mis pedidos + the quick action).
@@ -578,6 +579,11 @@ export const createOrder = async (
  *
  * The lifecycle is untouched: an edit never moves the status, never stamps an actual and never
  * writes history. Where the order stands is `POST /orders/:id/advance`'s business, and only its.
+ *
+ * **PAYMENT is untouched for the same reason** — `paymentMethodId`, `paidAt` and `paymentStatusId`
+ * are never written here. This endpoint rewrites what was AGREED; what HAPPENED (a move, a payment)
+ * belongs to its own door, `POST /orders/:id/payment`. Without that boundary a declarative
+ * full-state save would erase a recorded payment every time somebody corrected an address.
  */
 export const updateOrder = async (
   req: CustomRequest,
@@ -825,7 +831,8 @@ export const updateOrder = async (
           totalAmount,
           deliveryAmount: body.deliveryAmount ?? null,
           depositAmount: body.depositAmount ?? null,
-          paymentMethodId: body.paymentMethodId ?? null,
+          // NOTE: no `paymentMethodId`/`paidAt`/`paymentStatusId` — an edit never touches PAYMENT,
+          // the same boundary it has with the lifecycle (see this function's doc comment).
           // REQUIRED (Q-D2), and the edit form always sends the order's CURRENT assignee back — so
           // saving an untouched form is not a silent reassignment, while deliberately changing the
           // picker moves the order (and re-checks the new driver's day above).

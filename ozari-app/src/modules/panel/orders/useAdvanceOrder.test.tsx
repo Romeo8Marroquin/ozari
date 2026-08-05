@@ -4,10 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { apiPost } = vi.hoisted(() => ({ apiPost: vi.fn() }));
 vi.mock('@api/client', () => ({ api: { post: apiPost } }));
 
-const { invalidateQueries } = vi.hoisted(() => ({ invalidateQueries: vi.fn() }));
+const { invalidateQueries, cancelQueries } = vi.hoisted(() => ({
+  invalidateQueries: vi.fn(),
+  cancelQueries: vi.fn(async () => undefined),
+}));
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQueryClient: () => ({ invalidateQueries }),
+  useQueryClient: () => ({ invalidateQueries, cancelQueries }),
 }));
 
 import { QueryKeys } from '@constants/QueryKeys';
@@ -37,6 +40,13 @@ describe('useAdvanceOrder', () => {
     // An advance can move a row out of the agenda and into the history — invalidate the whole key.
     await waitFor(() =>
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: [QueryKeys.ORDERS] }),
+    );
+    // The DASHBOARD's in-flight read is CANCELLED before it is invalidated: it polls, so a GET
+    // issued just before this tap could otherwise land after it and paint the pre-move queue back.
+    expect(cancelQueries).toHaveBeenCalledWith({ queryKey: [QueryKeys.DASHBOARD] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: [QueryKeys.DASHBOARD] });
+    expect(cancelQueries.mock.invocationCallOrder[0]).toBeLessThan(
+      invalidateQueries.mock.invocationCallOrder[0] ?? 0,
     );
   });
 

@@ -497,8 +497,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     setValue('deliveryZoneId', address?.zone?.id ?? null);
     const fee = address?.domicilePrice ?? address?.zone?.deliveryFee;
     setValue('deliveryAmount', fee != null ? String(fee) : '', { shouldValidate: true });
-    // Payment method: pre-select the client's preferred (null = clear to "unspecified").
-    setValue('paymentMethodId', registry.preferredPaymentMethod?.id ?? null);
+    // The client's PREFERRED payment method is deliberately not applied to the order: a preference
+    // is not a payment, and writing it here made every order claim a method nobody had used yet.
   }, [clientRegistryId, registriesById, setValue]);
 
   // Reconcile the picked lines against fresh availability (the "adjust to available + notify" rule):
@@ -750,11 +750,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   const viewRoot = useRef<HTMLDivElement>(null);
   const renderedView = useOrderViewSwap(targetView, viewRoot);
 
-  // The estimate + its currency symbol (from the first picked product; the seeded catalog is GTQ).
+  // The estimate's currency comes from the first PICKED product — never a hardcoded symbol. Before
+  // anything is picked there is no currency to name and the estimate is zero, so it renders bare
+  // rather than asserting a currency the order has not chosen yet (owner rule 2026-08-04: no view
+  // hardcodes "Q"; every amount wears the symbol of the row it came from).
   const firstPicked = lineValues
     .map((line) => (line.productId != null ? productsById.get(line.productId) : undefined))
     .find((product): product is Product => product !== undefined);
-  const currencySymbol = firstPicked?.currency.symbol ?? 'Q';
+  const currencySymbol = firstPicked?.currency.symbol ?? '';
   // Billed days for the current window (for the per-line rental math) + the money breakdown: the
   // products subtotal on its own, the delivery fee, and the total.
   const billedDays = billedDaysFromStrings(deliveryAt, anyRental ? pickupAt : '');
@@ -1260,16 +1263,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                         aria-label={t(`${KEY}.fields.depositAmountLabel`)}
                       />
                     </div>
-                    <div className="reveal-item">
-                      <CustomSelectForm<CreateOrderFormType>
-                        id="order-payment-method"
-                        name="paymentMethodId"
-                        optionalLabel
-                        label={t(`${KEY}.fields.paymentMethodLabel`)}
-                        placeholderOption={t(`${KEY}.fields.paymentMethodPlaceholder`)}
-                        options={(catalog?.paymentMethods ?? []).map((m) => ({ value: m.id, label: m.name }))}
-                      />
-                    </div>
+                    {/* The payment METHOD is deliberately absent here (owner decision 2026-08-05):
+                        it records how the order was actually PAID, and at this point nobody has paid
+                        anything. Asking now collected a guess and stored it as a fact — and, since
+                        it was prefilled from the client's *preferred* method, stored a preference as
+                        one. It is asked for exactly once, in "Registrar pago", at the moment the
+                        money is actually observed. */}
                     {/* Breakdown: products subtotal + delivery fee → total (all estimated). */}
                     <div className="reveal-item flex flex-col gap-2 rounded-control bg-charcoal/[0.03] px-4 py-3">
                       <div className="flex items-center justify-between text-sm text-charcoal/60">

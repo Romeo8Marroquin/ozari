@@ -24,6 +24,8 @@ import {
   validateAdvanceOrder,
   validateOrderEvidenceUploads,
 } from "./advance/advance.validator.js";
+import { payOrder } from "./payment/payment.controller.js";
+import { validatePayOrder } from "./payment/payment.validator.js";
 
 const router: RouterType = Router();
 
@@ -100,6 +102,19 @@ router.post(
   canAdvanceOrders,
   validateAdvanceOrder,
   advanceOrder,
+);
+
+// Region: Recording PAYMENT — **STRICTLY Admin**, and deliberately its own door rather than a step
+// of the lifecycle: payment and fulfilment are independent axes (a client may pay days before
+// delivery, at the door, or a week after collection), so folding it into the pipeline would impose
+// an ordering the business does not have. A driver reports what happened physically; money is the
+// admin's.
+router.post(
+  "/:id/payment",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  validatePayOrder,
+  payOrder,
 );
 
 export default router;

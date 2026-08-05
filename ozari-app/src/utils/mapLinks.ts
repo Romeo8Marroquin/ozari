@@ -69,17 +69,29 @@ export function buildMapsUrl(app: MapsApp, destination: MapsDestination): string
 }
 
 /**
- * The destination for an order's delivery: its pin when it has one, else its address text.
- * Returns `undefined` only when there is neither — at which point the caller must not render a
- * navigation button at all, rather than opening a maps app on an empty search.
+ * The destination for an order's delivery — **only when that ORDER has a PIN** (owner decision,
+ * 2026-08-04). `undefined` otherwise, which is the signal to render no navigation button at all.
+ *
+ * It used to fall back to searching the address TEXT, and that was worse than nothing: a walk-in
+ * address like "Test dirección" or "Salón del club, entrada norte" is not a geocodable query, so the
+ * button opened a maps app on a search that lands somewhere unrelated — or nowhere — while looking
+ * exactly as trustworthy as a real pin. Offering navigation only when we can actually navigate makes
+ * the button's presence itself the information.
+ *
+ * The pin read here is the ORDER's snapshot, never the client's current one: a saved address may
+ * have been re-pinned or deleted since, and a past delivery must keep the coordinates it was
+ * actually given. An order pinned directly (with the client's address left unpinned) therefore still
+ * gets the button — which is exactly the intent.
+ *
+ * `address` remains the human LABEL carried alongside the pin, so the maps app shows a name rather
+ * than a bare coordinate.
  */
 export function orderDestination(
   address: string | undefined,
   coords: Coords | undefined,
 ): MapsDestination | undefined {
-  if (coords) {
-    return { kind: 'coords', coords, ...(address !== undefined && { label: address }) };
+  if (!coords) {
+    return undefined;
   }
-  const query = address?.trim();
-  return query ? { kind: 'query', query } : undefined;
+  return { kind: 'coords', coords, ...(address !== undefined && { label: address }) };
 }

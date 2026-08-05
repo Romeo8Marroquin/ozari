@@ -30,6 +30,19 @@ vi.mock('../pageMotion', async (importOriginal) => ({
 
 // The three dialogs have their own suites; here they stand in as markers so the PAGE's job —
 // deciding which action opens which one — is what's asserted.
+// The payment dialog has its own suite (and its own query client); the page only has to open it.
+vi.mock('./OrderPaymentModal', () => ({
+  default: ({ order, onClose }: { order?: { id: number }; onClose: () => void }) =>
+    order ? (
+      <div data-testid="payment-modal">
+        {order.id}
+        <button type="button" onClick={onClose}>
+          cerrar-pago
+        </button>
+      </div>
+    ) : null,
+}));
+
 vi.mock('./OrderAdvanceModal', () => ({
   default: ({ action, onClose }: { action?: { statusName: string }; onClose: () => void }) =>
     action ? (
@@ -225,28 +238,104 @@ describe('OrderDetailPage', () => {
     expect(screen.queryByTestId('advance-modal')).not.toBeInTheDocument();
   });
 
-  it('offers navigation only on a step somebody actually DRIVES to', async () => {
-    // The condition is the machine's own `tracksEvent`, never a status id: on a travel step the
-    // button appears beside the advance action; on paperwork steps it would be noise.
-    setOrder({ data: order({ actions: [action({ kind: 'forward' })] }) });
+  const PIN = { lat: 14.634915, lng: -90.506883 };
+
+  it('offers navigation while there is still a TRIP to make, not only on the arrival step', async () => {
+    // Gating on the machine's `tracksEvent` hid the button through "En ruta" — the exact moment the
+    // driver is leaving — because that flag marks the step which CONFIRMS arrival (Entregado).
+    setOrder({
+      data: order({ deliveryCoords: PIN, actions: [action({ kind: 'forward' })] }),
+    });
     const { unmount } = renderPage();
-    expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
+    expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
     unmount();
 
+    // Delivered, with the collection still ahead ⇒ there IS still a trip.
+    setOrder({
+      data: order({
+        deliveryCoords: PIN,
+        deliveredAt: '2026-08-01T14:10:00.000Z',
+        actions: [action({ kind: 'forward' })],
+      }),
+    });
+    const second = renderPage();
+    expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
+    second.unmount();
+
+    // Delivered on a purchase-only order (no pickup) ⇒ nothing left to drive to.
+    setOrder({
+      data: order({
+        deliveryCoords: PIN,
+        pickupAt: undefined,
+        deliveredAt: '2026-08-01T14:10:00.000Z',
+        actions: [],
+      }),
+    });
+    const third = renderPage();
+    expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
+    third.unmount();
+
+    // Cancelled ⇒ nothing will be performed at all.
+    setOrder({
+      data: order({ deliveryCoords: PIN, cancelledAt: '2026-08-01T09:00:00.000Z', actions: [] }),
+    });
+    renderPage();
+    expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
+  });
+
+  it('states whether the order has a PIN, so a saved one is never invisible', () => {
+    setOrder({ data: order({ deliveryCoords: PIN }) });
+    const { unmount } = renderPage();
+    expect(screen.getByText('14.634915, -90.506883')).toBeInTheDocument();
+    unmount();
+
+    setOrder({ data: order() });
+    renderPage();
+    expect(screen.getByText(`${KEY}.client.noCoords`)).toBeInTheDocument();
+  });
+
+  it('offers navigation ONLY when the order has a real pin, never from address text alone', () => {
+    // An address like "Zona 10, 4a avenida 5-55" is not reliably geocodable, so a button built on it
+    // opens a maps app somewhere unrelated while looking exactly as trustworthy as a pin.
     setOrder({
       data: order({ actions: [action({ kind: 'forward', tracksEvent: 'DELIVERY' })] }),
     });
     renderPage();
-    expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
+    expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
   });
 
   it('offers navigation to a DRIVER too — it is their button more than the admin’s', () => {
     useHasRole.mockReturnValue(false);
     setOrder({
-      data: order({ actions: [action({ kind: 'forward', tracksEvent: 'COLLECTION' })] }),
+      data: order({
+        deliveryCoords: PIN,
+        actions: [action({ kind: 'forward', tracksEvent: 'COLLECTION' })],
+      }),
     });
     renderPage();
     expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
+  });
+
+  it('offers "registrar pago" to an admin while unpaid, and opens the shared dialog', async () => {
+    setOrder({ data: order({ isPaid: false }) });
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.pay` }));
+    expect(screen.getByTestId('payment-modal')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'cerrar-pago' }));
+    expect(screen.queryByTestId('payment-modal')).not.toBeInTheDocument();
+  });
+
+  it('drops the payment action once the money is in, and never offers it to a non-admin', () => {
+    setOrder({ data: order({ isPaid: true }) });
+    const { unmount } = renderPage();
+    expect(screen.queryByRole('button', { name: `${KEY}.actions.pay` })).not.toBeInTheDocument();
+    unmount();
+
+    useHasRole.mockReturnValue(false);
+    setOrder({ data: order({ isPaid: false }) });
+    renderPage();
+    expect(screen.queryByRole('button', { name: `${KEY}.actions.pay` })).not.toBeInTheDocument();
   });
 
   it('gives a NON-admin no admin powers: no status control, no delete', () => {

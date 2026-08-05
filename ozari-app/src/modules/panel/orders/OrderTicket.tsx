@@ -1,6 +1,9 @@
-import { useTranslation } from 'react-i18next';
-import { HiOutlineArrowRight } from 'react-icons/hi2';
+﻿import { useTranslation } from 'react-i18next';
+import { HiOutlineArrowRight, HiOutlineBanknotes } from 'react-icons/hi2';
+import Button from '@components/Button';
 import MorphSwap from '@components/MorphSwap';
+import OpenInMapsButton from '@components/OpenInMapsButton';
+import { orderDestination } from '@utils/mapLinks';
 import useBreakpoint from '@hooks/useBreakpoint';
 import { formatShortDate, formatTime, isSameLocalDay } from './orderDayGroups';
 import { statusTone } from './statusTone';
@@ -8,6 +11,7 @@ import useOrderLifecycle from './useOrderLifecycle';
 import type { OrderAction, OrderListItem } from './order.types';
 
 const KEY = 'modules.panel.orders.ticket';
+const SECONDARY_COLOR = '#262626';
 
 // The card shows an order's TWO logistics events (delivery + pickup — never a history); the NEXT one
 // is emphasised (label + time), the other muted, so it reads "what's next" at a glance.
@@ -66,7 +70,10 @@ const OrderTicket: React.FC<{
   onOpen?: (order: OrderListItem) => void;
   /** Opens the confirm dialog for the offered forward move. Absent ⇒ the button stays inert. */
   onAdvance?: (order: OrderListItem, action: OrderAction) => void;
-}> = ({ order, onOpen, onAdvance }) => {
+  /** Opens the payment dialog. Absent ⇒ the action isn't offered at all (a Driver's agenda: money
+   *  is the admin's, a driver reports what happened physically). */
+  onPay?: (order: OrderListItem) => void;
+}> = ({ order, onOpen, onAdvance, onPay }) => {
   const { t } = useTranslation();
   const { isMobile } = useBreakpoint();
   // Compact (stacked) layout only on portrait phones (< sm); a landscape phone has room for the rail.
@@ -91,6 +98,13 @@ const OrderTicket: React.FC<{
   //   · delivered, pickup still pending  → the PICKUP is what's next;
   //   · collected / finished / cancelled → nothing is pending, so nothing is emphasised.
   const settled = order.readyAt !== undefined || order.cancelledAt !== undefined;
+  // Navigation is offered on the SAME rule as the detail and the dashboard: the order still has a
+  // trip to make, and it carries a pin. Derived from the tracked ACTUALS, never a status id.
+  const hasPendingTrip =
+    !settled &&
+    (order.deliveredAt === undefined ||
+      (order.pickupAt !== undefined && order.collectedAt === undefined));
+  const destination = orderDestination(undefined, order.deliveryCoords);
   const deliveryIsNext = !settled && order.deliveredAt === undefined;
   const pickupIsNext =
     !settled &&
@@ -157,28 +171,68 @@ const OrderTicket: React.FC<{
   // offers an Admin the full set on every order (advance, rewind, cancel) — but a scanning agenda is
   // not where you rewind or cancel someone's order; those belong to the order DETAIL (owner decision
   // 2026-07-27). So the ticket deliberately narrows the offer to `isMine` + `forward`.
+  // Both actions are the SAME component at the SAME size — the only way two buttons in a row are
+  // guaranteed to share a height. `xs` is the deliberate SUMMARY size: shorter than a page action,
+  // identical to its neighbour. `stopPropagation` keeps either from ALSO opening the detail behind.
   const quickAction = order.isMine && forward !== undefined && (
-    <button
-        type="button"
-        // The whole tap: the page opens the confirm dialog for THIS offered move (which decides for
-        // itself whether it needs photos or a reason). No lifecycle rule is re-derived here.
-        // `stopPropagation` keeps it from ALSO opening the detail — the card behind it is a link.
-        onClick={(event) => {
-          event.stopPropagation();
-          onAdvance?.(order, forward);
-        }}
-        aria-label={t(`${KEY}.nextStepAria`, {
-          step: t(`${KEY}.nextStep`, { status: forward.statusName }),
-        })}
-        // The button sizes itself to the morphing label, so it widens/narrows with the next step's
-        // name instead of snapping between two widths.
-        className="inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-control bg-charcoal px-3.5 py-1.5 text-xs font-semibold text-white outline-none transition-[background-color,scale] duration-200 hover:bg-charcoal/90 active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-charcoal/40 motion-reduce:transition-none"
-      >
-        <MorphSwap swapKey={forward.statusId}>
-          {t(`${KEY}.nextStep`, { status: forward.statusName })}
-        </MorphSwap>
-        <HiOutlineArrowRight aria-hidden className="size-3.5" />
-      </button>
+    <Button
+      size="xs"
+      color={SECONDARY_COLOR}
+      onClick={(event) => {
+        event.stopPropagation();
+        onAdvance?.(order, forward);
+      }}
+      aria-label={t(`${KEY}.nextStepAria`, {
+        step: t(`${KEY}.nextStep`, { status: forward.statusName }),
+      })}
+      endIcon={<HiOutlineArrowRight aria-hidden className="size-3.5" />}
+      className="font-semibold"
+    >
+      {/* The button sizes itself to the morphing label, so it widens/narrows with the next step's
+          name instead of snapping between two widths. */}
+      <MorphSwap swapKey={forward.statusId}>
+        {t(`${KEY}.nextStep`, { status: forward.statusName })}
+      </MorphSwap>
+    </Button>
+  );
+
+  // Money is its OWN axis, not a lifecycle step — so it gets its own affordance, ICON-ONLY on a
+  // scannable row where the one full label belongs to the step that moves the job forward. Offered
+  // on any unpaid order (not just `isMine`): collecting is the admin's job wherever they see it.
+  const payAction = onPay !== undefined && !order.isPaid && (
+    <Button
+      size="xs"
+      variant="soft"
+      color={SECONDARY_COLOR}
+      onClick={(event) => {
+        event.stopPropagation();
+        onPay(order);
+      }}
+      aria-label={t(`${KEY}.payAria`, { client: order.clientName })}
+      title={t(`${KEY}.pay`)}
+      startIcon={<HiOutlineBanknotes aria-hidden className="size-4" />}
+    />
+  );
+
+  // Navigation, offered on exactly the same rule as everywhere else: the order has a PIN and still
+  // has a trip to make. Icon-only for the same reason the payment action is — a scannable row has
+  // room for one full label, and it belongs to the step that moves the job forward.
+  const mapsAction = destination && hasPendingTrip && (
+    <span
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+      role="presentation"
+    >
+      <OpenInMapsButton destination={destination} size="xs" iconOnly />
+    </span>
+  );
+
+  const actions = (quickAction || payAction || mapsAction) && (
+    <div className="flex items-center gap-2">
+      {mapsAction}
+      {payAction}
+      {quickAction}
+    </div>
   );
 
   return (
@@ -234,7 +288,7 @@ const OrderTicket: React.FC<{
             {amount}
           </div>
           {/* On a phone the action earns its own full row — it's the primary tap, thumb-reachable. */}
-          {quickAction && <div className="flex justify-end">{quickAction}</div>}
+          {actions && <div className="flex justify-end">{actions}</div>}
         </>
       ) : (
         // Roomy rail layout: times | who | status + total + action. The action lives INSIDE the right
@@ -255,7 +309,7 @@ const OrderTicket: React.FC<{
           <div className="flex shrink-0 flex-col items-end justify-center gap-2">
             {statusChip}
             {amount}
-            {quickAction}
+            {actions}
           </div>
         </div>
       )}
@@ -264,3 +318,4 @@ const OrderTicket: React.FC<{
 };
 
 export default OrderTicket;
+

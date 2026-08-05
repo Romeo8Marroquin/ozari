@@ -340,6 +340,19 @@ export function projectOrderListItem(
     // promising that deleting it "returns units to inventory" would simply be false.
     holdsInventory: holdings.rental || holdings.sale,
     paymentStatus: order.paymentStatus,
+    // Is the money in? Derived from the ACTUAL (`paidAt`), not from a status id — the same stance
+    // the lifecycle takes. It exists so the client can offer "Registrar pago" from a FACT instead of
+    // comparing a lookup id, which is exactly how a dialog ends up guessing.
+    isPaid: order.paidAt !== null,
+    // The delivery PIN — the one delivery snapshot the lean list carries, so the agenda can offer
+    // navigation on the same rule as the detail and the dashboard. The address TEXT deliberately
+    // stays off the list (it is the PII-heavier half, and the detail is where it belongs); a maps
+    // link works without it, opening on the coordinates rather than on a labelled place.
+    // Same truthiness guard + total decode as the detail projection: an absent or unreadable pin
+    // projects as "no pin" rather than reaching `decryptKms` or rendering a NaN.
+    deliveryCoords: order.deliveryCoordsKms
+      ? decodeCoords(decryptKms(order.deliveryCoordsKms))
+      : undefined,
     deliveryAt: order.deliveryAt,
     pickupAt: order.pickupAt ?? undefined,
     deliveredAt: order.deliveredAt ?? undefined,

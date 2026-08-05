@@ -52,6 +52,19 @@ vi.mock('../pageMotion', async (importOriginal) => ({
 
 // The confirm dialog owns the mutation + upload hooks (its own suite covers them); here it stands in
 // as a marker so the page's job — handing the TAPPED action to it — is what's asserted.
+// The payment dialog has its own suite (and its own query client); the page only has to open it.
+vi.mock('./OrderPaymentModal', () => ({
+  default: ({ order, onClose }: { order?: { id: number }; onClose: () => void }) =>
+    order ? (
+      <div data-testid="payment-modal">
+        {order.id}
+        <button type="button" onClick={onClose}>
+          cerrar-pago
+        </button>
+      </div>
+    ) : null,
+}));
+
 vi.mock('./OrderAdvanceModal', () => ({
   default: ({
     order,
@@ -100,6 +113,7 @@ const order = (
   id,
   clientName: name,
   isRegistryClient: false,
+  isPaid: false,
   eventType: { id: 1, name: 'Evento familiar' },
   status: { id: 1, name: 'Pendiente' },
   paymentStatus: { id: 1, name: 'Pendiente' },
@@ -322,6 +336,29 @@ describe('OrdersPage', () => {
     // …and dismissing it clears the pending move (the next tap starts clean).
     await userEvent.click(screen.getByRole('button', { name: 'cerrar' }));
     expect(screen.queryByTestId('advance-modal')).not.toBeInTheDocument();
+  });
+
+  it('offers "registrar pago" on an unpaid ticket and opens the shared dialog', async () => {
+    setOrders({ data: paginated([order(1, todayAt(9), 'Cliente 1', { isPaid: false })]) });
+    render(<OrdersPage />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /modules\.panel\.orders\.ticket\.payAria/ }),
+    );
+    expect(screen.getByTestId('payment-modal')).toHaveTextContent('1');
+
+    await userEvent.click(screen.getByRole('button', { name: 'cerrar-pago' }));
+    expect(screen.queryByTestId('payment-modal')).not.toBeInTheDocument();
+  });
+
+  it('drops the payment action once the money is in', async () => {
+    setOrders({ data: paginated([order(1, todayAt(9), 'Cliente 1', { isPaid: true })]) });
+    render(<OrdersPage />);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(
+      screen.queryByRole('button', { name: /modules\.panel\.orders\.ticket\.payAria/ }),
+    ).not.toBeInTheDocument();
   });
 
   it('opens an order through the PANEL transition, not a raw jump', async () => {

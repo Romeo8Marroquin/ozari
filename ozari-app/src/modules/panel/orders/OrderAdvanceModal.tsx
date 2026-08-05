@@ -16,6 +16,8 @@ import { useOrderEvidenceUploads } from './useOrderEvidenceUploads';
 
 const KEY = 'modules.panel.orders.advance';
 const SECONDARY_COLOR = '#262626';
+/** The same red the delete dialogs use — reserved for actions that destroy work. */
+const DANGER_COLOR = '#dc2626';
 
 interface OrderAdvanceModalProps {
   /** The order being moved, and the move — both absent while the dialog is closed. */
@@ -210,7 +212,10 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({
           {/* The confirm repeats the instruction rather than saying "Confirmar", so the last thing
               read before the tap is the action itself. */}
           <Button
-            color={SECONDARY_COLOR}
+            // A DISRUPTIVE move (cancelling an order) wears the danger colour, exactly like the
+            // delete dialogs: charcoal is the app's "proceed" colour, and using it for the one
+            // action here that destroys work made a cancel look like any other step.
+            color={pendingAction?.kind === 'disruptive' ? DANGER_COLOR : SECONDARY_COLOR}
             fullWidth
             loading={busy}
             disabled={!enoughEvidence || !enoughReason}

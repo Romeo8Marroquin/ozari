@@ -42,6 +42,16 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: './src/test/setup.ts',
+    // Vitest's 5s default is a poor fit for this suite and was producing FALSE failures: the heavy
+    // form tests (`OrderForm`, `ClientRegistryModal`) type through dozens of fields, and when the
+    // machine is busy — a dev server, a parallel API run, anything else on the box — they cross 5s
+    // while still passing. That was being patched test-by-test with an explicit `}, 20000)`, which
+    // is noise that has to be remembered on every new test and gets forgotten until CI goes red.
+    //
+    // A generous global default does NOT hide real failures: a genuinely hung test still fails, it
+    // just takes longer to say so. Individual tests may still tighten this when the duration IS the
+    // assertion.
+    testTimeout: 20_000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'text-summary', 'html'],

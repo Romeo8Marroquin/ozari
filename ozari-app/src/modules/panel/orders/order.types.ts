@@ -85,6 +85,12 @@ export interface OrderListItem {
    *  of hedging — a finished or cancelled order gave its goods back long ago. */
   holdsInventory: boolean;
   paymentStatus: OrderLookup;
+  /** Is the money in? Derived server-side from `paidAt`, never from a payment-status id — the
+   *  "Registrar pago" action appears from THIS, so it can never disagree with the record. */
+  isPaid: boolean;
+  /** The delivery PIN — the one delivery snapshot the lean list carries, so the agenda offers
+   *  navigation on the same rule as the detail. The address TEXT lives on the detail only. */
+  deliveryCoords?: Coords;
   deliveryAt: string;
   pickupAt?: string;
   deliveredAt?: string;

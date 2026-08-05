@@ -43,7 +43,6 @@ const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFor
   comment: '',
   deliveryAmount: '',
   depositAmount: '',
-  paymentMethodId: null,
   assignedUserId: 2,
   lines: [{ productId: 3, quantity: '25', isRental: true }],
   ...overrides,
@@ -220,9 +219,10 @@ describe('toCreateOrderBody', () => {
     expect(body.comment).toBe('llamar al llegar');
   });
 
-  it('includes the payment method when chosen and omits it otherwise', () => {
-    expect(toCreateOrderBody(validForm({ paymentMethodId: 2 })).paymentMethodId).toBe(2);
-    expect(toCreateOrderBody(validForm({ paymentMethodId: null })).paymentMethodId).toBeUndefined();
+  it('never carries a payment METHOD — that is recorded when the money arrives', () => {
+    // `services.paymentMethodId` says how the order was actually PAID, which has not happened while
+    // the form is open. It is collected once, by "Registrar pago" (owner decision 2026-08-05).
+    expect(toCreateOrderBody(validForm())).not.toHaveProperty('paymentMethodId');
   });
 
   it('omits empty optional text/money fields', () => {
@@ -236,7 +236,7 @@ describe('toCreateOrderBody', () => {
   it('has sane defaults', () => {
     expect(createOrderDefaultValues.lines).toEqual([]);
     expect(createOrderDefaultValues.deliveryAt).toBe('');
-    expect(createOrderDefaultValues.paymentMethodId).toBeNull();
+    expect(createOrderDefaultValues).not.toHaveProperty('paymentMethodId');
   });
 });
 
@@ -461,7 +461,6 @@ describe('orderToFormValues', () => {
       deliveryAddress: 'Zona 10, 4a avenida 5-55',
       deliveryAmount: 50,
       depositAmount: 100,
-      paymentMethodId: 2,
       assignedUserId: 5,
       lines: [
         { productId: 3, quantity: 25 },
@@ -488,7 +487,9 @@ describe('orderToFormValues', () => {
     expect(values.comment).toBe('');
     expect(values.deliveryAmount).toBe('');
     expect(values.depositAmount).toBe('');
-    expect(values.paymentMethodId).toBeNull();
+    // Reopening an order never restores a payment method into the FORM: an edit cannot change how
+    // the order was paid, so the field does not exist here at all.
+    expect(values).not.toHaveProperty('paymentMethodId');
     // A purchase-only order sends no pickup at all (the mode rule, mirrored).
     expect(toCreateOrderBody(values).pickupAt).toBeUndefined();
   });
