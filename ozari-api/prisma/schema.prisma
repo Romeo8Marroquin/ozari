@@ -805,3 +805,33 @@ model AppPreference {
 
   @@map("app_preferences")
 }
+
+// A bank account the business asks clients to deposit into — the footer of every quote and order
+// document (EPIC-2-DOCUMENTS §6). An admin-managed CATALOG, so it wears the usual
+// name/description/is_active shape, with two differences that are the whole point of the model:
+//
+//  - **The number and the holder are ENCRYPTED at rest** (`*_kms`, the repo-wide PII pattern).
+//    They are *semi*-public by nature — they get printed on a document handed to a client — so the
+//    requirement was never secrecy, it was "not in the repo, not in an env var, not readable by an
+//    anonymous visitor". Encrypted columns behind the Admin-only `/preferences` is exactly that,
+//    and unlike an env var the admin can change an account without a redeploy.
+//  - **`bankKey` is a TOKEN, not a name** (`banrural`, `bac`, or null): it selects the logo the
+//    document renders. Null = "sin logo", always available, so any bank can be entered without us
+//    shipping an asset for it.
+//
+// NO-TRASH: nothing holds a FK to a bank account (a generated document already carries its text),
+// so these ALWAYS hard-delete.
+model BankAccount {
+  id               Int       @id @default(autoincrement())
+  name             String
+  description      String?
+  bankKey          String?   @map("bank_key")
+  accountType      String    @map("account_type")
+  accountNumberKms String    @map("account_number_kms")
+  holderKms        String    @map("holder_kms")
+  isActive         Boolean   @default(true) @map("is_active")
+  updatedAt        DateTime? @updatedAt @map("updated_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@map("bank_accounts")
+}

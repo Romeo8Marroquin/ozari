@@ -38,6 +38,7 @@ const payload = (): PreferencesResponse => ({
     paymentMethods: [],
     productCategories: [],
     productDetailTypes: [],
+    bankAccounts: [],
   },
   municipalities: [{ id: 4, name: 'Mixco', isActive: true }],
 });
@@ -165,6 +166,7 @@ describe('useCatalogRowMutations', () => {
       'payment-methods': 'paymentMethods',
       'product-categories': 'productCategories',
       'product-detail-types': 'productDetailTypes',
+      'bank-accounts': 'bankAccounts',
     });
   });
 

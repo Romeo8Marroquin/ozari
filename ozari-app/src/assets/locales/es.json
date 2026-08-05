@@ -353,7 +353,7 @@
       },
       "preferences": {
         "title": "Preferencias del sistema",
-        "lead": "Reglas y catálogos que aplican a todo el negocio: los tiempos de la logística, la evidencia de cada paso y las listas que alimentan los formularios.",
+        "lead": "Reglas y catálogos que aplican a todo el negocio: los tiempos de la logística, la evidencia de cada paso, las listas que alimentan los formularios y los datos que llevan tus documentos.",
         "loading": "Cargando las preferencias",
         "error": {
           "title": "No fue posible cargar las preferencias",
@@ -364,7 +364,8 @@
           "label": "Grupos de preferencias",
           "operation": "Operación",
           "orders": "Pedidos",
-          "products": "Productos"
+          "products": "Productos",
+          "documents": "Documentos"
         },
         "groups": {
           "orders": {
@@ -374,6 +375,10 @@
           "evidence": {
             "title": "Evidencia",
             "description": "Cuántas fotos solicita cada paso que las requiere, y por cuánto tiempo se conservan."
+          },
+          "documents": {
+            "title": "Membrete",
+            "description": "Los datos del negocio que encabezan y cierran cada cotización y comprobante. Se imprimen tal como los escribas aquí."
           }
         },
         "settings": {
@@ -381,6 +386,9 @@
           "integerError": "El valor debe ser un número entero.",
           "rangeError": "El valor debe estar entre {{min}} y {{max}}.",
           "invertedError": "El máximo de fotos no puede ser menor que el mínimo.",
+          "requiredError": "Este campo es obligatorio.",
+          "lengthError": "El texto no puede exceder {{max}} caracteres.",
+          "singleLineError": "Este campo debe ocupar una sola línea.",
           "logisticsSpacingMinutes": {
             "label": "Minutos entre eventos",
             "help": "Margen mínimo entre dos eventos (entrega o recolección) del mismo responsable, incluidos los de un mismo pedido. Dos responsables distintos sí pueden coincidir en el mismo horario."
@@ -400,6 +408,22 @@
           "evidenceRetentionMonths": {
             "label": "Meses de retención",
             "help": "Antigüedad a partir de la cual pueden depurarse las fotos de pedidos terminados. Los pedidos y su historial se conservan siempre."
+          },
+          "businessName": {
+            "label": "Nombre del negocio",
+            "help": "Encabeza cada documento. Es lo primero que lee el cliente, así que conviene el nombre con el que te conocen."
+          },
+          "businessPhone": {
+            "label": "Teléfono de contacto",
+            "help": "Aparece al pie de cada documento. Puedes dejarlo vacío si prefieres que te contacten por otro medio."
+          },
+          "terms": {
+            "label": "Términos y condiciones",
+            "help": "Se imprimen al pie de la última página. Aquí van las condiciones de daños, la política de envío y cualquier otra nota que deba quedar por escrito."
+          },
+          "quoteValidityDays": {
+            "label": "Vigencia de la cotización",
+            "help": "Días que declara válidos una cotización. No caduca sola: es lo que se le informa al cliente."
           }
         },
         "catalogs": {
@@ -426,7 +450,15 @@
           "productDetailTypes": {
             "title": "Tipos de detalle",
             "description": "Las características que puede llevar un producto: color, material…"
+          },
+          "bankAccounts": {
+            "title": "Cuentas bancarias",
+            "description": "Las cuentas a las que puede depositar un cliente. Se imprimen al pie de los documentos y se guardan cifradas: solo tú puedes verlas desde esta pantalla."
           }
+        },
+        "banks": {
+          "banrural": "Banrural",
+          "bac": "BAC Credomatic"
         },
         "actions": {
           "add": "Agregar",
@@ -438,7 +470,8 @@
           "inactive": "Inactivo",
           "leadHours": "{{count}} h de antelación",
           "fee": "Q {{amount}}",
-          "noFee": "Sin tarifa"
+          "noFee": "Sin tarifa",
+          "account": "{{type}} ••{{tail}}"
         },
         "rowForm": {
           "name": "Nombre",
@@ -448,6 +481,12 @@
           "municipalityPlaceholder": "Selecciona un municipio",
           "fee": "Costo de envío",
           "feePlaceholder": "Sin configurar",
+          "bank": "Banco",
+          "bankNone": "Sin logo",
+          "accountType": "Tipo de cuenta",
+          "accountTypePlaceholder": "Monetaria, ahorro…",
+          "accountNumber": "Número de cuenta",
+          "holder": "A nombre de",
           "active": "Activo",
           "save": "Guardar",
           "cancel": "Cancelar",
@@ -455,7 +494,8 @@
           "descriptionError": "La nota no puede exceder {{max}} caracteres.",
           "leadError": "Indica un número entero de horas.",
           "feeError": "Indica un monto válido, o deja el campo vacío.",
-          "municipalityError": "Selecciona el municipio de la zona."
+          "municipalityError": "Selecciona el municipio de la zona.",
+          "bankTextError": "Este campo debe tener entre {{min}} y {{max}} caracteres."
         },
         "deleteRow": {
           "dismiss": "Volver",

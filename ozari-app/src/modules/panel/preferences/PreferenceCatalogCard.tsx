@@ -208,6 +208,16 @@ const PreferenceCatalogCard: React.FC<PreferenceCatalogCardProps> = ({
     if (row.deliveryFee !== undefined) {
       return t(`${KEY}.badges.fee`, { amount: row.deliveryFee.toFixed(2) });
     }
+    // An account is identified by its TYPE and its last four digits, never the whole number: the
+    // list is a scannable overview an admin may have on screen with someone else in the room, and
+    // the tail is already enough to tell two accounts at the same bank apart. The full number is
+    // one click away in the editor, which is where it is actually needed.
+    if (catalog === 'bank-accounts') {
+      const tail = (row.accountNumber ?? '').replace(/\D/g, '').slice(-4);
+      return tail === ''
+        ? row.accountType
+        : t(`${KEY}.badges.account`, { type: row.accountType, tail });
+    }
     // A zone with no configured fee says so, rather than reading as free.
     return catalog === 'zones' ? t(`${KEY}.badges.noFee`) : undefined;
   };

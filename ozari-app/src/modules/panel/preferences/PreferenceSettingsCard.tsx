@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import AnimatedMessage from '@components/AnimatedMessage';
 import Button from '@components/Button';
 import CustomInput from '@components/CustomInput';
+import CustomTextarea from '@components/CustomTextarea';
 import { notify } from '@components/notifications/notify';
 import { toFormError } from '@utils/apiError';
 import { useUpdatePreferenceSettings } from './usePreferences';
@@ -61,8 +62,20 @@ const PreferenceSettingsCard: React.FC<PreferenceSettingsCardProps> = ({ setting
     text: edits[setting.key] ?? String(setting.value),
   }));
 
+  /** The same bounds the API enforces, checked as the admin types. A text setting is checked
+   *  against its OWN constraints — length, and whether a line break is legal — because reporting
+   *  "debe ser un número entero" for a terms block would be nonsense. */
   const errorFor = ({ setting, text }: SettingField): string | undefined => {
     const raw = text.trim();
+    if (setting.type === 'text') {
+      if (raw.length < setting.minLength) return t(`${KEY}.settings.requiredError`);
+      if (raw.length > setting.maxLength) {
+        return t(`${KEY}.settings.lengthError`, { max: setting.maxLength });
+      }
+      return !setting.multiline && /[\r\n]/.test(raw)
+        ? t(`${KEY}.settings.singleLineError`)
+        : undefined;
+    }
     if (!/^\d+$/.test(raw)) return t(`${KEY}.settings.integerError`);
     const value = Number(raw);
     return value < setting.min || value > setting.max
@@ -89,7 +102,12 @@ const PreferenceSettingsCard: React.FC<PreferenceSettingsCardProps> = ({ setting
     setTouched(true);
     if (blocking !== undefined || isPending || !dirty) return;
     updateSettings(
-      fields.map((field) => ({ key: field.setting.key, value: Number(field.text) })),
+      fields.map((field) => ({
+        key: field.setting.key,
+        // The wire type follows the setting's own type — sending "15" for an integer setting would
+        // be rejected by the same validator that rejects 15 for a text one.
+        value: field.setting.type === 'text' ? field.text.trim() : Number(field.text),
+      })),
       {
         onSuccess: () => notify.success(t(`${KEY}.toasts.settingsSaved`)),
         onError: (error) => {
@@ -115,23 +133,51 @@ const PreferenceSettingsCard: React.FC<PreferenceSettingsCardProps> = ({ setting
         {fields.map((field) => {
           const { setting } = field;
           const leaf = settingLeaf(setting.key);
+          const label = t(`${KEY}.settings.${leaf}.label`);
+          const invalid = touched && errorFor(field) !== undefined;
+          const change = (value: string): void =>
+            setEdits((current) => ({ ...current, [setting.key]: value }));
+          const multiline = setting.type === 'text' && setting.multiline;
           return (
-            <div key={setting.key} className="card-item flex min-w-0 flex-col gap-1">
-              <CustomInput
-                id={`preference-${leaf}`}
-                type="number"
-                inputMode="numeric"
-                min={setting.min}
-                max={setting.max}
-                label={t(`${KEY}.settings.${leaf}.label`)}
-                aria-label={t(`${KEY}.settings.${leaf}.label`)}
-                value={field.text}
-                disabled={isPending}
-                error={touched && errorFor(field) !== undefined}
-                onChange={(event) =>
-                  setEdits((current) => ({ ...current, [setting.key]: event.target.value }))
-                }
-              />
+            // A multiline setting takes the FULL row: a paragraph squeezed into half a grid column
+            // wraps every few words, which makes it unreadable exactly where reading it matters.
+            <div
+              key={setting.key}
+              className={`card-item flex min-w-0 flex-col gap-1 ${multiline ? 'sm:col-span-2' : ''}`}
+            >
+              {setting.type === 'text' ? (
+                <CustomTextarea
+                  id={`preference-${leaf}`}
+                  label={label}
+                  aria-label={label}
+                  // Single-line texts still get a textarea rather than an input so the whole group
+                  // shares one field language; `autoGrow` keeps a one-line value one line tall, and
+                  // the resolver is what forbids the newline — never a silently different control.
+                  //
+                  // Deliberately NO `maxLength`: a native cap silently swallows the tail of a pasted
+                  // block with no explanation, which reads as the app eating text. The mirrored
+                  // resolver says so in words instead — the same stance the row editor's note takes.
+                  autoGrow
+                  value={field.text}
+                  disabled={isPending}
+                  error={invalid}
+                  onChange={(event) => change(event.target.value)}
+                />
+              ) : (
+                <CustomInput
+                  id={`preference-${leaf}`}
+                  type="number"
+                  inputMode="numeric"
+                  min={setting.min}
+                  max={setting.max}
+                  label={label}
+                  aria-label={label}
+                  value={field.text}
+                  disabled={isPending}
+                  error={invalid}
+                  onChange={(event) => change(event.target.value)}
+                />
+              )}
               <p className="text-xs leading-relaxed text-charcoal/50">
                 {t(`${KEY}.settings.${leaf}.help`)}
               </p>

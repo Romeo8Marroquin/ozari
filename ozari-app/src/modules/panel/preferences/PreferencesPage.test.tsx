@@ -70,6 +70,32 @@ const data = (over: Partial<PreferencesResponse> = {}): PreferencesResponse => (
     { key: 'orders.evidenceMinPhotos', type: 'int', value: 1, min: 1, max: 20, group: 'evidence' },
     { key: 'orders.evidenceMaxPhotos', type: 'int', value: 10, min: 1, max: 20, group: 'evidence' },
     { key: 'orders.evidenceRetentionMonths', type: 'int', value: 24, min: 1, max: 120, group: 'evidence' },
+    {
+      key: 'documents.businessName',
+      type: 'text',
+      value: 'Party Rentals GT',
+      minLength: 2,
+      maxLength: 120,
+      multiline: false,
+      group: 'documents',
+    },
+    {
+      key: 'documents.terms',
+      type: 'text',
+      value: '',
+      minLength: 0,
+      maxLength: 1200,
+      multiline: true,
+      group: 'documents',
+    },
+    {
+      key: 'documents.quoteValidityDays',
+      type: 'int',
+      value: 15,
+      min: 1,
+      max: 365,
+      group: 'documents',
+    },
   ],
   catalogs: {
     eventTypes: [
@@ -92,6 +118,20 @@ const data = (over: Partial<PreferencesResponse> = {}): PreferencesResponse => (
     paymentMethods: [{ id: 1, name: 'Efectivo', isActive: true, isReferenced: false }],
     productCategories: [{ id: 1, name: 'Mesas', isActive: true, isReferenced: false }],
     productDetailTypes: [],
+    bankAccounts: [
+      {
+        id: 3,
+        name: 'Banrural monetaria',
+        isActive: true,
+        // The two secrets arrive DECRYPTED: this Admin-only screen is where they are edited.
+        bankKey: 'banrural',
+        accountType: 'Monetaria',
+        accountNumber: '3-456-78901-2',
+        holder: 'Party Rentals GT, S.A.',
+        // Nothing holds a FK to a bank account, so it is never referenced and always hard-deletes.
+        isReferenced: false,
+      },
+    ],
   },
   municipalities: [{ id: 4, name: 'Mixco', isActive: true }],
   ...over,
@@ -146,6 +186,12 @@ const openTab = async (tab: PreferenceTab, firstSection: string): Promise<HTMLEl
 
 const openOrders = () => openTab('orders', 'catalogs.eventTypes');
 const openProducts = () => openTab('products', 'catalogs.productCategories');
+/** The documents group holds two cards — the letterhead settings and the bank accounts. It returns
+ *  the BANK card, since the settings' fields are unique on the page and reachable by label alone. */
+const openDocuments = async (): Promise<HTMLElement> => {
+  await openTab('documents', 'groups.documents');
+  return cardFor(`${KEY}.catalogs.bankAccounts.title`);
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -288,13 +334,13 @@ describe('PreferenceTabs', () => {
     await press('{ArrowRight}');
     expect(selected()).toHaveAttribute('id', 'preferences-tab-orders');
     await press('{End}');
-    expect(selected()).toHaveAttribute('id', 'preferences-tab-products');
+    expect(selected()).toHaveAttribute('id', 'preferences-tab-documents');
     // Wrapping: right from the last lands on the first.
     await press('{ArrowRight}');
     expect(selected()).toHaveAttribute('id', 'preferences-tab-operation');
     // And left from the first wraps to the last.
     await press('{ArrowLeft}');
-    expect(selected()).toHaveAttribute('id', 'preferences-tab-products');
+    expect(selected()).toHaveAttribute('id', 'preferences-tab-documents');
     await press('{Home}');
     expect(selected()).toHaveAttribute('id', 'preferences-tab-operation');
 
@@ -311,6 +357,21 @@ describe('PreferenceTabs', () => {
     expect(pill).toHaveStyle({ translate: '0%' });
     await openProducts();
     expect(pill).toHaveStyle({ translate: '200%' });
+  });
+
+  it('sizes the track and the pill from the LIST, so a new group cannot overflow it', async () => {
+    // A hardcoded `grid-cols-3` plus a 33.333% pill silently broke the moment a fourth group was
+    // added — the control has to derive both from `PREFERENCE_TABS`.
+    setState({ data: data() });
+    const { container } = renderPage();
+    const tabs = screen.getAllByRole('tab');
+    const track = container.querySelector('[role="tablist"]');
+    const pill = container.querySelector('[role="tablist"] > span[aria-hidden]');
+
+    expect(tabs).toHaveLength(4);
+    expect(track).toHaveStyle({ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' });
+    // One segment wide: the track's width minus its 8px of padding, divided between the segments.
+    expect(pill).toHaveStyle({ width: 'calc(25% - 2px)' });
   });
 
   it('abandons a sweep whose group was left behind', async () => {
@@ -454,6 +515,84 @@ describe('PreferenceSettingsCard', () => {
 
     expect(screen.getByLabelText(`${KEY}.settings.turnaroundMinutes.label`)).toHaveValue(240);
     expect(screen.getAllByRole('button', { name: `${KEY}.settings.save` })[0]!).toBeDisabled();
+  });
+
+  describe('text settings', () => {
+    it('sends a text setting as a STRING and an int as a number, in one save', async () => {
+      // The wire type follows the setting's own type — the API's validator rejects the other one.
+      setState({ data: data() });
+      renderPage();
+      await openDocuments();
+
+      const name = screen.getByLabelText(`${KEY}.settings.businessName.label`);
+      await userEvent.clear(name);
+      await userEvent.type(name, '  Alquileres El Sol  ');
+      await userEvent.click(screen.getByRole('button', { name: `${KEY}.settings.save` }));
+
+      expect(updateSettings.mock.calls[0]?.[0]).toEqual([
+        { key: 'documents.businessName', value: 'Alquileres El Sol' },
+        { key: 'documents.terms', value: '' },
+        { key: 'documents.quoteValidityDays', value: 15 },
+      ]);
+    });
+
+    it('blocks an EMPTY required text but saves an empty optional one', async () => {
+      setState({ data: data() });
+      renderPage();
+      await openDocuments();
+
+      // A document with no letterhead is broken, so the name has no legitimate empty state…
+      const name = screen.getByLabelText(`${KEY}.settings.businessName.label`);
+      await userEvent.clear(name);
+      await userEvent.click(screen.getByRole('button', { name: `${KEY}.settings.save` }));
+      expect(await screen.findByText(`${KEY}.settings.requiredError`)).toBeInTheDocument();
+      expect(updateSettings).not.toHaveBeenCalled();
+
+      // …while the terms are already empty in the fixture and save happily alongside it.
+      await userEvent.type(name, 'Alquileres El Sol');
+      await userEvent.click(screen.getByRole('button', { name: `${KEY}.settings.save` }));
+      expect(updateSettings).toHaveBeenCalled();
+    });
+
+    it('refuses a LINE BREAK in a single-line setting, and allows one in the terms', async () => {
+      setState({ data: data() });
+      renderPage();
+      await openDocuments();
+
+      const name = screen.getByLabelText(`${KEY}.settings.businessName.label`);
+      await userEvent.clear(name);
+      await userEvent.click(name);
+      await userEvent.paste('Alquileres\nEl Sol');
+      await userEvent.click(screen.getByRole('button', { name: `${KEY}.settings.save` }));
+      expect(await screen.findByText(`${KEY}.settings.singleLineError`)).toBeInTheDocument();
+      expect(updateSettings).not.toHaveBeenCalled();
+
+      // The terms are a paragraph — newlines are the point there.
+      await userEvent.clear(name);
+      await userEvent.type(name, 'Alquileres El Sol');
+      await userEvent.click(screen.getByLabelText(`${KEY}.settings.terms.label`));
+      await userEvent.paste('Primera línea.\nSegunda línea.');
+      await userEvent.click(screen.getByRole('button', { name: `${KEY}.settings.save` }));
+      expect(updateSettings.mock.calls[0]?.[0]).toContainEqual({
+        key: 'documents.terms',
+        value: 'Primera línea.\nSegunda línea.',
+      });
+    });
+
+    it('rejects a text longer than the bound the API published', async () => {
+      setState({ data: data() });
+      renderPage();
+      await openDocuments();
+
+      const terms = screen.getByLabelText(`${KEY}.settings.terms.label`);
+      await userEvent.click(terms);
+      // Pasted rather than typed: `maxLength` stops the keyboard at the bound, and what has to be
+      // covered is the resolver's own answer when a value gets past it anyway.
+      await userEvent.paste('x'.repeat(1201));
+      await userEvent.click(screen.getByRole('button', { name: `${KEY}.settings.save` }));
+      expect(await screen.findByText(`${KEY}.settings.lengthError`)).toBeInTheDocument();
+      expect(updateSettings).not.toHaveBeenCalled();
+    });
   });
 });
 
@@ -759,6 +898,127 @@ describe('PreferenceCatalogCard editing', () => {
     await userEvent.click(within(card).getByRole('button', { name: `${KEY}.rowForm.save` }));
     createRow.mock.calls[0]?.[1].onError(new Error('boom'));
     expect(notify.error).toHaveBeenCalledWith(`${KEY}.errors.saveFallback`);
+  });
+
+  describe('bank accounts', () => {
+    it('identifies an account by its type and last four digits, never the whole number', async () => {
+      // The list is a scannable overview an admin may have on screen with someone else in the room;
+      // the tail already tells two accounts at the same bank apart. The full number lives one click
+      // away, in the editor, which is where it is actually needed.
+      setState({ data: data() });
+      renderPage();
+      const card = await openDocuments();
+
+      expect(within(card).getByText('Banrural monetaria')).toBeInTheDocument();
+      expect(within(card).getByText(`${KEY}.badges.account`)).toBeInTheDocument();
+      expect(within(card).queryByText(/3-456-78901-2/)).not.toBeInTheDocument();
+    });
+
+    it('falls back to the account TYPE when there are no digits to show', async () => {
+      // Two ways to get here, both real: a number with nothing numeric in it, and a row whose
+      // number is missing entirely — which is what a ciphertext the server could not decrypt comes
+      // back as. Neither may blank the row: the admin still has to find it to fix it.
+      const withoutNumber = { ...data().catalogs.bankAccounts[0]! };
+      delete withoutNumber.accountNumber;
+      for (const account of [{ ...withoutNumber, accountNumber: 'GT-—' }, withoutNumber]) {
+        const payload = data();
+        payload.catalogs.bankAccounts = [account];
+        setState({ data: payload });
+        const view = renderPage();
+        const card = await openDocuments();
+        expect(within(card).getByText('Monetaria')).toBeInTheDocument();
+        view.unmount();
+        routerState.search = {};
+      }
+    });
+
+    it('creates an account, sending the secrets as plain text for the API to encrypt', async () => {
+      setState({ data: data() });
+      renderPage();
+      const card = await openDocuments();
+
+      await userEvent.click(within(card).getByRole('button', { name: `${KEY}.actions.add` }));
+      await userEvent.type(within(card).getByLabelText(`${KEY}.rowForm.name`), 'BAC ahorro');
+      await userEvent.selectOptions(within(card).getByLabelText(`${KEY}.rowForm.bank`), 'bac');
+      await userEvent.type(within(card).getByLabelText(`${KEY}.rowForm.accountType`), 'Ahorro');
+      await userEvent.type(
+        within(card).getByLabelText(`${KEY}.rowForm.accountNumber`),
+        '9-876-54321-0',
+      );
+      await userEvent.type(within(card).getByLabelText(`${KEY}.rowForm.holder`), 'Party Rentals GT');
+      await userEvent.click(within(card).getByRole('button', { name: `${KEY}.rowForm.save` }));
+
+      expect(createRow.mock.calls[0]?.[0]).toEqual({
+        name: 'BAC ahorro',
+        isActive: true,
+        bankKey: 'bac',
+        accountType: 'Ahorro',
+        accountNumber: '9-876-54321-0',
+        holder: 'Party Rentals GT',
+      });
+    });
+
+    it('treats "sin logo" as a real choice, not an unfilled field', async () => {
+      // An account at a bank we ship no asset for is perfectly usable — it simply prints as text.
+      setState({ data: data() });
+      renderPage();
+      const card = await openDocuments();
+
+      await userEvent.click(within(card).getByRole('button', { name: `${KEY}.actions.add` }));
+      await userEvent.type(within(card).getByLabelText(`${KEY}.rowForm.name`), 'Industrial');
+      await userEvent.type(within(card).getByLabelText(`${KEY}.rowForm.accountType`), 'Monetaria');
+      await userEvent.type(within(card).getByLabelText(`${KEY}.rowForm.accountNumber`), '1234567');
+      await userEvent.type(within(card).getByLabelText(`${KEY}.rowForm.holder`), 'Party Rentals');
+      await userEvent.click(within(card).getByRole('button', { name: `${KEY}.rowForm.save` }));
+
+      expect(createRow.mock.calls[0]?.[0]).toMatchObject({ bankKey: null });
+    });
+
+    it('requires the type, the number and the holder before saving', async () => {
+      setState({ data: data() });
+      renderPage();
+      const card = await openDocuments();
+
+      await userEvent.click(within(card).getByRole('button', { name: `${KEY}.actions.add` }));
+      await userEvent.type(within(card).getByLabelText(`${KEY}.rowForm.name`), 'BAC ahorro');
+      await userEvent.click(within(card).getByRole('button', { name: `${KEY}.rowForm.save` }));
+      expect(await screen.findByText(`${KEY}.rowForm.bankTextError`)).toBeInTheDocument();
+      expect(createRow).not.toHaveBeenCalled();
+
+      // Filling the type moves the complaint along to the next missing field rather than clearing it.
+      await userEvent.type(within(card).getByLabelText(`${KEY}.rowForm.accountType`), 'Ahorro');
+      await userEvent.click(within(card).getByRole('button', { name: `${KEY}.rowForm.save` }));
+      expect(screen.getByText(`${KEY}.rowForm.bankTextError`)).toBeInTheDocument();
+      expect(createRow).not.toHaveBeenCalled();
+
+      // A number that is too SHORT is rejected the same way an absent one is.
+      await userEvent.type(within(card).getByLabelText(`${KEY}.rowForm.accountNumber`), '12');
+      await userEvent.type(within(card).getByLabelText(`${KEY}.rowForm.holder`), 'Party Rentals');
+      await userEvent.click(within(card).getByRole('button', { name: `${KEY}.rowForm.save` }));
+      expect(createRow).not.toHaveBeenCalled();
+    });
+
+    it('prefills the editor with the DECRYPTED values, which is why they are readable here', async () => {
+      setState({ data: data() });
+      renderPage();
+      const card = await openDocuments();
+
+      await userEvent.click(within(card).getByRole('button', { name: `${KEY}.actions.editRow` }));
+      expect(within(card).getByLabelText(`${KEY}.rowForm.bank`)).toHaveValue('banrural');
+      expect(within(card).getByLabelText(`${KEY}.rowForm.accountType`)).toHaveValue('Monetaria');
+      expect(within(card).getByLabelText(`${KEY}.rowForm.accountNumber`)).toHaveValue('3-456-78901-2');
+      expect(within(card).getByLabelText(`${KEY}.rowForm.holder`)).toHaveValue(
+        'Party Rentals GT, S.A.',
+      );
+    });
+
+    it('never shows a bank field on another catalog', async () => {
+      setState({ data: data() });
+      renderPage();
+      const card = await openOrders();
+      await userEvent.click(within(card).getByRole('button', { name: `${KEY}.actions.add` }));
+      expect(within(card).queryByLabelText(`${KEY}.rowForm.accountNumber`)).not.toBeInTheDocument();
+    });
   });
 
   it('grows a newly-arrived row open instead of letting the list jump', async () => {

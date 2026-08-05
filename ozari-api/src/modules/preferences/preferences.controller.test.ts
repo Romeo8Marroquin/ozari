@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { Response } from "express";
 import { Prisma } from "@prisma/client";
+import { encryptKms } from "@helpers/encryption.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
@@ -103,6 +104,24 @@ function mockPrisma(overrides: PrismaOverrides = {}) {
     create: vi.fn().mockResolvedValue(row(9, { minLeadHours: 48 })),
     update: vi.fn().mockResolvedValue(row(1, { minLeadHours: 48 })),
   };
+  // Bank accounts select two ENCRYPTED columns, so their rows carry real ciphertexts.
+  const bankRow = (id: number, over: Record<string, unknown> = {}) =>
+    row(id, {
+      bankKey: "banrural",
+      accountType: "Monetaria",
+      accountNumberKms: encryptKms("3-456-78901-2"),
+      holderKms: encryptKms("Party Rentals GT, S.A."),
+      ...over,
+    });
+  const bankAccount = {
+    ...lookup,
+    findMany: vi.fn().mockResolvedValue([bankRow(1), bankRow(2, { isActive: false })]),
+    findUnique: vi
+      .fn()
+      .mockResolvedValue(overrides.existing === undefined ? bankRow(1) : overrides.existing),
+    create: vi.fn().mockResolvedValue(bankRow(9)),
+    update: vi.fn().mockResolvedValue(bankRow(1)),
+  };
   const referencing = { groupBy: vi.fn().mockResolvedValue(groupRows(overrides.usedIds ?? [])) };
   const client = {
     appPreference: {
@@ -115,6 +134,7 @@ function mockPrisma(overrides: PrismaOverrides = {}) {
     paymentMethod: lookup,
     productCategory: lookup,
     productDetailType: lookup,
+    bankAccount,
     municipality: {
       findMany: vi.fn().mockResolvedValue([row(4, { name: "Mixco" })]),
       findFirst: vi.fn().mockResolvedValue(row(4)),
@@ -141,6 +161,11 @@ const buildReq = (
 
 const successData = <T>(): T => (sendOzariSuccess as Mock).mock.calls[0]?.[3] as T;
 
+beforeAll(() => {
+  process.env["ENCRYPTION_KEY"] =
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+});
+
 beforeEach(() => vi.clearAllMocks());
 
 describe("getPreferences", () => {
@@ -158,10 +183,19 @@ describe("getPreferences", () => {
       "paymentMethods",
       "productCategories",
       "productDetailTypes",
+      "bankAccounts",
     ]);
     // The extras arrive typed, and a Decimal fee becomes a plain number.
     expect(data.catalogs.eventTypes[0]).toMatchObject({ minLeadHours: 24 });
     expect(data.catalogs.zones[0]).toMatchObject({ deliveryFee: 50, municipalityId: 4 });
+    // The bank secrets arrive DECRYPTED — this Admin-only screen is the one place they are readable,
+    // and it is where the admin edits them.
+    expect(data.catalogs.bankAccounts[0]).toMatchObject({
+      bankKey: "banrural",
+      accountType: "Monetaria",
+      accountNumber: "3-456-78901-2",
+      holder: "Party Rentals GT, S.A.",
+    });
     // An unconfigured fee is ABSENT, never 0 — "not set" and "free" are different answers.
     expect(data.catalogs.zones[1]).not.toHaveProperty("deliveryFee");
     expect(data.municipalities).toEqual([

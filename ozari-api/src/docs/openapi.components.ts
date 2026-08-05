@@ -1213,20 +1213,37 @@ export const schemas: Record<string, Schema> = {
     description:
       "One scalar setting with the BOUNDS the API enforces, so a client can enforce the same ones " +
       "while the admin types (the mirrored-validation doctrine, applied to settings). Deliberately " +
-      "carries no label or help text: that is copy, and the frontend owns it.",
+      "carries no label or help text: that is copy, and the frontend owns it.\n\n" +
+      "**Discriminated by `type`.** An `int` carries `min`/`max`; a `text` carries `minLength`/" +
+      "`maxLength` and `multiline`. `multiline: false` is a RULE, not a rendering hint — the API " +
+      "rejects a line break in such a value, because a business name spanning two lines is a " +
+      "broken letterhead rather than a name.",
+    required: ["key", "type", "value", "group"],
     properties: {
       key: { type: "string", example: "orders.turnaroundMinutes" },
-      type: {
-        type: "string",
-        enum: ["int"],
-        description: "Always an integer today; the field exists so a future bool/text setting needs no new shape.",
+      type: { type: "string", enum: ["int", "text"], example: "int" },
+      value: {
+        oneOf: [{ type: "integer" }, { type: "string" }],
+        description: "An integer for `type: int`, a string for `type: text`.",
+        example: 120,
       },
-      value: { type: "integer", example: 120 },
-      min: { type: "integer", example: 0 },
-      max: { type: "integer", example: 1440 },
+      min: { type: "integer", description: "`int` only.", example: 0 },
+      max: { type: "integer", description: "`int` only.", example: 1440 },
+      minLength: {
+        type: "integer",
+        description: "`text` only. 0 = the empty value is a legitimate choice; ≥1 = required.",
+        example: 2,
+      },
+      maxLength: { type: "integer", description: "`text` only.", example: 120 },
+      multiline: {
+        type: "boolean",
+        description: "`text` only. False ⇒ line breaks are rejected.",
+        example: false,
+      },
       group: {
         type: "string",
-        description: "Grouping token (`orders`, `evidence`) the screen lays its cards out by.",
+        description:
+          "Grouping token (`orders`, `evidence`, `documents`) the screen lays its cards out by.",
         example: "orders",
       },
     },
@@ -1259,6 +1276,32 @@ export const schemas: Record<string, Schema> = {
         example: 50,
       },
       municipalityId: { type: "integer", description: "Zones only.", example: 4 },
+      bankKey: {
+        type: "string",
+        nullable: true,
+        enum: ["banrural", "bac", null],
+        description:
+          "Bank accounts only — a TOKEN naming the logo a document prints, never a bank name. " +
+          "`null` = \"sin logo\", always legal, so an account at any other bank is still usable.",
+        example: "banrural",
+      },
+      accountType: {
+        type: "string",
+        description: "Bank accounts only — \"Monetaria\", \"Ahorro\"… Free text: bank product names vary.",
+        example: "Monetaria",
+      },
+      accountNumber: {
+        type: "string",
+        description:
+          "Bank accounts only — DECRYPTED from `account_number_kms`. Stored AES-256-GCM encrypted " +
+          "at rest and returned only through this Admin-only endpoint.",
+        example: "3-456-78901-2",
+      },
+      holder: {
+        type: "string",
+        description: "Bank accounts only — DECRYPTED from `holder_kms`.",
+        example: "Party Rentals GT, S.A.",
+      },
       isReferenced: {
         type: "boolean",
         description:
@@ -1466,6 +1509,7 @@ export const schemas: Record<string, Schema> = {
           paymentMethods: { type: "array", items: schemaRef("CatalogRow") },
           productCategories: { type: "array", items: schemaRef("CatalogRow") },
           productDetailTypes: { type: "array", items: schemaRef("CatalogRow") },
+          bankAccounts: { type: "array", items: schemaRef("CatalogRow") },
         },
       },
       municipalities: {
@@ -1498,7 +1542,14 @@ export const schemas: Record<string, Schema> = {
           required: ["key", "value"],
           properties: {
             key: { type: "string", example: "orders.turnaroundMinutes" },
-            value: { type: "integer", example: 180 },
+            value: {
+              oneOf: [{ type: "integer" }, { type: "string" }],
+              description:
+                "Must match the setting's declared `type`: an integer inside `[min, max]`, or a " +
+                "string trimmed into `[minLength, maxLength]` (and free of line breaks unless the " +
+                "setting is `multiline`).",
+              example: 180,
+            },
           },
         },
       },
@@ -1531,6 +1582,39 @@ export const schemas: Record<string, Schema> = {
         type: "integer",
         description: "`zones` only, REQUIRED there — must be an active municipality.",
         example: 4,
+      },
+      bankKey: {
+        type: "string",
+        nullable: true,
+        enum: ["banrural", "bac", null],
+        description:
+          "`bank-accounts` only. `null`/omitted/`\"\"` = \"sin logo\". Any OTHER value is rejected: " +
+          "the token's only job is to name a logo we ship, so an unknown one would save happily " +
+          "and then render nothing, with no error to explain it.",
+        example: "banrural",
+      },
+      accountType: {
+        type: "string",
+        minLength: 2,
+        maxLength: 40,
+        description: "`bank-accounts` only, REQUIRED there.",
+        example: "Monetaria",
+      },
+      accountNumber: {
+        type: "string",
+        minLength: 4,
+        maxLength: 34,
+        description:
+          "`bank-accounts` only, REQUIRED there. Sent in PLAINTEXT and encrypted the moment it is " +
+          "written (`account_number_kms`).",
+        example: "3-456-78901-2",
+      },
+      holder: {
+        type: "string",
+        minLength: 2,
+        maxLength: 120,
+        description: "`bank-accounts` only, REQUIRED there. Encrypted at rest (`holder_kms`).",
+        example: "Party Rentals GT, S.A.",
       },
     },
   },

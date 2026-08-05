@@ -48,6 +48,7 @@ const catalogParam: OpenAPIV3.ParameterObject = {
       "payment-methods",
       "product-categories",
       "product-detail-types",
+      "bank-accounts",
     ],
   },
   example: "event-types",
@@ -2090,11 +2091,11 @@ export const paths: OpenAPIV3.PathsObject = {
       summary: "Add a row to a manageable catalog (admin)",
       operationId: "createCatalogRow",
       description:
-        "**STRICTLY Admin.** One endpoint for all six manageable catalogs — `event-types`, " +
+        "**STRICTLY Admin.** One endpoint for all seven manageable catalogs — `event-types`, " +
         "`contact-types`, `zones`, `payment-methods`, `product-categories`, " +
-        "`product-detail-types` — driven by a registry that declares each one's extra fields, so an " +
-        "event type can never be sent a `deliveryFee` and a zone can't be saved without its " +
-        "municipality.\n\n" +
+        "`product-detail-types`, `bank-accounts` — driven by a registry that declares each one's " +
+        "extra fields, so an event type can never be sent a `deliveryFee`, a zone can't be saved " +
+        "without its municipality, and a bank account can't be saved without its holder.\n\n" +
         "**Anything not in that list answers `404`**, including the lookups deliberately kept " +
         "unmanageable (`user-roles`, `currencies`, `product-business-types`, `rent-time-units`, " +
         "`payment-status`, the geo tables): runtime code branches on their ids, so an admin adding " +

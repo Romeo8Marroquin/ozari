@@ -169,6 +169,18 @@ export const appConfig = {
   // 60s: the definition changes rarely, so this is ~free, and it bounds every kind of staleness.
   statusCatalogTtlSeconds: 60,
 
+  // Fallbacks for the `documents.*` preferences — the letterhead of every quote and order document
+  // (EPIC-2-DOCUMENTS §6). The business NAME has a real default because a document with no
+  // letterhead is broken, and this is the business the whole deployment belongs to; the phone and
+  // the terms default to EMPTY on purpose — inventing a phone number would print a wrong one, and
+  // an unwritten terms block is simply a document without that paragraph.
+  defaultDocumentBusinessName: "Party Rentals GT",
+  defaultDocumentBusinessPhone: "",
+  defaultDocumentTerms: "",
+  // How long a quote states it is valid for. Two weeks is long enough to be useful and short
+  // enough that seasonal pricing doesn't get quoted from a stale document.
+  defaultQuoteValidityDays: 15,
+
   sensitiveKeys: ["password", "token", "secret", "creditCard", "cvv", "auth"],
   basePath: "/api",
 } as const;
