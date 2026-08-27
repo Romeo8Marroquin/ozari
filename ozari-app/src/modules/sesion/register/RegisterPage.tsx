@@ -21,6 +21,8 @@ import useRegister from '../hooks/useRegister';
 import useAuthCard from '../hooks/useAuthCard';
 import useDesktopAutoFocus from '@hooks/useDesktopAutoFocus';
 import { notify } from '@components/notifications/notify';
+import TermsModal from './TermsModal';
+import { hasReadableTerms, useTerms } from './useTerms';
 
 const RegisterPage: React.FC = () => {
   const { t } = useTranslation();
@@ -38,6 +40,11 @@ const RegisterPage: React.FC = () => {
   const submitLockRef = useRef(false);
   // Server-side submit error (e.g. email already registered), rendered inline above the button.
   const [formError, setFormError] = useState<string | undefined>(undefined);
+  // The business's published terms. Asking someone to accept a document they cannot read is the
+  // thing this fixes — but the link appears ONLY when there is genuinely something behind it, so a
+  // business that has published none simply offers nothing rather than an empty dialog.
+  const { data: terms } = useTerms();
+  const [readingTerms, setReadingTerms] = useState(false);
 
   const onSubmit = (data: RegisterType) => {
     if (isPending || submitLockRef.current) return;
@@ -161,11 +168,29 @@ const RegisterPage: React.FC = () => {
                     iconTabbable={false}
                   />
                 </div>
-                <div className="form-element w-full">
+                <div className="form-element flex w-full flex-wrap items-center gap-x-1.5 gap-y-0.5">
                   <Checkbox
                     {...register('termsAccepted')}
                     label={t('modules.sesion.register.form.terms')}
                   />
+                  {/* Beside the checkbox, never inside its label: a link nested in a `<label>` is a
+                      click that both toggles the box and opens a dialog, and the two fight. It
+                      appears only when there is something to read (see `hasReadableTerms`). */}
+                  {hasReadableTerms(terms) && (
+                    // Deliberately the checkbox label's OWN size and colour (`text-xs leading-5
+                    // text-gray-600`), carrying nothing but an underline. It is a footnote on a
+                    // sentence, not a call to action — the primary action here is registering, and a
+                    // bolder, larger, differently-coloured link competed with the submit button for
+                    // an eye that had already decided what it came to do. The underline is what
+                    // makes it discoverable; hover only deepens it, on the app's asymmetric timing.
+                    <button
+                      type="button"
+                      onClick={() => setReadingTerms(true)}
+                      className="cursor-pointer text-xs leading-5 text-gray-600 underline decoration-gray-400 underline-offset-2 transition-[color,text-decoration-color] duration-300 ease-[var(--ease-settle)] hover:text-charcoal hover:decoration-charcoal hover:duration-150 focus-visible:rounded-chip focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-charcoal/30 motion-reduce:transition-none"
+                    >
+                      {t('modules.sesion.register.terms.open')}
+                    </button>
+                  )}
                 </div>
                 <div className="form-element w-full flex flex-col items-center">
                   <FormError message={formError} id="register-form-error" />
@@ -208,6 +233,14 @@ const RegisterPage: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {/* Kept MOUNTED and driven by `open`, never conditionally rendered: a modal owns its own exit,
+          and removing it in the same frame leaves the closing animation nothing to play. */}
+      <TermsModal
+        open={readingTerms}
+        onClose={() => setReadingTerms(false)}
+        terms={terms ?? ''}
+      />
     </div>
   );
 };

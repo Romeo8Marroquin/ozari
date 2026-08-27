@@ -39,14 +39,21 @@ export type PreferenceSettingModel =
       minLength: number;
       maxLength: number;
       multiline: boolean;
+      /** What KIND of text this is — a token about the VALUE (`colorKey` doctrine), which a client
+       *  uses to offer the right keyboard. Absent = plain prose. */
+      format?: "phone";
       group: string;
-    };
+    }
+  // A switch: no bounds, because there is nothing to bound. Its own arm rather than an int limited
+  // to 0..1 so a client narrows straight to a boolean and a control, never to a number it has to
+  // know to render as a switch.
+  | { key: string; type: "bool"; value: boolean; group: string };
 
 /** `PUT /preferences/settings` — the FULL set, declarative like every other update in this codebase:
  *  what arrives is what the settings become. A partial body would make "unchanged" and "cleared"
  *  indistinguishable. */
 export interface UpdatePreferenceSettingsRequestModel {
-  settings: { key: string; value: number | string }[];
+  settings: { key: string; value: number | string | boolean }[];
 }
 
 /**

@@ -45,6 +45,7 @@ const EXPECTED_OPERATIONS: ReadonlyArray<readonly [string, string]> = [
   ["/preferences/catalogs/{catalog}/{id}", "put"],
   ["/preferences/catalogs/{catalog}/{id}", "delete"],
   ["/health/check", "get"],
+  ["/legal/terms", "get"],
 ];
 
 // Collect every `$ref` string anywhere in the document.

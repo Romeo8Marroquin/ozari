@@ -32,12 +32,16 @@ import {
   staggerIn,
   staggerOut,
 } from '../pageMotion';
+import QuoteDocumentButton from '../documents/QuoteDocumentButton';
+import FormDraftNote from '../FormDraftNote';
+import { useFormDraftsEnabled } from '../preferences/usePreferences';
 import { usePanelNavigate } from '../PanelNavContext';
 import PreferencesCta from '../PreferencesCta';
 import type { Product } from '../products/product.types';
 import ProductsStatus from '../products/ProductsStatus';
 import SectionReveal from '../products/SectionReveal';
 import ClientRegistryModal from './ClientRegistryModal';
+import { clearOrderDraft, isMeaningfulOrderDraft, readOrderDraft, saveOrderDraft } from './orderDraft';
 import { CHANNEL_INPUT_MODE, contactChannelKind } from '@constants/Regex';
 import ContactChannelIcon from './ContactChannelIcon';
 import type {
@@ -291,6 +295,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   const catalogQuery = useOrdersCatalog();
   const productsQuery = useOrderProducts();
   const registriesQuery = useClientRegistries();
+  // Defaults to ON while the preference is in flight — see `useFormDraftsEnabled` for why that
+  // direction is the safe one.
+  const { enabled: draftsEnabled } = useFormDraftsEnabled('orders');
   const { createOrder, isPending: isCreating } = useCreateOrder();
   const { updateOrder, isPending: isUpdating } = useUpdateOrder();
   const { checkAvailability } = useOrderAvailability();
@@ -385,19 +392,44 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   // EDIT: every value comes from the order itself, so saving an untouched form sends exactly what is
   // already stored. Computed once — RHF captures defaults at mount, and the edit page only mounts
   // this component once the order has loaded.
+  // What a PRISTINE create form looks like — the yardstick the autosave measures against, and where
+  // "descartar" returns to. Kept separate from `defaultValues` because those may BE a restored
+  // draft, and comparing a draft against itself would read as "untouched" and delete it.
+  const pristineDefaults = useMemo<CreateOrderFormType>(
+    () => ({ ...createOrderDefaultValues, assignedUserId: getStoredUserId() as unknown as number }),
+    [],
+  );
+  // The draft is read ONCE per mount (never re-read mid-session — the form itself is the source of
+  // truth once mounted); its presence drives the "restored" note until discarded. Create-only, for
+  // the same reason the product form's is: server state is authoritative on an edit, and a stale
+  // edit draft would silently resurrect values somebody else may have already changed.
+  //
+  // Seeded into `defaultValues` rather than `reset()` into the form after mount, and that is
+  // load-bearing: seeding means no watcher ever observes a CHANGE, so none of the prefill effects
+  // fire. A `reset()` would look identical and then let the client-selection effect below overwrite
+  // the restored contact, address, pin, instructions and fee with the client's CURRENT defaults —
+  // silently rewriting the admin's own work.
+  // Not read at all when the switch is already known to be OFF. (While the preference is still in
+  // flight it reads as ON — see `useFormDraftsEnabled` — but the storage is only ever written while
+  // enabled, so the only way to reach that window with a draft in hand is to have turned the feature
+  // off with one already saved. The effect below then empties it.)
+  const [storedDraft] = useState(() =>
+    mode === 'edit' || !draftsEnabled ? null : readOrderDraft(),
+  );
+  const [draftRestored, setDraftRestored] = useState(Boolean(storedDraft));
   const defaultValues = useMemo<CreateOrderFormType>(
-    () =>
-      order
-        ? orderToFormValues(order)
-        : { ...createOrderDefaultValues, assignedUserId: getStoredUserId() as unknown as number },
-    [order],
+    () => (order ? orderToFormValues(order) : (storedDraft ?? pristineDefaults)),
+    [order, storedDraft, pristineDefaults],
   );
   const methods = useForm<CreateOrderFormType>({
     resolver,
     defaultValues,
     mode: 'onTouched',
   });
-  const { handleSubmit, control, setValue, getValues, setError } = methods;
+  const { handleSubmit, control, setValue, getValues, setError, reset } = methods;
+  // The whole form, watched, so the draft mirrors every keystroke. One subscription for the lot —
+  // the alternative is one per field, and the draft has to be complete to be worth restoring.
+  const liveValues = useWatch({ control });
   const lines = useFieldArray({ control, name: 'lines' });
 
   // A removed line tweens OUT before RHF drops it (`detailRowOut`), so the list shrinks smoothly.
@@ -466,10 +498,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     [registries],
   );
   const clientRegistryId = useWatch({ control, name: 'clientRegistryId' });
-  // Seeded with the order's OWN client when editing, so the prefill below sees no change on mount:
-  // an existing order's snapshots are what was actually agreed, and overwriting them with the
-  // client's current defaults would silently rewrite the contact, address and delivery fee.
-  const previousRegistryId = useRef<number | null>(order?.clientRegistryId ?? null);
+  // Seeded with the order's OWN client when editing — or a restored DRAFT's — so the prefill below
+  // sees no change on mount. An existing order's snapshots are what was actually agreed, and a
+  // draft's are what the admin typed; overwriting either with the client's current defaults would
+  // silently rewrite the contact, address, pin, instructions and delivery fee.
+  const previousRegistryId = useRef<number | null>(
+    order?.clientRegistryId ?? storedDraft?.clientRegistryId ?? null,
+  );
   useEffect(() => {
     if (clientRegistryId == null || clientRegistryId === previousRegistryId.current) return;
     previousRegistryId.current = clientRegistryId;
@@ -500,6 +535,37 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     // The client's PREFERRED payment method is deliberately not applied to the order: a preference
     // is not a payment, and writing it here made every order claim a method nobody had used yet.
   }, [clientRegistryId, registriesById, setValue]);
+
+  // Silent autosave (create only). Every change persists the draft; a form back at its PRISTINE
+  // state clears it instead, so an untouched visit never leaves residue. With the preference off,
+  // the storage is actively emptied rather than merely left alone — switching the feature off has
+  // to mean "nothing of mine is being kept", not "nothing new will be". `useWatch` (not `watch()`)
+  // so the React Compiler can still memoize this component.
+  useEffect(() => {
+    if (isEdit) return;
+    if (!draftsEnabled) {
+      clearOrderDraft();
+      return;
+    }
+    const current = liveValues as CreateOrderFormType;
+    if (isMeaningfulOrderDraft(current, pristineDefaults)) saveOrderDraft(current);
+    else clearOrderDraft();
+  }, [liveValues, isEdit, draftsEnabled, pristineDefaults]);
+
+  // The note describes something that is CURRENTLY happening, so it goes away the moment the
+  // preference does — even though the restored values stay on screen, because they are the admin's
+  // work and wiping them over a settings change would be the greater surprise.
+  const showDraftNote = draftRestored && draftsEnabled;
+
+  const discardDraft = (): void => {
+    // Move focus off the note's button BEFORE its container turns aria-hidden/inert — Chrome
+    // refuses (and warns about) aria-hidden on an ancestor of the focused element.
+    /* v8 ignore next -- activeElement is always the clicked button here; blur() is a no-op guard */
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    clearOrderDraft();
+    reset(pristineDefaults);
+    setDraftRestored(false);
+  };
 
   // Reconcile the picked lines against fresh availability (the "adjust to available + notify" rule):
   // a line over its window availability is REDUCED to what's takeable, or REMOVED when nothing is
@@ -705,6 +771,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     }
     createOrder(body, {
       onSuccess: () => {
+        clearOrderDraft();
         void queryClient.invalidateQueries({ queryKey: [QueryKeys.ORDERS] });
         notify.success(t(`${KEY}.successToast`), { title: t(`${KEY}.successTitle`) });
         panelNavigate('/panel/pedidos');
@@ -826,11 +893,30 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   // The picker offers ALL products (rent + sale) — the order's kind is DERIVED from what's picked (any
   // rental line ⇒ a pickup is required); no upfront mode fork. Already-picked products are hidden. The
   // dropdown shows ONLY the product name; the takeable amount lives as a quiet hint under its quantity.
+  //
+  // Nothing takeable ⇒ NOT OFFERED (owner decision 2026-08-26). Listing a sold-out product only to
+  // reject it the moment a quantity is typed makes the admin do the work of discovering what is
+  // unavailable, one product at a time, in front of a client. The exception is a product the line
+  // ALREADY holds: hiding that would silently empty the select and lose what was picked — the
+  // quantity's own error says why it cannot stay.
+  // `takeableFor` answers `undefined` for UNKNOWN — a rental with no pickup chosen yet, or a product
+  // carrying no baseline. Unknown is not zero, so it stays on offer: refusing to list something we
+  // simply have not measured would hide half the catalogue until the dates are filled in.
+  const offerable = (product: Product): boolean => {
+    if (!enforcesStock) return true;
+    const takeable = takeableFor(product.id, availability, productsById);
+    return takeable === undefined || takeable > 0;
+  };
   const optionsFor = (currentId: number | null | undefined) =>
     products
-      .filter((product) => product.id === currentId || !usedProductIds.has(product.id))
+      .filter(
+        (product) =>
+          product.id === currentId || (!usedProductIds.has(product.id) && offerable(product)),
+      )
       .map((product) => ({ value: product.id, label: product.name }));
-  const canAddLine = lines.fields.length < products.length;
+  // "Agregar producto" is capped by what could actually be added, not by the raw catalog — otherwise
+  // the button stays enabled and opens a select with nothing in it.
+  const canAddLine = lines.fields.length < products.filter(offerable).length;
   // The takeable ceiling for a line's product — the window amount once probed, else the product's
   // current availability. Caps the quantity input's `max` (the resolver enforces the same limit),
   // so it must be ABSENT wherever the cap isn't real: on an order that reserves nothing, a `max`
@@ -915,6 +1001,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
               aria-busy={isLoading}
               className="flex flex-col gap-6"
             >
+              <FormDraftNote visible={showDraftNote} onDiscard={discardDraft} />
+
               {/* CLIENT — pick a walk-in registry or create one inline. */}
               <Section title={t(`${KEY}.sections.client.title`)} description={t(`${KEY}.sections.client.description`)}>
                 <SectionReveal loading={revealing} skeleton={<BodySkeleton rows={1} />}>
@@ -1306,6 +1394,17 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                   >
                     {t(`${KEY}.actions.cancel`)}
                   </Button>
+                  {/* CREATE only. On an edit the order already exists, so what the client should be
+                      handed is its comprobante — offered on the detail page — and a "cotización" for
+                      something already agreed would only muddy which document is authoritative. */}
+                  {!isEdit && (
+                    <QuoteDocumentButton
+                      productsById={productsById}
+                      registries={registries}
+                      eventTypes={catalog?.eventTypes ?? []}
+                      disabled={!dataReady || isSaving}
+                    />
+                  )}
                   <Button
                     type="submit"
                     form={FORM_ID}

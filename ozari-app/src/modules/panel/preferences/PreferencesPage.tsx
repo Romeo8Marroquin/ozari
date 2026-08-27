@@ -74,6 +74,8 @@ const TAB_SECTIONS: Record<PreferenceTab, readonly PreferenceSection[]> = {
   operation: [
     { kind: 'settings', group: 'orders', skeletonRows: 2 },
     { kind: 'settings', group: 'evidence', skeletonRows: 2 },
+    // One switch per create form — two rows, so the placeholder is the shape of what arrives.
+    { kind: 'settings', group: 'forms', skeletonRows: 2 },
   ],
   orders: [
     { kind: 'catalog', catalog: 'event-types', field: 'eventTypes', minimumActive: 1, skeletonRows: 3 },
@@ -85,8 +87,14 @@ const TAB_SECTIONS: Record<PreferenceTab, readonly PreferenceSection[]> = {
     { kind: 'catalog', catalog: 'product-categories', field: 'productCategories', minimumActive: 1, skeletonRows: 3 },
     { kind: 'catalog', catalog: 'product-detail-types', field: 'productDetailTypes', minimumActive: 0, skeletonRows: 2 },
   ],
+  // Three settings cards, not one, because they are three different things — the letterhead, what
+  // the page declares about the deal, and the terms the document never prints (see the API
+  // registry). `skeletonRows` is the count of fields in each, so the placeholder is the SHAPE of
+  // what lands and the card barely travels when it does.
   documents: [
-    { kind: 'settings', group: 'documents', skeletonRows: 4 },
+    { kind: 'settings', group: 'documents', skeletonRows: 2 },
+    { kind: 'settings', group: 'documentConditions', skeletonRows: 3 },
+    { kind: 'settings', group: 'legal', skeletonRows: 1 },
     { kind: 'catalog', catalog: 'bank-accounts', field: 'bankAccounts', minimumActive: 0, skeletonRows: 2 },
   ],
 };

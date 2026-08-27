@@ -1495,6 +1495,21 @@ export const schemas: Record<string, Schema> = {
     },
   },
 
+  TermsResponse: {
+    type: "object",
+    required: ["terms"],
+    description:
+      "The business's terms as the admin wrote them, newlines included. An EMPTY string means none " +
+      "have been published — a valid configuration, so a client offers nothing to read rather than " +
+      "reporting an error.",
+    properties: {
+      terms: {
+        type: "string",
+        example:
+          "Cualquier daño ocasionado al mobiliario será cobrado según el precio de reposición.",
+      },
+    },
+  },
   PreferencesResponse: {
     type: "object",
     properties: {

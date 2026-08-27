@@ -1,5 +1,24 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import { animateHeightFrom, animateListReflow, captureGalleryLayout, panelScroller } from './pageMotion';
+import {
+  animateHeightFrom,
+  animateListReflow,
+  captureGalleryLayout,
+  isRegionSettling,
+  panelScroller,
+} from './pageMotion';
+
+/** What the region looked like after the last commit — the frame the next change animates FROM. */
+interface RegionSnapshot {
+  key: string | number;
+  /** The key the ITEMS were last identified by, so a change that only resized the region (an editor
+   *  opening) can be told from one that actually moved rows. */
+  itemsKey: string | number;
+  height: number;
+  state: ReturnType<typeof captureGalleryLayout>;
+  /** False when it was taken while something was still moving, so the boxes it holds are a lie.
+   *  An untrusted snapshot eases the height and skips the glide rather than inventing a journey. */
+  trusted: boolean;
+}
 
 /**
  * Make a REGION adapt when the data behind it changes, instead of repainting: the container's height
@@ -15,32 +34,75 @@ import { animateHeightFrom, animateListReflow, captureGalleryLayout, panelScroll
  * `swapKey` is the identity of the CONTENT: re-rendering the same key (a background refetch handing
  * back equal data) animates nothing. `itemSelector` is optional — without it only the height eases;
  * with it, the matching elements must carry a `data-flip-id` so survivors can be told from arrivals.
+ *
+ * `itemsKey` separates the two halves when they are not the same question (owner rule 2026-08-05).
+ * A catalog card's height depends on BOTH its rows and whether an editor is open, but its rows only
+ * move when the ROWS change: keyed on `swapKey` alone, opening the inline form re-ran the glide over
+ * every row, so the whole list drifted for a change that had not moved a single one of them. Pass
+ * the rows' own identity here and the box grows while the list stays perfectly still. Omitted, it
+ * follows `swapKey`, which is right wherever size and items change together (the order detail).
  */
 export default function useMorphOnChange<T extends HTMLElement = HTMLDivElement>(
   swapKey: string | number,
   itemSelector?: string,
+  itemsKey: string | number = swapKey,
 ): React.RefObject<T | null> {
   const ref = useRef<T>(null);
-  const previous = useRef<{
-    key: string | number;
-    height: number;
-    state: ReturnType<typeof captureGalleryLayout>;
-  } | null>(null);
+  const previous = useRef<RegionSnapshot | null>(null);
+  /** The pending re-capture frame — one at a time, and cancelled on unmount. */
+  const frame = useRef(0);
+
+  /** Record the region as it stands right now, and say whether that record can be believed. */
+  const capture = (element: T): void => {
+    previous.current = {
+      key: swapKey,
+      itemsKey,
+      // Measured BEFORE animating: `animateHeightFrom` pins its from-height synchronously, so
+      // reading afterwards would record the height we are easing away from as if it were the new one.
+      height: element.offsetHeight,
+      state: itemSelector === undefined ? null : captureGalleryLayout(element, itemSelector),
+      trusted: !isRegionSettling(element, itemSelector),
+    };
+  };
+
+  /**
+   * Keep re-capturing until everything has come to rest.
+   *
+   * A snapshot taken mid-entrance is worthless, and there is no re-render when a tween ends to
+   * replace it — so the region watches for the stillness itself. One frame's work while an
+   * animation is already running, and it stops the moment nothing is moving, which is also the
+   * moment the record becomes true.
+   */
+  const settle = (): void => {
+    if (frame.current !== 0) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = 0;
+      const element = ref.current;
+      if (!element || previous.current === null) return;
+      const { key, itemsKey: items } = previous.current;
+      capture(element);
+      // `capture` stamps the CURRENT keys; this loop is only refreshing geometry, so the identity
+      // it was taken under has to survive or a pending change would look like it had been handled.
+      previous.current = { ...previous.current, key, itemsKey: items };
+      if (!previous.current.trusted) settle();
+    });
+  };
 
   // No dependency array on purpose: the region is measured after EVERY commit, so what's recorded
   // is always the frame the next change will animate FROM.
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
-    // Measure and capture BEFORE animating — `animateHeightFrom` pins its from-height synchronously,
-    // so reading afterwards would record the height we are easing away from as if it were the new one.
-    const height = element.offsetHeight;
-    const state = itemSelector === undefined ? null : captureGalleryLayout(element, itemSelector);
     const before = previous.current;
-    previous.current = { key: swapKey, height, state };
+    capture(element);
     if (before === null || before.key === swapKey) return;
     animateHeightFrom(element, before.height);
-    if (itemSelector !== undefined) animateListReflow(element, itemSelector, before.state);
+    // The glide runs only when the ITEMS moved, and only from boxes we actually trust.
+    if (itemSelector !== undefined && before.trusted && before.itemsKey !== itemsKey) {
+      animateListReflow(element, itemSelector, before.state);
+    }
+    // The height tween just started, so the record taken a moment ago is already out of date.
+    settle();
   });
 
   /**
@@ -61,23 +123,31 @@ export default function useMorphOnChange<T extends HTMLElement = HTMLDivElement>
     if (itemSelector === undefined) return;
     const scroller = panelScroller();
     if (!scroller) return;
-    let frame = 0;
+    let scrollFrame = 0;
     const resnapshot = (): void => {
-      frame = 0;
+      scrollFrame = 0;
       const element = ref.current;
       const record = previous.current;
       if (!element || !record) return;
       record.state = captureGalleryLayout(element, itemSelector);
+      record.trusted = !isRegionSettling(element, itemSelector);
     };
     const onScroll = (): void => {
-      if (frame === 0) frame = requestAnimationFrame(resnapshot);
+      if (scrollFrame === 0) scrollFrame = requestAnimationFrame(resnapshot);
     };
     scroller.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       scroller.removeEventListener('scroll', onScroll);
-      if (frame !== 0) cancelAnimationFrame(frame);
+      if (scrollFrame !== 0) cancelAnimationFrame(scrollFrame);
     };
   }, [itemSelector]);
+
+  useEffect(
+    () => () => {
+      if (frame.current !== 0) cancelAnimationFrame(frame.current);
+    },
+    [],
+  );
 
   return ref;
 }

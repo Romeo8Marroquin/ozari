@@ -27,3 +27,11 @@ dist-ssr
 .env
 # TanStack Router build artifacts
 .tanstack
+
+# `pnpm doc:preview` output — the bundled preview script and the PDFs it renders. A local design
+# tool for looking at the order document; nothing here is source or ships anywhere.
+scripts/.out
+scripts/*.pdf
+
+# Playwright MCP scratch output (screenshots taken while checking a render or a CSP policy)
+.playwright-mcp

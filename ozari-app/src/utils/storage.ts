@@ -39,6 +39,7 @@ export const Storage = {
 const SESSION_KEYS: readonly StorageKeys[] = [
   StorageKeyValues.TOKEN,
   StorageKeyValues.PRODUCT_CREATE_DRAFT,
+  StorageKeyValues.ORDER_CREATE_DRAFT,
 ];
 
 function getStorage(key: StorageKeys): globalThis.Storage {

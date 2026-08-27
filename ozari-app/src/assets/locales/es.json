@@ -167,6 +167,12 @@
         "title": "REGISTRO",
         "welcomeMessage": "Bienvenido",
         "subtitle": "Regístrate a los servicios de Party Rentals",
+        "terms": {
+          "open": "Leerlos",
+          "title": "Términos y condiciones",
+          "description": "Condiciones del servicio de Party Rentals.",
+          "close": "Entendido"
+        },
         "form": {
           "emailLabel": "Correo electrónico",
           "emailPlaceholder": "Ingrese su correo",
@@ -243,6 +249,11 @@
     },
     "panel": {
       "brand": "Party Rentals",
+      "formDraft": {
+        "restored": "Recuperamos tu borrador.",
+        "discard": "Descartar",
+        "disable": "Desactivar borradores"
+      },
       "nav": {
         "dashboard": "Inicio",
         "products": "Productos",
@@ -351,6 +362,71 @@
           "empty": "Aún no hay salidas registradas este mes."
         }
       },
+      "documents": {
+        "actions": {
+          "download": "Descargar comprobante",
+          "quote": "Descargar cotización"
+        },
+        "receipt": {
+          "title": "Comprobante de pedido"
+        },
+        "quote": {
+          "title": "Cotización"
+        },
+        "fields": {
+          "reference": "No.",
+          "issuedAt": "Emitido",
+          "validUntil": "Válida hasta",
+          "paid": "PAGADO",
+          "phonePrefix": "Tel.",
+          "clientCard": "Cliente",
+          "clientName": "Nombre",
+          "contact": "Teléfono",
+          "address": "Dirección de entrega",
+          "eventCard": "Evento y logística",
+          "eventType": "Tipo de evento",
+          "delivery": "Entrega",
+          "pickup": "Recolección",
+          "billedDays": "Días facturados",
+          "billedDaysValue_one": "{{count}} día",
+          "billedDaysValue_other": "{{count}} días",
+          "billedDaysHint": "El alquiler se cobra por día iniciado.",
+          "conditions": "Condiciones",
+          "banks": "Datos para depósito",
+          "page": "Página {{page}} de {{total}}"
+        },
+        "groups": {
+          "rental": "Alquiler",
+          "sale": "Venta"
+        },
+        "columns": {
+          "description": "Descripción",
+          "quantity": "Cantidad",
+          "days": "Días",
+          "dailyPrice": "Precio por día",
+          "unitPrice": "Precio unitario",
+          "lineTotal": "Subtotal"
+        },
+        "totals": {
+          "subtotal": "Subtotal",
+          "delivery": "Servicio a domicilio",
+          "deliveryIncludesReturn": "Incluye entrega y recolección",
+          "deliveryIncludesOneWay": "Incluye entrega",
+          "free": "Gratis",
+          "discount": "Descuento",
+          "total": "TOTAL",
+          "deposit": "Anticipo",
+          "balance": "Saldo pendiente"
+        },
+        "notices": {
+          "quote": "Cotización sujeta a cambios y a la disponibilidad de los artículos en las fechas indicadas.",
+          "terms": "La aceptación de este documento implica la conformidad con los términos y condiciones del servicio."
+        },
+        "errors": {
+          "failed": "No fue posible generar el documento. Inténtalo de nuevo.",
+          "incompleteForm": "Completa los datos marcados para generar la cotización."
+        }
+      },
       "preferences": {
         "title": "Preferencias del sistema",
         "lead": "Reglas y catálogos que aplican a todo el negocio: los tiempos de la logística, la evidencia de cada paso, las listas que alimentan los formularios y los datos que llevan tus documentos.",
@@ -376,9 +452,21 @@
             "title": "Evidencia",
             "description": "Cuántas fotos solicita cada paso que las requiere, y por cuánto tiempo se conservan."
           },
+          "forms": {
+            "title": "Formularios",
+            "description": "Cómo se comportan los formularios de creación mientras se llenan."
+          },
           "documents": {
             "title": "Membrete",
-            "description": "Los datos del negocio que encabezan y cierran cada cotización y comprobante. Se imprimen tal como los escribas aquí."
+            "description": "De quién viene el documento: encabeza cada cotización y comprobante."
+          },
+          "documentConditions": {
+            "title": "Condiciones del documento",
+            "description": "Lo que el documento declara además de los precios: las condiciones destacadas, el aviso de domicilio gratis y la vigencia de una cotización."
+          },
+          "legal": {
+            "title": "Términos y condiciones",
+            "description": "El texto completo del servicio. Los documentos no lo transcriben; se publica en el registro, donde el cliente lo acepta."
           }
         },
         "settings": {
@@ -409,21 +497,37 @@
             "label": "Meses de retención",
             "help": "Antigüedad a partir de la cual pueden depurarse las fotos de pedidos terminados. Los pedidos y su historial se conservan siempre."
           },
+          "saveDraftOrders": {
+            "label": "Guardar borrador de nuevo pedido",
+            "help": "Conserva lo que llevas escrito si recargas o navegas a otra página. El borrador vive solo en esta pestaña y se borra al cerrarla, al crear el pedido o al cerrar sesión."
+          },
+          "saveDraftProducts": {
+            "label": "Guardar borrador de nuevo producto",
+            "help": "Igual que el de pedidos, para el formulario de productos. Las fotos nunca se guardan en el borrador."
+          },
           "businessName": {
             "label": "Nombre del negocio",
-            "help": "Encabeza cada documento. Es lo primero que lee el cliente, así que conviene el nombre con el que te conocen."
+            "help": "Encabeza cada documento."
           },
           "businessPhone": {
             "label": "Teléfono de contacto",
-            "help": "Aparece al pie de cada documento. Puedes dejarlo vacío si prefieres que te contacten por otro medio."
+            "help": "Aparece al pie. Opcional."
           },
           "terms": {
             "label": "Términos y condiciones",
-            "help": "Se imprimen al pie de la última página. Aquí van las condiciones de daños, la política de envío y cualquier otra nota que deba quedar por escrito."
+            "help": "Se resguardan aquí. Los documentos los referencian sin transcribirlos."
+          },
+          "conditions": {
+            "label": "Condiciones destacadas",
+            "help": "Una por línea (máximo cuatro). Estas sí se imprimen en cada documento, junto a los totales."
+          },
+          "freeDeliveryNote": {
+            "label": "Aviso de domicilio gratis",
+            "help": "Se imprime solo cuando el envío del pedido es de Q0.00. Si el envío se cobra, se omite."
           },
           "quoteValidityDays": {
-            "label": "Vigencia de la cotización",
-            "help": "Días que declara válidos una cotización. No caduca sola: es lo que se le informa al cliente."
+            "label": "Vigencia (días)",
+            "help": "Días que una cotización se declara vigente."
           }
         },
         "catalogs": {
@@ -453,7 +557,7 @@
           },
           "bankAccounts": {
             "title": "Cuentas bancarias",
-            "description": "Las cuentas a las que puede depositar un cliente. Se imprimen al pie de los documentos y se guardan cifradas: solo tú puedes verlas desde esta pantalla."
+            "description": "Cuentas para depósitos de clientes. Se guardan cifradas."
           }
         },
         "banks": {
@@ -1127,10 +1231,6 @@
           "configMissing": {
             "title": "Falta configuración",
             "description": "No hay datos de referencia configurados (categorías, monedas u otros). Configúralos en preferencias para poder crear productos."
-          },
-          "draft": {
-            "restored": "Restauramos un borrador guardado de este formulario.",
-            "discard": "Descartar borrador"
           },
           "sections": {
             "info": {

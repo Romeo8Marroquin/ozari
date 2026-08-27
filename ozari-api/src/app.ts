@@ -20,6 +20,7 @@ import type { AppError } from "./models/common/error.js";
 import authRouter from "./modules/auth/auth.route.js";
 import clientRegistriesRouter from "./modules/clientRegistries/clientRegistries.route.js";
 import dashboardRouter from "./modules/dashboard/dashboard.route.js";
+import legalRouter from "./modules/legal/legal.route.js";
 import ordersRouter from "./modules/orders/orders.route.js";
 import preferencesRouter from "./modules/preferences/preferences.route.js";
 import productsRouter from "./modules/products/products.route.js";
@@ -231,6 +232,12 @@ function configureRoutes(app: Express): void {
   // Module routes with appropriate rate limiters
   // Health check - public limiter (moderate)
   apiRouter.use("/health", rateLimiters["public"], healthRouter);
+
+  // The business's published terms — PUBLIC limiter, because the people who most need to read them
+  // are the ones being asked to accept them at registration, who have no session yet. Deliberately
+  // NOT part of the Admin-only preferences router: publishing one paragraph must not mean handing an
+  // anonymous visitor every catalog, operational rule and bank account behind it.
+  apiRouter.use("/legal", rateLimiters["public"], legalRouter);
 
   // Auth endpoints — authenticated tier for the router; the CREDENTIAL endpoints inside it stack
   // their own strict 10/min limiter (see auth.route.ts), so /me and /signout never starve on it.

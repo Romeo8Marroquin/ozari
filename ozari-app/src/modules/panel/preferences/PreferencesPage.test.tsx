@@ -46,14 +46,16 @@ vi.mock('@tanstack/react-router', () => ({
 
 // Only the row transitions are spied on — the rest of the vocabulary stays real so the page's own
 // reveal, tab swap and editor cross-fade still run exactly as they do in the app.
-const { editorSlotOut, revealInScroller } = vi.hoisted(() => ({
+const { editorSlotOut, revealInScroller, animateListReflow } = vi.hoisted(() => ({
   editorSlotOut: vi.fn(() => Promise.resolve()),
   revealInScroller: vi.fn(),
+  animateListReflow: vi.fn(),
 }));
 vi.mock('../pageMotion', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../pageMotion')>()),
   editorSlotOut,
   revealInScroller,
+  animateListReflow,
 }));
 
 import { PanelNavContext, type PanelNav } from '../PanelNavContext';
@@ -70,6 +72,8 @@ const data = (over: Partial<PreferencesResponse> = {}): PreferencesResponse => (
     { key: 'orders.evidenceMinPhotos', type: 'int', value: 1, min: 1, max: 20, group: 'evidence' },
     { key: 'orders.evidenceMaxPhotos', type: 'int', value: 10, min: 1, max: 20, group: 'evidence' },
     { key: 'orders.evidenceRetentionMonths', type: 'int', value: 24, min: 1, max: 120, group: 'evidence' },
+    { key: 'forms.saveDraftOrders', type: 'bool', value: true, group: 'forms' },
+    { key: 'forms.saveDraftProducts', type: 'bool', value: true, group: 'forms' },
     {
       key: 'documents.businessName',
       type: 'text',
@@ -80,13 +84,25 @@ const data = (over: Partial<PreferencesResponse> = {}): PreferencesResponse => (
       group: 'documents',
     },
     {
+      key: 'documents.businessPhone',
+      type: 'text',
+      value: '5555-1234',
+      minLength: 0,
+      maxLength: 60,
+      multiline: false,
+      format: 'phone',
+      group: 'documents',
+    },
+    // Three GROUPS in the Documentos tab, not one: the letterhead, what the page declares about the
+    // deal, and the terms the document never prints. Each is its own card with its own save.
+    {
       key: 'documents.terms',
       type: 'text',
       value: '',
       minLength: 0,
       maxLength: 1200,
       multiline: true,
-      group: 'documents',
+      group: 'legal',
     },
     {
       key: 'documents.quoteValidityDays',
@@ -94,7 +110,7 @@ const data = (over: Partial<PreferencesResponse> = {}): PreferencesResponse => (
       value: 15,
       min: 1,
       max: 365,
-      group: 'documents',
+      group: 'documentConditions',
     },
   ],
   catalogs: {
@@ -450,6 +466,21 @@ describe('PreferenceSettingsCard', () => {
     expect(notify.success).toHaveBeenCalledWith(`${KEY}.toasts.settingsSaved`);
   });
 
+  it('saves a SWITCH as a real boolean, never as a string or a 0/1', async () => {
+    // The API refuses to coerce `"false"` or `0` — deliberately, so a stale client is a rejection
+    // rather than a setting the admin never chose. This is the client half of that contract.
+    setState({ data: data() });
+    renderPage();
+    await userEvent.click(screen.getByLabelText(`${KEY}.settings.saveDraftOrders.label`));
+    await userEvent.click(screen.getAllByRole('button', { name: `${KEY}.settings.save` })[2]!);
+
+    // Per FORM, not one global — so flipping the order switch leaves the product one alone.
+    expect(updateSettings.mock.calls[0]?.[0]).toEqual([
+      { key: 'forms.saveDraftOrders', value: false },
+      { key: 'forms.saveDraftProducts', value: true },
+    ]);
+  });
+
   it('blocks an out-of-range value and an INVERTED evidence range before the request', async () => {
     setState({ data: data() });
     renderPage();
@@ -518,7 +549,28 @@ describe('PreferenceSettingsCard', () => {
   });
 
   describe('text settings', () => {
-    it('sends a text setting as a STRING and an int as a number, in one save', async () => {
+    /** The save button of the CARD that owns `label`. The Documentos tab is three settings cards
+     *  now — letterhead, conditions, terms — and each sends only its own group. */
+    const saveFor = (label: string): HTMLElement =>
+      within(screen.getByLabelText(label).closest('form')!).getByRole('button', {
+        name: `${KEY}.settings.save`,
+      });
+
+    it('draws the control the VALUE asks for, not one shape for the whole card', async () => {
+      // A business name in a text area invites a paragraph the resolver then rejects, and it costs
+      // the phone its keypad. Only a genuinely multi-line setting gets a textarea.
+      setState({ data: data() });
+      renderPage();
+      await openDocuments();
+
+      expect(screen.getByLabelText(`${KEY}.settings.businessName.label`).tagName).toBe('INPUT');
+      const phone = screen.getByLabelText(`${KEY}.settings.businessPhone.label`);
+      expect(phone).toHaveAttribute('type', 'tel');
+      expect(phone).toHaveAttribute('inputmode', 'tel');
+      expect(screen.getByLabelText(`${KEY}.settings.terms.label`).tagName).toBe('TEXTAREA');
+    });
+
+    it('sends a text setting as a STRING and an int as a number', async () => {
       // The wire type follows the setting's own type — the API's validator rejects the other one.
       setState({ data: data() });
       renderPage();
@@ -527,13 +579,23 @@ describe('PreferenceSettingsCard', () => {
       const name = screen.getByLabelText(`${KEY}.settings.businessName.label`);
       await userEvent.clear(name);
       await userEvent.type(name, '  Alquileres El Sol  ');
-      await userEvent.click(screen.getByRole('button', { name: `${KEY}.settings.save` }));
+      await userEvent.click(saveFor(`${KEY}.settings.businessName.label`));
 
+      // Only the LETTERHEAD group — the terms and the validity live in their own cards now.
       expect(updateSettings.mock.calls[0]?.[0]).toEqual([
         { key: 'documents.businessName', value: 'Alquileres El Sol' },
-        { key: 'documents.terms', value: '' },
-        { key: 'documents.quoteValidityDays', value: 15 },
+        { key: 'documents.businessPhone', value: '5555-1234' },
       ]);
+
+      updateSettings.mockClear();
+      const days = screen.getByLabelText(`${KEY}.settings.quoteValidityDays.label`);
+      await userEvent.clear(days);
+      await userEvent.type(days, '7');
+      await userEvent.click(saveFor(`${KEY}.settings.quoteValidityDays.label`));
+      expect(updateSettings.mock.calls[0]?.[0]).toContainEqual({
+        key: 'documents.quoteValidityDays',
+        value: 7,
+      });
     });
 
     it('blocks an EMPTY required text but saves an empty optional one', async () => {
@@ -544,39 +606,57 @@ describe('PreferenceSettingsCard', () => {
       // A document with no letterhead is broken, so the name has no legitimate empty state…
       const name = screen.getByLabelText(`${KEY}.settings.businessName.label`);
       await userEvent.clear(name);
-      await userEvent.click(screen.getByRole('button', { name: `${KEY}.settings.save` }));
+      await userEvent.click(saveFor(`${KEY}.settings.businessName.label`));
       expect(await screen.findByText(`${KEY}.settings.requiredError`)).toBeInTheDocument();
       expect(updateSettings).not.toHaveBeenCalled();
 
-      // …while the terms are already empty in the fixture and save happily alongside it.
+      // …while the phone beside it is optional and saves happily once the name is valid again.
       await userEvent.type(name, 'Alquileres El Sol');
-      await userEvent.click(screen.getByRole('button', { name: `${KEY}.settings.save` }));
+      await userEvent.click(saveFor(`${KEY}.settings.businessName.label`));
       expect(updateSettings).toHaveBeenCalled();
     });
 
-    it('refuses a LINE BREAK in a single-line setting, and allows one in the terms', async () => {
+    it('makes a line break UNREACHABLE in a single-line field, and keeps them in the terms', async () => {
       setState({ data: data() });
       renderPage();
       await openDocuments();
 
+      // Now that a single-line setting draws an `<input>`, the control itself drops the newline on
+      // paste — the mirrored rule has nothing left to report, which is the better failure: the
+      // admin never types something the form then refuses.
       const name = screen.getByLabelText(`${KEY}.settings.businessName.label`);
       await userEvent.clear(name);
       await userEvent.click(name);
       await userEvent.paste('Alquileres\nEl Sol');
-      await userEvent.click(screen.getByRole('button', { name: `${KEY}.settings.save` }));
-      expect(await screen.findByText(`${KEY}.settings.singleLineError`)).toBeInTheDocument();
-      expect(updateSettings).not.toHaveBeenCalled();
+      expect(name).toHaveValue('AlquileresEl Sol');
 
       // The terms are a paragraph — newlines are the point there.
-      await userEvent.clear(name);
-      await userEvent.type(name, 'Alquileres El Sol');
       await userEvent.click(screen.getByLabelText(`${KEY}.settings.terms.label`));
       await userEvent.paste('Primera línea.\nSegunda línea.');
-      await userEvent.click(screen.getByRole('button', { name: `${KEY}.settings.save` }));
+      await userEvent.click(saveFor(`${KEY}.settings.terms.label`));
       expect(updateSettings.mock.calls[0]?.[0]).toContainEqual({
         key: 'documents.terms',
         value: 'Primera línea.\nSegunda línea.',
       });
+    });
+
+    it('still reports a line break that arrived from the SERVER in a single-line setting', async () => {
+      // The mirrored rule is not dead code: a hand-edited row can deliver one (the API truncates an
+      // over-long text on read but does not strip newlines), and the value reaches the field
+      // untouched. Saving anything in that card then surfaces it rather than sending a value the
+      // API would reject.
+      const payload = data();
+      const stored = payload.settings.find((setting) => setting.key === 'documents.businessName');
+      Object.assign(stored!, { value: 'Alquileres\nEl Sol' });
+      setState({ data: payload });
+      renderPage();
+      await openDocuments();
+
+      // Touch the phone beside it so the card is dirty — an untouched card cannot be saved at all.
+      await userEvent.type(screen.getByLabelText(`${KEY}.settings.businessPhone.label`), '5');
+      await userEvent.click(saveFor(`${KEY}.settings.businessPhone.label`));
+      expect(await screen.findByText(`${KEY}.settings.singleLineError`)).toBeInTheDocument();
+      expect(updateSettings).not.toHaveBeenCalled();
     });
 
     it('rejects a text longer than the bound the API published', async () => {
@@ -589,7 +669,7 @@ describe('PreferenceSettingsCard', () => {
       // Pasted rather than typed: `maxLength` stops the keyboard at the bound, and what has to be
       // covered is the resolver's own answer when a value gets past it anyway.
       await userEvent.paste('x'.repeat(1201));
-      await userEvent.click(screen.getByRole('button', { name: `${KEY}.settings.save` }));
+      await userEvent.click(saveFor(`${KEY}.settings.terms.label`));
       expect(await screen.findByText(`${KEY}.settings.lengthError`)).toBeInTheDocument();
       expect(updateSettings).not.toHaveBeenCalled();
     });
@@ -1019,6 +1099,37 @@ describe('PreferenceCatalogCard editing', () => {
       await userEvent.click(within(card).getByRole('button', { name: `${KEY}.actions.add` }));
       expect(within(card).queryByLabelText(`${KEY}.rowForm.accountNumber`)).not.toBeInTheDocument();
     });
+  });
+
+  it('never glides the rows for a change that did not MOVE them', async () => {
+    // The card's height depends on its rows AND on whether an editor is open; a row's POSITION
+    // depends only on the rows. Keyed on the two together, opening the inline form re-ran the glide
+    // across every row — the whole list drifted back into place for a change that had not moved one
+    // of them (reported 2026-08-05, worst on first use because the snapshot was also taken mid-
+    // entrance). The two questions are answered separately now.
+    setState({ data: data() });
+    const { rerender } = renderPage();
+    const card = await openProducts();
+    animateListReflow.mockClear();
+
+    await userEvent.click(within(card).getByRole('button', { name: `${KEY}.actions.add` }));
+    expect(animateListReflow).not.toHaveBeenCalled();
+
+    await userEvent.click(within(card).getByRole('button', { name: `${KEY}.rowForm.cancel` }));
+    await waitFor(() =>
+      expect(within(card).queryByLabelText(`${KEY}.rowForm.name`)).not.toBeInTheDocument(),
+    );
+    expect(animateListReflow).not.toHaveBeenCalled();
+
+    // A SAVED row IS a change to the list, so its neighbours glide aside to make room for it.
+    const grown = data();
+    grown.catalogs.productCategories = [
+      ...grown.catalogs.productCategories,
+      { id: 9, name: 'Carpas', isActive: true, isReferenced: false },
+    ];
+    setState({ data: grown });
+    rerender(<PreferencesPage />);
+    expect(animateListReflow).toHaveBeenCalled();
   });
 
   it('grows a newly-arrived row open instead of letting the list jump', async () => {

@@ -26,6 +26,15 @@ vi.mock('./useUpdateProduct', () => ({
 const { notify } = vi.hoisted(() => ({ notify: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@components/notifications/notify', () => ({ notify }));
 
+// Only the draft SWITCH is stubbed; the rest of the preferences module stays real.
+const { formDrafts } = vi.hoisted(() => ({
+  formDrafts: vi.fn(() => ({ enabled: true, isLoading: false })),
+}));
+vi.mock('../preferences/usePreferences', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../preferences/usePreferences')>()),
+  useFormDraftsEnabled: formDrafts,
+}));
+
 // The upload hook is mocked (its own test covers the presign + PUT mechanics); the REAL
 // useGalleryImages runs underneath so these tests exercise the actual staging behaviour.
 const { uploadImages, uploading } = vi.hoisted(() => ({
@@ -49,6 +58,8 @@ import type { Product } from './product.types';
 import { BUSINESS_TYPE_SELL, createProductDefaultValues } from './SchemaCreateProduct';
 
 const KEY = 'modules.panel.products.create';
+/** The draft note is ONE component shared by both create forms, so its copy is not per-form. */
+const DRAFT_KEY = 'modules.panel.formDraft';
 
 const catalog = {
   businessTypes: [
@@ -132,6 +143,7 @@ beforeEach(() => {
   sessionStorage.clear();
   localStorage.clear();
   vi.clearAllMocks();
+  formDrafts.mockReturnValue({ enabled: true, isLoading: false });
   pending.value = false;
   updatePending.value = false;
   uploading.value = false;
@@ -312,12 +324,12 @@ describe('ProductForm — silent draft', () => {
 
     // The note lives in an always-mounted grid-rows collapse (so it eases, never pops); open =
     // the collapse container is not hidden.
-    const noteContainer = screen.getByText(`${KEY}.draft.restored`).closest('[aria-hidden]');
+    const noteContainer = screen.getByText(`${DRAFT_KEY}.restored`).closest('[aria-hidden]');
     expect(noteContainer).toHaveAttribute('aria-hidden', 'false');
     expect(noteContainer?.className).toContain('grid-rows-[1fr]');
     expect(screen.getByLabelText(new RegExp(`${KEY}.fields.nameLabel`))).toHaveValue('Mesa redonda');
 
-    await userEvent.click(screen.getByRole('button', { name: `${KEY}.draft.discard` }));
+    await userEvent.click(screen.getByRole('button', { name: `${DRAFT_KEY}.discard` }));
     // Discard COLLAPSES the note (still mounted through the animation) instead of yanking it out.
     expect(noteContainer).toHaveAttribute('aria-hidden', 'true');
     expect(noteContainer?.className).toContain('grid-rows-[0fr]');
@@ -325,9 +337,28 @@ describe('ProductForm — silent draft', () => {
     await waitFor(() => expect(Storage.get(StorageKeys.PRODUCT_CREATE_DRAFT)).toBeNull());
   });
 
+  it('honours its OWN switch: off means nothing restored and nothing kept', async () => {
+    // `forms.saveDraftProducts`, separate from the order form's — a product is set up once at a
+    // desk, an order is filled with a client on the phone, so the answer for one is not the answer
+    // for the other. Off also EMPTIES the slot: it has to mean "nothing of mine is being kept".
+    seedValidDraft();
+    formDrafts.mockReturnValue({ enabled: false, isLoading: false });
+    renderForm();
+
+    await waitFor(() => expect(Storage.get(StorageKeys.PRODUCT_CREATE_DRAFT)).toBeNull());
+    expect(screen.getByLabelText(new RegExp(`${KEY}.fields.nameLabel`))).toHaveValue('');
+    expect(screen.getByText(`${DRAFT_KEY}.restored`).closest('[aria-hidden]')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    );
+
+    await userEvent.type(screen.getByLabelText(new RegExp(`${KEY}.fields.nameLabel`)), 'Mesa');
+    expect(Storage.get(StorageKeys.PRODUCT_CREATE_DRAFT)).toBeNull();
+  });
+
   it('keeps the note collapsed (hidden and inert) when there is no draft to restore', () => {
     renderForm();
-    const noteContainer = screen.getByText(`${KEY}.draft.restored`).closest('[aria-hidden]');
+    const noteContainer = screen.getByText(`${DRAFT_KEY}.restored`).closest('[aria-hidden]');
     expect(noteContainer).toHaveAttribute('aria-hidden', 'true');
     expect(noteContainer?.className).toContain('grid-rows-[0fr]');
   });
@@ -535,7 +566,7 @@ describe('ProductForm — edit mode', () => {
     renderEdit();
 
     // The form shows the PRODUCT, and the create draft's restored note stays collapsed.
-    const noteContainer = screen.getByText(`${KEY}.draft.restored`).closest('[aria-hidden]');
+    const noteContainer = screen.getByText(`${DRAFT_KEY}.restored`).closest('[aria-hidden]');
     expect(noteContainer).toHaveAttribute('aria-hidden', 'true');
 
     // Typing must not touch the stored create draft (edit has no draft at all).

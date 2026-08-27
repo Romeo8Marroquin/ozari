@@ -169,6 +169,11 @@ export const appConfig = {
   // 60s: the definition changes rarely, so this is ~free, and it bounds every kind of staleness.
   statusCatalogTtlSeconds: 60,
 
+  // Whether the create forms keep a silent draft of half-finished work. ON: losing twenty fields to
+  // a mis-tapped back button is the failure worth preventing, and the draft is per-tab and dies with
+  // it. Admin-editable — a shared machine is a real reason to want it off.
+  defaultSaveFormDrafts: true,
+
   // Fallbacks for the `documents.*` preferences — the letterhead of every quote and order document
   // (EPIC-2-DOCUMENTS §6). The business NAME has a real default because a document with no
   // letterhead is broken, and this is the business the whole deployment belongs to; the phone and
@@ -177,9 +182,19 @@ export const appConfig = {
   defaultDocumentBusinessName: "Party Rentals GT",
   defaultDocumentBusinessPhone: "",
   defaultDocumentTerms: "",
-  // How long a quote states it is valid for. Two weeks is long enough to be useful and short
-  // enough that seasonal pricing doesn't get quoted from a stale document.
-  defaultQuoteValidityDays: 15,
+  // The short conditions a document PRINTS, and the free-delivery line. Both default to EMPTY for
+  // the same reason the terms do, and it matters more here: these are statements made in the
+  // business's own voice on a page handed to a client. A missing row must print nothing rather than
+  // put a policy nobody wrote into their mouth. The SEED, which knows which business this is, starts
+  // them at the lines the old hand-made template carried — and the admin edits them from there.
+  defaultDocumentConditions: "",
+  defaultDocumentFreeDeliveryNote: "",
+  // How long a quote states it is valid for (owner decision 2026-08-26: ONE WEEK). Long enough for
+  // a client to decide, short enough that a stale document cannot be waved at us after prices or
+  // availability have moved — and a week is the unit the business actually thinks in. Admin-editable
+  // in Preferencias → Documentos, so this is only the value a database that has never seen the
+  // setting resolves to.
+  defaultQuoteValidityDays: 7,
 
   sensitiveKeys: ["password", "token", "secret", "creditCard", "cvv", "auth"],
   basePath: "/api",

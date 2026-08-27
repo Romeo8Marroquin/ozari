@@ -16,14 +16,44 @@
 
     <meta name="referrer" content="strict-origin-when-cross-origin" />
     <!-- CSP notes (the tight script-src 'self' is what carries the security weight):
+         · script-src `'wasm-unsafe-eval'` = @react-pdf/renderer lays out pages with yoga, which
+           ships as an EMSCRIPTEN-COMPILED WebAssembly module and calls `WebAssembly.instantiate`.
+           Browsers refuse that under a bare `script-src 'self'`.
+           IT MUST NOT BECOME `'unsafe-eval'`. That token would re-enable string-to-code execution
+           (`eval`, `new Function`, `setTimeout('…')`) across the WHOLE app and would undo the one
+           directive carrying the real weight here. `'wasm-unsafe-eval'` is the purpose-built,
+           strictly narrower token: it permits compiling/instantiating WebAssembly and NOTHING else.
+           VERIFIED, not assumed (2026-08-05): the built `react-pdf.browser-*.js` chunk was scanned —
+           `WebAssembly` ×5, `eval(` ×0, `new Function` ×0 — so the broad token genuinely is not
+           needed. Re-check that if the library is ever upgraded.
+           Support: Chrome/Edge 97+, Firefox 102+, Safari 16.4+. An older browser IGNORES the
+           unknown token, so WASM stays blocked and only the PDF button fails — the rest of the app
+           is untouched. That degradation is deliberately preferred over weakening the policy for
+           everyone. The way to need NO concession at all is rendering PDFs on the server, where no
+           CSP applies; that is the same path emailing documents will take (EPIC-2-DOCUMENTS §10).
+         · worker-src `blob:` ALSO covers react-pdf: it inflates image streams in a Blob worker
+           (`new Worker(URL.createObjectURL(new Blob([…])))`). Already allowed for Vite — noted here
+           so nobody removes it as dev-only tooling.
          · img-src `blob:` = the product-form gallery previews (URL.createObjectURL);
            `*.partyrentalsgt.com` = the uploaded photos' public hosts (the R2 buckets' custom
            domains — assets-stg. today, assets. for prod later; our own apex, NOT a blanket https:).
-         · connect-src `*.r2.cloudflarestorage.com` = the browser PUTs gallery photos STRAIGHT to R2
-           via presigned URLs (the bytes never pass through the API); wildcard because the exact
-           account host is deliberately not committed to this public file. NOTE: the BUCKET must
-           also allow the app origins in its own CORS policy (DEPLOYMENT.md §3b.4) — CORS is a
-           browser gate only; the real upload authorization is the presigned signature itself.
+         · R2 IS TWO DIFFERENT HOSTS, and only one of them is here:
+             – WRITING (`connect-src`) goes to the S3 API endpoint,
+               `<account-id>.r2.cloudflarestorage.com` — the browser PUTs gallery photos and order
+               evidence STRAIGHT there via presigned URLs, so the bytes never pass through the API.
+             – READING (`img-src`) goes to `assets-stg.partyrentalsgt.com` (`R2_PUBLIC_URL`), which
+               is our OWN domain and is therefore already covered by `*.partyrentalsgt.com`.
+           The write host is PINNED to the exact account (2026-08-06), replacing a
+           `*.r2.cloudflarestorage.com` wildcard that permitted connections to every Cloudflare
+           account's R2 — the one remaining outbound hole wide enough to exfiltrate through. The
+           account id is an identifier, not a credential, and the browser already receives it inside
+           every presigned URL, so withholding it bought obscurity worth far less than the wildcard
+           cost. Same host in every environment (local, staging, prod share the account; the BUCKET
+           differs, not the endpoint) — IF production is ever moved to a separate Cloudflare account,
+           its endpoint must be added here in the same change.
+           NOTE: the BUCKET must also allow the app origins in its own CORS policy (DEPLOYMENT.md
+           §3b.4) — CORS is a browser gate only; the real upload authorization is the presigned
+           signature itself.
          · connect-src ALSO lists every API origin the built app may call, because a CSP blocks what
            it does not name and the failure looks like a dead app, not a config error. It must stay
            in step with `VITE_API_URL` (Cloudflare Pages) — CHANGING THE API HOST MEANS CHANGING
@@ -39,20 +69,58 @@
            Cloudflare's Universal SSL covers the apex plus a single subdomain level, so a two-level
            host has no certificate and fails the TLS handshake before any of this matters
            (DEPLOYMENT.md §3c). Both are listed here so a build serves either environment.
-           The `run.app` entry is the ROLLBACK path during the custom-domain cutover (repointing DNS
-           must not need a frontend rebuild); drop it once `api-staging.` has been stable for a
-           while. See DEPLOYMENT.md §3c.
+           The raw `run.app` fallback was REMOVED (2026-08-06) now that `api-staging.` is serving —
+           verified before removing, not assumed. A CSP should list what the app actually talks to,
+           not what it might talk to in an emergency: keeping a standing exception for a rare event
+           widens the policy permanently to save one step during it. The rollback path still exists,
+           it simply also needs a Pages rebuild (one click, ~1 min) alongside the DNS change — which
+           a rollback would realistically involve anyway. See DEPLOYMENT.md §3c.
+         · connect-src `data:` = @react-pdf/renderer FETCHES its built-in Helvetica metrics from a
+           `data:` URI it carries inside its own bundle, so generating a document counts as a
+           network connection to `data:`. Omitting it shipped exactly the failure this file keeps
+           warning about (2026-08-05): "Descargar comprobante" spun and produced nothing, with the
+           real reason visible only in the console.
+           WHY THIS IS SAFE, and why it must not be confused with `data:` in script-src (which
+           would be dangerous): a `data:` URI carries its own bytes inline and CANNOT REACH THE
+           NETWORK, so allowing it in connect-src opens NO EXFILTRATION CHANNEL — there is no
+           server on the other end to receive anything. It also grants no new capability: reaching
+           `fetch()` at all requires already-executing script, which script-src 'self' governs, and
+           script that is already running can construct the same bytes inline without asking CSP
+           for permission. The directive is scoped to connect-src ALONE; `data:` is not added to
+           script-src, object-src or frame-src, and must not be.
+           There is no tighter form — CSP cannot scope a `data:` URI by content or type. The only
+           alternatives are bundling a real font file (hundreds of KB inside every generated PDF,
+           to avoid a directive that grants nothing) or rendering PDFs server-side, which is the
+           eventual path for EMAILING documents rather than a fix for this.
          · worker-src `blob:` = dev tooling (Vite) spawns blob workers; harmless — creating one
-           requires already-executing script, which script-src restricts to 'self'. -->
+           requires already-executing script, which script-src restricts to 'self'.
+         · NOTHING HERE IS LOCAL-DEV SLACK. There is no `localhost`, no `127.0.0.1`, no `ws://` and
+           no `http:` source anywhere: dev is covered by `'self'` alone, because Vite serves the app
+           and PROXIES `/api` to :3000 on that same origin. So the policy a developer runs under is
+           the policy staging and production run under, which is the only reason "it works locally"
+           is worth anything here.
+         · base-uri / form-action / object-src are declared EXPLICITLY because the first two do NOT
+           fall back to `default-src` — leaving them out is silently permissive, not inherited.
+           `base-uri 'none'` stops an injected `<base href>` from re-pointing every relative URL in
+           the document; `form-action 'self'` stops a form being made to POST somewhere else (ours
+           all submit through JS, so this costs nothing); `object-src 'none'` retires the plugin
+           surface outright rather than allowing it from 'self'.
+         · frame-ancestors is DELIBERATELY ABSENT here and lives in `public/_headers` instead:
+           browsers IGNORE it in a `<meta>` tag (as they do `sandbox` and `report-uri`), so writing
+           it here would look like clickjacking protection while providing none. That file is the
+           ONLY other place any policy is set, and it carries nothing but framing. -->
 
     <meta
       http-equiv="Content-Security-Policy"
       content="
         default-src 'self';
+        base-uri 'none';
+        form-action 'self';
+        object-src 'none';
         style-src 'self' 'unsafe-inline';
-        script-src 'self';
+        script-src 'self' 'wasm-unsafe-eval';
         img-src 'self' data: blob: https://*.partyrentalsgt.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org;
-        connect-src 'self' https://api-staging.partyrentalsgt.com https://api.partyrentalsgt.com https://ozari-api-694756660984.northamerica-south1.run.app https://*.r2.cloudflarestorage.com https://nominatim.openstreetmap.org;
+        connect-src 'self' data: https://api-staging.partyrentalsgt.com https://api.partyrentalsgt.com https://be7e742ff7f447afd256327ad57d8208.r2.cloudflarestorage.com https://nominatim.openstreetmap.org;
         worker-src 'self' blob:;
         font-src 'self';
       "

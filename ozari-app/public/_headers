@@ -1,0 +1,38 @@
+# Cloudflare Pages response headers.
+#
+# WHY THIS FILE EXISTS AT ALL: browsers IGNORE `frame-ancestors`, `sandbox` and `report-uri` when a
+# CSP arrives in a <meta> tag — they are only honoured as a real HTTP header. Writing them in
+# index.html would LOOK like clickjacking protection while providing none, which is worse than
+# leaving them out. So they live here, and nowhere else.
+#
+# THE FULL CSP DELIBERATELY STAYS IN index.html. Two sources of one policy is exactly how CSP bugs
+# become unfindable (each policy is enforced independently and the STRICTEST wins, so a stale copy
+# here would silently override a corrected one there — with no error, just a dead feature). The
+# policy below therefore contains ONE directive: framing. A policy with no `default-src` restricts
+# nothing else, so it cannot interfere with index.html's.
+#
+# Local dev does NOT read this file — Vite ignores it, Cloudflare Pages applies it on deploy. That
+# is acceptable precisely because nothing here changes app behaviour: it only forbids things the app
+# never does (being framed, MIME sniffing, camera/mic access).
+
+/*
+  # Clickjacking: this app must never be embedded. `frame-ancestors 'none'` is the modern control;
+  # X-Frame-Options repeats it for anything old enough not to honour CSP Level 2.
+  Content-Security-Policy: frame-ancestors 'none'
+  X-Frame-Options: DENY
+  # Stops a response being re-interpreted as a type it did not declare (the classic way a user
+  # upload becomes a script).
+  X-Content-Type-Options: nosniff
+  # The app asks for none of these; saying so means a compromised page cannot ask either.
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  # Belt and braces with the <meta> of the same name already in index.html.
+  Referrer-Policy: strict-origin-when-cross-origin
+  # HSTS is served by Cloudflare's own edge settings too; declaring it here keeps it true even if
+  # that toggle is ever changed. One year, subdomains included, preload-eligible.
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+
+# The build's fingerprinted assets are immutable by construction (the hash changes when the bytes
+# do), so they can be cached hard. index.html is NOT in here on purpose: it must stay revalidated,
+# or a CSP change like the ones above would sit stale in caches for a year.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

@@ -21,7 +21,9 @@ import {
   staggerIn,
   staggerOut,
 } from '../pageMotion';
+import FormDraftNote from '../FormDraftNote';
 import { usePanelNavigate } from '../PanelNavContext';
+import { useFormDraftsEnabled } from '../preferences/usePreferences';
 import PreferencesCta from '../PreferencesCta';
 import type { CatalogOption, CurrencyCatalogOption, ProductCatalog } from './product.types';
 import {
@@ -195,6 +197,8 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
   // existing photos (staged locally from then on); new files upload only at submit time — presigned
   // PUTs straight to R2 — so an abandoned form never leaves orphaned objects behind.
   const gallery = useGalleryImages(product?.images);
+  // Defaults to ON while the preference is in flight — see `useFormDraftsEnabled`.
+  const { enabled: draftsEnabled } = useFormDraftsEnabled('products');
   const { uploadImages, isUploading, progress } = useProductImageUploads();
   const isBusy = isCreating || isUpdating || isUploading;
 
@@ -203,7 +207,12 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
 
   // The draft is read ONCE per mount (never re-read mid-session — the form itself is the source of
   // truth once mounted); its presence drives the "restored" note until discarded. Create-only.
-  const [draft] = useState(() => (isEdit ? null : readProductDraft()));
+  // Not read at all when this form's switch is already known to be OFF (`forms.saveDraftProducts` —
+  // its own key, because the answer for a product set up once at a desk is not the answer for an
+  // order filled with a client on the phone). While the preference is in flight it reads as ON, but
+  // the storage is only ever written while enabled, so the only way into that window with a draft in
+  // hand is to have turned the feature off with one already saved; the autosave effect empties it.
+  const [draft] = useState(() => (isEdit || !draftsEnabled ? null : readProductDraft()));
   const [draftRestored, setDraftRestored] = useState(Boolean(draft));
 
   const methods = useForm<CreateProductFormType>({
@@ -244,10 +253,16 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
   const liveValues = useWatch({ control });
   useEffect(() => {
     if (isEdit) return;
+    // With the switch off the slot is actively emptied rather than merely left alone: turning the
+    // feature off has to mean "nothing of mine is being kept", not "nothing new will be".
+    if (!draftsEnabled) {
+      clearProductDraft();
+      return;
+    }
     const current = liveValues as CreateProductFormType;
     if (isMeaningfulDraft(current)) saveProductDraft(current);
     else clearProductDraft();
-  }, [liveValues, isEdit]);
+  }, [liveValues, isEdit, draftsEnabled]);
 
   // A business-type SWITCH clears the now-irrelevant price fields (stale values must never submit)
   // and re-arms the rent defaults. Reacts only to real changes — never the initial mount, which may
@@ -450,30 +465,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
             <span role="status" aria-label={t(`${KEY}.loading`)} className="sr-only" />
           )}
 
-          {/* Restored-draft note: visible, dismissible, never blocking. Always mounted in a
-              grid-rows 0fr↔1fr collapse (the FormError trick) so appearing/discarding EASES the
-              space open/closed instead of shoving the sections; `-mb-6` cancels the column gap
-              while collapsed and transitions back in step with the height. */}
-          <div
-            aria-hidden={!draftRestored}
-            inert={!draftRestored}
-            className={`grid transition-[grid-template-rows,margin] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
-              draftRestored ? 'grid-rows-[1fr]' : '-mb-6 grid-rows-[0fr]'
-            }`}
-          >
-            <div className="overflow-hidden">
-              <div className="reveal-block flex flex-wrap items-center justify-between gap-2 rounded-control border border-charcoal/[0.08] bg-charcoal/[0.03] px-4 py-2.5 text-sm text-charcoal/70">
-                <span>{t(`${KEY}.draft.restored`)}</span>
-                <button
-                  type="button"
-                  onClick={discardDraft}
-                  className="cursor-pointer font-medium text-charcoal underline-offset-2 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta rounded-chip"
-                >
-                  {t(`${KEY}.draft.discard`)}
-                </button>
-              </div>
-            </div>
-          </div>
+          <FormDraftNote visible={draftRestored && draftsEnabled} onDiscard={discardDraft} />
 
           <FormSection title={t(`${KEY}.sections.info.title`)} description={t(`${KEY}.sections.info.description`)}>
             <SectionReveal loading={!catalogReady} skeleton={<InfoSkeleton />}>

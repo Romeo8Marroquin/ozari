@@ -92,6 +92,22 @@ describe("validateUpdatePreferenceSettings", () => {
     expectRejected("invertedEvidenceRange");
   });
 
+  it("accepts a real BOOLEAN for a switch, and refuses to coerce anything else", () => {
+    expect(run({ settings: [{ key: "forms.saveDraftOrders", value: true }] }).next).toHaveBeenCalled();
+    vi.clearAllMocks();
+    expect(run({ settings: [{ key: "forms.saveDraftOrders", value: false }] }).next).toHaveBeenCalled();
+
+    // `"true"` and `1` are the shapes a stale or hand-rolled client sends. Coercing them would turn
+    // a client bug into a setting the admin never chose, on an endpoint that is declarative and
+    // admin-only — so they are rejected rather than interpreted.
+    for (const value of ["true", 1, null]) {
+      vi.clearAllMocks();
+      const { next } = run({ settings: [{ key: "forms.saveDraftOrders", value }] });
+      expect(next).not.toHaveBeenCalled();
+      expectRejected("invalidSettingValue");
+    }
+  });
+
   it("accepts a TEXT setting, trimmed", () => {
     const { req, next } = run({
       settings: [{ key: "documents.businessName", value: "  Alquileres El Sol  " }],

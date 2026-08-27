@@ -4,6 +4,7 @@ import AnimatedMessage from '@components/AnimatedMessage';
 import Button from '@components/Button';
 import CustomInput from '@components/CustomInput';
 import CustomTextarea from '@components/CustomTextarea';
+import Switch from '@components/Switch';
 import { notify } from '@components/notifications/notify';
 import { toFormError } from '@utils/apiError';
 import { useUpdatePreferenceSettings } from './usePreferences';
@@ -26,6 +27,19 @@ interface SettingField {
   setting: PreferenceSetting;
   text: string;
 }
+
+/**
+ * A field's edited TEXT → the value the API expects for that setting's own arm.
+ *
+ * Every edit is held as a string (an emptied number field has to be able to exist as `''` while it
+ * is retyped), so a switch stores `'true'`/`'false'` and converts back here — which is also exactly
+ * what `String(setting.value)` produces when the field has not been touched, so the untouched and
+ * the edited paths agree without a special case.
+ */
+const settingWireValue = ({ setting, text }: SettingField): string | number | boolean => {
+  if (setting.type === 'bool') return text === 'true';
+  return setting.type === 'text' ? text.trim() : Number(text);
+};
 
 /**
  * The scalar settings of ONE group, as a small save-on-demand form.
@@ -67,6 +81,8 @@ const PreferenceSettingsCard: React.FC<PreferenceSettingsCardProps> = ({ setting
    *  "debe ser un número entero" for a terms block would be nonsense. */
   const errorFor = ({ setting, text }: SettingField): string | undefined => {
     const raw = text.trim();
+    // A switch is one of two values by construction — there is nothing a user can type wrong.
+    if (setting.type === 'bool') return undefined;
     if (setting.type === 'text') {
       if (raw.length < setting.minLength) return t(`${KEY}.settings.requiredError`);
       if (raw.length > setting.maxLength) {
@@ -105,8 +121,9 @@ const PreferenceSettingsCard: React.FC<PreferenceSettingsCardProps> = ({ setting
       fields.map((field) => ({
         key: field.setting.key,
         // The wire type follows the setting's own type — sending "15" for an integer setting would
-        // be rejected by the same validator that rejects 15 for a text one.
-        value: field.setting.type === 'text' ? field.text.trim() : Number(field.text),
+        // be rejected by the same validator that rejects 15 for a text one, and the API refuses to
+        // coerce `"true"` into a boolean for exactly the same reason.
+        value: settingWireValue(field),
       })),
       {
         onSuccess: () => notify.success(t(`${KEY}.toasts.settingsSaved`)),
@@ -141,23 +158,54 @@ const PreferenceSettingsCard: React.FC<PreferenceSettingsCardProps> = ({ setting
           return (
             // A multiline setting takes the FULL row: a paragraph squeezed into half a grid column
             // wraps every few words, which makes it unreadable exactly where reading it matters.
+            // A switch takes it too — its label sits BESIDE the control, so half a column would put
+            // a sentence next to a toggle and wrap it into three lines.
             <div
               key={setting.key}
-              className={`card-item flex min-w-0 flex-col gap-1 ${multiline ? 'sm:col-span-2' : ''}`}
+              className={`card-item flex min-w-0 flex-col gap-1 ${
+                multiline || setting.type === 'bool' ? 'sm:col-span-2' : ''
+              }`}
             >
-              {setting.type === 'text' ? (
+              {setting.type === 'bool' ? (
+                // The switch carries the label itself rather than sitting under a floating one:
+                // a toggle whose meaning is above it reads as a heading with an orphaned control.
+                <Switch
+                  id={`preference-${leaf}`}
+                  checked={field.text === 'true'}
+                  disabled={isPending}
+                  label={label}
+                  aria-label={label}
+                  onChange={(next) => change(String(next))}
+                />
+              ) : multiline ? (
                 <CustomTextarea
                   id={`preference-${leaf}`}
                   label={label}
                   aria-label={label}
-                  // Single-line texts still get a textarea rather than an input so the whole group
-                  // shares one field language; `autoGrow` keeps a one-line value one line tall, and
-                  // the resolver is what forbids the newline — never a silently different control.
+                  // Only a genuinely MULTI-LINE setting gets a textarea (owner, 2026-08-26). Every
+                  // single-line one used to get one too, "so the whole group shares one field
+                  // language" — but a business name in a text area invites a paragraph the resolver
+                  // then rejects, and it costs the phone its keypad. The control should describe the
+                  // value, not the card.
                   //
                   // Deliberately NO `maxLength`: a native cap silently swallows the tail of a pasted
                   // block with no explanation, which reads as the app eating text. The mirrored
                   // resolver says so in words instead — the same stance the row editor's note takes.
                   autoGrow
+                  value={field.text}
+                  disabled={isPending}
+                  error={invalid}
+                  onChange={(event) => change(event.target.value)}
+                />
+              ) : setting.type === 'text' ? (
+                <CustomInput
+                  id={`preference-${leaf}`}
+                  type={setting.format === 'phone' ? 'tel' : 'text'}
+                  // The value's own kind decides the keyboard — the same rule the client-registry
+                  // contact field follows (`CHANNEL_INPUT_MODE`), so a phone is a phone everywhere.
+                  inputMode={setting.format === 'phone' ? 'tel' : 'text'}
+                  label={label}
+                  aria-label={label}
                   value={field.text}
                   disabled={isPending}
                   error={invalid}

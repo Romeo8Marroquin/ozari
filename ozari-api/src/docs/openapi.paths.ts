@@ -1815,6 +1815,31 @@ export const paths: OpenAPIV3.PathsObject = {
       },
     },
   },
+  "/legal/terms": {
+    get: {
+      tags: ["System"],
+      summary: "The business's published terms and conditions",
+      operationId: "getTerms",
+      description:
+        "**PUBLIC** — no session, no role. The people who most need to read these are the ones " +
+        "being asked to ACCEPT them at registration, who by definition have no account yet.\n\n" +
+        "Deliberately NOT part of the Admin-only `/preferences`: publishing one paragraph must not " +
+        "mean handing an anonymous visitor every catalog, operational rule and bank account behind " +
+        "that endpoint. It reads the same `documents.terms` setting through the same registry, so " +
+        "the text a client accepts is exactly the text the admin wrote.\n\n" +
+        "An **empty string is a legitimate answer**, not a `404`: a business that has published no " +
+        "terms is a valid configuration, and a client should then offer nothing to read rather " +
+        "than show an error about a document that was never meant to exist. Public limiter (30/min).",
+      security: [{ ApiKeyAuth: [] }],
+      responses: {
+        "200": dataResponse("The terms, as written. May be empty.", "TermsResponse", {
+          terms: "Cualquier daño ocasionado al mobiliario será cobrado según el precio de reposición.",
+        }),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
   "/orders/{id}/payment": {
     post: {
       tags: ["Orders"],

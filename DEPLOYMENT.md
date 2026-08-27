@@ -288,7 +288,8 @@ the third-party-cookie bug this whole exercise exists to fix.)
 
 | Thing | Where | Why it must move in the same change |
 |---|---|---|
-| CSP `connect-src` | `ozari-app/index.html` | A CSP blocks what it doesn't name; the app looks dead. Lists both API hosts **and** the `run.app` host so a DNS rollback needs no rebuild. |
+| CSP `connect-src` | `ozari-app/index.html` | A CSP blocks what it doesn't name; the app looks dead. Lists both API hosts + the exact R2 write endpoint. **The `run.app` fallback was removed (2026-08-06)** now that `api-staging.` serves: a DNS rollback now also needs a Pages rebuild (one click, ~1 min), which is the right trade for not carrying a standing exception. |
+| CSP response headers | `ozari-app/public/_headers` | `frame-ancestors`, `sandbox` and `report-uri` are IGNORED in a `<meta>` tag — they only work as real headers, so they live here (with `X-Frame-Options`, `nosniff`, `Permissions-Policy`, HSTS). It carries **framing only**; the full CSP stays in `index.html`, because two sources of one policy is how CSP bugs become unfindable. |
 | `_APP_HOST` fallback | `ozari-api/cloudbuild.yaml` | Used by manual builds when no trigger substitution overrides it. |
 | `app_host` default | `infrastructure/.../variables.tf` + `terraform.tfvars.example` | Terraform owns the trigger substitution; a stale default would revert the console edit on the next apply. |
 | Email logo | `ozari-api/src/config/app.ts` | Now **derived** from `APP_HOST` — nothing to edit, and it can't go stale again. |
@@ -584,6 +585,9 @@ call its own backend.
 [ ] 9  Pages env VITE_API_URL=https://api.partyrentalsgt.com  → then TRIGGER A REBUILD (inlined!)
 [ ] 10 Confirm APP_HOST on the prod Cloud Run revision == the prod FRONTEND origin, no trailing slash
 [ ] 10 index.html CSP connect-src already lists api.partyrentalsgt.com — confirm before the build
+[ ] 10 CSP connect-src pins the R2 WRITE endpoint by account id — if prod uses a DIFFERENT
+       Cloudflare account, add its endpoint too (reads need nothing: R2_PUBLIC_URL is our own
+       domain, already covered by *.partyrentalsgt.com in img-src)
 [ ] 11 Verify: /api/health/check, /api/docs ABSENT (NODE_ENV=production), register→login→reset smoke
        test, a product photo upload (proves R2 CORS), and the §3c.4 iPhone >15min session gate
 ```

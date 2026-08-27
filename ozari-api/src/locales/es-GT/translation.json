@@ -756,6 +756,16 @@
       }
     }
   },
+  "legal": {
+    "getTerms": {
+      "termsFetched": "Términos y condiciones obtenidos exitosamente.",
+      "errorFetching": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "termsFetched": "Términos y condiciones obtenidos exitosamente.",
+        "errorFetching": "Error al obtener los términos y condiciones: {{-error}}."
+      }
+    }
+  },
   "preferences": {
     "getPreferences": {
       "preferencesFetched": "Preferencias obtenidas exitosamente.",

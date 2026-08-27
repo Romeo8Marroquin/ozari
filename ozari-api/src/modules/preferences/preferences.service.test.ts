@@ -43,26 +43,31 @@ const client = (rows: Array<{ key: string; value: string }>) => ({
 describe("PREFERENCE_SETTINGS", () => {
   it("exposes ONLY the settings the system actually honours", () => {
     // Owner rule 2026-07-29: a control that saves a value nothing reads teaches the admin to
-    // distrust the whole screen. The seed carries 16 keys; these 9 are the editable ones.
-    //
-    // The four `documents.*` keys are the ONE documented exception, and only until the next slice:
-    // EPIC-2-DOCUMENTS makes Phase 0 the letterhead so the owner can enter and verify it before a
-    // PDF exists, and Phase 1 is what reads them. If that phase is ever abandoned, these four come
-    // out with it rather than lingering as controls that configure nothing.
+    // distrust the whole screen. Every `documents.*` key below is READ by the order document
+    // (EPIC-2-DOCUMENTS Phase 1), so the Phase 0 exception this list used to record is closed.
     expect(PREFERENCE_SETTINGS.map((setting) => setting.key)).toEqual([
       "orders.logisticsSpacingMinutes",
       "orders.turnaroundMinutes",
       "orders.evidenceMinPhotos",
       "orders.evidenceMaxPhotos",
       "orders.evidenceRetentionMonths",
+      "forms.saveDraftOrders",
+      "forms.saveDraftProducts",
       "documents.businessName",
       "documents.businessPhone",
       "documents.terms",
+      "documents.conditions",
+      "documents.freeDeliveryNote",
       "documents.quoteValidityDays",
     ]);
     // Every one carries bounds the client mirrors while typing, and a fallback INSIDE them — a
     // fallback outside its own range would be a value the API refuses to accept back.
     for (const setting of PREFERENCE_SETTINGS) {
+      if (setting.type === "bool") {
+        // A switch has nothing to bound — the only thing to check is that it declares a default.
+        expect(typeof setting.fallback).toBe("boolean");
+        continue;
+      }
       if (setting.type === "text") {
         expect(setting.maxLength).toBeGreaterThan(setting.minLength);
         expect(setting.fallback.length).toBeLessThanOrEqual(setting.maxLength);
@@ -78,13 +83,52 @@ describe("PREFERENCE_SETTINGS", () => {
     }
   });
 
-  it("forbids a line break everywhere except the terms block", () => {
-    // A business name or a phone spanning two lines is a broken letterhead, not a name. The terms
-    // are a paragraph, so they are the one place newlines are meaningful.
+  it("forbids a line break everywhere except the two multi-line blocks", () => {
+    // A business name, a phone or a one-sentence delivery note spanning two lines is a broken
+    // letterhead. The terms are a paragraph and the printed conditions are one-per-line, so those
+    // two are the only places a newline means something.
     const multiline = PREFERENCE_SETTINGS.filter(
       (setting) => setting.type === "text" && setting.multiline,
     ).map((setting) => setting.key);
-    expect(multiline).toEqual(["documents.terms"]);
+    expect(multiline).toEqual(["documents.terms", "documents.conditions"]);
+  });
+
+  it("gives each create form its OWN draft switch", () => {
+    // One global switch was the first shape (2026-08-26) and lasted a day. The two forms are used
+    // by different people at different moments — an order is filled with a client on the phone, a
+    // product is set up once at a desk — so the answer for one is not the answer for the other.
+    const drafts = PREFERENCE_SETTINGS.filter((setting) => setting.group === "forms");
+    expect(drafts.map((setting) => setting.key)).toEqual([
+      "forms.saveDraftOrders",
+      "forms.saveDraftProducts",
+    ]);
+    expect(drafts.every((setting) => setting.type === "bool")).toBe(true);
+  });
+
+  it("reads a switch as its DEFAULT unless the row says one of the two words we write", () => {
+    const drafts = definitionOf("forms.saveDraftOrders");
+    expect(readSettingValue(drafts, "true")).toBe(true);
+    expect(readSettingValue(drafts, "false")).toBe(false);
+    // A missing row, a hand-edited "1", a leftover "yes" — none of these is a value we can honestly
+    // interpret, and reading them as `false` would turn a feature off because a row is malformed.
+    expect(readSettingValue(drafts, undefined)).toBe(appConfig.defaultSaveFormDrafts);
+    expect(readSettingValue(drafts, "1")).toBe(appConfig.defaultSaveFormDrafts);
+    expect(readSettingValue(drafts, "yes")).toBe(appConfig.defaultSaveFormDrafts);
+  });
+
+  it("keeps the draft switch ON by default", () => {
+    // Losing twenty fields to a mis-tapped back button is the failure worth preventing; turning the
+    // drafts off is a deliberate choice for a shared machine, never the starting point.
+    expect(appConfig.defaultSaveFormDrafts).toBe(true);
+  });
+
+  it("lets every printable document line be EMPTY", () => {
+    // A business that states no conditions and charges for every delivery is a real business. The
+    // document simply omits those blocks; it never invents a policy to fill them.
+    expect(textDefinitionOf("documents.conditions").minLength).toBe(0);
+    expect(textDefinitionOf("documents.freeDeliveryNote").minLength).toBe(0);
+    expect(appConfig.defaultDocumentConditions).toBe("");
+    expect(appConfig.defaultDocumentFreeDeliveryNote).toBe("");
   });
 
   it("lets the turnaround be ZERO but never the spacing", () => {
@@ -188,8 +232,30 @@ describe("loadSettings", () => {
       minLength: 0,
       maxLength: 1200,
       multiline: true,
-      group: "documents",
+      // NOT the letterhead group: the document never prints these — the register screen publishes
+      // them through `GET /legal/terms`, which is the only place they are read.
+      group: "legal",
     });
+  });
+
+  it("ships a text setting's FORMAT only when it has one", () => {
+    // A token about the VALUE (the `colorKey` doctrine), so a client can offer a phone keypad. An
+    // absent field means plain prose — never a `format: "text"` every consumer has to ignore.
+    const phone = textDefinitionOf("documents.businessPhone");
+    expect(phone.format).toBe("phone");
+    expect(textDefinitionOf("documents.businessName").format).toBeUndefined();
+  });
+
+  it("groups the document settings by what they ARE, not by where they are edited", () => {
+    // One "Membrete" heading covered the business's name, its terms and conditions, and a quote's
+    // validity — only the first of which is a letterhead.
+    const groupOf = (key: string) => definitionOf(key).group;
+    expect(groupOf("documents.businessName")).toBe("documents");
+    expect(groupOf("documents.businessPhone")).toBe("documents");
+    expect(groupOf("documents.conditions")).toBe("documentConditions");
+    expect(groupOf("documents.freeDeliveryNote")).toBe("documentConditions");
+    expect(groupOf("documents.quoteValidityDays")).toBe("documentConditions");
+    expect(groupOf("documents.terms")).toBe("legal");
   });
 
   it("is complete on a database seeded BEFORE a setting existed", async () => {
@@ -244,3 +310,4 @@ describe("writeSettings", () => {
     });
   });
 });
+

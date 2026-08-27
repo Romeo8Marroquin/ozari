@@ -49,10 +49,20 @@ function parseSettingValue(
   definition: SettingDefinition,
   value: unknown,
 ):
-  | { failure: null; value: number | string }
+  | { failure: null; value: number | string | boolean }
   | { failure: string; params: Record<string, unknown>; value: never } {
   const fail = (key: string, params: Record<string, unknown>) =>
     ({ failure: key, params }) as { failure: string; params: Record<string, unknown>; value: never };
+
+  if (definition.type === "bool") {
+    // A real boolean only. `"true"` and `1` are NOT coerced: this endpoint is declarative and
+    // admin-only, so a body of the wrong shape is a stale or tampered client, and coercion would
+    // turn a client bug into a silently applied setting.
+    if (typeof value !== "boolean") {
+      return fail("invalidSettingValue", { key: definition.key, value });
+    }
+    return { failure: null, value };
+  }
 
   if (definition.type === "text") {
     const text = sanitizeText(value, definition.minLength, definition.maxLength);
@@ -118,7 +128,7 @@ export const validateUpdatePreferenceSettings = (
     }
 
     const seen = new Set<string>();
-    const settings: { key: string; value: number | string }[] = [];
+    const settings: { key: string; value: number | string | boolean }[] = [];
     for (const raw of rawSettings as Array<Record<string, unknown>>) {
       const key = raw?.["key"];
       const value = raw?.["value"];

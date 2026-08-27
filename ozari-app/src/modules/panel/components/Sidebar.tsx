@@ -5,6 +5,7 @@ import { HiOutlineChevronLeft, HiOutlineXMark } from 'react-icons/hi2';
 import {
   PANEL_NAV,
   filterNavByRole,
+  panelHomeFor,
   panelSectionFor,
   type PanelNavItem,
   type PanelPath,
@@ -128,10 +129,13 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
   const panelNavigate = usePanelNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
   // Nav is role-filtered (a UX layer): hide tabs the current role can't use. `HOME` is the brand
-  // link target and the default landing now that the dashboard placeholder is gone.
+  // link target, and it is DERIVED from the same role filter as the nav — so it is whatever the
+  // role's first tab is (the dashboard for an Admin), and a new front door never has to be
+  // remembered in a second place. It was pinned to `/panel/productos` from before the dashboard
+  // existed, which is how an admin's brand click kept landing on the product grid.
   const role = useRole();
   const visibleNav = filterNavByRole(PANEL_NAV, role);
-  const HOME: PanelPath = '/panel/productos';
+  const HOME: PanelPath = panelHomeFor(role);
 
   const navRef = useRef<HTMLElement>(null);
   const pillRef = useRef<HTMLSpanElement>(null);

@@ -9,4 +9,5 @@ export enum QueryKeys {
   CLIENT_REGISTRIES = 'client-registries',
   PREFERENCES = 'preferences',
   DASHBOARD = 'dashboard',
+  TERMS = 'terms',
 }

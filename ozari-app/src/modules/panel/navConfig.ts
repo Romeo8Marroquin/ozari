@@ -102,9 +102,30 @@ export const PANEL_NAV: PanelNavItem[] = [
  * matches nothing. Keeps the default-landing rule derived from the SAME role-visibility source as
  * the sidebar, so the two can never disagree.
  */
+/**
+ * THE per-role landing page — the one place to change where a role lands.
+ *
+ * Explicit rather than derived, because "the first tab you can see" made the landing page a
+ * side-effect of the SIDEBAR'S ORDER: moving a tab would silently move somebody's home, and giving
+ * a role a new front door would mean reordering the nav for everyone. A role with no entry here
+ * falls back to that order, which is a sensible default and not a decision.
+ *
+ * Only Admin needs one today (the dashboard is theirs alone); a Client still lands on products and
+ * a Driver on the agenda, which is what the fallback gives them.
+ */
+const PANEL_HOME: Partial<Record<Role, PanelPath>> = {
+  [Role.Admin]: '/panel/inicio',
+};
+
 export function panelHomeFor(role: Role | null): PanelPath {
+  const visible = filterNavByRole(PANEL_NAV, role);
+  const explicit = role === null ? undefined : PANEL_HOME[role];
+  // Cross-checked against the role's OWN visible tabs: an entry above that the role cannot actually
+  // see would land them on a guarded route and bounce them straight back out. A config slip should
+  // degrade to the default, never to a redirect loop.
+  if (explicit !== undefined && visible.some((item) => item.to === explicit)) return explicit;
   /* v8 ignore next -- defensive `??`: the settings tab is unrestricted, so the list is never empty */
-  return filterNavByRole(PANEL_NAV, role)[0]?.to ?? '/panel/ajustes';
+  return visible[0]?.to ?? '/panel/ajustes';
 }
 
 /**

@@ -605,26 +605,61 @@ export function growCardIn(el: HTMLElement | null, gapPx: number): void {
  * Content taking (or leaving) a SLOT inside a morph region — the catalog card's "Agregar" button
  * becoming a form, a row swapping between its display and its fields, a confirmed deletion leaving.
  *
- * These deliberately animate **only opacity and a small lift**, never height: the surrounding region
- * is a `useMorphOnChange` area that already eases its own height in normal flow, and a second height
- * tween nested inside it would fight the first (the two would each try to own the same pixels). So the
- * region grows or shrinks, the content fades within the space it opened or vacated, and the two read
- * as one gesture. That is also why a deletion here uses THIS rather than `detailRowOut`, which closes
- * the space itself and belongs to lists that have no morph region above them.
+ * These deliberately animate **only opacity and a lateral slide**, never height: the surrounding
+ * region is a `useMorphOnChange` area that already eases its own height in normal flow, and a second
+ * height tween nested inside it would fight the first (the two would each try to own the same pixels).
+ * So the region grows or shrinks, the content travels within the space it opened or vacated, and the
+ * two read as one gesture. That is also why a deletion here uses THIS rather than `detailRowOut`,
+ * which closes the space itself and belongs to lists that have no morph region above them.
+ *
+ * **The axis is LATERAL** (2026-08-05): in from the LEFT, out to the RIGHT. The old motion was an 8px
+ * fade-lift, which is below what the eye follows through an ease — against a box that is
+ * simultaneously easing its height by ~200px, the content simply appeared, and the whole gesture read
+ * as abrupt no matter how smooth the growth was. A slide has somewhere to come FROM, so the arrival is
+ * a movement rather than a state change. It is also this screen's own axis (the groups are a segmented
+ * control) and it matches `detailRowOut`, which already leaves to the right.
+ *
+ * **The durations are matched to the region's own height ease** (`animateHeightFrom`, 0.35s on the
+ * same curve), so the box and its content settle on the same frame instead of one finishing early and
+ * leaving the other still moving — the other half of what read as abruptness.
+ *
+ * A form marks its rows `[data-editor-field]` and they WAVE in behind the slot, the same nested
+ * cascade a section uses: the box opens, the form follows, the fields fill in. Content without those
+ * marks (a row label reclaiming its slot, a confirmed deletion) simply moves as one piece.
  *
  * `editorSlotOut` resolves so a caller can commit the state change only once the outgoing content is
  * gone — otherwise the box would shrink around content that was still fully visible.
  */
+const EDITOR_SLOT_SHIFT = 24;
+/** How long after the slot each field starts — small enough to read as one gesture, not a queue. */
+const EDITOR_FIELD_STEP = 0.05;
+
 export function editorSlotIn(el: HTMLElement | null | undefined): void {
   if (!el || prefersReducedMotion()) return;
   gsap.fromTo(
     el,
-    { autoAlpha: 0, y: 8 },
+    { autoAlpha: 0, x: -EDITOR_SLOT_SHIFT },
     {
       autoAlpha: 1,
-      y: 0,
+      x: 0,
+      duration: 0.35,
+      ease: PAGE_ENTER.ease,
+      overwrite: true,
+      clearProps: 'transform',
+    },
+  );
+  const fields = el.querySelectorAll<HTMLElement>('[data-editor-field]');
+  if (fields.length === 0) return;
+  gsap.fromTo(
+    fields,
+    { autoAlpha: 0, x: -12 },
+    {
+      autoAlpha: 1,
+      x: 0,
       duration: 0.3,
       ease: PAGE_ENTER.ease,
+      stagger: EDITOR_FIELD_STEP,
+      delay: EDITOR_FIELD_STEP,
       overwrite: true,
       clearProps: 'transform',
     },
@@ -634,10 +669,13 @@ export function editorSlotIn(el: HTMLElement | null | undefined): void {
 export function editorSlotOut(el: HTMLElement | null | undefined): Promise<void> {
   if (!el || prefersReducedMotion()) return Promise.resolve();
   return new Promise((resolve) => {
+    // The fields leave as ONE piece with the slot (no reverse stagger): an exit is the shortest part
+    // of the gesture, and staggering it only delays the thing the user asked for — the same reason
+    // the page's own exits stay single-level while its entrances cascade.
     gsap.to(el, {
       autoAlpha: 0,
-      y: -4,
-      duration: 0.16,
+      x: EDITOR_SLOT_SHIFT,
+      duration: 0.22,
       ease: PAGE_EXIT.ease,
       overwrite: true,
       onComplete: resolve,
@@ -740,6 +778,29 @@ export function captureGalleryLayout(
 ): Flip.FlipState | null {
   if (!scope || prefersReducedMotion()) return null;
   return Flip.getState(scope.querySelectorAll(selector));
+}
+
+/**
+ * Is anything still MOVING this region — itself, an ancestor carrying it, or the items inside it?
+ *
+ * A Flip snapshot records viewport boxes, so one taken mid-tween records where things happened to be
+ * on that frame, not where they rest. Consume it later and the next reflow faithfully glides the
+ * whole list from a position it was never really in — the "the list did a weird little animation,
+ * but only the first time" bug (2026-08-05: arriving on a preferences tab captures the rows while
+ * the entrance wave still has them translated, and the first editor-open then slides the entire list
+ * back from the right).
+ *
+ * ANCESTORS matter as much as the items: the page entrance animates the section, the reveal wave
+ * animates the rows, and either one displaces boxes without a re-render to notice it. Walking to the
+ * root is a handful of `isTweening` checks once per commit — cheap next to being wrong.
+ */
+export function isRegionSettling(scope: HTMLElement, itemSelector?: string): boolean {
+  for (let node: HTMLElement | null = scope; node !== null; node = node.parentElement) {
+    if (gsap.isTweening(node)) return true;
+  }
+  if (itemSelector === undefined) return false;
+  const items = scope.querySelectorAll(itemSelector);
+  return items.length > 0 && gsap.isTweening(items);
 }
 
 /**

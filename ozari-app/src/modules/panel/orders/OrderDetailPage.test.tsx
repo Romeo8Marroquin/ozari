@@ -28,6 +28,16 @@ vi.mock('../pageMotion', async (importOriginal) => ({
   growCardIn,
 }));
 
+// The document action has its OWN suite (which is where "not on a cancelled order", the letterhead
+// and the paid balance are pinned). Here it is a marker, like the dialogs below: the page's job is
+// only to offer it to an admin. Standing in also keeps this suite free of the preferences query the
+// real button reads.
+vi.mock('../documents/OrderDocumentButton', () => ({
+  default: ({ order }: { order: { id: number } }) => (
+    <span data-testid="order-document">{order.id}</span>
+  ),
+}));
+
 // The three dialogs have their own suites; here they stand in as markers so the PAGE's job —
 // deciding which action opens which one — is what's asserted.
 // The payment dialog has its own suite (and its own query client); the page only has to open it.
@@ -336,6 +346,21 @@ describe('OrderDetailPage', () => {
     setOrder({ data: order({ isPaid: false }) });
     renderPage();
     expect(screen.queryByRole('button', { name: `${KEY}.actions.pay` })).not.toBeInTheDocument();
+  });
+
+  it('offers the DOCUMENT to an admin regardless of payment, and never to anyone else', () => {
+    // Its own suite decides when it renders nothing (a cancelled order); the page's job is simply
+    // to put it in an admin's hands — including once the order is paid, when the same document
+    // becomes the client's proof rather than their bill.
+    setOrder({ data: order({ isPaid: true }) });
+    const { unmount } = renderPage();
+    expect(screen.getByTestId('order-document')).toBeInTheDocument();
+    unmount();
+
+    useHasRole.mockReturnValue(false);
+    setOrder({ data: order() });
+    renderPage();
+    expect(screen.queryByTestId('order-document')).not.toBeInTheDocument();
   });
 
   it('gives a NON-admin no admin powers: no status control, no delete', () => {

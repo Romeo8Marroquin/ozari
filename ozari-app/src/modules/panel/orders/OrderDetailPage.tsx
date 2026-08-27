@@ -24,6 +24,7 @@ import { growCardIn, SECTION_REVEAL_STEP, staggerIn, staggerOut } from '../pageM
 import { usePanelNavigate } from '../PanelNavContext';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
 import useMorphOnChange from '../useMorphOnChange';
+import OrderDocumentButton from '../documents/OrderDocumentButton';
 import ProductsStatus from '../products/ProductsStatus';
 import SectionReveal from '../products/SectionReveal';
 import { formatTime } from './orderDayGroups';
@@ -394,6 +395,14 @@ const OrderDetailPage: React.FC = () => {
                       >
                         {t(`${KEY}.actions.pay`)}
                       </Button>
+                    </span>
+                  )}
+                  {/* The order's DOCUMENT — offered at every step but a cancelled one, because it is
+                      how the client is told what they owe, not a receipt that waits for payment.
+                      The component itself decides whether to render (EPIC-2-DOCUMENTS Phase 1). */}
+                  {isAdmin && (
+                    <span data-flip-id="order-document" className="state-flip">
+                      <OrderDocumentButton order={order} />
                     </span>
                   )}
                   {backward && (

@@ -1,0 +1,29 @@
+{
+  // Local design tooling only — `tsconfig.app.json` includes `src` alone, so a script living here
+  // would otherwise fall back to the root config and be transpiled with the CLASSIC JSX runtime,
+  // which fails the moment it renders a component the app compiles with the automatic one.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    // Mirrors `tsconfig.app.json`: the template pulls in shared app modules (the brand geometry,
+    // the billed-days rule), and those reach for aliases of their own further down the graph.
+    "paths": {
+      "@hooks/*": ["../src/hooks/*"],
+      "@utils/*": ["../src/utils/*"],
+      "@sesion/*": ["../src/modules/sesion/*"],
+      "@assets/*": ["../src/assets/*"],
+      "@components/*": ["../src/components/*"],
+      "@constants/*": ["../src/constants/*"],
+      "@functions/*": ["../src/utils/functions/*"],
+      "@contexts/*": ["../src/contexts/*"],
+      "@api/*": ["../src/api/*"]
+    }
+  },
+  "include": ["./**/*.ts", "./**/*.tsx"]
+}
