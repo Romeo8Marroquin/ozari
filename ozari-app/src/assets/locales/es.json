@@ -334,6 +334,7 @@
           "revenue": "Ingresos",
           "orders": "Pedidos",
           "averageOrder": "Ticket promedio",
+          "collected": "Cobrado",
           "outstanding": "Por cobrar",
           "cancelled": "Cancelados",
           "outstandingHint_one": "{{count}} pedido sin pago registrado",
@@ -689,7 +690,8 @@
             "changeStatus": "Cambiar estado",
             "reopen": "Reactivar pedido",
             "edit": "Editar pedido",
-            "pay": "Registrar pago"
+            "pay": "Registrar pago",
+            "undoPay": "Deshacer pago"
           },
           "client": {
             "title": "Cliente y entrega",
@@ -1020,6 +1022,19 @@
           "successToast": "Se registró el pago del pedido de {{client}}.",
           "errors": {
             "fallback": "No se pudo registrar el pago. Intenta de nuevo."
+          }
+        },
+        "paymentUndo": {
+          "title": "Deshacer el pago",
+          "description": "¿Quieres eliminar el pago registrado del pedido de {{client}}?",
+          "note": "Se eliminará el registro del pago: el pedido volverá a quedar pendiente y se borrará el método registrado. Esto solo cambia tus registros, no devuelve dinero al cliente.",
+          "hint": "Si vuelves a registrar el pago, se guardará con la fecha de ese momento.",
+          "confirm": "Deshacer pago",
+          "cancel": "Cancelar",
+          "successTitle": "Pago deshecho",
+          "successToast": "El pedido de {{client}} volvió a quedar pendiente de pago.",
+          "errors": {
+            "fallback": "No se pudo deshacer el pago. Intenta de nuevo."
           }
         },
         "registry": {

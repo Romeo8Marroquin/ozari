@@ -547,6 +547,17 @@
         "error": "Error al registrar el pago: {{-error}}."
       }
     },
+    "undoPayment": {
+      "undone": "Registro de pago deshecho exitosamente.",
+      "notFound": "El pedido no existe o ya no está disponible.",
+      "notPaid": "Este pedido no tiene un pago registrado.",
+      "errorUndoing": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "undone": "Registro de pago deshecho para el pedido {{id}}.",
+        "notPaid": "El pedido {{id}} no tenía un pago registrado.",
+        "error": "Error al deshacer el registro de pago: {{-error}}."
+      }
+    },
     "deleteOrder": {
       "orderDeleted": "Pedido eliminado permanentemente.",
       "orderNotFound": "El pedido no existe o ya no está disponible.",

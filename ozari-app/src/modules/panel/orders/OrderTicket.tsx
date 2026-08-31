@@ -5,6 +5,7 @@ import MorphSwap from '@components/MorphSwap';
 import OpenInMapsButton from '@components/OpenInMapsButton';
 import { orderDestination } from '@utils/mapLinks';
 import useBreakpoint from '@hooks/useBreakpoint';
+import ActionRow from '../ActionRow';
 import { formatShortDate, formatTime, isSameLocalDay } from './orderDayGroups';
 import { statusTone } from './statusTone';
 import useOrderLifecycle, { isTravelStep } from './useOrderLifecycle';
@@ -223,13 +224,15 @@ const OrderTicket: React.FC<{
     </span>
   );
 
-  const actions = (quickAction || payAction || mapsAction) && (
-    <div className="flex items-center gap-2">
-      {mapsAction}
-      {payAction}
-      {quickAction}
-    </div>
-  );
+  // The row is DERIVED from the order's state, so its membership changes under the reader: taking a
+  // payment removes the middle button, going en route adds the first. `ActionRow` makes that a
+  // gesture — the leaving button fades where it stands, then the rest glide into the space — instead
+  // of a one-frame re-layout. The keys are the actions' identities, never their positions.
+  const actionItems = [
+    ...(mapsAction ? [{ key: 'maps', node: mapsAction }] : []),
+    ...(payAction ? [{ key: 'pay', node: payAction }] : []),
+    ...(quickAction ? [{ key: 'advance', node: quickAction }] : []),
+  ];
 
   return (
     <article
@@ -283,8 +286,10 @@ const OrderTicket: React.FC<{
             </div>
             {amount}
           </div>
-          {/* On a phone the action earns its own full row — it's the primary tap, thumb-reachable. */}
-          {actions && <div className="flex justify-end">{actions}</div>}
+          {/* On a phone the action earns its own full row — it's the primary tap, thumb-reachable.
+              `ActionRow` IS that row (it renders nothing when there is no action to offer), so the
+              card's gap closes by itself once the last one is gone. */}
+          <ActionRow items={actionItems} className="flex items-center justify-end gap-2" />
         </>
       ) : (
         // Roomy rail layout: times | who | status + total + action. The action lives INSIDE the right
@@ -305,7 +310,7 @@ const OrderTicket: React.FC<{
           <div className="flex shrink-0 flex-col items-end justify-center gap-2">
             {statusChip}
             {amount}
-            {actions}
+            <ActionRow items={actionItems} className="flex items-center gap-2" />
           </div>
         </div>
       )}

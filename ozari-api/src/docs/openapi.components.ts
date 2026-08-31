@@ -1418,6 +1418,15 @@ export const schemas: Record<string, Schema> = {
               revenue: schemaRef("StatComparison"),
               orders: schemaRef("StatComparison"),
               averageOrder: schemaRef("StatComparison"),
+              collected: {
+                allOf: [schemaRef("StatComparison")],
+                description:
+                  "Money actually RECEIVED this month, scoped by `paidAt` — the one monthly figure " +
+                  "not scoped by delivery date, and deliberately so. `revenue` is what the month's " +
+                  "work is worth; this is what came in. An order delivered in July and settled in " +
+                  "August is July's revenue and August's cash, and the gap between them is what " +
+                  "`outstanding` totals.",
+              },
               cancelled: {
                 allOf: [schemaRef("StatComparison")],
                 description:

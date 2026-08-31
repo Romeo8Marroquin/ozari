@@ -1,6 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { NextFunction, Request, Response } from "express";
-import { validatePayOrder } from "./payment.validator.js";
+import {
+  validatePayOrder,
+  validateUndoOrderPayment,
+} from "./payment.validator.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
 
@@ -63,6 +66,37 @@ describe("validatePayOrder", () => {
       {},
       HttpEnum.BAD_REQUEST,
       "orders.payOrder.validators.invalidMethod",
+    );
+  });
+});
+
+describe("validateUndoOrderPayment", () => {
+  const undo = (params: Record<string, string>, body: unknown = {}) => {
+    const req = { params, body } as unknown as Request;
+    const next = vi.fn() as unknown as NextFunction;
+    validateUndoOrderPayment(req, {} as Response, next);
+    return { req, next };
+  };
+
+  it("passes a well-formed id straight through — the act carries no options at all", () => {
+    // Undoing is a CORRECTION of a mistaken tap, not a refund: there is no amount, date or method
+    // to supply, so a body is meaningless here rather than malformed.
+    const { next } = undo({ id: "12" });
+    expect(next).toHaveBeenCalled();
+  });
+
+  it("ignores whatever a stale client sends in the body", () => {
+    const { next } = undo({ id: "12" }, { paymentMethodId: 3 });
+    expect(next).toHaveBeenCalled();
+  });
+
+  it.each([["abc"], ["0"], ["-3"], ["1.5"]])("rejects a malformed id (%s)", (id) => {
+    const { next } = undo({ id });
+    expect(next).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      {},
+      HttpEnum.BAD_REQUEST,
+      "orders.payOrder.validators.invalidId",
     );
   });
 });

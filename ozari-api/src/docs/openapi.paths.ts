@@ -1911,6 +1911,53 @@ export const paths: OpenAPIV3.PathsObject = {
         "500": serverError,
       },
     },
+    delete: {
+      tags: ["Orders"],
+      summary: "Delete an order's payment record (admin)",
+      operationId: "undoOrderPayment",
+      description:
+        "**STRICTLY Admin.** Clears `paidAt`, drops the recorded method and returns the payment " +
+        "status to PENDING — the exact inverse of the POST, leaving the order as it stood before.\n\n" +
+        "**A hard delete, not a tombstone.** Nothing is kept, so there is no 'undone payment' state " +
+        "and no undo of the undo: re-recording is simply a new payment, stamped with the date it is " +
+        "actually made. Why the door exists at all is that recording payment is one " +
+        "irreversible-looking tap offered on three screens and the POST answers `409` on the second " +
+        "(rightly), so the state was otherwise unreachable from the UI.\n\n" +
+        "**It is not a refund.** Money travelling back to the client is a different event with its " +
+        "own amount, date and method, and would be its own door; this touches only our record.\n\n" +
+        "An order with NO payment answers `409`, the mirror of the POST's: it means the caller is " +
+        "looking at a stale screen, and succeeding silently would report deleting something that " +
+        "was already gone. It never touches the service status, the tracked actuals or stock.",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "integer", minimum: 1 },
+          example: 12,
+        },
+      ],
+      responses: {
+        "200": dataResponse(
+          "The updated order, in the detail shape.",
+          "OrderDetailResponse",
+          { order: { id: 12, isPaid: false } },
+          "Payment record undone",
+        ),
+        "400": errorResponse("The id is malformed.", 400, "The order id is not valid"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse("No order with that id.", 404, "The order does not exist"),
+        "409": errorResponse(
+          "The order has no payment to undo.",
+          409,
+          "This order has no payment recorded",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
   },
 
   "/dashboard": {

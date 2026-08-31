@@ -84,6 +84,9 @@ const dashboard = (overrides: Partial<Dashboard> = {}): Dashboard =>
       revenue: { current: 12400, previous: 9800, deltaPercent: 26.5 },
       orders: { current: 28, previous: 24, deltaPercent: 16.7 },
       averageOrder: { current: 442.86, previous: 408.33, deltaPercent: 8.5 },
+      // Deliberately NOT the revenue total: cash in is scoped by payment date, revenue by delivery
+      // date, and the gap between them is what "Por cobrar" tracks.
+      collected: { current: 10500, previous: 8400, deltaPercent: 25 },
       cancelled: { current: 3, previous: 5, deltaPercent: -40 },
     },
     outstanding: { amount: 3150, orders: 7 },

@@ -53,6 +53,20 @@ vi.mock('./OrderPaymentModal', () => ({
     ) : null,
 }));
 
+// The undo dialog likewise: its own suite owns the copy and the 409; the page only has to offer it
+// (and only to an admin, only once the money is in) and open it.
+vi.mock('./OrderPaymentUndoModal', () => ({
+  default: ({ order, onClose }: { order?: { id: number }; onClose: () => void }) =>
+    order ? (
+      <div data-testid="payment-undo-modal">
+        {order.id}
+        <button type="button" onClick={onClose}>
+          cerrar-deshacer-pago
+        </button>
+      </div>
+    ) : null,
+}));
+
 vi.mock('./OrderAdvanceModal', () => ({
   default: ({ action, onClose }: { action?: { statusName: string }; onClose: () => void }) =>
     action ? (
@@ -349,6 +363,34 @@ describe('OrderDetailPage', () => {
     setOrder({ data: order({ isPaid: false }) });
     renderPage();
     expect(screen.queryByRole('button', { name: `${KEY}.actions.pay` })).not.toBeInTheDocument();
+  });
+
+  it('offers the way BACK from a payment, and only where a considered tap belongs', async () => {
+    // Recording payment is one irreversible-looking tap on three screens and the API answers 409 on
+    // the second, so a mis-tap had no way back at all. The undo lives HERE and nowhere else: the
+    // agenda and the dashboard are scanning surfaces where an undo beside "Registrar pago" is an
+    // invitation to hit the wrong one at a glance.
+    setOrder({ data: order({ isPaid: true }) });
+    const { unmount } = renderPage();
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.undoPay` }));
+    expect(screen.getByTestId('payment-undo-modal')).toBeInTheDocument();
+    // Dismissing it leaves the order exactly where it was — the action is still there to take.
+    await userEvent.click(screen.getByRole('button', { name: 'cerrar-deshacer-pago' }));
+    expect(screen.queryByTestId('payment-undo-modal')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `${KEY}.actions.undoPay` })).toBeInTheDocument();
+    unmount();
+
+    // Nothing to undo while the money is still out.
+    setOrder({ data: order({ isPaid: false }) });
+    const { unmount: second } = renderPage();
+    expect(screen.queryByRole('button', { name: `${KEY}.actions.undoPay` })).not.toBeInTheDocument();
+    second();
+
+    // Money is the admin's — correcting it too.
+    useHasRole.mockReturnValue(false);
+    setOrder({ data: order({ isPaid: true }) });
+    renderPage();
+    expect(screen.queryByRole('button', { name: `${KEY}.actions.undoPay` })).not.toBeInTheDocument();
   });
 
   it('offers the DOCUMENT to an admin regardless of payment, and never to anyone else', () => {
