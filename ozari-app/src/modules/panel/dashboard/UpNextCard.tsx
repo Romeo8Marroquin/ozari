@@ -11,7 +11,7 @@ import OpenInMapsButton from '@components/OpenInMapsButton';
 import { orderDestination } from '@utils/mapLinks';
 import { formatShortDate, formatTime, isSameLocalDay } from '../orders/orderDayGroups';
 import { statusTone } from '../orders/statusTone';
-import useOrderLifecycle from '../orders/useOrderLifecycle';
+import useOrderLifecycle, { isTravelStep } from '../orders/useOrderLifecycle';
 import type { OrderAction } from '../orders/order.types';
 import type { UpNextItem } from './dashboard.types';
 import { relativeKey, relativeTime } from './dashboardFormat';
@@ -28,9 +28,9 @@ const SECONDARY_COLOR = '#262626';
  * do now".
  *
  * Everything actionable is data-driven exactly as on a ticket: the forward step comes from the
- * backend's lifecycle engine (`useOrderLifecycle`), and the navigation button appears only when
- * there is somewhere to go (`orderDestination` resolves pin-or-address and returns nothing when
- * there is neither — a maps app opened on an empty search helps no one).
+ * backend's lifecycle engine (`useOrderLifecycle`), and the navigation button appears only when the
+ * order carries a pin (`orderDestination` returns nothing otherwise — a maps app opened on an empty
+ * search helps no one) AND the move it is waiting for is somebody driving (`isTravelStep`).
  */
 const UpNextCard: React.FC<{
   item: UpNextItem;
@@ -139,7 +139,9 @@ const UpNextCard: React.FC<{
           {/* Both actions are the SAME component at the SAME size — the only way two buttons in a
               row are guaranteed to share a height. `xs` is the deliberate summary size: shorter than
               a page action, identical to its neighbour. */}
-          {destination && <OpenInMapsButton destination={destination} size="xs" iconOnly />}
+          {destination && isTravelStep(forward) && (
+            <OpenInMapsButton destination={destination} size="xs" iconOnly />
+          )}
           {/* Money is its own axis, so it gets its own affordance — but ICON-ONLY here: a scannable
               card has room for one full label, and that belongs to the step that moves the job
               forward. The full "Registrar pago" wording lives on the order detail. */}

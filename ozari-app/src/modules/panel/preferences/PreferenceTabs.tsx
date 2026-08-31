@@ -1,8 +1,15 @@
 import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import useBreakpoint from '@hooks/useBreakpoint';
 import { PREFERENCE_TABS, type PreferenceTab } from './preferencesSearch';
 
 const KEY = 'modules.panel.preferences.tabs';
+
+/** Segments per line on a PHONE. Four Spanish group names ("Documentos" is the widest) need about
+ *  90px each to be read whole; a 320px screen leaves the track 280px, so four across is 70px and
+ *  the last label simply painted outside the pill. Two per line is 140px — room for a name twice as
+ *  long as any we have, which is what keeps this from breaking again on the next group. */
+const COMPACT_COLUMNS = 2;
 
 /**
  * The preferences group switch — the same segmented-control language as Agenda/Historial, widened to
@@ -11,9 +18,15 @@ const KEY = 'modules.panel.preferences.tabs';
  * division rule, on the settle curve), and `focus-visible` so the keyboard ring never flashes on a
  * pointer click.
  *
- * The pill is positioned by a `translate` of its own width per index — remember the v4 trap: those
+ * The pill is positioned by a `translate` of its own size per index — remember the v4 trap: those
  * utilities emit the `translate` property, so the transition has to name it explicitly or the pill
  * would jump.
+ *
+ * **It WRAPS on a phone rather than truncating or scrolling.** A segmented control's whole promise
+ * is that every option is visible at once, so the two usual escapes both cost more than they save:
+ * an ellipsis hides the word that distinguishes the groups ("Docum…"), and a scrolling track hides
+ * a group entirely behind a gesture nothing announces. Two lines of two costs a few pixels of
+ * height and keeps the promise — and the pill still slides, now diagonally.
  *
  * The selected group is URL state (`preferencesSearch`), like Agenda/Historial — a reload or a shared
  * link lands where the admin was working. This component only reports the intent; the page writes it.
@@ -27,6 +40,7 @@ const PreferenceTabs: React.FC<{
   onChange: (tab: PreferenceTab) => void;
 }> = ({ tab, onChange }) => {
   const { t } = useTranslation();
+  const { isMobile } = useBreakpoint();
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const activate = (index: number): void => {
@@ -57,28 +71,37 @@ const PreferenceTabs: React.FC<{
 
   const index = PREFERENCE_TABS.indexOf(tab);
   const count = PREFERENCE_TABS.length;
+  // The grid comes from the LIST, never from a hardcoded `grid-cols-3`: adding a group is one entry
+  // in `PREFERENCE_TABS`, and a control that silently kept three columns would overflow its own
+  // pill. `isMobile` is briefly undefined pre-effect — treat that as the narrow case, like every
+  // other consumer of this hook.
+  const columns = isMobile === false ? count : Math.min(count, COMPACT_COLUMNS);
+  const rows = Math.ceil(count / columns);
 
   return (
     <div
       role="tablist"
       aria-label={t(`${KEY}.label`)}
-      // The column count comes from the LIST, not a hardcoded `grid-cols-3`: adding a group is one
-      // entry in `PREFERENCE_TABS`, and a control that silently kept three columns would overflow
-      // its own pill.
-      style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
-      className="relative grid w-full rounded-full bg-charcoal/5 p-1 sm:w-auto"
+      style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+      // Wrapped, the track is no longer a stadium: `rounded-full` on a two-line box turns its ends
+      // into big semicircles that leave a crescent of track around the corner pills. `rounded-card`
+      // is within a couple of pixels of concentric with a pill's own radius plus the 4px inset.
+      className={`relative grid w-full bg-charcoal/5 p-1 sm:w-auto ${
+        rows === 1 ? 'rounded-full' : 'rounded-card'
+      }`}
       onKeyDown={onKeyDown}
     >
-      {/* The shared selection pill: one segment wide (the track minus its 8px of padding, divided
-          by the segment count), slid by its own width per index. Decorative — the buttons carry the
-          semantics. */}
+      {/* The shared selection pill: exactly ONE cell (the track minus its 8px of padding, divided by
+          the columns and rows), slid by its own size per column and row. Decorative — the buttons
+          carry the semantics. */}
       <span
         aria-hidden
         style={{
-          width: `calc(${100 / count}% - ${8 / count}px)`,
-          translate: `${index * 100}%`,
+          width: `calc(${100 / columns}% - ${8 / columns}px)`,
+          height: `calc(${100 / rows}% - ${8 / rows}px)`,
+          translate: `${(index % columns) * 100}% ${Math.floor(index / columns) * 100}%`,
         }}
-        className="pointer-events-none absolute inset-y-1 left-1 rounded-full bg-white shadow-sm transition-[translate] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none"
+        className="pointer-events-none absolute left-1 top-1 rounded-full bg-white shadow-sm transition-[translate] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none"
       />
       {PREFERENCE_TABS.map((option, optionIndex) => {
         const selected = option === tab;

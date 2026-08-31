@@ -250,44 +250,47 @@ describe('OrderDetailPage', () => {
 
   const PIN = { lat: 14.634915, lng: -90.506883 };
 
-  it('offers navigation while there is still a TRIP to make, not only on the arrival step', async () => {
-    // Gating on the machine's `tracksEvent` hid the button through "En ruta" — the exact moment the
-    // driver is leaving — because that flag marks the step which CONFIRMS arrival (Entregado).
+  it('offers navigation only when the next move is a TRIP, on the same rule as every other screen', async () => {
+    // Out for delivery: the next move CONFIRMS an arrival (`tracksEvent`), so somebody is driving.
     setOrder({
-      data: order({ deliveryCoords: PIN, actions: [action({ kind: 'forward' })] }),
+      data: order({
+        deliveryCoords: PIN,
+        actions: [action({ kind: 'forward', statusName: 'Entregado', tracksEvent: 'DELIVERY' })],
+      }),
     });
     const { unmount } = renderPage();
     expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
     unmount();
 
-    // Delivered, with the collection still ahead ⇒ there IS still a trip.
+    // Delivered, with the collection still ahead ⇒ the return trip is next.
     setOrder({
       data: order({
         deliveryCoords: PIN,
         deliveredAt: '2026-08-01T14:10:00.000Z',
-        actions: [action({ kind: 'forward' })],
+        actions: [action({ kind: 'forward', statusName: 'Recolectado', tracksEvent: 'COLLECTION' })],
       }),
     });
     const second = renderPage();
     expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
     second.unmount();
 
-    // Delivered on a purchase-only order (no pickup) ⇒ nothing left to drive to.
+    // Still pending: the next move is "En ruta", which tracks nothing — it is the loading, and the
+    // van has not left. Offering directions here is what put a Waze button on next week's orders.
     setOrder({
-      data: order({
-        deliveryCoords: PIN,
-        pickupAt: undefined,
-        deliveredAt: '2026-08-01T14:10:00.000Z',
-        actions: [],
-      }),
+      data: order({ deliveryCoords: PIN, actions: [action({ kind: 'forward' })] }),
     });
     const third = renderPage();
     expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
     third.unmount();
 
-    // Cancelled ⇒ nothing will be performed at all.
+    // A rewind or a cancel is desk work — neither can qualify, so an order whose only offers are
+    // disruptive gets nothing.
     setOrder({
-      data: order({ deliveryCoords: PIN, cancelledAt: '2026-08-01T09:00:00.000Z', actions: [] }),
+      data: order({
+        deliveryCoords: PIN,
+        cancelledAt: '2026-08-01T09:00:00.000Z',
+        actions: [action({ kind: 'disruptive' })],
+      }),
     });
     renderPage();
     expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();

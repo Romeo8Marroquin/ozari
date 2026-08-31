@@ -209,8 +209,31 @@ const openDocuments = async (): Promise<HTMLElement> => {
   return cardFor(`${KEY}.catalogs.bankAccounts.title`);
 };
 
+/** Pretend the window is wide. The default test `matchMedia` matches only reduced-motion, so every
+ *  suite here runs at the BASE breakpoint — which is what the wrapped tab track is for. Restored in
+ *  `beforeEach` so it can never leak into the next test.
+ *
+ *  It answers ONLY the width queries and leaves reduced-motion matching: turning motion on here
+ *  would start the page's entrance, whose first frame sets `visibility: hidden` — and a hidden node
+ *  is not in the accessibility tree, so every `getByRole` in the test would stop finding anything. */
+let realMatchMedia: typeof window.matchMedia;
+const asDesktop = (): void => {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: query.startsWith('(min-width') || query === '(prefers-reduced-motion: reduce)',
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })) as unknown as typeof window.matchMedia;
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  if (realMatchMedia === undefined) realMatchMedia = window.matchMedia;
+  window.matchMedia = realMatchMedia;
   routerState.search = {};
   useUpdatePreferenceSettings.mockReturnValue({ updateSettings, isPending: false });
   useCatalogRowMutations.mockReturnValue({
@@ -370,24 +393,43 @@ describe('PreferenceTabs', () => {
     setState({ data: data() });
     const { container } = renderPage();
     const pill = container.querySelector('[role="tablist"] > span[aria-hidden]');
-    expect(pill).toHaveStyle({ translate: '0%' });
+    expect(pill).toHaveStyle({ translate: '0% 0%' });
+    // The suite runs at the base breakpoint, where the four groups wrap two-by-two: the third one
+    // is the first cell of the SECOND line, so the pill travels down rather than across.
     await openProducts();
-    expect(pill).toHaveStyle({ translate: '200%' });
+    expect(pill).toHaveStyle({ translate: '0% 100%' });
+  });
+
+  it('WRAPS on a phone instead of painting the last group outside its own track', async () => {
+    // Four Spanish group names across a 320px screen gave each 70px, so "Documentos" spilled past
+    // the pill and off the card. Two lines of two keeps every label whole and readable.
+    setState({ data: data() });
+    const { container } = renderPage();
+    const track = container.querySelector('[role="tablist"]');
+    const pill = container.querySelector('[role="tablist"] > span[aria-hidden]');
+
+    expect(screen.getAllByRole('tab')).toHaveLength(4);
+    expect(track).toHaveStyle({ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' });
+    // Exactly ONE cell: the track minus its 8px of padding, split between the columns and the rows.
+    expect(pill).toHaveStyle({ width: 'calc(50% - 4px)', height: 'calc(50% - 4px)' });
+    // Two lines are no longer a stadium — a `rounded-full` box would show track around the corners.
+    expect(track).not.toHaveClass('rounded-full');
   });
 
   it('sizes the track and the pill from the LIST, so a new group cannot overflow it', async () => {
     // A hardcoded `grid-cols-3` plus a 33.333% pill silently broke the moment a fourth group was
     // added — the control has to derive both from `PREFERENCE_TABS`.
+    asDesktop();
     setState({ data: data() });
     const { container } = renderPage();
-    const tabs = screen.getAllByRole('tab');
     const track = container.querySelector('[role="tablist"]');
     const pill = container.querySelector('[role="tablist"] > span[aria-hidden]');
 
-    expect(tabs).toHaveLength(4);
+    expect(screen.getAllByRole('tab')).toHaveLength(4);
     expect(track).toHaveStyle({ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' });
-    // One segment wide: the track's width minus its 8px of padding, divided between the segments.
-    expect(pill).toHaveStyle({ width: 'calc(25% - 2px)' });
+    // One segment wide, one line tall: with room for every group the control is a stadium again.
+    expect(pill).toHaveStyle({ width: 'calc(25% - 2px)', height: 'calc(100% - 8px)' });
+    expect(track).toHaveClass('rounded-full');
   });
 
   it('abandons a sweep whose group was left behind', async () => {

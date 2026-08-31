@@ -7,7 +7,7 @@ import { orderDestination } from '@utils/mapLinks';
 import useBreakpoint from '@hooks/useBreakpoint';
 import { formatShortDate, formatTime, isSameLocalDay } from './orderDayGroups';
 import { statusTone } from './statusTone';
-import useOrderLifecycle from './useOrderLifecycle';
+import useOrderLifecycle, { isTravelStep } from './useOrderLifecycle';
 import type { OrderAction, OrderListItem } from './order.types';
 
 const KEY = 'modules.panel.orders.ticket';
@@ -98,12 +98,6 @@ const OrderTicket: React.FC<{
   //   · delivered, pickup still pending  → the PICKUP is what's next;
   //   · collected / finished / cancelled → nothing is pending, so nothing is emphasised.
   const settled = order.readyAt !== undefined || order.cancelledAt !== undefined;
-  // Navigation is offered on the SAME rule as the detail and the dashboard: the order still has a
-  // trip to make, and it carries a pin. Derived from the tracked ACTUALS, never a status id.
-  const hasPendingTrip =
-    !settled &&
-    (order.deliveredAt === undefined ||
-      (order.pickupAt !== undefined && order.collectedAt === undefined));
   const destination = orderDestination(undefined, order.deliveryCoords);
   const deliveryIsNext = !settled && order.deliveredAt === undefined;
   const pickupIsNext =
@@ -214,10 +208,12 @@ const OrderTicket: React.FC<{
     />
   );
 
-  // Navigation, offered on exactly the same rule as everywhere else: the order has a PIN and still
-  // has a trip to make. Icon-only for the same reason the payment action is — a scannable row has
-  // room for one full label, and it belongs to the step that moves the job forward.
-  const mapsAction = destination && hasPendingTrip && (
+  // Navigation, offered on exactly the same rule as everywhere else: the order has a PIN and the
+  // move it is waiting for is somebody DRIVING (`isTravelStep`) — not merely "it is unfinished",
+  // which put a Waze button on orders scheduled for next week. Icon-only for the same reason the
+  // payment action is: a scannable row has room for one full label, and it belongs to the step that
+  // moves the job forward.
+  const mapsAction = destination && isTravelStep(forward) && (
     <span
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}

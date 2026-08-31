@@ -278,8 +278,13 @@ const DashboardPage: React.FC = () => {
         </SectionReveal>
       </section>
 
+      {/* Both cards are `min-w-0` GRID ITEMS: a grid item's automatic minimum size is its content's,
+          so without it anything inside that refuses to shrink (a chart's intrinsic ratio, a long
+          unbroken value) widens the track — and the panel's `main` computes `overflow-x` to auto, so
+          the whole dashboard gains a sideways scroll instead of the card clipping. Same rule as the
+          responsive truncation chain. */}
       <div className="grid gap-6 xl:grid-cols-2">
-        <section className="reveal-block flex flex-col gap-5 rounded-card bg-white p-4 ring-1 ring-black/[0.04] sm:p-5">
+        <section className="reveal-block flex min-w-0 flex-col gap-5 rounded-card bg-white p-4 ring-1 ring-black/[0.04] sm:p-5">
           <div>
             <h2 className="text-base font-bold text-charcoal">{t(`${KEY}.trend.title`)}</h2>
             <p className="text-xs text-charcoal/55">{t(`${KEY}.trend.description`)}</p>
@@ -313,7 +318,7 @@ const DashboardPage: React.FC = () => {
           </SectionReveal>
         </section>
 
-        <section className="reveal-block flex flex-col gap-3 rounded-card bg-white p-4 ring-1 ring-black/[0.04] sm:p-5">
+        <section className="reveal-block flex min-w-0 flex-col gap-3 rounded-card bg-white p-4 ring-1 ring-black/[0.04] sm:p-5">
           <div>
             <h2 className="text-base font-bold text-charcoal">{t(`${KEY}.statusSplit.title`)}</h2>
             <p className="text-xs text-charcoal/55">{t(`${KEY}.statusSplit.description`)}</p>

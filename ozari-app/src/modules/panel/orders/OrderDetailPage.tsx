@@ -34,6 +34,7 @@ import OrderPaymentModal from './OrderPaymentModal';
 import OrderStatusModal from './OrderStatusModal';
 import { statusTone } from './statusTone';
 import { useOrder } from './useOrder';
+import { isTravelStep } from './useOrderLifecycle';
 import { useOrdersCatalog } from './useOrdersCatalog';
 import type { OrderAction, OrderEvidence } from './order.types';
 
@@ -250,17 +251,6 @@ const OrderDetailPage: React.FC = () => {
 
   // Where "abrir mapa" sends them — the order's own PIN, or nothing (see `orderDestination`).
   const mapsDestination = orderDestination(order?.deliveryAddress, order?.deliveryCoords);
-  // Is there still a trip to make? Navigation is offered while the order has somewhere left to go,
-  // which is NOT the same as "the next step stamps an actual". `tracksEvent` is DELIVERY on
-  // *Entregado* and COLLECTION on *Recolectado* — the steps that CONFIRM arrival — so gating on it
-  // hid the button through "En ruta", i.e. through exactly the moment the driver is leaving and
-  // needs directions. Derived from the tracked actuals, like every other pending-work rule.
-  const hasPendingTrip =
-    order != null &&
-    order.cancelledAt === undefined &&
-    order.readyAt === undefined &&
-    (order.deliveredAt === undefined ||
-      (order.pickupAt !== undefined && order.collectedAt === undefined));
   const forward = order?.actions.find((action) => action.kind === 'forward');
   const backward = order?.actions.find((action) => action.kind === 'backward');
   const disruptive = order?.actions.filter((action) => action.kind === 'disruptive') ?? [];
@@ -368,13 +358,12 @@ const OrderDetailPage: React.FC = () => {
                       {t(`${KEY}.actions.advance`, { status: forward.statusName })}
                     </Button>
                   )}
-                  {/* Navigation sits beside the advance action while the order still HAS a trip to
-                      make and carries a pin. Not gated on `tracksEvent`: that flag marks the step
-                      which CONFIRMS arrival (Entregado / Recolectado), so using it hid the button
-                      through "En ruta" — the exact moment the driver is leaving and needs it. It
-                      rides the same `.state-flip` group, so it glides in and out with the rest of
-                      the action row as the order walks its pipeline. */}
-                  {hasPendingTrip && mapsDestination && (
+                  {/* Navigation sits beside the advance action exactly when that action is somebody
+                      DRIVING (`isTravelStep` — the machine's own `tracksEvent`) and the order
+                      carries a pin: leaving with the load (next: Entregado) or going back for it
+                      (next: Recolectado). It rides the same `.state-flip` group, so it glides in
+                      and out with the rest of the action row as the order walks its pipeline. */}
+                  {isTravelStep(forward) && mapsDestination && (
                     <span data-flip-id="open-in-maps" className="state-flip">
                       {/* `sm`, matching the advance button beside it — two actions in one row must
                           share a height. */}
