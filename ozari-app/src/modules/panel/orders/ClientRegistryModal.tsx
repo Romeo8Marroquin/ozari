@@ -327,7 +327,9 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
                     }}
                   >
                     <div className="flex items-start gap-2">
-                      <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-[minmax(0,180px)_minmax(0,1fr)]">
+                      {/* Columns stay tight; only the ROW gap grows, and only below `sm` is there a
+                          row at all — which is exactly where the two fields stack. */}
+                      <div className="grid min-w-0 flex-1 gap-x-2 gap-y-field sm:grid-cols-[minmax(0,180px)_minmax(0,1fr)]">
                         <CustomSelectForm<CreateRegistryFormType>
                           id={`registry-contact-type-${index}`}
                           name={`contacts.${index}.contactTypeId`}
@@ -401,7 +403,9 @@ const ClientRegistryModal: React.FC<ClientRegistryModalProps> = ({
                   }}
                 >
                   <div className="flex items-start gap-2">
-                    <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    {/* `gap-field`: four stacked fields, and the zone select carries a help line
+                        that the instructions label below it was landing on top of. */}
+                    <div className="flex min-w-0 flex-1 flex-col gap-field">
                       <CustomTextareaForm<CreateRegistryFormType>
                         id={`registry-address-${index}`}
                         name={`addresses.${index}.address`}

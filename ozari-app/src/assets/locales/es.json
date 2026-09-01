@@ -1113,7 +1113,6 @@
         "expand": "Expandir menú",
         "userMenu": "Menú de usuario",
         "userMenuFor": "Menú de usuario: {{name}}",
-        "notifications": "Notificaciones",
         "navigation": "Navegación principal"
       },
       "user": {
@@ -1386,6 +1385,7 @@
             "connect": "Conectar",
             "disconnect": "Desconectar",
             "connectedToast": "Google Calendar se conectó correctamente.",
+            "disconnectedToast": "Google Calendar se desconectó.",
             "errorToast": "No pudimos conectar Google Calendar. Intenta de nuevo."
           },
           "feed": {
@@ -1399,7 +1399,36 @@
             "copied": "Enlace copiado.",
             "copyFailed": "No pudimos copiar el enlace. Selecciónalo y cópialo a mano.",
             "howTo": "En iPhone: Calendario → Calendarios → Agregar calendario → Agregar calendario de suscripción, y pega este enlace.",
-            "revokeNote": "Guarda este enlace: es privado. Si generas uno nuevo, los dispositivos que ya lo tengan dejarán de recibir la agenda."
+            "revokeNote": "Guarda este enlace: es privado. Si generas uno nuevo, los dispositivos que ya lo tengan dejarán de recibir la agenda.",
+            "removedToast": "El enlace de suscripción se quitó.",
+            "regeneratedToast": "Listo, este es tu enlace nuevo."
+          },
+          "confirm": {
+            "cancel": "Cancelar",
+            "googleDisconnect": {
+              "title": "Desconectar Google Calendar",
+              "description": "Dejaremos de crear y actualizar eventos en tu Google Calendar.",
+              "note": "Los eventos que ya están en tu calendario se quedan ahí: son citas que sigues teniendo. Lo que se detiene es la actualización, así que un pedido que cambie después de hoy ya no se reflejará.",
+              "hint": "Puedes volver a conectar cuando quieras; se vuelven a sincronizar los pedidos pendientes.",
+              "confirm": "Desconectar",
+              "error": "No pudimos desconectar la cuenta. Intenta de nuevo."
+            },
+            "feedRemove": {
+              "title": "Quitar el enlace de suscripción",
+              "description": "El enlace dejará de funcionar de inmediato.",
+              "note": "Los calendarios que ya lo tengan dejarán de recibir la agenda. La suscripción no se borra sola del teléfono: se queda ahí, vacía, hasta que la elimines desde el dispositivo.",
+              "hint": "Puedes generar uno nuevo cuando quieras, pero hay que volver a suscribir cada dispositivo.",
+              "confirm": "Quitar enlace",
+              "error": "No pudimos quitar el enlace. Intenta de nuevo."
+            },
+            "feedRegenerate": {
+              "title": "Generar un enlace nuevo",
+              "description": "El enlace actual dejará de funcionar.",
+              "note": "Generar uno nuevo es la única forma de revocar el anterior. Los dispositivos que ya estén suscritos dejarán de recibir la agenda hasta que pegues el enlace nuevo en cada uno.",
+              "hint": "Hazlo si el enlace anterior llegó a alguien más; si solo quieres verlo, está aquí abajo.",
+              "confirm": "Generar de nuevo",
+              "error": "No pudimos generar el enlace. Intenta de nuevo."
+            }
           },
           "reminder": {
             "label": "Aviso antes de cada evento",

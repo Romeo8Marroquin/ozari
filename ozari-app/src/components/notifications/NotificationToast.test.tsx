@@ -132,6 +132,116 @@ describe('NotificationToast', () => {
     const style = screen.getByRole('status').getAttribute('style') ?? '';
     expect(style).toContain('max-width');
     expect(style).toContain(`${DEFAULT_MAX_WIDTH}px`);
+    // The cap is asked of the CONTAINER, never computed from the viewport: `100vw` counts a
+    // scrollbar the toast cannot use, and any hard-coded padding here is this component guessing at
+    // a host that changes its own at `sm`.
+    expect(style).toContain('100%');
+    expect(style).not.toContain('100vw');
+  });
+
+  describe('when the space it was measured against changes', () => {
+    /** The clipped glass surface — the element whose width is locked in pixels. */
+    const surfaceOf = (): HTMLElement =>
+      screen.getByRole('status').firstElementChild as HTMLElement;
+
+    const setViewportWidth = (width: number): void => {
+      Object.defineProperty(window, 'innerWidth', { value: width, configurable: true });
+    };
+
+    const resize = async (): Promise<void> => {
+      await act(async () => {
+        fireEvent(window, new Event('resize'));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      });
+    };
+
+    it('RE-MEASURES on a width change — a locked pixel width cannot survive a rotation', async () => {
+      // Landscape → portrait is the case that shows: a toast measured at the wider size would sit
+      // on a narrower screen, overflowing the edge it is anchored to, and nothing in the layout
+      // could correct it because the width is an inline pixel value.
+      mockLayout();
+      setViewportWidth(900);
+      render(<NotificationToast item={makeItem({ duration: 0 })} align="right" />);
+      expect(surfaceOf().style.width).toBe('200px');
+
+      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+        width: 120,
+        height: 40,
+        top: 0,
+        left: 0,
+        right: 120,
+        bottom: 40,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect);
+      setViewportWidth(390);
+      await resize();
+      expect(surfaceOf().style.width).toBe('120px');
+    });
+
+    it('IGNORES a height-only resize — that is a phone URL bar, not a new width', async () => {
+      // Mobile browsers fire `resize` every time the bar slides. Rebuilding the toast's geometry
+      // while somebody is merely scrolling would be motion nobody asked for.
+      mockLayout();
+      setViewportWidth(390);
+      render(<NotificationToast item={makeItem({ duration: 0 })} align="right" />);
+
+      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+        width: 120,
+        height: 40,
+        top: 0,
+        left: 0,
+        right: 120,
+        bottom: 40,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect);
+      await resize();
+      expect(surfaceOf().style.width).toBe('200px');
+    });
+
+    it('coalesces a burst of resizes into ONE frame, and cancels it if the toast leaves first', () => {
+      // A drag-resize fires continuously; measuring on every event would read layout dozens of times
+      // per second. And a frame still pending when the toast unmounts must be cancelled, or it wakes
+      // up to measure elements that are no longer in the document.
+      mockLayout();
+      setViewportWidth(900);
+      const { unmount } = render(<NotificationToast item={makeItem({ duration: 0 })} align="right" />);
+
+      act(() => {
+        setViewportWidth(800);
+        fireEvent(window, new Event('resize'));
+        setViewportWidth(700); // same frame — must not schedule a second measurement
+        fireEvent(window, new Event('resize'));
+      });
+      unmount();
+    });
+
+    it('does not re-measure a toast that is on its way out', async () => {
+      // The exit owns the geometry while it runs; re-measuring under it would fight the collapse.
+      mockLayout();
+      setViewportWidth(900);
+      seed(makeItem({ id: 'leaving', duration: 0 }));
+      render(<NotificationToast item={makeItem({ id: 'leaving', duration: 0 })} align="right" />);
+      fireEvent.click(screen.getByRole('status')); // starts the exit
+
+      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue({
+        width: 120,
+        height: 40,
+        top: 0,
+        left: 0,
+        right: 120,
+        bottom: 40,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect);
+      setViewportWidth(390);
+      await resize();
+      expect(surfaceOf().style.width).toBe('200px');
+    });
   });
 
   it('auto-dismisses after its duration elapses', () => {

@@ -46,10 +46,23 @@ export function calendarEntryId(
  * announced — the one failure this integration exists to prevent, and the one you would only notice
  * by missing a delivery.
  *
- * The rule: ask for the configured lead, but never for more time than actually remains. When the
- * order is created inside the lead window the reminder lands at (essentially) now — which is the
- * honest answer, because "we cannot warn you a day ahead of something happening in sixteen hours"
- * leaves only "so you are being told now".
+ * The rule: ask for the configured lead, but never for more time than actually remains **minus a
+ * safety margin** (`reminderSafetyMinutes`). When the order is created inside the lead window the
+ * reminder lands a few minutes out — which is the honest answer, because "we cannot warn you a day
+ * ahead of something happening in sixteen hours" leaves only "so you are being told now".
+ *
+ * ⚠️ **The margin is not padding, it is the difference between a notification and silence.** Clamping
+ * to exactly the time remaining puts the trigger instant on `now` — and the event still has to travel
+ * to Google over the network, or be fetched and parsed by a phone, so by the time anyone evaluates it
+ * the instant has passed. Neither vendor documents what happens then; "fires immediately" and "never
+ * fires" are both plausible, and the second is a delivery nobody was warned about. Reserving a few
+ * minutes makes the trigger provably future at the moment we hand it over, so the outcome stops
+ * depending on a race we do not control.
+ *
+ * The margin only ever bites in the clamped case: with room for the configured lead, that lead is
+ * returned untouched. And when there is not even room for the margin (an event minutes away), the
+ * answer is a ZERO lead — a reminder at the event's own start, which is still in the future for as
+ * long as `minutesUntil > 0` and therefore safe by the same argument.
  *
  * Returns `undefined` when the event has already started: there is nothing left to warn about, and
  * a zero-minute reminder on a past event is noise at best.
@@ -63,8 +76,9 @@ export function reminderMinutesFor(
   if (minutesUntil <= 0) {
     return undefined;
   }
-  // `floor`, so the reminder instant is at or after `now` and never a few seconds behind it.
-  const available = Math.floor(minutesUntil);
+  // `floor` after subtracting the margin, so the reminder instant is at least that far ahead of
+  // `now` — never a few seconds behind it, where it would be dropped.
+  const available = Math.floor(minutesUntil - appConfig.calendar.reminderSafetyMinutes);
   const wanted = Math.min(configuredMinutes, appConfig.calendar.google.maxReminderMinutes);
   return Math.max(0, Math.min(wanted, available));
 }

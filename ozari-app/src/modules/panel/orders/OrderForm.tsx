@@ -532,6 +532,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     setValue('deliveryZoneId', address?.zone?.id ?? null);
     const fee = address?.domicilePrice ?? address?.zone?.deliveryFee;
     setValue('deliveryAmount', fee != null ? String(fee) : '', { shouldValidate: true });
+    // The client's own NOTES open the order's comment. They are the standing facts about this client
+    // ("cliente frecuente", "cobrar al terminar") and the comment is where the person packing the
+    // order actually looks — collected on the client, then never shown again, they were information
+    // the admin had written down and could not see. Prefilled like the address and the instructions,
+    // and editable in exactly the same way: this is where the note STARTS, not what it must stay.
+    // Empty CLEARS, so a previous client's notes never ride along on the next one's order.
+    setValue('comment', registry.notes ?? '');
     // The client's PREFERRED payment method is deliberately not applied to the order: a preference
     // is not a payment, and writing it here made every order claim a method nobody had used yet.
   }, [clientRegistryId, registriesById, setValue]);
@@ -1121,7 +1128,10 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                           }}
                         >
                           <div className="flex min-w-0 flex-1 flex-col">
-                            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,130px)]">
+                            {/* Below `sm` these stack, and the quantity field's label would land on
+                                the product select's availability hint — hence `gap-y-field`, while
+                                the columns keep their tighter gap. */}
+                            <div className="grid gap-x-3 gap-y-field sm:grid-cols-[minmax(0,1fr)_minmax(0,130px)]">
                               <CustomSelectForm<CreateOrderFormType>
                                 id={`order-line-product-${index}`}
                                 name={`lines.${index}.productId`}

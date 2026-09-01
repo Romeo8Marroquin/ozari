@@ -40,6 +40,27 @@ describe('MorphSwap', () => {
     expect(screen.queryByText('Pendiente')).not.toBeInTheDocument();
   });
 
+  it('wraps as a BLOCK when asked, and lets the outgoing copy keep its width', () => {
+    // A chip must not wrap; a sentence that rewrites itself must. And the abandoned copy needs the
+    // full width or it shrink-wraps to its own text and visibly re-flows on its way out — the reader
+    // would see the old sentence re-break while it fades.
+    const { rerender } = render(
+      <MorphSwap block swapKey="a">
+        Conecta tu cuenta
+      </MorphSwap>,
+    );
+    const box = screen.getByText('Conecta tu cuenta').parentElement;
+    expect(box?.className).toContain('block');
+    expect(box?.className).not.toContain('whitespace-nowrap');
+
+    rerender(
+      <MorphSwap block swapKey="b">
+        Conectado como a@b.com
+      </MorphSwap>,
+    );
+    expect(screen.getByText('Conecta tu cuenta').className).toContain('w-full');
+  });
+
   it('passes extra classes through to the morphing box', () => {
     render(
       <MorphSwap swapKey="a" className="text-xs">

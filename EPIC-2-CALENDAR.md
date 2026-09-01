@@ -64,14 +64,23 @@ discover by missing a delivery.
 
 `reminderMinutesFor(start, now, configured)`:
 
-- never more than the time that actually remains (`floor`, so the reminder instant is at or after
-  `now`, not a few seconds behind it);
+- never more than the time that actually remains, **minus `reminderSafetyMinutes` (5)**;
 - never more than Google's own ceiling (40320 minutes — the API rejects more);
 - `undefined` once the event has started, because there is nothing left to warn about.
 
-When an order is created inside the lead window the reminder therefore lands at ~now. That is the
-honest answer: we cannot warn you a day ahead of something happening in sixteen hours, so you are
-being told now.
+When an order is created inside the lead window the reminder therefore lands a few minutes out. That
+is the honest answer: we cannot warn you a day ahead of something happening in sixteen hours, so you
+are being told now.
+
+⚠️ **Why the margin exists, and why it is not padding** (owner, 2026-08-31). Clamping to *exactly*
+the time remaining puts the trigger on `now` — and the event still has to cross the network to
+Google, or be fetched and parsed by a phone, so by the time anything evaluates it the instant has
+gone. **Neither vendor documents what happens then**; "fires immediately" and "never fires" are both
+plausible readings, and the second is a delivery nobody was warned about. Reserving five minutes
+makes the trigger provably future at hand-over, so the outcome no longer depends on a race we do not
+control. The margin bites ONLY in the clamped case — with room for the configured lead, that lead is
+returned untouched — and inside the margin (an event minutes away) the lead drops to **zero**: a
+reminder at the event's own start, still future for as long as the event has not begun.
 
 The **ICS feed recomputes it on every fetch**, against that moment — so a subscribed calendar's
 alarms are correct no matter when it last polled.
@@ -139,9 +148,31 @@ Two routes are mounted **before the API-key check** (`createApp`), each with its
   pattern). Regenerating replaces both, which is the only way to revoke a URL already pasted into
   somebody's phone; the UI says so out loud, right under the button.
 
-Everything else under `/calendar` is **STRICTLY Admin**. When a Driver may connect their own,
-`activeCalendarConnections` is the ONE function that changes (to "every admin, plus the order's
-assignee") — and the route guard widens *together with it*, never before.
+Everything else under `/calendar` is **STRICTLY Admin**. When a Driver may connect their own, the
+route guard is the ONE thing that widens — the routing rule below already sends each order to its
+assignee, so nothing else in the module has to change.
+
+### ⚠️ An order goes to ONE calendar: its ASSIGNEE's (owner, 2026-08-31)
+
+It used to go to **every** connected calendar. That reads like a feature ("the whole team sees the
+schedule") and is really a leak: an admin who connected their personal Google account received every
+job in the business, including ones assigned to somebody else, in the calendar they run their life
+from. The owner found it by having a second admin subscribe and watching a colleague's delivery
+appear. A calendar answers *what do I have to do* — an order that is not mine does not belong in it.
+
+Both transports enforce it, from the same field:
+
+- **Google** — `syncOrderCalendars` reconciles EVERY live connection, but only the assignee's gets
+  the entries; every other one is reconciled with an **empty set**. That second half is load-bearing:
+  it is what removes the events from the previous assignee when a job is reassigned, with no diff, no
+  bookkeeping table and no special call site — the sync stays declarative and still self-heals.
+  Deleting an event that was never there is a no-op by design, so the extra calls cost a round trip.
+- **The ICS feed** — the query is scoped by `assignedUserId: feed.userId`. A feed is one person's
+  working schedule.
+
+Two consequences worth stating: an **unassigned** order reaches nobody's calendar (it is not yet
+anyone's job), and an order assigned to a **Driver** produces no events until Drivers may connect —
+which is now purely the route guard's business.
 
 Disconnecting hard-deletes the row and revokes the grant with Google (best-effort; our copy goes
 either way). **Events already written are deliberately LEFT in the calendar** — they are

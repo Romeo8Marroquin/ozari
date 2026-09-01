@@ -1,5 +1,9 @@
 # Ozari
 
+📘 **¿Va a usar la aplicación?** El [**Manual de Party Rentals**](./MANUAL.md) explica cada flujo —
+catálogo, pedidos, entregas, cobros, documentos y calendarios— con lo esencial arriba y el detalle
+desplegable.
+
 Cloud-ready operations platform for a party-rentals business: product catalog and inventory today;
 orders, availability and delivery logistics next (see Planning below).
 

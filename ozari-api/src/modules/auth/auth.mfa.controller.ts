@@ -334,7 +334,7 @@ export const verifyMfaLogin = async (
       : await consumeRecoveryCode(prismaClient, userId, code);
 
     if (!codeAccepted) {
-      recordFailedMfa(userId);
+      await recordFailedMfa(userId);
       logger.warn(
         i18next.t("user.mfaVerifyLogin.logs.invalidCode", { userId }),
       );
@@ -349,7 +349,7 @@ export const verifyMfaLogin = async (
       return;
     }
 
-    clearMfaAttempts(userId);
+    await clearMfaAttempts(userId);
 
     await issueAuthenticatedSession(prismaClient, res, {
       userId,

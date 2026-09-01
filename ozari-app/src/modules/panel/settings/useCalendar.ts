@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@api/client';
 import { QueryKeys } from '@constants/QueryKeys';
@@ -32,17 +33,27 @@ export function shouldRetryCalendar(count: number, error: unknown): boolean {
   return getStatus(error as AxiosError) !== 403 && count < 2;
 }
 
-/** Every calendar mutation refreshes the one query behind this screen — nothing else in the app
- *  reads it, so there is no wider invalidation to do. */
+/**
+ * Every calendar mutation refreshes the one query behind this screen — nothing else in the app reads
+ * it, so there is no wider invalidation to do.
+ *
+ * **The write only REPORTS; `commit` is what changes the screen.** That split is the deletion
+ * doctrine (`useCatalogRowMutations` is the reference): a row must never leave before the server
+ * agreed it should, and the exit has to play BETWEEN the answer and the re-read — otherwise the
+ * content is gone from the DOM before there is anything left to animate, and the card just snaps
+ * shut. Invalidating inside `onSuccess` made that impossible to express, because the refetch landed
+ * whenever it landed. So: request → (on the answer) play the exit → `commit()` → the screen re-reads
+ * itself.
+ */
 function useCalendarMutation<TVariables = void>(
   mutationFn: (variables: TVariables) => Promise<unknown>,
 ) {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn,
-    retry: false,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [QueryKeys.CALENDAR] }),
-  });
+  const mutation = useMutation({ mutationFn, retry: false });
+  const commit = useCallback((): void => {
+    void queryClient.invalidateQueries({ queryKey: [QueryKeys.CALENDAR] });
+  }, [queryClient]);
+  return { mutation, commit };
 }
 
 /**
@@ -73,24 +84,24 @@ export function useConnectGoogleCalendar() {
 }
 
 export function useDisconnectGoogleCalendar() {
-  const mutation = useCalendarMutation(() =>
+  const { mutation, commit } = useCalendarMutation(() =>
     api.delete('/calendar/google', { skipErrorNotification: true }),
   );
-  return { disconnect: mutation.mutate, isPending: mutation.isPending };
+  return { disconnect: mutation.mutateAsync, isPending: mutation.isPending, commit };
 }
 
 /** Mints the subscription URL — and REGENERATES it, which is the same call and the only way to
  *  revoke a URL that has already been pasted into a device. */
 export function useCreateCalendarFeed() {
-  const mutation = useCalendarMutation(() =>
+  const { mutation, commit } = useCalendarMutation(() =>
     api.post('/calendar/feed', {}, { skipErrorNotification: true }),
   );
-  return { createFeed: mutation.mutate, isPending: mutation.isPending };
+  return { createFeed: mutation.mutateAsync, isPending: mutation.isPending, commit };
 }
 
 export function useDeleteCalendarFeed() {
-  const mutation = useCalendarMutation(() =>
+  const { mutation, commit } = useCalendarMutation(() =>
     api.delete('/calendar/feed', { skipErrorNotification: true }),
   );
-  return { deleteFeed: mutation.mutate, isPending: mutation.isPending };
+  return { deleteFeed: mutation.mutateAsync, isPending: mutation.isPending, commit };
 }

@@ -136,6 +136,7 @@ const saleProduct: Product = {
 const registry: ClientRegistry = {
   id: 3,
   name: 'María López',
+  notes: 'Cliente frecuente',
   contacts: [
     { id: 1, contactType: { id: 1, name: 'WhatsApp' }, value: '5555-1234', isPrincipal: true },
     { id: 2, contactType: { id: 2, name: 'Teléfono' }, value: '2222-3333', isPrincipal: false },
@@ -410,6 +411,31 @@ describe('OrderForm', () => {
       expect((byId(container, 'order-delivery-name') as HTMLInputElement).value).toBe('María López'),
     );
     expect((byId(container, 'order-delivery-contact') as HTMLInputElement).value).toBe('5555-1234');
+    // The client's own NOTES open the order's comment. Collected on the client and then never shown
+    // again, they were information the admin had written down and could not see; the comment is
+    // where whoever packs the order actually looks. Editable from there, like every other prefill.
+    expect((byId(container, 'order-comment') as HTMLTextAreaElement).value).toBe('Cliente frecuente');
+  });
+
+  it('CLEARS the comment for a client with no notes, so nothing rides along', async () => {
+    // Same rule as the pin and the arrival instructions: a field prefilled from a client must not
+    // keep the previous client's value when the new one has none.
+    const user = userEvent.setup();
+    useClientRegistries.mockReturnValue(
+      q({ data: [registry, { ...registry, id: 4, name: 'Sin notas', notes: undefined }] }),
+    );
+    const { container } = renderForm();
+    await user.selectOptions(byId(container, 'order-client'), '3');
+    await waitFor(() =>
+      expect((byId(container, 'order-comment') as HTMLTextAreaElement).value).toBe(
+        'Cliente frecuente',
+      ),
+    );
+
+    await user.selectOptions(byId(container, 'order-client'), '4');
+    await waitFor(() =>
+      expect((byId(container, 'order-comment') as HTMLTextAreaElement).value).toBe(''),
+    );
   });
 
   it('autofills the delivery fee from the client and shows the saved-data pickers', async () => {

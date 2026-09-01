@@ -68,6 +68,40 @@ model PasswordResetToken {
   @@map("password_reset_tokens")
 }
 
+// Brute-force counters for the two secrets an authenticated flow can be attacked by GUESSING: a
+// password (keyed by the email's SHA) and a TOTP code (keyed by the user id).
+//
+// It lives in the DATABASE rather than in each instance's memory, and that is the whole point: with
+// `max-instances = 3` an in-memory counter is enforced up to three times over, and a cold start (a
+// scale-to-zero service is always about to have one) forgets every attempt ever made. Postgres is
+// already on the request path for a login, so making the count GLOBAL and durable costs one indexed
+// query and no new infrastructure — the same reasoning that made the password-reset cooldown
+// DB-backed while the IP limiter stayed in memory.
+//
+// Rows are transient: cleared on a successful authentication, overwritten when their window lapses,
+// and swept by the cleanup job. The table therefore holds roughly "accounts currently failing", not
+// a history — and never an email address, only its hash.
+model AuthAttempt {
+  id Int @id @default(autoincrement())
+
+  // Which secret is being guessed (`AuthAttemptScopeEnum`) and WHOSE — for LOGIN the SHA-256 of the
+  // email (never the address itself: this table would otherwise become a list of who has an
+  // account), for MFA the user id as text. One row per subject per scope.
+  scope   String
+  subject String
+
+  attempts       Int      @default(0)
+  firstAttemptAt DateTime @map("first_attempt_at")
+  // When the window lapses. A row past this instant is treated as absent — and is what the cleanup
+  // job deletes, so an abandoned lockout never lingers.
+  resetAt   DateTime @map("reset_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([scope, subject], name: "uq_auth_attempts_scope_subject")
+  @@index([resetAt])
+  @@map("auth_attempts")
+}
+
 model MfaRecoveryCode {
   id        Int       @id @default(autoincrement())
   userId    Int       @map("user_id")

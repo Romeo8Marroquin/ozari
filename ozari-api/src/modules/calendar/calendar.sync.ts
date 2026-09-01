@@ -52,6 +52,7 @@ const calendarOrderSelect = {
   cancelledAt: true,
   updatedAt: true,
   createdAt: true,
+  assignedUserId: true,
   deliveryNameKms: true,
   deliveryAddressKms: true,
   eventType: { select: { name: true } },
@@ -80,6 +81,7 @@ export async function loadCalendarOrder(
     cancelledAt: row.cancelledAt,
     updatedAt: row.updatedAt,
     createdAt: row.createdAt,
+    assignedUserId: row.assignedUserId,
     clientName: decryptKms(row.deliveryNameKms),
     address: decryptKms(row.deliveryAddressKms),
     eventTypeName: row.eventType.name,
@@ -88,12 +90,12 @@ export async function loadCalendarOrder(
 }
 
 /**
- * Every connection an order should be written to.
+ * Every LIVE connection — the set the sync reconciles against, not the set that receives an order.
  *
- * Today: all ACTIVE connections, which is exactly the set of admins — connecting is an Admin-only
- * route, so the guard already scopes it. **When a Driver may connect their own calendar, this is the
- * one function that changes**: it becomes "every admin, plus the order's assignee", and nothing else
- * in the module has to know.
+ * It deliberately returns them ALL, because the sync has to be able to REMOVE an order from a
+ * calendar that should no longer hold it: a job that was reassigned, and an order that was deleted
+ * (whose row is gone, so there is no assignee left to scope by). Who actually receives an order is
+ * decided per connection in {@link syncOrderCalendars} — see the rule there.
  */
 export async function activeCalendarConnections(
   client: Pick<Prisma.TransactionClient, "calendarConnection">,
@@ -210,7 +212,22 @@ export async function syncOrderCalendars(orderId: number): Promise<void> {
       : [];
     for (const connection of connections) {
       try {
-        await applyToConnection(connection, entries, orderId);
+        // ⚠️ **An order goes into ONE person's calendar: the one who has to perform it.**
+        //
+        // It used to go into EVERY connected calendar, which read as a feature ("the whole team sees
+        // the schedule") and is really a leak: an admin who connected their personal Google account
+        // received every job in the business, including ones assigned to somebody else, in the
+        // calendar they use for their own life. A calendar answers "what do I have to do" — an order
+        // that is not mine does not belong in it. (Owner, 2026-08-31.)
+        //
+        // Every OTHER connection is reconciled with an empty set rather than skipped, and that is the
+        // load-bearing half: it is what removes the events from the previous assignee when a job is
+        // reassigned. The sync stays declarative — each calendar is made to match what it should hold
+        // — so a reassignment needs no diff, no bookkeeping and no special call site, and a missed
+        // sync still heals on the next one. Deleting an event that was never there is a no-op by
+        // design (`deleteGoogleEvent`), so the extra calls cost a round trip and nothing else.
+        const mine = order !== null && connection.userId === order.assignedUserId;
+        await applyToConnection(connection, mine ? entries : [], orderId);
       } catch (error) {
         logger.error(i18next.t("calendar.logs.syncFailed", { id: orderId }), { error });
       }

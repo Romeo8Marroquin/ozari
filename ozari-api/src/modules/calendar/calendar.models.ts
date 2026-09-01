@@ -43,6 +43,14 @@ export interface CalendarOrderModel {
   cancelledAt: Date | null;
   updatedAt: Date | null;
   createdAt: Date;
+  /**
+   * WHOSE job this is — the only person whose calendar it belongs in.
+   *
+   * Nullable because the column is (older rows predate the validator making it required), and an
+   * order nobody is assigned to is written to NOBODY's calendar. That is the honest answer: a
+   * calendar says "what I have to do", and an unassigned job is not yet anyone's.
+   */
+  assignedUserId: number | null;
   /** Decrypted, because a calendar entry with no name on it is useless. */
   clientName: string;
   address: string;

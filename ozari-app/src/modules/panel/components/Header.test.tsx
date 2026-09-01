@@ -47,14 +47,24 @@ afterEach(() => {
 });
 
 describe('Header', () => {
-  it('renders the section title for the active route and the notifications + user menu', () => {
+  it('renders the section title for the active route and the user menu', () => {
     setViewport('desktop');
     currentPath.value = '/panel/ajustes';
     render(<Header />, { wrapper });
 
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('modules.panel.nav.settings');
-    expect(screen.getByRole('button', { name: 'modules.panel.actions.notifications' })).toBeInTheDocument();
     expect(screen.getByTestId('user-menu')).toBeInTheDocument();
+  });
+
+  it('carries NO notification bell — an affordance with nothing behind it', () => {
+    // It was a button with no handler wearing a hard-coded unread dot: a permanent claim that
+    // something was waiting, to the one user who could never clear it.
+    setViewport('desktop');
+    currentPath.value = '/panel/ajustes';
+    render(<Header />, { wrapper });
+    expect(
+      screen.queryByRole('button', { name: 'modules.panel.actions.notifications' }),
+    ).not.toBeInTheDocument();
   });
 
   it('falls back to the products title when the path matches no nav item', () => {

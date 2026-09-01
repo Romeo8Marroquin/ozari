@@ -150,9 +150,9 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
       // settles; measuring before locking targeted the wrong (pre-wrap) height.
       gsap.set(body, { height: 'auto', opacity: 1 });
       gsap.set(surface, { width: 'auto' });
-      const W = Math.ceil(surface.getBoundingClientRect().width);
-      const Wt = tab.offsetWidth;
-      const Ht = tab.offsetHeight;
+      let W = Math.ceil(surface.getBoundingClientRect().width);
+      let Wt = tab.offsetWidth;
+      let Ht = tab.offsetHeight;
       gsap.set(surface, { width: W });
       let bodyH = body.offsetHeight;
       dimsRef.current = { W, Wt, Ht, bodyH };
@@ -212,6 +212,38 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
           focusPathRef.current.setAttribute('d', finalClip);
         }
       };
+      /**
+       * ⚠️ The measured width is LOCKED in pixels, so it has to be re-taken when the space it was
+       * measured against changes — a phone ROTATING, or a desktop window being resized. Landscape
+       * → portrait is the case that shows: a toast measured at 440px would sit on a 390px screen,
+       * overflowing the edge it is anchored to, and nothing in the layout could correct it because
+       * the width is an inline pixel value.
+       *
+       * Only the WIDTH is watched. Mobile browsers fire `resize` every time the URL bar slides, and
+       * re-measuring on a height change would rebuild the shape while the user is merely scrolling.
+       * Coalesced to a frame, ignored during the birth and the exit (both own the geometry while
+       * they run), and re-entrant-safe because it ends in the same `settle()` the birth uses.
+       */
+      let lastWidth = window.innerWidth;
+      let resizeFrame = 0;
+      const remeasure = (): void => {
+        resizeFrame = 0;
+        if (!entered || exitingRef.current) return;
+        gsap.set(surface, { width: 'auto' });
+        W = Math.ceil(surface.getBoundingClientRect().width);
+        Wt = tab.offsetWidth;
+        Ht = tab.offsetHeight;
+        gsap.set(surface, { width: W });
+        dimsRef.current = { ...dimsRef.current, W, Wt, Ht };
+        settle();
+      };
+      const onResize = (): void => {
+        if (window.innerWidth === lastWidth) return;
+        lastWidth = window.innerWidth;
+        if (resizeFrame === 0) resizeFrame = requestAnimationFrame(remeasure);
+      };
+      window.addEventListener('resize', onResize);
+
       // Re-settle ONLY if fonts arrive after the birth (a genuine late-font reflow).
       // `document.fonts.ready` resolves immediately when fonts are already cached, so the
       // `entered` guard keeps it from collapsing the birth mid-animation.
@@ -270,6 +302,11 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
           },
         );
       }
+
+      return () => {
+        window.removeEventListener('resize', onResize);
+        if (resizeFrame !== 0) cancelAnimationFrame(resizeFrame);
+      };
     },
     { scope: rootRef },
   );
@@ -294,11 +331,18 @@ const NotificationToast: React.FC<NotificationToastProps> = ({ item, align }) =>
 
   // Width policy: a fixed `width` forces multi-line wrapping; otherwise the toast is
   // fit-content up to `maxWidth` (then it wraps). Both are configurable per call.
+  //
+  // ⚠️ The cap is `100%` — the space the HOST column actually offers — not `calc(100vw - 2rem)`,
+  // which was this component guessing at its container (2026-08-31). That guess was wrong in three
+  // ways at once: it hard-coded the host's mobile padding, so at `sm` and up (`p-6`) the cap ran
+  // 16px past the real edge; `100vw` counts a desktop scrollbar the toast cannot use; and on a phone
+  // it is measured against the LAYOUT viewport, which is not what is on screen while the URL bar is
+  // sliding. A percentage asks the parent, which is right at every width by construction.
   const toCss = (v: number | string): string => (typeof v === 'number' ? `${v}px` : v);
   const sizeStyle: React.CSSProperties =
     item.width != null
       ? { width: toCss(item.width) }
-      : { maxWidth: `min(${toCss(item.maxWidth ?? DEFAULT_MAX_WIDTH)}, calc(100vw - 2rem))` };
+      : { maxWidth: `min(${toCss(item.maxWidth ?? DEFAULT_MAX_WIDTH)}, 100%)` };
 
   return (
     <div

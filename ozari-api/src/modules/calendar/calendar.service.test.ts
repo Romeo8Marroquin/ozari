@@ -8,6 +8,7 @@ vi.mock("@/config/i18n.js", () => ({
   },
 }));
 
+import { appConfig } from "@/config/app.js";
 import {
   buildIcs,
   calendarEntriesFor,
@@ -62,6 +63,9 @@ describe("calendarEntryId", () => {
 
 describe("reminderMinutesFor", () => {
   const inHours = (hours: number) => new Date(NOW.getTime() + hours * 60 * 60 * 1000);
+  // Read from config rather than hardcoded: tuning the margin must not silently make these
+  // assertions describe a rule the code no longer follows.
+  const SAFETY = appConfig.calendar.reminderSafetyMinutes;
 
   it("asks for the configured lead when there is room for it", () => {
     expect(reminderMinutesFor(inHours(48), NOW, 1440)).toBe(1440);
@@ -70,16 +74,30 @@ describe("reminderMinutesFor", () => {
   it("CLAMPS to the time that actually remains — the edge case the feature turns on", () => {
     // A calendar fires at `start − minutes`; if that instant has gone by, NOTHING fires. So an order
     // booked 16 hours out with a 24-hour lead would be entered and never announced. Clamped, the
-    // reminder lands now, which is the honest answer.
-    expect(reminderMinutesFor(inHours(16), NOW, 1440)).toBe(16 * 60);
-    expect(reminderMinutesFor(inHours(0.5), NOW, 1440)).toBe(30);
+    // reminder lands a few minutes out, which is the honest answer.
+    expect(reminderMinutesFor(inHours(16), NOW, 1440)).toBe(16 * 60 - SAFETY);
+    expect(reminderMinutesFor(inHours(0.5), NOW, 1440)).toBe(30 - SAFETY);
+  });
+
+  it("leaves the SAFETY MARGIN between now and the trigger, never landing it on `now`", () => {
+    // The event still has to reach Google over the network, or be parsed by a phone. A trigger
+    // computed as exactly `now` is in the PAST by the time anyone evaluates it, and what a calendar
+    // does with a past trigger is undocumented — possibly nothing at all. So the reminder instant is
+    // pushed to at least `now + SAFETY`.
+    const triggerMinutesFromNow = (hoursOut: number): number => {
+      const lead = reminderMinutesFor(inHours(hoursOut), NOW, 1440);
+      return hoursOut * 60 - (lead ?? 0);
+    };
+    expect(triggerMinutesFromNow(16)).toBe(SAFETY);
+    expect(triggerMinutesFromNow(0.5)).toBe(SAFETY);
   });
 
   it("never asks for a reminder in the PAST, however little time is left", () => {
-    // Half a minute out: `floor` keeps the reminder instant at or after now rather than a few
-    // seconds behind it, where it would be dropped.
+    // Inside the margin there is no room to reserve it, so the lead drops to ZERO — a reminder at
+    // the event's own start, which is still in the future for as long as the event has not begun.
     const soon = new Date(NOW.getTime() + 30 * 1000);
     expect(reminderMinutesFor(soon, NOW, 1440)).toBe(0);
+    expect(reminderMinutesFor(new Date(NOW.getTime() + SAFETY * 60 * 1000), NOW, 1440)).toBe(0);
   });
 
   it("declines entirely once the event has started — there is nothing left to warn about", () => {

@@ -17,11 +17,14 @@ vi.mock("@/config/logger.js", () => ({
 describe("Cleanup Expired Sessions Job", () => {
   let mockDeleteMany: ReturnType<typeof vi.fn>;
   let mockResetTokenDeleteMany: ReturnType<typeof vi.fn>;
+  let mockAuthAttemptDeleteMany: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
     mockDeleteMany = vi.fn();
     mockResetTokenDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
+
+    mockAuthAttemptDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
 
     const { getPrismaClient } = await import("@/services/prisma.service.js");
     (getPrismaClient as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -30,6 +33,9 @@ describe("Cleanup Expired Sessions Job", () => {
       },
       passwordResetToken: {
         deleteMany: mockResetTokenDeleteMany,
+      },
+      authAttempt: {
+        deleteMany: mockAuthAttemptDeleteMany,
       },
     });
   });
@@ -137,6 +143,23 @@ describe("Cleanup Expired Sessions Job", () => {
     });
     expect(logger.info).toHaveBeenCalledWith(
       "[Cleanup Job] Successfully cleaned up 3 expired password-reset tokens",
+    );
+  });
+
+  it("purges LAPSED brute-force counters, and never a live one", async () => {
+    // A live window is what a lockout IS: deleting it here would hand an attacker a free reset, so
+    // the cutoff has to be `lte: now` and nothing wider.
+    const { logger } = await import("@/config/logger.js");
+    mockDeleteMany.mockResolvedValue({ count: 0 });
+    mockAuthAttemptDeleteMany.mockResolvedValue({ count: 7 });
+
+    await cleanupExpiredSessions();
+
+    expect(mockAuthAttemptDeleteMany).toHaveBeenCalledWith({
+      where: { resetAt: { lte: expect.any(Date) } },
+    });
+    expect(logger.info).toHaveBeenCalledWith(
+      "[Cleanup Job] Successfully cleaned up 7 lapsed auth attempt counters",
     );
   });
 });

@@ -2163,6 +2163,9 @@ export const paths: OpenAPIV3.PathsObject = {
         "**Fetched by calendar apps, not by our client.** Returns `text/calendar` (RFC 5545) with " +
         "one `VEVENT` per pending delivery and collection, each carrying a `VALARM` at the " +
         "configured lead time.\n\n" +
+        "**Scoped to the token's own user**: only orders ASSIGNED to them appear. A feed is one " +
+        "person's working schedule, not the whole business's — the same rule the Google sync " +
+        "follows, so both transports show one person exactly the same jobs.\n\n" +
         "It is the second route mounted BEFORE the API-key check: Apple Calendar sends no header, " +
         "cookie or origin we control, so **the 32-byte token in the path is the credential**. It is " +
         "hashed in storage, and regenerating it invalidates every subscription at once. Its own " +

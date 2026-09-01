@@ -1,6 +1,6 @@
 ﻿import { useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
-import { HiOutlineBars3, HiOutlineBell } from 'react-icons/hi2';
+import { HiOutlineBars3 } from 'react-icons/hi2';
 import { PANEL_NAV } from '../navConfig';
 import { usePanelChrome } from '../hooks/usePanelChrome';
 import UserMenu from './UserMenu';
@@ -38,16 +38,14 @@ const Header: React.FC = () => {
         <h1 className="panel-header-title truncate text-lg font-semibold text-charcoal">{title}</h1>
       </div>
 
+      {/* No notification bell (owner, 2026-08-31). It was a button with no handler wearing a
+          hard-coded unread dot — a permanent claim that something was waiting, made to the one user
+          who could never clear it. There is deliberately nothing behind it either: the only
+          recurring thing an admin must be told is a delivery or a collection, and that lands in
+          their real calendar with a reminder (EPIC-2-CALENDAR), which works when the app is closed.
+          An in-app centre earns its place when there is a SECOND person to notify (assignments,
+          hand-offs) or a client portal — bring the bell back with that, not before. */}
       <div className="flex items-center gap-1.5 sm:gap-2">
-        <button
-          type="button"
-          aria-label={t('modules.panel.actions.notifications')}
-          className={`relative grid size-10 cursor-pointer place-items-center rounded-xl text-charcoal/60 transition-[color,background-color,box-shadow] duration-200 hover:bg-charcoal/[0.05] hover:text-charcoal ${FOCUS_RING}`}
-        >
-          <HiOutlineBell aria-hidden className="size-5" />
-          <span aria-hidden className="absolute right-2.5 top-2.5 size-2 rounded-full bg-magenta ring-2 ring-white" />
-        </button>
-
         <UserMenu />
       </div>
     </header>

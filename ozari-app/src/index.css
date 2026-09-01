@@ -54,6 +54,23 @@
   --spacing-sidebar-drawer: 270px; /* mobile overlay drawer (a touch wider for touch targets) */
   --spacing-header: 4rem; /* 64px — top bar height; the sidebar brand block matches it */
   --spacing-panel-content: 1536px; /* max readable content width on ultrawide displays */
+
+  /* ⚠️ CLEARANCE A STACKED FORM FIELD OWES THE ONE ABOVE IT — use as `gap-y-field` (or `gap-field`
+     on a plain column; on a GRID pair it with a smaller `gap-x-*`, since the columns need no such
+     room and widening them would open holes in the layout).
+
+     A floating label LEAVES its own box when it rises: it is absolutely positioned and translated
+     up 24px, so a filled field's label paints ~13px ABOVE the input's top edge, in space the field
+     does not reserve and cannot see. Nothing looks wrong until the element above ends with text at
+     its own bottom edge — a field's help line or its error — and then the two print on top of each
+     other. It is worst exactly where it is least likely to be caught: a two-line message on a phone,
+     or a grid that stacks into one column below `sm`.
+
+     16px is the smallest round number that clears the 13px, and it is what the app's roomier forms
+     already use by habit — this only gives that habit a name so a `gap-2` between two fields reads
+     as the mistake it is. It is NOT a general form rhythm: a field followed by a button, a radio or
+     a note needs nothing, because the thing that overflows is the LOWER element's label. */
+  --spacing-field: 1rem;
 }
 
 /* ── Stacking order (the single source of truth for z-index across the app) ──────────────
