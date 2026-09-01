@@ -18,14 +18,16 @@ locals {
   build_sa_member = "serviceAccount:${google_service_account.build.email}"
 
   run_sa_accessible_secrets = {
-    database_url       = google_secret_manager_secret.ozari_database_url.secret_id
-    jwt_secret         = google_secret_manager_secret.ozari_jwt_secret.secret_id
-    jwt_refresh_secret = google_secret_manager_secret.ozari_jwt_refresh_secret.secret_id
-    encryption_key     = google_secret_manager_secret.ozari_encryption_key.secret_id
-    api_key            = google_secret_manager_secret.ozari_api_key.secret_id
-    email_key          = google_secret_manager_secret.ozari_email_key.secret_id
-    r2_access_key      = google_secret_manager_secret.ozari_r2_access_key.secret_id
-    r2_secret_key      = google_secret_manager_secret.ozari_r2_secret_key.secret_id
+    database_url         = google_secret_manager_secret.ozari_database_url.secret_id
+    jwt_secret           = google_secret_manager_secret.ozari_jwt_secret.secret_id
+    jwt_refresh_secret   = google_secret_manager_secret.ozari_jwt_refresh_secret.secret_id
+    encryption_key       = google_secret_manager_secret.ozari_encryption_key.secret_id
+    api_key              = google_secret_manager_secret.ozari_api_key.secret_id
+    email_key            = google_secret_manager_secret.ozari_email_key.secret_id
+    r2_access_key        = google_secret_manager_secret.ozari_r2_access_key.secret_id
+    r2_secret_key        = google_secret_manager_secret.ozari_r2_secret_key.secret_id
+    google_client_id     = google_secret_manager_secret.ozari_google_client_id.secret_id
+    google_client_secret = google_secret_manager_secret.ozari_google_client_secret.secret_id
   }
 
   # Cloud Build (ozari-build-sa) needs DB URLs for the migration step.

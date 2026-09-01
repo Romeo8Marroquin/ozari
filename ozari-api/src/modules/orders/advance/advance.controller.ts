@@ -10,6 +10,7 @@ import { HttpEnum } from "@models/enums/httpEnum.js";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
 import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
+import { syncOrderCalendars } from "../../calendar/calendar.sync.js";
 import {
   getEvidenceBounds,
   getStatusCatalog,
@@ -307,6 +308,13 @@ export const advanceOrder = async (
     }
     // Post-commit hook point (best-effort, never fails the request): per-status notifications and
     // auto-assign policies plug in HERE — see EPIC-2-ORDER-LIFECYCLE §7.
+    //
+    // The connected calendars are the first tenant. A move is exactly what changes what belongs in
+    // one: confirming a delivery retires that entry (it is work already done, and being reminded
+    // about it tomorrow would be absurd), a cancellation retires both, and a REWIND clears the
+    // actual and brings the entry back — all of it derived, because `calendarEntriesFor` reads the
+    // same actuals the logistics pad does rather than a status id.
+    await syncOrderCalendars(id);
 
     const response: OrderDetailEnvelopeModel = {
       order: projectOrderDetail(

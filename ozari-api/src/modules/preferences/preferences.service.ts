@@ -103,6 +103,25 @@ export const PREFERENCE_SETTINGS: readonly SettingDefinition[] = [
   // different people at different moments — an order is filled with a client on the phone, a product
   // is set up once at a desk — so the answer for one is not the answer for the other. A form added
   // later gets its own key here; nothing about this shape has to change.
+  // How long before a delivery or collection a connected calendar reminds. ONE value for both
+  // transports (the Google events and the ICS feed), because "how much warning do we want" is a
+  // single question — two controls would let a phone and a laptop disagree about the same job.
+  //
+  // It lives in Preferencias rather than beside the connection in Ajustes for the reason that splits
+  // those two screens: the CONNECTION is my account, the RULE is how the business runs. And it is
+  // honoured everywhere — clamped, and clamped again against the time actually remaining, so an
+  // order booked inside the window still gets its reminder (`reminderMinutesFor`).
+  {
+    key: "calendar.reminderMinutes",
+    group: "calendar",
+    type: "int",
+    // Zero is legitimate: "tell me when it starts". The ceiling is Google's own bound on a reminder
+    // override — asking for more is rejected by the API, so offering it would be a control that
+    // saves a value the calendar refuses.
+    min: 0,
+    max: 40320,
+    fallback: appConfig.calendar.defaultReminderMinutes,
+  },
   {
     key: "forms.saveDraftOrders",
     group: "forms",

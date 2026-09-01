@@ -34,6 +34,7 @@ import {
   initialStatus,
 } from "./lifecycle/lifecycle.service.js";
 import { getStorage } from "@helpers/storage.js";
+import { syncOrderCalendars } from "../calendar/calendar.sync.js";
 import {
   OrderDriverConflictError,
   OrderSelfOverlapError,
@@ -522,6 +523,11 @@ export const createOrder = async (
         }),
       ),
     };
+    // The connected calendars, brought in line with the order that now exists. Best-effort by
+    // contract (`syncOrderCalendars` never throws) and AFTER the commit — holding a transaction open
+    // across a call to Google is how a slow third party becomes a lock-contention outage. Awaited
+    // rather than fired and forgotten because Cloud Run only allocates CPU during the request.
+    await syncOrderCalendars(created.id);
     sendOzariSuccess(
       res,
       HttpEnum.CREATED,
@@ -865,6 +871,9 @@ export const updateOrder = async (
         }),
       ),
     };
+    // An edit can move the dates, drop the collection or rename the client — the calendars are
+    // re-derived wholesale rather than patched, exactly like the order itself.
+    await syncOrderCalendars(id);
     sendOzariSuccess(res, HttpEnum.OK, i18next.t("orders.updateOrder.orderUpdated"), response);
   } catch (error) {
     if (error instanceof OrderNotFoundError) {
@@ -980,6 +989,9 @@ export const deleteOrder = async (
         metadata: { operation: "ORDER_DELETED", evidenceObjects: purgedKeys.length },
       });
     }
+    // The order is gone, so the sync finds nothing and removes whatever the calendars still hold —
+    // the same declarative call, which is why a delete needs no special path of its own.
+    await syncOrderCalendars(id);
     sendOzariSuccess(res, HttpEnum.OK, i18next.t("orders.deleteOrder.orderDeleted"));
   } catch (error) {
     if (error instanceof OrderNotFoundError) {

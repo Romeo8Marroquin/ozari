@@ -453,6 +453,10 @@
             "title": "Evidencia",
             "description": "Cuántas fotos solicita cada paso que las requiere, y por cuánto tiempo se conservan."
           },
+          "calendar": {
+            "title": "Calendario",
+            "description": "Con cuánta anticipación avisan los calendarios conectados. Cada quien conecta el suyo desde Ajustes."
+          },
           "forms": {
             "title": "Formularios",
             "description": "Cómo se comportan los formularios de creación mientras se llenan."
@@ -497,6 +501,10 @@
           "evidenceRetentionMonths": {
             "label": "Meses de retención",
             "help": "Antigüedad a partir de la cual pueden depurarse las fotos de pedidos terminados. Los pedidos y su historial se conservan siempre."
+          },
+          "reminderMinutes": {
+            "label": "Minutos de anticipación del aviso",
+            "help": "Cuánto antes de cada entrega o recolección avisa el calendario. 1440 = un día. Si el pedido se crea con menos tiempo que este, el aviso se ajusta para que igual llegue."
           },
           "saveDraftOrders": {
             "label": "Guardar borrador de nuevo pedido",
@@ -1365,6 +1373,46 @@
       },
       "settings": {
         "lead": "Administra tu información y la seguridad de tu cuenta.",
+        "calendar": {
+          "title": "Calendarios",
+          "description": "Recibe las entregas y recolecciones en tu propio calendario, con recordatorio.",
+          "error": "No pudimos cargar la configuración de calendario.",
+          "google": {
+            "label": "Google Calendar",
+            "description": "Conecta tu cuenta y creamos los eventos automáticamente.",
+            "connectedAs": "Conectado como {{account}}.",
+            "unknownAccount": "tu cuenta de Google",
+            "unavailable": "La conexión con Google no está configurada en este servidor.",
+            "connect": "Conectar",
+            "disconnect": "Desconectar",
+            "connectedToast": "Google Calendar se conectó correctamente.",
+            "errorToast": "No pudimos conectar Google Calendar. Intenta de nuevo."
+          },
+          "feed": {
+            "label": "Apple Calendar y otros",
+            "description": "Apple no permite crear eventos desde fuera, así que aquí te suscribes a un calendario nuestro. Funciona igual en Outlook.",
+            "create": "Generar enlace",
+            "regenerate": "Generar de nuevo",
+            "remove": "Quitar enlace",
+            "copy": "Copiar",
+            "copyAgain": "Copiar de nuevo",
+            "copied": "Enlace copiado.",
+            "copyFailed": "No pudimos copiar el enlace. Selecciónalo y cópialo a mano.",
+            "howTo": "En iPhone: Calendario → Calendarios → Agregar calendario → Agregar calendario de suscripción, y pega este enlace.",
+            "revokeNote": "Guarda este enlace: es privado. Si generas uno nuevo, los dispositivos que ya lo tengan dejarán de recibir la agenda."
+          },
+          "reminder": {
+            "label": "Aviso antes de cada evento",
+            "description": "Se aplica a los dos. Se configura en Preferencias → Operación.",
+            "atStart": "A la hora del evento",
+            "minutes_one": "{{count}} minuto antes",
+            "minutes_other": "{{count}} minutos antes",
+            "hours_one": "{{count}} hora antes",
+            "hours_other": "{{count}} horas antes",
+            "days_one": "{{count}} día antes",
+            "days_other": "{{count}} días antes"
+          }
+        },
         "device": {
           "title": "Este dispositivo",
           "description": "Preferencias guardadas solo en este teléfono o computadora.",

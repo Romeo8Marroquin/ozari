@@ -1368,6 +1368,82 @@ export const schemas: Record<string, Schema> = {
     ],
   },
 
+  CalendarStatusResponse: {
+    type: "object",
+    description:
+      "The calendar settings screen in one payload. Never an access or refresh token; the feed " +
+      "URL IS a secret and is returned deliberately, because an admin must be able to copy it onto " +
+      "another device.",
+    properties: {
+      calendar: {
+        type: "object",
+        properties: {
+          google: {
+            type: "object",
+            description:
+              "The OAuth grant. `connected` is whether a row exists at all; `isActive` is whether " +
+              "it is paused — a revoked grant deactivates itself on the next attempt rather than " +
+              "being retried forever.",
+            properties: {
+              connected: { type: "boolean", example: true },
+              isActive: { type: "boolean", example: true },
+              accountEmail: {
+                type: "string",
+                nullable: true,
+                description: "Which Google account, so an admin can tell they linked the right one.",
+              },
+            },
+          },
+          feed: {
+            type: "object",
+            description: "The ICS subscription. Absent `url` ⇒ none has been minted yet.",
+            properties: {
+              isActive: { type: "boolean", example: true },
+              url: { type: "string", nullable: true },
+            },
+          },
+          reminderMinutes: {
+            type: "integer",
+            description:
+              "The `calendar.reminderMinutes` preference — ONE lead time for both transports, so a " +
+              "phone and a laptop cannot disagree about the same job. Clamped again at write time " +
+              "against the time actually remaining, so an order booked inside the window still " +
+              "gets its reminder.",
+            example: 1440,
+          },
+          googleAvailable: {
+            type: "boolean",
+            description:
+              "Whether the deployment has Google OAuth credentials. `false` ⇒ offer the ICS feed " +
+              "only, and say why.",
+            example: true,
+          },
+        },
+      },
+    },
+  },
+
+  CalendarAuthorizeResponse: {
+    type: "object",
+    properties: {
+      authorizeUrl: {
+        type: "string",
+        description: "Google's consent page, with the signed `state` already attached.",
+      },
+    },
+  },
+
+  CalendarFeedResponse: {
+    type: "object",
+    properties: {
+      url: {
+        type: "string",
+        description:
+          "The private subscription URL. Regenerating replaces it, which is also how it is revoked.",
+      },
+    },
+  },
+
   DashboardResponse: {
     type: "object",
     description:

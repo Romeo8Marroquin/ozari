@@ -74,6 +74,9 @@ const TAB_SECTIONS: Record<PreferenceTab, readonly PreferenceSection[]> = {
   operation: [
     { kind: 'settings', group: 'orders', skeletonRows: 2 },
     { kind: 'settings', group: 'evidence', skeletonRows: 2 },
+    // One field: how much warning a connected calendar gives. The CONNECTION itself is in Ajustes
+    // (it is somebody's own Google account); the rule is here, where rules live.
+    { kind: 'settings', group: 'calendar', skeletonRows: 1 },
     // One switch per create form — two rows, so the placeholder is the shape of what arrives.
     { kind: 'settings', group: 'forms', skeletonRows: 2 },
   ],

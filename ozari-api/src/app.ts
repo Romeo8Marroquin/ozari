@@ -18,6 +18,9 @@ import { HttpEnum } from "./models/enums/httpEnum.js";
 import type { AppError } from "./models/common/error.js";
 
 import authRouter from "./modules/auth/auth.route.js";
+import calendarRouter, {
+  mountCalendarPublicRoutes,
+} from "./modules/calendar/calendar.route.js";
 import clientRegistriesRouter from "./modules/clientRegistries/clientRegistries.route.js";
 import dashboardRouter from "./modules/dashboard/dashboard.route.js";
 import legalRouter from "./modules/legal/legal.route.js";
@@ -33,6 +36,12 @@ export function createApp(): Express {
   // Interactive API docs are mounted first, BEFORE the security chain, so the Swagger UI and its
   // assets are reachable without an API key and aren't blocked by the strict global CSP.
   mountApiDocs(app);
+
+  // The OAuth callback and the ICS feed are mounted here for the SAME reason the docs are: they are
+  // reached by parties that cannot send our API key — Google redirecting a browser back, and Apple
+  // Calendar fetching a subscription. Each authenticates itself instead (a signed `state`, a
+  // 32-byte path token) and carries its own strict limiter. See `mountCalendarPublicRoutes`.
+  mountCalendarPublicRoutes(app);
 
   configureMiddlewares(app);
 
@@ -255,6 +264,11 @@ function configureRoutes(app: Express): void {
   // System preferences (scalar settings + the manageable seeded catalogs) - authenticated limiter;
   // STRICTLY Admin inside the router, every route
   apiRouter.use("/preferences", rateLimiters["authenticated"], preferencesRouter);
+
+  // External calendar connections (Google) + the ICS subscription token - authenticated limiter;
+  // STRICTLY Admin inside the router. The two UNAUTHENTICATED calendar routes are mounted earlier,
+  // before the API-key check — see `createApp`.
+  apiRouter.use("/calendar", rateLimiters["authenticated"], calendarRouter);
 
   // The admin home screen - authenticated limiter; STRICTLY Admin inside the router. Deliberately on
   // the lenient tier: the panel re-reads it on every focus and on a slow interval, exactly like /me,

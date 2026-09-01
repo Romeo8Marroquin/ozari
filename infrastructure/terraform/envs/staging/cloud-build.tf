@@ -28,12 +28,13 @@ resource "google_cloudbuild_trigger" "ozari_api_dev" {
   include_build_logs = "INCLUDE_BUILD_LOGS_WITH_STATUS"
 
   substitutions = {
-    _APP_HOST     = var.app_host
-    _IMAGE_URL    = "${var.region}-docker.pkg.dev/${var.project_id}/${var.artifact_repository_id}/${var.image_name}"
-    _NODE_ENV     = var.node_env
-    _REGION       = var.region
-    _RUN_SA       = google_service_account.run.email
-    _SERVICE_NAME = var.service_name
+    _APP_HOST       = var.app_host
+    _API_PUBLIC_URL = var.api_public_url
+    _IMAGE_URL      = "${var.region}-docker.pkg.dev/${var.project_id}/${var.artifact_repository_id}/${var.image_name}"
+    _NODE_ENV       = var.node_env
+    _REGION         = var.region
+    _RUN_SA         = google_service_account.run.email
+    _SERVICE_NAME   = var.service_name
     # R2 plain values (kept out of the public cloudbuild.yaml; sourced from gitignored terraform.tfvars).
     # These must match the R2_* env values in cloud-run.tf, or Cloud Build and Terraform will thrash them.
     _R2_ENDPOINT    = var.r2_endpoint

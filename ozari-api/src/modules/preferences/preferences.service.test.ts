@@ -51,6 +51,9 @@ describe("PREFERENCE_SETTINGS", () => {
       "orders.evidenceMinPhotos",
       "orders.evidenceMaxPhotos",
       "orders.evidenceRetentionMonths",
+      // Honoured by BOTH calendar transports — the Google events and the ICS feed read the same
+      // value, so a phone and a laptop can never disagree about the same job.
+      "calendar.reminderMinutes",
       "forms.saveDraftOrders",
       "forms.saveDraftProducts",
       "documents.businessName",

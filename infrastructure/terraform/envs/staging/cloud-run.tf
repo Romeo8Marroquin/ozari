@@ -65,6 +65,13 @@ resource "google_cloud_run_v2_service" "ozari_api" {
         name  = "APP_HOST"
         value = var.app_host
       }
+      # The API's own public origin (calendar OAuth redirect + the ICS feed URL). Required here
+      # because the Cloudflare Worker rewrites the Host to run.app, so the request cannot see it.
+      # Must mirror cloudbuild.yaml's _API_PUBLIC_URL, or a deploy and an apply thrash each other.
+      env {
+        name  = "API_PUBLIC_URL"
+        value = var.api_public_url
+      }
       # Cloudflare R2 plain (non-secret) config. Must mirror cloudbuild.yaml's --set-env-vars
       # (fed by the trigger's _R2_* substitutions) so a Cloud Build deploy and a terraform apply
       # don't overwrite each other. Empty until set in terraform.tfvars — harmless until Epic 1.
@@ -153,6 +160,27 @@ resource "google_cloud_run_v2_service" "ozari_api" {
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.ozari_r2_secret_key.secret_id
+            version = "latest"
+          }
+        }
+      }
+      # Google Calendar OAuth client (SECRET, both halves — see secrets.tf for why the ID is bound
+      # as a secret too). Must mirror cloudbuild.yaml's --set-secrets, and their versions must exist
+      # before this applies (DEPLOYMENT.md §3d).
+      env {
+        name = "GOOGLE_CLIENT_ID"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.ozari_google_client_id.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "GOOGLE_CLIENT_SECRET"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.ozari_google_client_secret.secret_id
             version = "latest"
           }
         }

@@ -72,6 +72,7 @@ const data = (over: Partial<PreferencesResponse> = {}): PreferencesResponse => (
     { key: 'orders.evidenceMinPhotos', type: 'int', value: 1, min: 1, max: 20, group: 'evidence' },
     { key: 'orders.evidenceMaxPhotos', type: 'int', value: 10, min: 1, max: 20, group: 'evidence' },
     { key: 'orders.evidenceRetentionMonths', type: 'int', value: 24, min: 1, max: 120, group: 'evidence' },
+    { key: 'calendar.reminderMinutes', type: 'int', value: 1440, min: 0, max: 40320, group: 'calendar' },
     { key: 'forms.saveDraftOrders', type: 'bool', value: true, group: 'forms' },
     { key: 'forms.saveDraftProducts', type: 'bool', value: true, group: 'forms' },
     {
@@ -514,7 +515,8 @@ describe('PreferenceSettingsCard', () => {
     setState({ data: data() });
     renderPage();
     await userEvent.click(screen.getByLabelText(`${KEY}.settings.saveDraftOrders.label`));
-    await userEvent.click(screen.getAllByRole('button', { name: `${KEY}.settings.save` })[2]!);
+    // The FOURTH card in Operación: logística, evidencia, calendario, formularios.
+    await userEvent.click(screen.getAllByRole('button', { name: `${KEY}.settings.save` })[3]!);
 
     // Per FORM, not one global — so flipping the order switch leaves the product one alone.
     expect(updateSettings.mock.calls[0]?.[0]).toEqual([
