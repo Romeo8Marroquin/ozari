@@ -189,8 +189,15 @@ Never run it casually. There is no destroy helper script on purpose.
 
 These are intentionally left **unmanaged** in this first pass; review and clean up later:
 
-- **`neon-database-url`** — old/unused secret. Cleanup candidate.
-- **`neon-direct-url`** — old/unused secret. Cleanup candidate.
+- **`jwt-secret`**, **`neon-database-url`**, **`neon-direct-url`** — old/unused secrets superseded by
+  the `ozari-*` names; nothing in `cloudbuild.yaml` or Terraform references them. Together with three
+  superseded VERSIONS (`ozari-jwt-secret` has 3 enabled, `ozari-jwt-refresh-secret` has 2) they are
+  **$0.36/month of the bill** — Secret Manager charges per enabled version, forever. Verify, then
+  delete; see `INFRASTRUCTURE-PLAN.md` §6/§8. **Do not delete
+  `ozari-github-github-oauthtoken-c19aef`** — that one is Cloud Build's GitHub connection token.
+- **No Artifact Registry cleanup policy** — 27 images / 3.8 GB accumulated by 2026-09-01, oldest from
+  June, ~$0.42/month. A `cleanup_policies` block takes it under the free tier
+  (`INFRASTRUCTURE-PLAN.md` §3.1).
 - **Default compute service account has `roles/editor`** — over-privileged; scope down.
 - **Cloud Build service agent has `roles/secretmanager.admin`** — scope down to
   `secretAccessor` on specific secrets.
@@ -200,7 +207,15 @@ These are intentionally left **unmanaged** in this first pass; review and clean 
   cost (~$0.26 per image scanned ≈ several $/month at this deploy cadence). Dependency
   CVEs are tracked manually via `pnpm audit` instead. Revisit if budget allows.
 
-## Production (future)
+## Production (future) — and the full-IaC rebuild
+
+> **The plan for both lives in [`INFRASTRUCTURE-PLAN.md`](../INFRASTRUCTURE-PLAN.md)** (repo root):
+> the complete ownership map (what is Terraform today, what can move into it, and what has no API and
+> never will), the ordered bootstrap for a brand-new environment, the staging teardown-and-rebuild
+> procedure with what is irrecoverably lost, the irreducible list of manual steps, and the measured
+> cost model. Read it before creating `envs/prod/` — several decisions there (shared registry vs. one
+> per environment, Neon project vs. branch, whether Cloudflare joins Terraform) change the shape of
+> that directory, and are cheaper to make before it exists than after.
 
 Production does **not** exist yet. When it does, mirror this layout under a separate
 env directory and keep everything isolated:

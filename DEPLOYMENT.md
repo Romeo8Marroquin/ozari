@@ -9,6 +9,13 @@ services (Neon, Cloudflare, Resend).
 > **Production does not exist yet** — this document is the plan to create it perfectly when the time
 > comes. Nothing here provisions prod on its own.
 
+> **This file is the RUNBOOK — what to do, in what order, with which console.**
+> [`INFRASTRUCTURE-PLAN.md`](./INFRASTRUCTURE-PLAN.md) is the **plan to make most of it unnecessary**:
+> which of these steps can become Terraform, which never can (the Google OAuth client, secret values,
+> the GitHub App install), the ordered bootstrap for a fresh environment, the staging
+> teardown-and-rebuild, and the measured cost model. When a step below moves into Terraform, it is
+> deleted from here and recorded there — the two must never describe the same step differently.
+
 > **Public-repo safety.** This repo is public. **No secret values, connection strings, keys, or state
 > ever go in git.** Every sensitive value is created out-of-band and stored in Secret Manager
 > (backend) or the Cloudflare dashboard (frontend). Steps that must be done by hand for this reason
