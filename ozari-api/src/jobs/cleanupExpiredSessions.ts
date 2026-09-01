@@ -12,6 +12,7 @@ import { getPrismaClient } from "@/services/prisma.service.js";
  * 1. Delete sessions that have expired (expiresAt <= now)
  * 2. Delete inactive sessions older than 7 days (soft delete cleanup)
  * 3. Delete expired password-reset tokens (abandoned requests that were never used)
+ * 4. Delete lapsed brute-force counters (`auth_attempts` past their window)
  *
  * Usage:
  * - Manual: `pnpm run cleanup:sessions`
@@ -54,6 +55,18 @@ export async function cleanupExpiredSessions(): Promise<void> {
 
     logger.info(
       `[Cleanup Job] Successfully cleaned up ${resetTokens.count} expired password-reset tokens`,
+    );
+
+    // Purge lapsed brute-force counters. A live one is re-read on every attempt and OVERWRITTEN once
+    // its window ends, so nothing here is load-bearing — this only stops rows for accounts nobody
+    // came back to from sitting in the table forever. Deleting a live window would hand an attacker
+    // a reset, hence the `lte: now`.
+    const authAttempts = await prismaClient.authAttempt.deleteMany({
+      where: { resetAt: { lte: now } },
+    });
+
+    logger.info(
+      `[Cleanup Job] Successfully cleaned up ${authAttempts.count} lapsed auth attempt counters`,
     );
 
     return;

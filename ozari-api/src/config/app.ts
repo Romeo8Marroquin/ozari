@@ -113,6 +113,14 @@ export const appConfig = {
       // clamp has to know it (`reminderMinutesFor`).
       maxReminderMinutes: 40320, // 28 days
     },
+    // How much daylight to leave between NOW and the reminder instant when the configured lead does
+    // not fit (`reminderMinutesFor`). Landing the trigger exactly on `now` is a race nobody can win:
+    // the request still has to reach Google, or the .ics still has to be fetched and parsed by a
+    // phone, and neither vendor DOCUMENTS what it does with a trigger that has just gone by — the
+    // plausible answers include "fires immediately" and "never fires", and the second is a delivery
+    // nobody was told about. Five minutes is small enough to still be a warning and large enough to
+    // cover request latency, a cold start and clock skew between us and them.
+    reminderSafetyMinutes: 5,
     // The OAuth `state` is a short-lived signed JWT carrying the user id: the consent redirect comes
     // back as a plain top-level navigation with no session of ours attached (the refresh cookie is
     // scoped to /api/auth), so the state is the ONLY thing that says who is connecting. Short TTL

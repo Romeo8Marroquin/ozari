@@ -90,26 +90,30 @@ describe('the writes', () => {
     ['disconnect', useDisconnectGoogleCalendar, () => apiDelete, '/calendar/google'],
     ['createFeed', useCreateCalendarFeed, () => apiPost, '/calendar/feed'],
     ['deleteFeed', useDeleteCalendarFeed, () => apiDelete, '/calendar/feed'],
-  ])('%s calls its endpoint and refreshes the screen', async (name, hook, verb, path) => {
+  ])('%s calls its endpoint, and only REPORTS', async (name, hook, verb, path) => {
     verb().mockResolvedValue({ data: {} });
     const { result } = renderHook(() => hook(), { wrapper: createQueryWrapper() });
-    (result.current as unknown as Record<string, () => void>)[name]!();
+    const write = (result.current as unknown as Record<string, () => Promise<unknown>>)[name]!;
+    await write();
 
-    await waitFor(() => expect(verb()).toHaveBeenCalled());
+    expect(verb()).toHaveBeenCalled();
     expect(verb().mock.calls[0]?.[0]).toBe(path);
+    // THE POINT OF THE SPLIT: a successful write does NOT refresh the screen by itself. The caller
+    // owns that moment, because the outgoing content has to play its exit BEFORE the re-read takes
+    // it out of the DOM — animate-then-commit, never commit-then-try-to-animate-nothing.
+    expect(invalidateQueries).not.toHaveBeenCalled();
+
+    result.current.commit();
     // Nothing else in the app reads this query, so there is no wider invalidation to do.
-    await waitFor(() =>
-      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: [QueryKeys.CALENDAR] }),
-    );
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: [QueryKeys.CALENDAR] });
   });
 
-  it('leaves the cache alone when a write fails', async () => {
+  it('REJECTS a failed write, so the caller can keep the dialog open and say why', async () => {
     apiDelete.mockRejectedValue(new Error('boom'));
     const { result } = renderHook(() => useDeleteCalendarFeed(), {
       wrapper: createQueryWrapper(),
     });
-    result.current.deleteFeed();
-    await waitFor(() => expect(apiDelete).toHaveBeenCalled());
+    await expect(result.current.deleteFeed()).rejects.toThrow('boom');
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
 });

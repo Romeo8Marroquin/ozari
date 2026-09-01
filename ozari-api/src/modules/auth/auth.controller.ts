@@ -197,7 +197,7 @@ export const signInUser = async (
       // invalid-password path below, preventing account enumeration via timing.
       await comparePassword(password, await getTimingEqualizerHash());
       logger.warn(i18next.t("user.signInUser.logs.userNotFound", { email }));
-      recordFailedLogin(email);
+      await recordFailedLogin(email);
       if (isDeployedEnvironment()) {
         logAuthAudit({
           action: AuditAction.USER_LOGIN_FAILED,
@@ -224,7 +224,7 @@ export const signInUser = async (
           userId: user.id,
         }),
       );
-      recordFailedLogin(email);
+      await recordFailedLogin(email);
       if (isDeployedEnvironment()) {
         logAuthAudit({
           action: AuditAction.USER_LOGIN_FAILED,
@@ -256,7 +256,7 @@ export const signInUser = async (
         jwtSecret,
         appConfig.mfaToken as jwt.SignOptions,
       );
-      clearLoginAttempts(email);
+      await clearLoginAttempts(email);
       logger.info(
         i18next.t("user.signInUser.logs.mfaRequired", { userId: user.id }),
       );
@@ -274,7 +274,7 @@ export const signInUser = async (
       userRole: user.roleId,
       deviceUuid,
     });
-    clearLoginAttempts(email);
+    await clearLoginAttempts(email);
 
     logger.info(
       i18next.t("user.signInUser.logs.userAuthenticated", { userId: user.id }),

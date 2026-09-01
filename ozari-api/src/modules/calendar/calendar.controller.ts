@@ -375,6 +375,12 @@ export const getCalendarFeed = async (req: Request, res: Response): Promise<void
         where: {
           isActive: true,
           cancelledAt: null,
+          // ⚠️ **This subscriber's OWN jobs, and nobody else's.** The feed used to return every
+          // order in the window to every token, so an admin who subscribed on their phone received
+          // work assigned to someone else — the same leak the Google half had, and the one that is
+          // hardest to notice, because a subscription just quietly fills up. A feed is one person's
+          // schedule; `assignedUserId` is what makes it theirs. (Owner, 2026-08-31.)
+          assignedUserId: feed.userId,
           deliveryAt: {
             gte: new Date(now.getTime() - appConfig.calendar.feedPastDays * DAY_MS),
             lte: new Date(now.getTime() + appConfig.calendar.feedFutureDays * DAY_MS),
@@ -409,6 +415,9 @@ export const getCalendarFeed = async (req: Request, res: Response): Promise<void
         cancelledAt: row.cancelledAt,
         updatedAt: row.updatedAt,
         createdAt: row.createdAt,
+        // Already narrowed to this subscriber by the query above; carried so the model is the same
+        // shape the sync builds and neither can drift from the other.
+        assignedUserId: feed.userId,
         clientName: decryptKms(row.deliveryNameKms),
         address: decryptKms(row.deliveryAddressKms),
         eventTypeName: row.eventType.name,

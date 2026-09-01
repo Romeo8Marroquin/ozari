@@ -1,18 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { Request, Response, NextFunction } from "express";
-import {
-  checkLoginRateLimit,
-  recordFailedLogin,
-  clearLoginAttempts,
-  getAttemptCount,
-} from "./loginRateLimit.middleware.js";
-import { HttpEnum } from "@models/enums/httpEnum.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { NextFunction, Request, Response } from "express";
 
 vi.mock("@/config/logger.js", () => ({
-  logger: {
-    warn: vi.fn(),
-    debug: vi.fn(),
-  },
+  logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
 vi.mock("@/config/i18n.js", () => ({
@@ -27,241 +17,138 @@ vi.mock("@/config/i18n.js", () => ({
 }));
 
 vi.mock("@models/http/ozariErrorModel.js", () => ({
-  sendOzariError: vi.fn((res: Response, status: number) => {
-    res.status(status).json({ success: false });
+  sendOzariError: vi.fn((res: Response, status: number, message: string) => {
+    res.status(status).json({ success: false, message });
   }),
 }));
 
 vi.mock("@/config/auditLogger.js", () => ({
-  AuditAction: {
-    ACCOUNT_LOCKED: "ACCOUNT_LOCKED",
-  },
+  AuditAction: { ACCOUNT_LOCKED: "ACCOUNT_LOCKED" },
   logSecurityAudit: vi.fn(),
 }));
 
-describe("Login Rate Limit Middleware", () => {
-  let mockReq: Partial<Request>;
-  let mockRes: Partial<Response>;
-  let mockNext: NextFunction;
-  const testEmail = "test@example.com";
+// The COUNTER is the throttle service's business (and has its own suite, including the atomic
+// increment and the fail-open paths). What is asserted here is the middleware's own job: whether it
+// refuses, what it says, what it audits — and that it never hands the store an email address.
+const { attemptState, recordFailedAttempt, clearAttempts } = vi.hoisted(() => ({
+  attemptState: vi.fn(),
+  recordFailedAttempt: vi.fn(),
+  clearAttempts: vi.fn(),
+}));
+vi.mock("@services/authThrottle.service.js", () => ({
+  AuthAttemptScope: { LOGIN: "LOGIN", MFA: "MFA" },
+  attemptState,
+  recordFailedAttempt,
+  clearAttempts,
+}));
 
-  beforeEach(() => {
-    mockReq = {
-      body: {},
-    };
-    mockRes = {
-      status: vi.fn().mockReturnThis(),
-      json: vi.fn().mockReturnThis(),
-    };
-    mockNext = vi.fn();
-    vi.clearAllMocks();
-    clearLoginAttempts(testEmail);
+import { logSecurityAudit } from "@/config/auditLogger.js";
+import { encryptSha256Sync } from "@helpers/encryption.js";
+import { HttpEnum } from "@models/enums/httpEnum.js";
+import {
+  checkLoginRateLimit,
+  clearLoginAttempts,
+  getAttemptCount,
+  recordFailedLogin,
+} from "./loginRateLimit.middleware.js";
+
+const EMAIL = "test@example.com";
+const SUBJECT = encryptSha256Sync(EMAIL);
+
+let req: Partial<Request>;
+let res: Partial<Response>;
+let next: NextFunction;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.unstubAllEnvs();
+  attemptState.mockResolvedValue(null);
+  recordFailedAttempt.mockResolvedValue({ attempts: 1, remainingMinutes: 15 });
+  req = { body: { email: EMAIL } };
+  res = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
+  next = vi.fn();
+});
+
+describe("checkLoginRateLimit", () => {
+  it("allows an account with no live window", async () => {
+    await checkLoginRateLimit(req as Request, res as Response, next);
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
   });
 
-  afterEach(() => {
-    clearLoginAttempts(testEmail);
+  it("allows an account still under the threshold", async () => {
+    attemptState.mockResolvedValue({ attempts: 4, remainingMinutes: 9 });
+    await checkLoginRateLimit(req as Request, res as Response, next);
+    expect(next).toHaveBeenCalled();
   });
 
-  describe("checkLoginRateLimit", () => {
-    it("should allow first attempt", () => {
-      mockReq.body = { email: testEmail };
-
-      checkLoginRateLimit(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
-
-      expect(mockNext).toHaveBeenCalled();
-      expect(mockRes.status).not.toHaveBeenCalled();
-    });
-
-    it("should allow request without email", () => {
-      mockReq.body = {};
-
-      checkLoginRateLimit(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
-
-      expect(mockNext).toHaveBeenCalled();
-      expect(mockRes.status).not.toHaveBeenCalled();
-    });
-
-    it("should allow attempts within limit", () => {
-      mockReq.body = { email: testEmail };
-
-      for (let i = 0; i < 4; i++) {
-        recordFailedLogin(testEmail);
-      }
-
-      checkLoginRateLimit(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
-
-      expect(mockNext).toHaveBeenCalled();
-      expect(mockRes.status).not.toHaveBeenCalled();
-    });
-
-    it("should block after max attempts exceeded", () => {
-      mockReq.body = { email: testEmail };
-
-      for (let i = 0; i < 5; i++) {
-        recordFailedLogin(testEmail);
-      }
-
-      checkLoginRateLimit(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
-
-      expect(mockNext).not.toHaveBeenCalled();
-      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.TOO_MANY_REQUESTS);
-    });
+  it("REFUSES once the attempts are spent, and says how long is left", async () => {
+    attemptState.mockResolvedValue({ attempts: 5, remainingMinutes: 9 });
+    await checkLoginRateLimit(req as Request, res as Response, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(HttpEnum.TOO_MANY_REQUESTS);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("9 minutes") }),
+    );
   });
 
-  describe("recordFailedLogin", () => {
-    it("should record first failed attempt", () => {
-      recordFailedLogin(testEmail);
-
-      expect(getAttemptCount(testEmail)).toBe(1);
-    });
-
-    it("should increment failed attempts", () => {
-      recordFailedLogin(testEmail);
-      recordFailedLogin(testEmail);
-      recordFailedLogin(testEmail);
-
-      expect(getAttemptCount(testEmail)).toBe(3);
-    });
-
-    it("should trigger audit log when account locked", async () => {
-      const originalEnv = process.env["NODE_ENV"];
-      process.env["NODE_ENV"] = "production";
-
-      for (let i = 0; i < 5; i++) {
-        recordFailedLogin(testEmail);
-      }
-
-      const { logSecurityAudit } = await import("@/config/auditLogger.js");
-      expect(logSecurityAudit).toHaveBeenCalled();
-
-      process.env["NODE_ENV"] = originalEnv;
-      clearLoginAttempts(testEmail);
-    });
-
-    it("should not trigger audit log in development", async () => {
-      const originalEnv = process.env["NODE_ENV"];
-      process.env["NODE_ENV"] = "development";
-
-      for (let i = 0; i < 5; i++) {
-        recordFailedLogin(testEmail);
-      }
-
-      const { logSecurityAudit } = await import("@/config/auditLogger.js");
-      expect(logSecurityAudit).not.toHaveBeenCalled();
-
-      process.env["NODE_ENV"] = originalEnv;
-      clearLoginAttempts(testEmail);
-    });
+  it("counts against the email's HASH, never the address itself", async () => {
+    // A table of plaintext emails would reveal which ones have accounts — exactly what the login
+    // endpoint's constant-time path exists to avoid leaking.
+    await checkLoginRateLimit(req as Request, res as Response, next);
+    expect(attemptState).toHaveBeenCalledWith("LOGIN", SUBJECT);
+    expect(attemptState).not.toHaveBeenCalledWith("LOGIN", EMAIL);
   });
 
-  describe("clearLoginAttempts", () => {
-    it("should clear existing attempts", () => {
-      recordFailedLogin(testEmail);
-      recordFailedLogin(testEmail);
-      expect(getAttemptCount(testEmail)).toBe(2);
+  it("passes through a request with no email — the validator owns that error", async () => {
+    req.body = {};
+    await checkLoginRateLimit(req as Request, res as Response, next);
+    expect(next).toHaveBeenCalled();
+    expect(attemptState).not.toHaveBeenCalled();
+  });
+});
 
-      clearLoginAttempts(testEmail);
-
-      expect(getAttemptCount(testEmail)).toBe(0);
-    });
-
-    it("should handle clearing non-existent email", () => {
-      clearLoginAttempts("nonexistent@example.com");
-
-      expect(getAttemptCount("nonexistent@example.com")).toBe(0);
-    });
+describe("recordFailedLogin", () => {
+  it("records the failure against the hashed subject", async () => {
+    await recordFailedLogin(EMAIL);
+    expect(recordFailedAttempt).toHaveBeenCalledWith("LOGIN", SUBJECT, 15 * 60 * 1000);
   });
 
-  describe("getAttemptCount", () => {
-    it("should return zero for new email", () => {
-      expect(getAttemptCount(testEmail)).toBe(0);
-    });
-
-    it("should return correct count after attempts", () => {
-      recordFailedLogin(testEmail);
-      recordFailedLogin(testEmail);
-
-      expect(getAttemptCount(testEmail)).toBe(2);
-    });
-
-    it("should return zero after clearing", () => {
-      recordFailedLogin(testEmail);
-      clearLoginAttempts(testEmail);
-
-      expect(getAttemptCount(testEmail)).toBe(0);
-    });
+  it("audit-logs the lock-out in a deployed environment", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    recordFailedAttempt.mockResolvedValue({ attempts: 5, remainingMinutes: 15 });
+    await recordFailedLogin(EMAIL);
+    expect(logSecurityAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ACCOUNT_LOCKED", email: EMAIL }),
+    );
   });
 
-  describe("integration scenarios", () => {
-    it("should allow login after clearing attempts", () => {
-      mockReq.body = { email: testEmail };
+  it("does NOT audit-log in development", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    recordFailedAttempt.mockResolvedValue({ attempts: 5, remainingMinutes: 15 });
+    await recordFailedLogin(EMAIL);
+    expect(logSecurityAudit).not.toHaveBeenCalled();
+  });
 
-      for (let i = 0; i < 5; i++) {
-        recordFailedLogin(testEmail);
-      }
+  it("says nothing at all when the counter could not be written", async () => {
+    // The store fails open; a login that could not be counted is still a login, not an incident.
+    recordFailedAttempt.mockResolvedValue(null);
+    await recordFailedLogin(EMAIL);
+    expect(logSecurityAudit).not.toHaveBeenCalled();
+  });
+});
 
-      clearLoginAttempts(testEmail);
+describe("clearLoginAttempts / getAttemptCount", () => {
+  it("clears the subject's window on a successful login", async () => {
+    await clearLoginAttempts(EMAIL);
+    expect(clearAttempts).toHaveBeenCalledWith("LOGIN", SUBJECT);
+  });
 
-      checkLoginRateLimit(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
+  it("reports the live count, and 0 when there is no window", async () => {
+    attemptState.mockResolvedValue({ attempts: 2, remainingMinutes: 5 });
+    await expect(getAttemptCount(EMAIL)).resolves.toBe(2);
 
-      expect(mockNext).toHaveBeenCalled();
-      expect(mockRes.status).not.toHaveBeenCalled();
-    });
-
-    it("should handle multiple different emails", () => {
-      const email1 = "user1@example.com";
-      const email2 = "user2@example.com";
-
-      recordFailedLogin(email1);
-      recordFailedLogin(email1);
-      recordFailedLogin(email2);
-
-      expect(getAttemptCount(email1)).toBe(2);
-      expect(getAttemptCount(email2)).toBe(1);
-
-      clearLoginAttempts(email1);
-      clearLoginAttempts(email2);
-    });
-
-    it("should block exactly at max attempts", () => {
-      mockReq.body = { email: testEmail };
-
-      for (let i = 0; i < 5; i++) {
-        recordFailedLogin(testEmail);
-      }
-
-      expect(getAttemptCount(testEmail)).toBe(5);
-
-      checkLoginRateLimit(
-        mockReq as Request,
-        mockRes as Response,
-        mockNext as NextFunction,
-      );
-
-      expect(mockNext).not.toHaveBeenCalled();
-      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.TOO_MANY_REQUESTS);
-
-      clearLoginAttempts(testEmail);
-    });
+    attemptState.mockResolvedValue(null);
+    await expect(getAttemptCount(EMAIL)).resolves.toBe(0);
   });
 });

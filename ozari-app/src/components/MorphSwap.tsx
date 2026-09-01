@@ -7,6 +7,20 @@ interface MorphSwapProps {
   swapKey: string | number;
   children: React.ReactNode;
   className?: string;
+  /**
+   * Lay the swap out as a BLOCK that wraps, for prose rather than a chip.
+   *
+   * The default is a nowrap inline box because that is what a status chip or a button label needs —
+   * but a sentence that rewrites itself ("Conecta tu cuenta…" → "Conectado como a@b.com") must keep
+   * wrapping, and forcing it onto one line pushes it out of its column. The outgoing copy then needs
+   * `w-full` so it wraps at exactly the same width it did in flow; without it the abandoned copy
+   * shrink-wraps to its own text and visibly re-flows on its way out.
+   *
+   * Height is deliberately NOT animated here — a wrapping swap belongs inside a `useMorphOnChange`
+   * region, which owns the height for everything in it, and two height tweens on nested elements
+   * fight (the repo's layered-not-nested rule).
+   */
+  block?: boolean;
 }
 
 /**
@@ -25,7 +39,7 @@ interface MorphSwapProps {
  * outgoing copy's own (it is still on screen at its natural size when the morph begins). Under
  * reduced motion the morph resolves instantly and only the current content is ever painted.
  */
-const MorphSwap: React.FC<MorphSwapProps> = ({ swapKey, children, className }) => {
+const MorphSwap: React.FC<MorphSwapProps> = ({ swapKey, children, className, block = false }) => {
   const container = useRef<HTMLSpanElement>(null);
   const incoming = useRef<HTMLSpanElement>(null);
   const outgoingElement = useRef<HTMLSpanElement>(null);
@@ -62,13 +76,19 @@ const MorphSwap: React.FC<MorphSwapProps> = ({ swapKey, children, className }) =
   return (
     <span
       ref={container}
-      className={`relative inline-block overflow-hidden whitespace-nowrap align-bottom ${className ?? ''}`}
+      className={`relative overflow-hidden ${
+        block ? 'block' : 'inline-block whitespace-nowrap align-bottom'
+      } ${className ?? ''}`}
     >
       <span ref={incoming} className="block">
         {children}
       </span>
       {shown.outgoing !== null && (
-        <span ref={outgoingElement} aria-hidden className="absolute left-0 top-0 block">
+        <span
+          ref={outgoingElement}
+          aria-hidden
+          className={`absolute left-0 top-0 block ${block ? 'w-full' : ''}`}
+        >
           {shown.outgoing}
         </span>
       )}

@@ -45,6 +45,9 @@ const orderRow = (over: Record<string, unknown> = {}) => ({
   cancelledAt: null,
   updatedAt: null,
   createdAt: new Date("2026-08-01T07:00:00.000Z"),
+  // Assigned to the same user as the default connection: this order is that person's job, which is
+  // the only reason it reaches their calendar at all.
+  assignedUserId: 2,
   deliveryNameKms: encryptKms("María López"),
   deliveryAddressKms: encryptKms("Zona 10"),
   eventType: { name: "Evento familiar" },
@@ -269,9 +272,11 @@ describe("syncOrderCalendars", () => {
   });
 
   it("keeps one admin's failure from stopping another's calendar", async () => {
+    // Both connections belong to the SAME person here (a second device/account of theirs), because
+    // the point of this test is failure isolation, not routing.
     mockPrisma({
       calendarConnection: {
-        findMany: vi.fn(async () => [connectionRow(), connectionRow({ id: 2, userId: 3 })]),
+        findMany: vi.fn(async () => [connectionRow(), connectionRow({ id: 2 })]),
         update: vi.fn(),
       },
     });
@@ -279,6 +284,40 @@ describe("syncOrderCalendars", () => {
     await syncOrderCalendars(12);
     // The second connection still received its two events.
     expect(upsertGoogleEvent).toHaveBeenCalledTimes(3);
+  });
+
+  it("writes an order ONLY to the calendar of the person it is assigned to", async () => {
+    // It used to go to EVERY connected calendar, which reads as a feature and is really a leak: an
+    // admin's personal Google account filled up with jobs belonging to somebody else.
+    mockPrisma({
+      calendarConnection: {
+        findMany: vi.fn(async () => [connectionRow(), connectionRow({ id: 2, userId: 3 })]),
+        update: vi.fn(),
+      },
+    });
+    await syncOrderCalendars(12);
+    // The assignee (user 2) gets both events; user 3 gets none.
+    expect(upsertGoogleEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("REMOVES the events from a calendar the order no longer belongs in", async () => {
+    // The load-bearing half of the rule: reconciling every OTHER connection with an empty set is
+    // what takes a reassigned job off the previous assignee's calendar — no diff, no bookkeeping,
+    // and it self-heals if a sync was ever missed.
+    mockPrisma({
+      service: { findFirst: vi.fn(async () => orderRow({ assignedUserId: 3 })) },
+    });
+    await syncOrderCalendars(12);
+    expect(upsertGoogleEvent).not.toHaveBeenCalled();
+    expect(deleteGoogleEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it("writes an UNASSIGNED order to nobody — it is not yet anyone's job", async () => {
+    mockPrisma({
+      service: { findFirst: vi.fn(async () => orderRow({ assignedUserId: null })) },
+    });
+    await syncOrderCalendars(12);
+    expect(upsertGoogleEvent).not.toHaveBeenCalled();
   });
 
   it("NEVER throws — an order is not lost because a calendar could not be reached", async () => {
