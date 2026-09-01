@@ -70,6 +70,10 @@ export interface Dashboard {
     revenue: StatComparison;
     orders: StatComparison;
     averageOrder: StatComparison;
+    /** Money actually RECEIVED this month (scoped by `paidAt`, not by delivery date). `revenue` is
+     *  what the month's work is worth; this is what came in, and the gap between them is what
+     *  `outstanding` totals. */
+    collected: StatComparison;
     /** Orders CANCELLED this month — the one figure here reporting work LOST rather than done. */
     cancelled: StatComparison;
   };

@@ -24,8 +24,14 @@ export type PreferenceSetting =
       minLength: number;
       maxLength: number;
       multiline: boolean;
+      /** What KIND of text this is — a token about the VALUE, which decides the keyboard offered.
+       *  Absent = plain prose. */
+      format?: 'phone';
       group: string;
-    };
+    }
+  // A switch: no bounds, because there is nothing to bound — and nothing to validate as the admin
+  // types, which is why `errorFor` has no arm for it.
+  | { key: string; type: 'bool'; value: boolean; group: string };
 
 /** A plain reference row a FORM picks from (the municipalities a zone belongs to). Not manageable
  *  here, so it carries no reference flag — there is no delete to describe. */

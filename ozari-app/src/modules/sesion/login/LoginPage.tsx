@@ -16,6 +16,8 @@ import Button from '@components/Button';
 import FormError from '@components/FormError';
 import { notify } from '@components/notifications/notify';
 import { toFormError } from '@utils/apiError';
+import { getStoredRole } from '@hooks/useRole';
+import { panelHomeFor } from '../../panel/navConfig';
 import useLogin from '../hooks/useLogin';
 import { useSearch } from '@tanstack/react-router';
 import useAuthCard from '../hooks/useAuthCard';
@@ -130,7 +132,10 @@ const LoginPage: React.FC = () => {
         if (response.headers['authorization']) {
           setIsRedirecting(true);
           reset();
-          redirectAfterSuccess(search.redirect ?? '/panel/productos');
+          // The role's OWN front door, read from the token the session just stored — never a fixed
+          // path. Pinned to `/panel/productos` from before the dashboard existed, which is how a
+          // signed-in admin kept landing on the product grid instead of their dashboard.
+          redirectAfterSuccess(search.redirect ?? panelHomeFor(getStoredRole()));
           return;
         }
         notify.error(t('modules.sesion.login.api.loginError'));
@@ -214,7 +219,10 @@ const LoginPage: React.FC = () => {
             mfaToken={mfaToken}
             onVerified={() => {
               setIsRedirecting(true);
-              redirectAfterSuccess(search.redirect ?? '/panel/productos');
+              // The role's OWN front door, read from the token the session just stored — never a fixed
+          // path. Pinned to `/panel/productos` from before the dashboard existed, which is how a
+          // signed-in admin kept landing on the product grid instead of their dashboard.
+          redirectAfterSuccess(search.redirect ?? panelHomeFor(getStoredRole()));
             }}
             onExpired={() => {
               // Clear the token INSIDE the commit (with the step change) — clearing it earlier would

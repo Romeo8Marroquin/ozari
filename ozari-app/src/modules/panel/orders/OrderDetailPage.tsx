@@ -21,18 +21,22 @@ import { Role } from '@constants/Roles';
 import { useHasRole } from '@hooks/useRole';
 import { getStatus } from '@utils/apiError';
 import { growCardIn, SECTION_REVEAL_STEP, staggerIn, staggerOut } from '../pageMotion';
+import ActionRow from '../ActionRow';
 import { usePanelNavigate } from '../PanelNavContext';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
 import useMorphOnChange from '../useMorphOnChange';
+import OrderDocumentButton from '../documents/OrderDocumentButton';
 import ProductsStatus from '../products/ProductsStatus';
 import SectionReveal from '../products/SectionReveal';
 import { formatTime } from './orderDayGroups';
 import OrderAdvanceModal from './OrderAdvanceModal';
 import OrderDeleteModal from './OrderDeleteModal';
 import OrderPaymentModal from './OrderPaymentModal';
+import OrderPaymentUndoModal from './OrderPaymentUndoModal';
 import OrderStatusModal from './OrderStatusModal';
 import { statusTone } from './statusTone';
 import { useOrder } from './useOrder';
+import { isTravelStep } from './useOrderLifecycle';
 import { useOrdersCatalog } from './useOrdersCatalog';
 import type { OrderAction, OrderEvidence } from './order.types';
 
@@ -177,6 +181,7 @@ const OrderDetailPage: React.FC = () => {
   const { data: catalog } = useOrdersCatalog();
   const [advancing, setAdvancing] = useState<OrderAction | undefined>(undefined);
   const [paying, setPaying] = useState(false);
+  const [undoingPayment, setUndoingPayment] = useState(false);
   const [changingStatus, setChangingStatus] = useState(false);
   const [deleting, setDeleting] = useState(false);
   /** The evidence set being viewed full-size — ONE step's photos, never the whole order's. */
@@ -192,7 +197,17 @@ const OrderDetailPage: React.FC = () => {
 
   // The three regions a lifecycle move rewrites. Keyed by what actually changed, so a background
   // refetch returning identical data animates nothing.
-  const stateBody = useMorphOnChange<HTMLDivElement>(order?.status.id ?? 0, '.state-flip');
+  //
+  // The state card's height answers to BOTH axes — a step changes the sentence and the buttons, and
+  // recording money swaps one button for another, which can re-wrap the row. Keyed on the status
+  // alone, taking a payment resized the card in a single frame. Its `.state-flip` ITEM (the sentence)
+  // still moves only with the status, which is what `itemsKey` is for: the box adapts while the line
+  // that did not change stays perfectly still. The buttons are the `ActionRow`'s own business.
+  const stateBody = useMorphOnChange<HTMLDivElement>(
+    `${order?.status.id ?? 0}|${order?.isPaid ?? false}`,
+    '.state-flip',
+    order?.status.id ?? 0,
+  );
   const logistics = useMorphOnChange<HTMLDivElement>(
     `${order?.assignee?.id ?? ''}|${order?.deliveredAt ?? ''}|${order?.collectedAt ?? ''}|${order?.readyAt ?? ''}`,
     '.fact-flip',
@@ -249,17 +264,6 @@ const OrderDetailPage: React.FC = () => {
 
   // Where "abrir mapa" sends them — the order's own PIN, or nothing (see `orderDestination`).
   const mapsDestination = orderDestination(order?.deliveryAddress, order?.deliveryCoords);
-  // Is there still a trip to make? Navigation is offered while the order has somewhere left to go,
-  // which is NOT the same as "the next step stamps an actual". `tracksEvent` is DELIVERY on
-  // *Entregado* and COLLECTION on *Recolectado* — the steps that CONFIRM arrival — so gating on it
-  // hid the button through "En ruta", i.e. through exactly the moment the driver is leaving and
-  // needs directions. Derived from the tracked actuals, like every other pending-work rule.
-  const hasPendingTrip =
-    order != null &&
-    order.cancelledAt === undefined &&
-    order.readyAt === undefined &&
-    (order.deliveredAt === undefined ||
-      (order.pickupAt !== undefined && order.collectedAt === undefined));
   const forward = order?.actions.find((action) => action.kind === 'forward');
   const backward = order?.actions.find((action) => action.kind === 'backward');
   const disruptive = order?.actions.filter((action) => action.kind === 'disruptive') ?? [];
@@ -271,6 +275,167 @@ const OrderDetailPage: React.FC = () => {
   );
   const statusName = (id: number): string =>
     catalog?.serviceStatuses.find((status) => status.id === id)?.name ?? `#${id}`;
+
+  /**
+   * The state card's action row, in the order it is read.
+   *
+   * The forward move leads, navigation sits beside it (only while that move is somebody DRIVING),
+   * money comes next as its own axis, then the paperwork, then the ways back — and cancelling comes
+   * LAST, after every ordinary move: it is the one action here that ends the order, and it must
+   * never sit between two everyday buttons where a hurried tap can find it.
+   *
+   * Each entry's `key` is what the action IS, not where it sits — `advance` keeps its key while its
+   * label morphs from "Marcar En ruta" to "Marcar Entregado", so the button adapts in place instead
+   * of being replaced, and `pay` genuinely leaves when it becomes `undo-pay`.
+   */
+  const actionItems = order
+    ? [
+        ...(forward
+          ? [
+              {
+                key: 'advance',
+                node: (
+                  <Button
+                    size="sm"
+                    color={SECONDARY_COLOR}
+                    endIcon={<HiOutlineArrowRight className="size-4" />}
+                    onClick={() => setAdvancing(forward)}
+                  >
+                    {/* The label morphs rather than swapping, exactly as on the agenda ticket — the
+                        button widens into its new step instead of blinking between two words. */}
+                    <MorphSwap swapKey={forward.statusId}>
+                      {t(`${KEY}.actions.advance`, { status: forward.statusName })}
+                    </MorphSwap>
+                  </Button>
+                ),
+              },
+            ]
+          : []),
+        // `sm`, matching the advance button beside it — two actions in one row must share a height.
+        ...(isTravelStep(forward) && mapsDestination
+          ? [{ key: 'maps', node: <OpenInMapsButton destination={mapsDestination} size="sm" /> }]
+          : []),
+        // Recording PAYMENT — its own axis, so it stands beside the lifecycle actions rather than
+        // inside them. Full label here: the detail page has the room a scannable card does not.
+        ...(isAdmin && !order.isPaid
+          ? [
+              {
+                key: 'pay',
+                node: (
+                  <Button
+                    variant="soft"
+                    size="sm"
+                    color={SECONDARY_COLOR}
+                    startIcon={<HiOutlineBanknotes className="size-4" />}
+                    onClick={() => setPaying(true)}
+                  >
+                    {t(`${KEY}.actions.pay`)}
+                  </Button>
+                ),
+              },
+            ]
+          : []),
+        // …and the way back from a mis-tap. It exists ONLY here: the agenda and the dashboard are
+        // scanning surfaces where the one money action that belongs is the one that moves the job
+        // forward, and an undo beside it invites the wrong tap at a glance.
+        ...(isAdmin && order.isPaid
+          ? [
+              {
+                key: 'undo-pay',
+                node: (
+                  <Button
+                    variant="soft"
+                    size="sm"
+                    color={SECONDARY_COLOR}
+                    startIcon={<HiOutlineArrowUturnLeft className="size-4" />}
+                    onClick={() => setUndoingPayment(true)}
+                  >
+                    {t(`${KEY}.actions.undoPay`)}
+                  </Button>
+                ),
+              },
+            ]
+          : []),
+        // The order's DOCUMENT — offered at every step but a cancelled one, because it is how the
+        // client is told what they owe, not a receipt that waits for payment. The component itself
+        // decides whether to render (EPIC-2-DOCUMENTS Phase 1).
+        ...(isAdmin ? [{ key: 'document', node: <OrderDocumentButton order={order} /> }] : []),
+        ...(backward
+          ? [
+              {
+                key: 'rewind',
+                node: (
+                  <Button
+                    variant="soft"
+                    size="sm"
+                    color={SECONDARY_COLOR}
+                    startIcon={<HiOutlineArrowUturnLeft className="size-4" />}
+                    onClick={() => setAdvancing(backward)}
+                  >
+                    <MorphSwap swapKey={backward.statusId}>
+                      {t(`${KEY}.actions.rewind`, { status: backward.statusName })}
+                    </MorphSwap>
+                  </Button>
+                ),
+              },
+            ]
+          : []),
+        // ADMIN-only powers: they have no representation in `actions` (a jump isn't a single offered
+        // move, and reopening a cancelled order offers nothing).
+        ...(isAdmin
+          ? [
+              {
+                key: 'change-status',
+                node: (
+                  <Button
+                    variant="soft"
+                    size="sm"
+                    color={SECONDARY_COLOR}
+                    startIcon={<HiOutlineArrowPath className="size-4" />}
+                    onClick={() => setChangingStatus(true)}
+                  >
+                    <MorphSwap swapKey={order.cancelledAt !== undefined ? 'reopen' : 'change'}>
+                      {t(
+                        `${KEY}.actions.${order.cancelledAt !== undefined ? 'reopen' : 'changeStatus'}`,
+                      )}
+                    </MorphSwap>
+                  </Button>
+                ),
+              },
+              {
+                // Editing rewrites what was AGREED (client, window, products, money); it never
+                // touches where the order stands. Admin-only, like the backend's PUT.
+                key: 'edit',
+                node: (
+                  <Button
+                    variant="soft"
+                    size="sm"
+                    color={SECONDARY_COLOR}
+                    startIcon={<HiOutlinePencilSquare className="size-4" />}
+                    onClick={() => panelNavigate(`/panel/pedidos/${order.id}/editar`)}
+                  >
+                    {t(`${KEY}.actions.edit`)}
+                  </Button>
+                ),
+              },
+            ]
+          : []),
+        ...disruptive.map((action) => ({
+          key: `cancel-${action.statusId}`,
+          node: (
+            <Button
+              variant="soft"
+              size="sm"
+              color={DANGER_COLOR}
+              startIcon={<HiOutlineXMark className="size-4" />}
+              onClick={() => setAdvancing(action)}
+            >
+              {t(`${KEY}.actions.cancel`)}
+            </Button>
+          ),
+        })),
+      ]
+    : [];
 
   return (
     <div ref={root} className="flex flex-1 flex-col gap-4">
@@ -318,8 +483,14 @@ const OrderDetailPage: React.FC = () => {
               <SkeletonBody titleWidth="w-32" aside>
                 <div className="flex flex-col gap-3">
                   <Bar w="w-56" h="h-3" />
+                  {/* The placeholder is the SHAPE of what lands: an admin's row is five or six
+                      actions that wrap onto two lines, so two lone bars had the card grow by half
+                      its height the moment the data arrived. `h-9` is the `sm` button height. */}
                   <div className="flex flex-wrap gap-2">
                     <Bar w="w-36" h="h-9" />
+                    <Bar w="w-28" h="h-9" />
+                    <Bar w="w-32" h="h-9" />
+                    <Bar w="w-24" h="h-9" />
                     <Bar w="w-32" h="h-9" />
                   </div>
                 </div>
@@ -354,111 +525,14 @@ const OrderDetailPage: React.FC = () => {
                         ? t(`${KEY}.state.next`, { status: order.nextStatus.name })
                         : t(`${KEY}.state.idle`)}
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {forward && (
-                    <Button
-                      data-flip-id={`forward-${forward.statusId}`}
-                      className="state-flip"
-                      size="sm"
-                      color={SECONDARY_COLOR}
-                      endIcon={<HiOutlineArrowRight className="size-4" />}
-                      onClick={() => setAdvancing(forward)}
-                    >
-                      {t(`${KEY}.actions.advance`, { status: forward.statusName })}
-                    </Button>
-                  )}
-                  {/* Navigation sits beside the advance action while the order still HAS a trip to
-                      make and carries a pin. Not gated on `tracksEvent`: that flag marks the step
-                      which CONFIRMS arrival (Entregado / Recolectado), so using it hid the button
-                      through "En ruta" — the exact moment the driver is leaving and needs it. It
-                      rides the same `.state-flip` group, so it glides in and out with the rest of
-                      the action row as the order walks its pipeline. */}
-                  {hasPendingTrip && mapsDestination && (
-                    <span data-flip-id="open-in-maps" className="state-flip">
-                      {/* `sm`, matching the advance button beside it — two actions in one row must
-                          share a height. */}
-                      <OpenInMapsButton destination={mapsDestination} size="sm" />
-                    </span>
-                  )}
-                  {/* Recording PAYMENT — its own axis, so it stands beside the lifecycle actions
-                      rather than inside them, and stays offered until the money is actually in.
-                      Full label here: the detail page has the room a scannable card does not. */}
-                  {isAdmin && !order.isPaid && (
-                    <span data-flip-id="pay-order" className="state-flip">
-                      <Button
-                        variant="soft"
-                        size="sm"
-                        color={SECONDARY_COLOR}
-                        startIcon={<HiOutlineBanknotes className="size-4" />}
-                        onClick={() => setPaying(true)}
-                      >
-                        {t(`${KEY}.actions.pay`)}
-                      </Button>
-                    </span>
-                  )}
-                  {backward && (
-                    <Button
-                      data-flip-id={`backward-${backward.statusId}`}
-                      className="state-flip"
-                      variant="soft"
-                      size="sm"
-                      color={SECONDARY_COLOR}
-                      startIcon={<HiOutlineArrowUturnLeft className="size-4" />}
-                      onClick={() => setAdvancing(backward)}
-                    >
-                      {t(`${KEY}.actions.rewind`, { status: backward.statusName })}
-                    </Button>
-                  )}
-                  {/* ADMIN-only powers: they have no representation in `actions` (a jump isn't a
-                      single offered move, and reopening a cancelled order offers nothing). */}
-                  {isAdmin && (
-                    <>
-                      <Button
-                        data-flip-id={`admin-${order.cancelledAt !== undefined ? 'reopen' : 'change'}`}
-                        className="state-flip"
-                        variant="soft"
-                        size="sm"
-                        color={SECONDARY_COLOR}
-                        startIcon={<HiOutlineArrowPath className="size-4" />}
-                        onClick={() => setChangingStatus(true)}
-                      >
-                        {t(
-                          `${KEY}.actions.${order.cancelledAt !== undefined ? 'reopen' : 'changeStatus'}`,
-                        )}
-                      </Button>
-                      {/* Editing rewrites what was AGREED (client, window, products, money); it
-                          never touches where the order stands. Admin-only, like the backend's PUT. */}
-                      <Button
-                        data-flip-id="admin-edit"
-                        className="state-flip"
-                        variant="soft"
-                        size="sm"
-                        color={SECONDARY_COLOR}
-                        startIcon={<HiOutlinePencilSquare className="size-4" />}
-                        onClick={() => panelNavigate(`/panel/pedidos/${order.id}/editar`)}
-                      >
-                        {t(`${KEY}.actions.edit`)}
-                      </Button>
-                    </>
-                  )}
-                  {/* Cancelling comes LAST, after every ordinary move: it is the one action here
-                      that ends the order, and it should never sit between two everyday buttons
-                      where a hurried tap can find it. */}
-                  {disruptive.map((action) => (
-                    <Button
-                      key={action.statusId}
-                      data-flip-id={`cancel-${action.statusId}`}
-                      className="state-flip"
-                      variant="soft"
-                      size="sm"
-                      color={DANGER_COLOR}
-                      startIcon={<HiOutlineXMark className="size-4" />}
-                      onClick={() => setAdvancing(action)}
-                    >
-                      {t(`${KEY}.actions.cancel`)}
-                    </Button>
-                  ))}
-                </div>
+                {/* Every action here comes and goes with the order's state — the map appears when
+                    the van leaves, "Registrar pago" becomes "Deshacer pago" the moment money is
+                    recorded, the rewind exists only once there is somewhere to rewind to. So the
+                    row is an `ActionRow`: what leaves fades where it stands, and only then do the
+                    survivors glide into the space it vacated. Its keys are the actions' identities,
+                    never their positions — which is what lets the middle one disappear and the two
+                    around it close the gap as one movement. */}
+                <ActionRow items={actionItems} className="flex flex-wrap items-center gap-2" />
               </div>
             )}
           </Section>
@@ -796,6 +870,11 @@ const OrderDetailPage: React.FC = () => {
           <OrderPaymentModal
             order={paying ? order : undefined}
             onClose={() => setPaying(false)}
+          />
+          {/* …and its way back, which lives ONLY here. */}
+          <OrderPaymentUndoModal
+            order={undoingPayment ? order : undefined}
+            onClose={() => setUndoingPayment(false)}
           />
           <OrderStatusModal
             order={changingStatus ? order : undefined}

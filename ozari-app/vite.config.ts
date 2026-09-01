@@ -93,7 +93,11 @@ export default defineConfig({
         'src/modules/panel/pageMotion.ts',
         // The "region adapts instead of repainting" hook — a thin React wrapper that measures a box
         // after each commit and replays the difference through pageMotion's GSAP helpers. Same
-        // rationale as pageMotion/useAuthCard: visual orchestration only, no decisions of its own.
+        // rationale as pageMotion/useAuthCard: visual orchestration, and its measurements need real
+        // layout jsdom does not provide. The two DECISIONS it does make — glide only when the ITEMS
+        // changed, and never from a snapshot taken mid-animation — are pinned through their call
+        // site instead (`PreferencesPage.test.tsx`, "never glides the rows for a change that did
+        // not MOVE them"), the same treatment `revealInScroller` gets inside excluded pageMotion.
         'src/modules/panel/useMorphOnChange.ts',
         // The card→detail shared-element image transition (fixed clone + GSAP travel between the
         // pages) — pure visual orchestration on top of the standard transition, verified by eye;
@@ -106,6 +110,12 @@ export default defineConfig({
         // choosing which app to open, when the button appears — lives in tested pure modules
         // (`utils/geo`, `utils/geocode`, `utils/mapLinks`, `utils/mapsPreference`).
         'src/components/leafletMap.ts',
+        // The PDF template. react-pdf's primitives are not DOM elements — they render through its
+        // own layout engine, which jsdom cannot drive — so a test here could only assert that our
+        // own mock was called. Exactly the `leafletMap` situation, and answered the same way: every
+        // DECISION is in tested pure modules (`documentModel`, `downloadDocument`), and this file
+        // holds only styles and the shape of the page.
+        'src/modules/panel/documents/OrderDocument.tsx',
       ],
     },
   },

@@ -70,9 +70,21 @@ const PreferenceCatalogCard: React.FC<PreferenceCatalogCardProps> = ({
    */
   const editorKey =
     editing === undefined ? 'closed' : editing === null ? 'new' : `row-${editing}`;
+  /**
+   * The ROWS' own identity, passed separately so the two halves of the morph answer the questions
+   * they actually belong to: the card's HEIGHT depends on the rows and the open editor together,
+   * but a row only MOVES when the rows change.
+   *
+   * Keyed on the combined string alone, opening the inline form re-ran the glide across every row —
+   * a journey for a change that had not moved a single one of them, which is exactly the drift the
+   * owner reported (2026-08-05). Now the box grows and the list stays perfectly still; a saved row
+   * still arrives with its neighbours gliding aside, because THAT is a change to the rows.
+   */
+  const rowsKey = rows.map((row) => `${row.id}:${row.isActive}`).join(',');
   const body = useMorphOnChange<HTMLDivElement>(
-    `${rows.map((row) => `${row.id}:${row.isActive}`).join(',')}|${editorKey}`,
+    `${rowsKey}|${editorKey}`,
     '.preference-row',
+    rowsKey,
   );
 
   const nodes = useRef(new Map<number, HTMLLIElement>());

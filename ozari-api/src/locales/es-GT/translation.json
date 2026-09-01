@@ -547,6 +547,17 @@
         "error": "Error al registrar el pago: {{-error}}."
       }
     },
+    "undoPayment": {
+      "undone": "Registro de pago deshecho exitosamente.",
+      "notFound": "El pedido no existe o ya no está disponible.",
+      "notPaid": "Este pedido no tiene un pago registrado.",
+      "errorUndoing": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "undone": "Registro de pago deshecho para el pedido {{id}}.",
+        "notPaid": "El pedido {{id}} no tenía un pago registrado.",
+        "error": "Error al deshacer el registro de pago: {{-error}}."
+      }
+    },
     "deleteOrder": {
       "orderDeleted": "Pedido eliminado permanentemente.",
       "orderNotFound": "El pedido no existe o ya no está disponible.",
@@ -753,6 +764,56 @@
       "logs": {
         "error": "Error al obtener el panel: {{-error}}.",
         "noCurrency": "No hay ninguna moneda configurada; no se puede construir el panel."
+      }
+    }
+  },
+  "calendar": {
+    "kinds": {
+      "DELIVERY": "Entrega",
+      "COLLECTION": "Recolección"
+    },
+    "description": {
+      "at": "Hora: {{time}}",
+      "event": "{{event}} · {{count}} artículos",
+      "address": "Dirección: {{address}}",
+      "order": "Pedido #{{id}}"
+    },
+    "status": {
+      "success": "Configuración de calendario obtenida exitosamente.",
+      "error": "Ha ocurrido un error, por favor intente de nuevo más tarde."
+    },
+    "google": {
+      "authorizeSuccess": "Enlace de autorización generado exitosamente.",
+      "notConfigured": "La conexión con Google Calendar no está configurada en este servidor.",
+      "disconnected": "Google Calendar se desconectó exitosamente.",
+      "disconnectError": "Ha ocurrido un error, por favor intente de nuevo más tarde."
+    },
+    "feed": {
+      "name": "Party Rentals · Entregas y recolecciones",
+      "created": "Enlace de suscripción generado exitosamente.",
+      "deleted": "Enlace de suscripción eliminado exitosamente.",
+      "error": "Ha ocurrido un error, por favor intente de nuevo más tarde."
+    },
+    "logs": {
+      "connected": "Google Calendar conectado para el usuario {{userId}}.",
+      "disconnected": "Google Calendar desconectado para el usuario {{userId}}.",
+      "grantRevoked": "El usuario {{userId}} revocó el acceso a Google Calendar; la conexión se desactivó.",
+      "callbackRejected": "Callback de Google Calendar rechazado: estado o código inválido.",
+      "callbackError": "Error al completar la conexión con Google Calendar: {{-error}}.",
+      "revokeFailed": "No se pudo revocar el acceso en Google: {{-error}}.",
+      "syncFailed": "No se pudo sincronizar el pedido {{id}} con los calendarios conectados.",
+      "statusError": "Error al obtener la configuración de calendario: {{-error}}.",
+      "disconnectError": "Error al desconectar Google Calendar: {{-error}}.",
+      "feedError": "Error en el enlace de suscripción de calendario: {{-error}}."
+    }
+  },
+  "legal": {
+    "getTerms": {
+      "termsFetched": "Términos y condiciones obtenidos exitosamente.",
+      "errorFetching": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "termsFetched": "Términos y condiciones obtenidos exitosamente.",
+        "errorFetching": "Error al obtener los términos y condiciones: {{-error}}."
       }
     }
   },

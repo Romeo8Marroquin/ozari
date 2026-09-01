@@ -107,6 +107,17 @@ export interface DashboardResponseModel {
     revenue: StatComparisonModel;
     orders: StatComparisonModel;
     averageOrder: StatComparisonModel;
+    /**
+     * Money actually RECEIVED this month — scoped by `paidAt`, which is the one figure on this
+     * screen that is not scoped by delivery date, and deliberately so.
+     *
+     * `revenue` is what the month's work is WORTH; this is what came in. They differ by exactly the
+     * lag a small rental business lives with — an order delivered in July and settled in August
+     * counts as July's revenue and August's cash — and the gap between them is the thing
+     * `outstanding` is the running total of. Reporting only the first two would have shown a good
+     * month while the bank account said otherwise.
+     */
+    collected: StatComparisonModel;
     /** Orders CANCELLED this month (scoped by delivery date, like every figure here). Excluded from
      *  `revenue`/`orders` by the LIVE filter — counted separately because a cancellation is the one
      *  number on this screen that reports work LOST rather than done. */

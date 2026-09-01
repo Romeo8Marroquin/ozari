@@ -167,6 +167,12 @@
         "title": "REGISTRO",
         "welcomeMessage": "Bienvenido",
         "subtitle": "Regístrate a los servicios de Party Rentals",
+        "terms": {
+          "open": "Leerlos",
+          "title": "Términos y condiciones",
+          "description": "Condiciones del servicio de Party Rentals.",
+          "close": "Entendido"
+        },
         "form": {
           "emailLabel": "Correo electrónico",
           "emailPlaceholder": "Ingrese su correo",
@@ -243,6 +249,11 @@
     },
     "panel": {
       "brand": "Party Rentals",
+      "formDraft": {
+        "restored": "Recuperamos tu borrador.",
+        "discard": "Descartar",
+        "disable": "Desactivar borradores"
+      },
       "nav": {
         "dashboard": "Inicio",
         "products": "Productos",
@@ -323,6 +334,7 @@
           "revenue": "Ingresos",
           "orders": "Pedidos",
           "averageOrder": "Ticket promedio",
+          "collected": "Cobrado",
           "outstanding": "Por cobrar",
           "cancelled": "Cancelados",
           "outstandingHint_one": "{{count}} pedido sin pago registrado",
@@ -351,6 +363,71 @@
           "empty": "Aún no hay salidas registradas este mes."
         }
       },
+      "documents": {
+        "actions": {
+          "download": "Descargar comprobante",
+          "quote": "Descargar cotización"
+        },
+        "receipt": {
+          "title": "Comprobante de pedido"
+        },
+        "quote": {
+          "title": "Cotización"
+        },
+        "fields": {
+          "reference": "No.",
+          "issuedAt": "Emitido",
+          "validUntil": "Válida hasta",
+          "paid": "PAGADO",
+          "phonePrefix": "Tel.",
+          "clientCard": "Cliente",
+          "clientName": "Nombre",
+          "contact": "Teléfono",
+          "address": "Dirección de entrega",
+          "eventCard": "Evento y logística",
+          "eventType": "Tipo de evento",
+          "delivery": "Entrega",
+          "pickup": "Recolección",
+          "billedDays": "Días facturados",
+          "billedDaysValue_one": "{{count}} día",
+          "billedDaysValue_other": "{{count}} días",
+          "billedDaysHint": "El alquiler se cobra por día iniciado.",
+          "conditions": "Condiciones",
+          "banks": "Datos para depósito",
+          "page": "Página {{page}} de {{total}}"
+        },
+        "groups": {
+          "rental": "Alquiler",
+          "sale": "Venta"
+        },
+        "columns": {
+          "description": "Descripción",
+          "quantity": "Cantidad",
+          "days": "Días",
+          "dailyPrice": "Precio por día",
+          "unitPrice": "Precio unitario",
+          "lineTotal": "Subtotal"
+        },
+        "totals": {
+          "subtotal": "Subtotal",
+          "delivery": "Servicio a domicilio",
+          "deliveryIncludesReturn": "Incluye entrega y recolección",
+          "deliveryIncludesOneWay": "Incluye entrega",
+          "free": "Gratis",
+          "discount": "Descuento",
+          "total": "TOTAL",
+          "deposit": "Anticipo",
+          "balance": "Saldo pendiente"
+        },
+        "notices": {
+          "quote": "Cotización sujeta a cambios y a la disponibilidad de los artículos en las fechas indicadas.",
+          "terms": "La aceptación de este documento implica la conformidad con los términos y condiciones del servicio."
+        },
+        "errors": {
+          "failed": "No fue posible generar el documento. Inténtalo de nuevo.",
+          "incompleteForm": "Completa los datos marcados para generar la cotización."
+        }
+      },
       "preferences": {
         "title": "Preferencias del sistema",
         "lead": "Reglas y catálogos que aplican a todo el negocio: los tiempos de la logística, la evidencia de cada paso, las listas que alimentan los formularios y los datos que llevan tus documentos.",
@@ -376,9 +453,25 @@
             "title": "Evidencia",
             "description": "Cuántas fotos solicita cada paso que las requiere, y por cuánto tiempo se conservan."
           },
+          "calendar": {
+            "title": "Calendario",
+            "description": "Con cuánta anticipación avisan los calendarios conectados. Cada quien conecta el suyo desde Ajustes."
+          },
+          "forms": {
+            "title": "Formularios",
+            "description": "Cómo se comportan los formularios de creación mientras se llenan."
+          },
           "documents": {
             "title": "Membrete",
-            "description": "Los datos del negocio que encabezan y cierran cada cotización y comprobante. Se imprimen tal como los escribas aquí."
+            "description": "De quién viene el documento: encabeza cada cotización y comprobante."
+          },
+          "documentConditions": {
+            "title": "Condiciones del documento",
+            "description": "Lo que el documento declara además de los precios: las condiciones destacadas, el aviso de domicilio gratis y la vigencia de una cotización."
+          },
+          "legal": {
+            "title": "Términos y condiciones",
+            "description": "El texto completo del servicio. Los documentos no lo transcriben; se publica en el registro, donde el cliente lo acepta."
           }
         },
         "settings": {
@@ -409,21 +502,41 @@
             "label": "Meses de retención",
             "help": "Antigüedad a partir de la cual pueden depurarse las fotos de pedidos terminados. Los pedidos y su historial se conservan siempre."
           },
+          "reminderMinutes": {
+            "label": "Minutos de anticipación del aviso",
+            "help": "Cuánto antes de cada entrega o recolección avisa el calendario. 1440 = un día. Si el pedido se crea con menos tiempo que este, el aviso se ajusta para que igual llegue."
+          },
+          "saveDraftOrders": {
+            "label": "Guardar borrador de nuevo pedido",
+            "help": "Conserva lo que llevas escrito si recargas o navegas a otra página. El borrador vive solo en esta pestaña y se borra al cerrarla, al crear el pedido o al cerrar sesión."
+          },
+          "saveDraftProducts": {
+            "label": "Guardar borrador de nuevo producto",
+            "help": "Igual que el de pedidos, para el formulario de productos. Las fotos nunca se guardan en el borrador."
+          },
           "businessName": {
             "label": "Nombre del negocio",
-            "help": "Encabeza cada documento. Es lo primero que lee el cliente, así que conviene el nombre con el que te conocen."
+            "help": "Encabeza cada documento."
           },
           "businessPhone": {
             "label": "Teléfono de contacto",
-            "help": "Aparece al pie de cada documento. Puedes dejarlo vacío si prefieres que te contacten por otro medio."
+            "help": "Aparece al pie. Opcional."
           },
           "terms": {
             "label": "Términos y condiciones",
-            "help": "Se imprimen al pie de la última página. Aquí van las condiciones de daños, la política de envío y cualquier otra nota que deba quedar por escrito."
+            "help": "Se resguardan aquí. Los documentos los referencian sin transcribirlos."
+          },
+          "conditions": {
+            "label": "Condiciones destacadas",
+            "help": "Una por línea (máximo cuatro). Estas sí se imprimen en cada documento, junto a los totales."
+          },
+          "freeDeliveryNote": {
+            "label": "Aviso de domicilio gratis",
+            "help": "Se imprime solo cuando el envío del pedido es de Q0.00. Si el envío se cobra, se omite."
           },
           "quoteValidityDays": {
-            "label": "Vigencia de la cotización",
-            "help": "Días que declara válidos una cotización. No caduca sola: es lo que se le informa al cliente."
+            "label": "Vigencia (días)",
+            "help": "Días que una cotización se declara vigente."
           }
         },
         "catalogs": {
@@ -453,7 +566,7 @@
           },
           "bankAccounts": {
             "title": "Cuentas bancarias",
-            "description": "Las cuentas a las que puede depositar un cliente. Se imprimen al pie de los documentos y se guardan cifradas: solo tú puedes verlas desde esta pantalla."
+            "description": "Cuentas para depósitos de clientes. Se guardan cifradas."
           }
         },
         "banks": {
@@ -585,7 +698,8 @@
             "changeStatus": "Cambiar estado",
             "reopen": "Reactivar pedido",
             "edit": "Editar pedido",
-            "pay": "Registrar pago"
+            "pay": "Registrar pago",
+            "undoPay": "Deshacer pago"
           },
           "client": {
             "title": "Cliente y entrega",
@@ -918,6 +1032,19 @@
             "fallback": "No se pudo registrar el pago. Intenta de nuevo."
           }
         },
+        "paymentUndo": {
+          "title": "Deshacer el pago",
+          "description": "¿Quieres eliminar el pago registrado del pedido de {{client}}?",
+          "note": "Se eliminará el registro del pago: el pedido volverá a quedar pendiente y se borrará el método registrado. Esto solo cambia tus registros, no devuelve dinero al cliente.",
+          "hint": "Si vuelves a registrar el pago, se guardará con la fecha de ese momento.",
+          "confirm": "Deshacer pago",
+          "cancel": "Cancelar",
+          "successTitle": "Pago deshecho",
+          "successToast": "El pedido de {{client}} volvió a quedar pendiente de pago.",
+          "errors": {
+            "fallback": "No se pudo deshacer el pago. Intenta de nuevo."
+          }
+        },
         "registry": {
           "title": "Nuevo cliente",
           "description": "Registra un cliente para tus pedidos por teléfono o WhatsApp.",
@@ -1128,10 +1255,6 @@
             "title": "Falta configuración",
             "description": "No hay datos de referencia configurados (categorías, monedas u otros). Configúralos en preferencias para poder crear productos."
           },
-          "draft": {
-            "restored": "Restauramos un borrador guardado de este formulario.",
-            "discard": "Descartar borrador"
-          },
           "sections": {
             "info": {
               "title": "Información",
@@ -1250,6 +1373,46 @@
       },
       "settings": {
         "lead": "Administra tu información y la seguridad de tu cuenta.",
+        "calendar": {
+          "title": "Calendarios",
+          "description": "Recibe las entregas y recolecciones en tu propio calendario, con recordatorio.",
+          "error": "No pudimos cargar la configuración de calendario.",
+          "google": {
+            "label": "Google Calendar",
+            "description": "Conecta tu cuenta y creamos los eventos automáticamente.",
+            "connectedAs": "Conectado como {{account}}.",
+            "unknownAccount": "tu cuenta de Google",
+            "unavailable": "La conexión con Google no está configurada en este servidor.",
+            "connect": "Conectar",
+            "disconnect": "Desconectar",
+            "connectedToast": "Google Calendar se conectó correctamente.",
+            "errorToast": "No pudimos conectar Google Calendar. Intenta de nuevo."
+          },
+          "feed": {
+            "label": "Apple Calendar y otros",
+            "description": "Apple no permite crear eventos desde fuera, así que aquí te suscribes a un calendario nuestro. Funciona igual en Outlook.",
+            "create": "Generar enlace",
+            "regenerate": "Generar de nuevo",
+            "remove": "Quitar enlace",
+            "copy": "Copiar",
+            "copyAgain": "Copiar de nuevo",
+            "copied": "Enlace copiado.",
+            "copyFailed": "No pudimos copiar el enlace. Selecciónalo y cópialo a mano.",
+            "howTo": "En iPhone: Calendario → Calendarios → Agregar calendario → Agregar calendario de suscripción, y pega este enlace.",
+            "revokeNote": "Guarda este enlace: es privado. Si generas uno nuevo, los dispositivos que ya lo tengan dejarán de recibir la agenda."
+          },
+          "reminder": {
+            "label": "Aviso antes de cada evento",
+            "description": "Se aplica a los dos. Se configura en Preferencias → Operación.",
+            "atStart": "A la hora del evento",
+            "minutes_one": "{{count}} minuto antes",
+            "minutes_other": "{{count}} minutos antes",
+            "hours_one": "{{count}} hora antes",
+            "hours_other": "{{count}} horas antes",
+            "days_one": "{{count}} día antes",
+            "days_other": "{{count}} días antes"
+          }
+        },
         "device": {
           "title": "Este dispositivo",
           "description": "Preferencias guardadas solo en este teléfono o computadora.",

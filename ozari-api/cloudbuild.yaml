@@ -17,6 +17,12 @@ substitutions:
   # this in the deployed trigger; this literal is the fallback for a manual/local build, so the two
   # must be changed together (DEPLOYMENT.md §3c).
   _APP_HOST: https://staging.partyrentalsgt.com
+  # The API's OWN public origin. Needed because the Cloudflare Worker in front of Cloud Run rewrites
+  # the Host header to the run.app name (DEPLOYMENT.md §3c), so a request cannot see the brand host —
+  # and the calendar's OAuth redirect + the ICS feed URL an admin pastes into their phone are built
+  # from it. No trailing slash. Empty = derive from the request (correct for a deployment with no
+  # proxy in front). Terraform's trigger substitution overrides this fallback, like _APP_HOST.
+  _API_PUBLIC_URL: https://api-staging.partyrentalsgt.com
   _NODE_ENV: staging
   _LOG_LEVEL: info
   _MAX_INSTANCES: '3'
@@ -37,6 +43,13 @@ substitutions:
   # Secret NAMES are safe in the repo (they're identifiers, like the other *_SECRET subs above).
   _R2_ACCESS_KEY_SECRET: ozari-r2-access-key
   _R2_SECRET_KEY_SECRET: ozari-r2-secret-key
+  # Google Calendar OAuth client. These bind :latest like every other secret, so their VERSIONS must
+  # exist before a deploy runs (load values via gcloud first — DEPLOYMENT.md §3d), or `gcloud run
+  # deploy` fails on a secret with no version. The integration itself is optional: with the values
+  # absent the API answers `googleAvailable: false` and the settings screen offers only the ICS feed —
+  # but the BINDING is not optional once it is listed here.
+  _GOOGLE_CLIENT_ID_SECRET: ozari-google-client-id
+  _GOOGLE_CLIENT_SECRET_SECRET: ozari-google-client-secret
 
 steps:
   - id: verify-api
@@ -109,8 +122,8 @@ steps:
       # Matches Terraform's timeout_seconds (60): a backstop above the app's own 30s request timeout.
       # Keep these two in sync or Cloud Build and Terraform will thrash the value on each deploy/apply.
       - --timeout=60
-      - --set-env-vars=NODE_ENV=${_NODE_ENV},LOG_LEVEL=${_LOG_LEVEL},APP_HOST=${_APP_HOST},R2_ENDPOINT=${_R2_ENDPOINT},R2_BUCKET_NAME=${_R2_BUCKET_NAME},R2_PUBLIC_URL=${_R2_PUBLIC_URL}
-      - --set-secrets=DATABASE_URL=${_DATABASE_URL_SECRET}:latest,JWT_SECRET=${_JWT_SECRET_SECRET}:latest,JWT_REFRESH_SECRET=${_JWT_REFRESH_SECRET_SECRET}:latest,ENCRYPTION_KEY=${_ENCRYPTION_KEY_SECRET}:latest,API_KEY=${_API_KEY_SECRET}:latest,EMAIL_KEY=${_EMAIL_KEY_SECRET}:latest,R2_ACCESS_KEY=${_R2_ACCESS_KEY_SECRET}:latest,R2_SECRET_KEY=${_R2_SECRET_KEY_SECRET}:latest
+      - --set-env-vars=NODE_ENV=${_NODE_ENV},LOG_LEVEL=${_LOG_LEVEL},APP_HOST=${_APP_HOST},API_PUBLIC_URL=${_API_PUBLIC_URL},R2_ENDPOINT=${_R2_ENDPOINT},R2_BUCKET_NAME=${_R2_BUCKET_NAME},R2_PUBLIC_URL=${_R2_PUBLIC_URL}
+      - --set-secrets=DATABASE_URL=${_DATABASE_URL_SECRET}:latest,JWT_SECRET=${_JWT_SECRET_SECRET}:latest,JWT_REFRESH_SECRET=${_JWT_REFRESH_SECRET_SECRET}:latest,ENCRYPTION_KEY=${_ENCRYPTION_KEY_SECRET}:latest,API_KEY=${_API_KEY_SECRET}:latest,EMAIL_KEY=${_EMAIL_KEY_SECRET}:latest,R2_ACCESS_KEY=${_R2_ACCESS_KEY_SECRET}:latest,R2_SECRET_KEY=${_R2_SECRET_KEY_SECRET}:latest,GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID_SECRET}:latest,GOOGLE_CLIENT_SECRET=${_GOOGLE_CLIENT_SECRET_SECRET}:latest
 
 images:
   - ${_IMAGE_URL}:$COMMIT_SHA

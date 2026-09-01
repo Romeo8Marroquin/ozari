@@ -45,6 +45,8 @@ model User {
   userAuthProviders    UserAuthProvider[]
   mfaRecoveryCodes     MfaRecoveryCode[]
   passwordResetTokens  PasswordResetToken[]
+  calendarConnections  CalendarConnection[]
+  calendarFeed         CalendarFeed?
 
   @@map("users")
 }
@@ -97,6 +99,65 @@ model UserAuthProvider {
   @@unique([providerName, providerSubject], name: "uq_user_auth_providers_provider_subject")
   @@unique([userId, providerName], name: "uq_user_auth_providers_user_provider")
   @@map("user_auth_providers")
+}
+
+// A user's connected external CALENDAR — the OAuth grant that lets us write their delivery and
+// collection events into it.
+//
+// Deliberately SEPARATE from `user_auth_providers`, which is sign-in identity: different scopes,
+// different lifecycle, and revoking a social login must never silently stop someone's schedule from
+// arriving. `provider` is a column rather than a second table so a future provider is additive.
+//
+// The refresh token is the long-lived grant and is encrypted at rest like every other secret here;
+// the access token is a minutes-long CACHE, refreshed on demand, and is nullable because a
+// connection is perfectly valid before it has ever been used.
+model CalendarConnection {
+  id       Int    @id @default(autoincrement())
+  userId   Int    @map("user_id")
+  provider String
+
+  refreshTokenKms      String    @map("refresh_token_kms")
+  accessTokenKms       String?   @map("access_token_kms")
+  accessTokenExpiresAt DateTime? @map("access_token_expires_at")
+
+  // Which calendar events are written into ("primary" = the account's own), and the address the UI
+  // shows so an admin can tell WHICH Google account they connected.
+  calendarId      String  @default("primary") @map("calendar_id")
+  accountEmailKms String? @map("account_email_kms")
+
+  // Paused without being disconnected: the grant survives, the writes stop. Disconnecting deletes
+  // the row outright (NO-TRASH — nothing references a connection).
+  isActive  Boolean   @default(true) @map("is_active")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, provider], name: "uq_calendar_connections_user_provider")
+  @@map("calendar_connections")
+}
+
+// A user's private ICS SUBSCRIPTION — the calendar feed Apple Calendar, Outlook and anything else
+// can subscribe to. There is no write API for Apple Calendar (see EPIC-2-CALENDAR §1), so a feed is
+// not a fallback here: it is THE mechanism for every calendar that is not Google.
+//
+// The token IS the credential — the feed URL carries no session, because a calendar app sends no
+// headers we control. So it is stored exactly like an email address: a SHA for the unique lookup
+// and an encrypted copy so the URL can be shown again on a second device. Regenerating replaces
+// both, which instantly invalidates every subscription made with the old one.
+model CalendarFeed {
+  id       Int    @id @default(autoincrement())
+  userId   Int    @unique @map("user_id")
+  tokenSha String @unique @map("token_sha")
+  tokenKms String @map("token_kms")
+
+  isActive  Boolean   @default(true) @map("is_active")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("calendar_feeds")
 }
 
 model TokenType {

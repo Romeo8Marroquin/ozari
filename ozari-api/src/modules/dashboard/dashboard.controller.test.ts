@@ -102,6 +102,9 @@ const mockPrisma = (mocks: DashboardMocks = {}) => {
     service: {
       findMany,
       count,
+      // In `Promise.all` order: this month's revenue, last month's, this month's CASH IN, last
+      // month's. The last two are scoped by `paidAt`, so they deliberately do not equal the first
+      // two — an order delivered in one month and settled in the next belongs to both figures.
       aggregate: vi
         .fn()
         .mockResolvedValueOnce({
@@ -111,7 +114,9 @@ const mockPrisma = (mocks: DashboardMocks = {}) => {
         .mockResolvedValueOnce({
           _sum: { totalAmount: new Prisma.Decimal("9800") },
           _count: { _all: 24 },
-        }),
+        })
+        .mockResolvedValueOnce({ _sum: { totalAmount: new Prisma.Decimal("10500") } })
+        .mockResolvedValueOnce({ _sum: { totalAmount: new Prisma.Decimal("8400") } }),
       groupBy: vi.fn(async () => mocks.statusRows ?? []),
       findFirst: vi.fn(async () =>
         "latestCurrency" in mocks ? mocks.latestCurrency : { currency: CURRENCY },
@@ -190,6 +195,9 @@ describe("getDashboard", () => {
     expect(month.revenue).toEqual({ current: 12400, previous: 9800, deltaPercent: 26.5 });
     expect(month.orders).toEqual({ current: 28, previous: 24, deltaPercent: 16.7 });
     expect(month.averageOrder.current).toBe(442.86);
+    // CASH IN is its own figure, scoped by `paidAt` rather than by delivery date — so it is
+    // deliberately NOT the revenue total. The gap between the two is what `outstanding` tracks.
+    expect(month.collected).toEqual({ current: 10500, previous: 8400, deltaPercent: 25 });
     // Cancellations are excluded from revenue and from "in progress" — counted here so the screen
     // reports work LOST as well as work done.
     expect(month.cancelled).toEqual({ current: 3, previous: 5, deltaPercent: -40 });

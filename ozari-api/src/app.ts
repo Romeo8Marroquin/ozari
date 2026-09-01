@@ -18,8 +18,12 @@ import { HttpEnum } from "./models/enums/httpEnum.js";
 import type { AppError } from "./models/common/error.js";
 
 import authRouter from "./modules/auth/auth.route.js";
+import calendarRouter, {
+  mountCalendarPublicRoutes,
+} from "./modules/calendar/calendar.route.js";
 import clientRegistriesRouter from "./modules/clientRegistries/clientRegistries.route.js";
 import dashboardRouter from "./modules/dashboard/dashboard.route.js";
+import legalRouter from "./modules/legal/legal.route.js";
 import ordersRouter from "./modules/orders/orders.route.js";
 import preferencesRouter from "./modules/preferences/preferences.route.js";
 import productsRouter from "./modules/products/products.route.js";
@@ -32,6 +36,12 @@ export function createApp(): Express {
   // Interactive API docs are mounted first, BEFORE the security chain, so the Swagger UI and its
   // assets are reachable without an API key and aren't blocked by the strict global CSP.
   mountApiDocs(app);
+
+  // The OAuth callback and the ICS feed are mounted here for the SAME reason the docs are: they are
+  // reached by parties that cannot send our API key — Google redirecting a browser back, and Apple
+  // Calendar fetching a subscription. Each authenticates itself instead (a signed `state`, a
+  // 32-byte path token) and carries its own strict limiter. See `mountCalendarPublicRoutes`.
+  mountCalendarPublicRoutes(app);
 
   configureMiddlewares(app);
 
@@ -232,6 +242,12 @@ function configureRoutes(app: Express): void {
   // Health check - public limiter (moderate)
   apiRouter.use("/health", rateLimiters["public"], healthRouter);
 
+  // The business's published terms — PUBLIC limiter, because the people who most need to read them
+  // are the ones being asked to accept them at registration, who have no session yet. Deliberately
+  // NOT part of the Admin-only preferences router: publishing one paragraph must not mean handing an
+  // anonymous visitor every catalog, operational rule and bank account behind it.
+  apiRouter.use("/legal", rateLimiters["public"], legalRouter);
+
   // Auth endpoints — authenticated tier for the router; the CREDENTIAL endpoints inside it stack
   // their own strict 10/min limiter (see auth.route.ts), so /me and /signout never starve on it.
   apiRouter.use("/auth", rateLimiters["authenticated"], authRouter);
@@ -248,6 +264,11 @@ function configureRoutes(app: Express): void {
   // System preferences (scalar settings + the manageable seeded catalogs) - authenticated limiter;
   // STRICTLY Admin inside the router, every route
   apiRouter.use("/preferences", rateLimiters["authenticated"], preferencesRouter);
+
+  // External calendar connections (Google) + the ICS subscription token - authenticated limiter;
+  // STRICTLY Admin inside the router. The two UNAUTHENTICATED calendar routes are mounted earlier,
+  // before the API-key check — see `createApp`.
+  apiRouter.use("/calendar", rateLimiters["authenticated"], calendarRouter);
 
   // The admin home screen - authenticated limiter; STRICTLY Admin inside the router. Deliberately on
   // the lenient tier: the panel re-reads it on every focus and on a slow interval, exactly like /me,

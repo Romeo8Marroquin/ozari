@@ -13,11 +13,16 @@
     "test:watch": "vitest --watch",
     "test:local": "vitest --watch --coverage",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "doc:preview": "vite build --ssr scripts/preview-document.tsx --outDir scripts/.out --emptyOutDir --logLevel warn && node scripts/.out/preview-document.js",
+    "doc:preview:long": "pnpm doc:preview -- --long",
+    "doc:preview:free": "pnpm doc:preview -- --free",
+    "doc:preview:quote": "pnpm doc:preview -- --quote"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
     "@hookform/resolvers": "^5.4.0",
+    "@react-pdf/renderer": "^4.5.1",
     "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-router": "^1.170.16",
     "axios": "^1.18.0",

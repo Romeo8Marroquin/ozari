@@ -353,6 +353,22 @@ async function seedAppPreferences(prisma: SeedPrismaClient): Promise<void> {
       description:
         "Unidad de tiempo de alquiler por defecto en el formulario de productos (2 = Día)",
     },
+    {
+      key: "forms.saveDraftOrders",
+      value: "true",
+      valueType: "bool",
+      group: "forms",
+      description:
+        "Guardar un borrador silencioso del formulario de nuevo pedido a medio llenar (se conserva al recargar o navegar, y se borra al cerrar la pestaña)",
+    },
+    {
+      key: "forms.saveDraftProducts",
+      value: "true",
+      valueType: "bool",
+      group: "forms",
+      description:
+        "Guardar un borrador silencioso del formulario de nuevo producto a medio llenar (se conserva al recargar o navegar, y se borra al cerrar la pestaña)",
+    },
     // documents.* — el membrete de las cotizaciones y comprobantes (EPIC-2-DOCUMENTS §6). El
     // teléfono y los términos nacen VACÍOS a propósito: inventar un número imprimiría uno
     // equivocado en cada documento, y unos términos sin escribir son simplemente un documento sin
@@ -377,14 +393,35 @@ async function seedAppPreferences(prisma: SeedPrismaClient): Promise<void> {
       valueType: "text",
       group: "documents",
       description:
-        "Términos y condiciones impresos al pie de la última página de cada documento",
+        "Términos y condiciones del negocio. Los documentos no los transcriben: incluyen una línea de aceptación que hace referencia a ellos",
+    },
+    {
+      key: "documents.conditions",
+      // Las dos condiciones que la plantilla hecha a mano ya imprimía. A diferencia del fallback
+      // del código (vacío: no ponemos políticas en boca de un negocio que no las escribió), la
+      // semilla SÍ sabe de qué negocio se trata, y el upsert es create-only: si el administrador
+      // las reescribe, volver a sembrar nunca las devuelve.
+      value:
+        "Cualquier daño ocasionado en el mobiliario se cobrará.\nPrecios y disponibilidad sujetos a cambios.",
+      valueType: "text",
+      group: "documents",
+      description:
+        "Condiciones destacadas que se IMPRIMEN en cada documento, una por línea (máximo cuatro)",
+    },
+    {
+      key: "documents.freeDeliveryNote",
+      value: "Domicilio gratis en Hacienda Real.",
+      valueType: "text",
+      group: "documents",
+      description:
+        "Línea que se imprime SOLO cuando el envío del pedido es Q0.00; en un pedido con envío cobrado se omite",
     },
     {
       key: "documents.quoteValidityDays",
-      value: "15",
+      value: "7",
       valueType: "int",
       group: "documents",
-      description: "Días de vigencia que declara una cotización",
+      description: "Días de vigencia que declara una cotización (una semana)",
     },
   ];
   for (const row of appPreferences) {
@@ -399,8 +436,10 @@ async function seedAppPreferences(prisma: SeedPrismaClient): Promise<void> {
   // too). `orders.evidencePhotosRequired` was a single global switch; whether a step demands photos
   // is now the PER-STATUS `service_status.requires_evidence` flag (EPIC-2 order lifecycle,
   // 2026-07-27), so the old row could only ever mislead. Safe + idempotent: no code reads it.
+  // `forms.saveDrafts` was ONE switch for both create forms; it became one per form the same week
+  // (owner decision 2026-08-26), so the old key can only ever mislead a reader of this table.
   await prisma.appPreference.deleteMany({
-    where: { key: { in: ["orders.evidencePhotosRequired"] } },
+    where: { key: { in: ["orders.evidencePhotosRequired", "forms.saveDrafts"] } },
   });
 }
 

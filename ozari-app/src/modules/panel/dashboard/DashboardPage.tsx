@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   HiOutlineArrowPath,
   HiOutlineBanknotes,
+  HiOutlineCheckCircle,
   HiOutlineClipboardDocumentList,
   HiOutlineExclamationTriangle,
   HiOutlinePlus,
@@ -235,9 +236,13 @@ const DashboardPage: React.FC = () => {
           delaySeconds={SECTION_REVEAL_STEP * 2}
         >
           {data && (
-            // FIVE cards here (revenue, orders, ticket, outstanding, cancelled): 5-up only on the
-            // widest screens, 3-up below — never a single orphan on its own row.
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+            // SIX cards (revenue, orders, ticket, collected, outstanding, cancelled), and six is a
+            // layout decision as much as a reporting one: five left a HOLE at every width — an
+            // orphan on its own row at 2-up and 3-up, and a gap at 5-up — which reads as something
+            // that failed to load. Six divides by 2 and by 3, so the block is always a full
+            // rectangle. The old `2xl:grid-cols-5` is gone with it: 3-up on the widest screens keeps
+            // the money figures readable instead of squeezing six cards into one thin band.
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <StatCard
                 label={t(`${KEY}.month.revenue`)}
                 value={money(data.month.revenue.current)}
@@ -257,6 +262,18 @@ const DashboardPage: React.FC = () => {
                 value={money(data.month.averageOrder.current)}
                 icon={HiOutlineReceiptPercent}
                 stat={data.month.averageOrder}
+              />
+              {/* Billed vs COLLECTED — the gap a small business actually feels. `revenue` is what
+                  the month's work is worth (by delivery date); this is the money that arrived (by
+                  payment date), and the two differ by exactly the lag "Por cobrar" is the running
+                  total of. Reporting only the first would show a strong month while the bank
+                  account said otherwise. */}
+              <StatCard
+                label={t(`${KEY}.month.collected`)}
+                value={money(data.month.collected.current)}
+                icon={HiOutlineCheckCircle}
+                stat={data.month.collected}
+                hint={t(`${KEY}.month.previous`, { value: money(data.month.collected.previous) })}
               />
               <StatCard
                 label={t(`${KEY}.month.outstanding`)}
@@ -278,8 +295,13 @@ const DashboardPage: React.FC = () => {
         </SectionReveal>
       </section>
 
+      {/* Both cards are `min-w-0` GRID ITEMS: a grid item's automatic minimum size is its content's,
+          so without it anything inside that refuses to shrink (a chart's intrinsic ratio, a long
+          unbroken value) widens the track — and the panel's `main` computes `overflow-x` to auto, so
+          the whole dashboard gains a sideways scroll instead of the card clipping. Same rule as the
+          responsive truncation chain. */}
       <div className="grid gap-6 xl:grid-cols-2">
-        <section className="reveal-block flex flex-col gap-5 rounded-card bg-white p-4 ring-1 ring-black/[0.04] sm:p-5">
+        <section className="reveal-block flex min-w-0 flex-col gap-5 rounded-card bg-white p-4 ring-1 ring-black/[0.04] sm:p-5">
           <div>
             <h2 className="text-base font-bold text-charcoal">{t(`${KEY}.trend.title`)}</h2>
             <p className="text-xs text-charcoal/55">{t(`${KEY}.trend.description`)}</p>
@@ -313,7 +335,7 @@ const DashboardPage: React.FC = () => {
           </SectionReveal>
         </section>
 
-        <section className="reveal-block flex flex-col gap-3 rounded-card bg-white p-4 ring-1 ring-black/[0.04] sm:p-5">
+        <section className="reveal-block flex min-w-0 flex-col gap-3 rounded-card bg-white p-4 ring-1 ring-black/[0.04] sm:p-5">
           <div>
             <h2 className="text-base font-bold text-charcoal">{t(`${KEY}.statusSplit.title`)}</h2>
             <p className="text-xs text-charcoal/55">{t(`${KEY}.statusSplit.description`)}</p>

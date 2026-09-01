@@ -9,9 +9,10 @@ import Button from '@components/Button';
 import MorphSwap from '@components/MorphSwap';
 import OpenInMapsButton from '@components/OpenInMapsButton';
 import { orderDestination } from '@utils/mapLinks';
+import ActionRow from '../ActionRow';
 import { formatShortDate, formatTime, isSameLocalDay } from '../orders/orderDayGroups';
 import { statusTone } from '../orders/statusTone';
-import useOrderLifecycle from '../orders/useOrderLifecycle';
+import useOrderLifecycle, { isTravelStep } from '../orders/useOrderLifecycle';
 import type { OrderAction } from '../orders/order.types';
 import type { UpNextItem } from './dashboard.types';
 import { relativeKey, relativeTime } from './dashboardFormat';
@@ -28,9 +29,9 @@ const SECONDARY_COLOR = '#262626';
  * do now".
  *
  * Everything actionable is data-driven exactly as on a ticket: the forward step comes from the
- * backend's lifecycle engine (`useOrderLifecycle`), and the navigation button appears only when
- * there is somewhere to go (`orderDestination` resolves pin-or-address and returns nothing when
- * there is neither — a maps app opened on an empty search helps no one).
+ * backend's lifecycle engine (`useOrderLifecycle`), and the navigation button appears only when the
+ * order carries a pin (`orderDestination` returns nothing otherwise — a maps app opened on an empty
+ * search helps no one) AND the move it is waiting for is somebody driving (`isTravelStep`).
  */
 const UpNextCard: React.FC<{
   item: UpNextItem;
@@ -51,6 +52,63 @@ const UpNextCard: React.FC<{
   // directions, so "en 3 horas" and "atrasado 3 horas" can never disagree about their thresholds.
   const relative = relativeTime(item.event.minutesUntil);
   const countdownLabel = t(`${KEY}.${relativeKey(relative)}`, { count: relative.value });
+
+  // Derived from the order's state, so membership changes under the reader — hence `ActionRow`.
+  // The keys are the actions' identities, never their positions.
+  const actionItems = [
+    ...(destination && isTravelStep(forward)
+      ? [
+          {
+            key: 'maps',
+            node: <OpenInMapsButton destination={destination} size="xs" iconOnly />,
+          },
+        ]
+      : []),
+    // Money is its own axis, so it gets its own affordance — but ICON-ONLY here: a scannable card
+    // has room for one full label, and that belongs to the step that moves the job forward. The
+    // full "Registrar pago" wording lives on the order detail.
+    ...(item.isPaid
+      ? []
+      : [
+          {
+            key: 'pay',
+            node: (
+              <Button
+                size="xs"
+                variant="soft"
+                color={SECONDARY_COLOR}
+                onClick={() => onPay(item)}
+                aria-label={t(`${KEY}.payAria`, { client: item.clientName })}
+                title={t(`${KEY}.pay`)}
+                startIcon={<HiOutlineBanknotes aria-hidden className="size-4" />}
+              />
+            ),
+          },
+        ]),
+    ...(forward
+      ? [
+          {
+            key: 'advance',
+            node: (
+              <Button
+                size="xs"
+                color={SECONDARY_COLOR}
+                onClick={() => onAdvance(item, forward)}
+                aria-label={t(`${KEY}.nextStepAria`, {
+                  step: t(`${KEY}.nextStep`, { status: forward.statusName }),
+                })}
+                endIcon={<HiOutlineArrowRight aria-hidden className="size-3.5" />}
+                className="font-semibold"
+              >
+                <MorphSwap swapKey={forward.statusId}>
+                  {t(`${KEY}.nextStep`, { status: forward.statusName })}
+                </MorphSwap>
+              </Button>
+            ),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <article
@@ -129,47 +187,19 @@ const UpNextCard: React.FC<{
         </span>
 
         <div
-          className="flex shrink-0 items-center gap-2"
-          // The row holds the two ESCAPES from this card (navigate away, advance the order); neither
-          // should also open the detail behind them.
+          className="shrink-0"
+          // The row holds the ESCAPES from this card (navigate away, take a payment, advance the
+          // order); none should also open the detail behind them.
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
           role="presentation"
         >
-          {/* Both actions are the SAME component at the SAME size — the only way two buttons in a
-              row are guaranteed to share a height. `xs` is the deliberate summary size: shorter than
-              a page action, identical to its neighbour. */}
-          {destination && <OpenInMapsButton destination={destination} size="xs" iconOnly />}
-          {/* Money is its own axis, so it gets its own affordance — but ICON-ONLY here: a scannable
-              card has room for one full label, and that belongs to the step that moves the job
-              forward. The full "Registrar pago" wording lives on the order detail. */}
-          {!item.isPaid && (
-            <Button
-              size="xs"
-              variant="soft"
-              color={SECONDARY_COLOR}
-              onClick={() => onPay(item)}
-              aria-label={t(`${KEY}.payAria`, { client: item.clientName })}
-              title={t(`${KEY}.pay`)}
-              startIcon={<HiOutlineBanknotes aria-hidden className="size-4" />}
-            />
-          )}
-          {forward && (
-            <Button
-              size="xs"
-              color={SECONDARY_COLOR}
-              onClick={() => onAdvance(item, forward)}
-              aria-label={t(`${KEY}.nextStepAria`, {
-                step: t(`${KEY}.nextStep`, { status: forward.statusName }),
-              })}
-              endIcon={<HiOutlineArrowRight aria-hidden className="size-3.5" />}
-              className="font-semibold"
-            >
-              <MorphSwap swapKey={forward.statusId}>
-                {t(`${KEY}.nextStep`, { status: forward.statusName })}
-              </MorphSwap>
-            </Button>
-          )}
+          {/* Every action is the SAME component at the SAME size — the only way buttons in a row are
+              guaranteed to share a height. `xs` is the deliberate summary size: shorter than a page
+              action, identical to its neighbours. The SET changes as the order advances (the map
+              arrives when the van leaves, the payment leaves when the money is in), so `ActionRow`
+              owns that: what goes fades where it stands, then the rest glide into its space. */}
+          <ActionRow items={actionItems} className="flex items-center gap-2" />
         </div>
       </div>
     </article>

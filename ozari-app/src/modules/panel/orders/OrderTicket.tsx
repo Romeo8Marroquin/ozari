@@ -5,9 +5,10 @@ import MorphSwap from '@components/MorphSwap';
 import OpenInMapsButton from '@components/OpenInMapsButton';
 import { orderDestination } from '@utils/mapLinks';
 import useBreakpoint from '@hooks/useBreakpoint';
+import ActionRow from '../ActionRow';
 import { formatShortDate, formatTime, isSameLocalDay } from './orderDayGroups';
 import { statusTone } from './statusTone';
-import useOrderLifecycle from './useOrderLifecycle';
+import useOrderLifecycle, { isTravelStep } from './useOrderLifecycle';
 import type { OrderAction, OrderListItem } from './order.types';
 
 const KEY = 'modules.panel.orders.ticket';
@@ -98,12 +99,6 @@ const OrderTicket: React.FC<{
   //   · delivered, pickup still pending  → the PICKUP is what's next;
   //   · collected / finished / cancelled → nothing is pending, so nothing is emphasised.
   const settled = order.readyAt !== undefined || order.cancelledAt !== undefined;
-  // Navigation is offered on the SAME rule as the detail and the dashboard: the order still has a
-  // trip to make, and it carries a pin. Derived from the tracked ACTUALS, never a status id.
-  const hasPendingTrip =
-    !settled &&
-    (order.deliveredAt === undefined ||
-      (order.pickupAt !== undefined && order.collectedAt === undefined));
   const destination = orderDestination(undefined, order.deliveryCoords);
   const deliveryIsNext = !settled && order.deliveredAt === undefined;
   const pickupIsNext =
@@ -214,10 +209,12 @@ const OrderTicket: React.FC<{
     />
   );
 
-  // Navigation, offered on exactly the same rule as everywhere else: the order has a PIN and still
-  // has a trip to make. Icon-only for the same reason the payment action is — a scannable row has
-  // room for one full label, and it belongs to the step that moves the job forward.
-  const mapsAction = destination && hasPendingTrip && (
+  // Navigation, offered on exactly the same rule as everywhere else: the order has a PIN and the
+  // move it is waiting for is somebody DRIVING (`isTravelStep`) — not merely "it is unfinished",
+  // which put a Waze button on orders scheduled for next week. Icon-only for the same reason the
+  // payment action is: a scannable row has room for one full label, and it belongs to the step that
+  // moves the job forward.
+  const mapsAction = destination && isTravelStep(forward) && (
     <span
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
@@ -227,13 +224,15 @@ const OrderTicket: React.FC<{
     </span>
   );
 
-  const actions = (quickAction || payAction || mapsAction) && (
-    <div className="flex items-center gap-2">
-      {mapsAction}
-      {payAction}
-      {quickAction}
-    </div>
-  );
+  // The row is DERIVED from the order's state, so its membership changes under the reader: taking a
+  // payment removes the middle button, going en route adds the first. `ActionRow` makes that a
+  // gesture — the leaving button fades where it stands, then the rest glide into the space — instead
+  // of a one-frame re-layout. The keys are the actions' identities, never their positions.
+  const actionItems = [
+    ...(mapsAction ? [{ key: 'maps', node: mapsAction }] : []),
+    ...(payAction ? [{ key: 'pay', node: payAction }] : []),
+    ...(quickAction ? [{ key: 'advance', node: quickAction }] : []),
+  ];
 
   return (
     <article
@@ -287,8 +286,10 @@ const OrderTicket: React.FC<{
             </div>
             {amount}
           </div>
-          {/* On a phone the action earns its own full row — it's the primary tap, thumb-reachable. */}
-          {actions && <div className="flex justify-end">{actions}</div>}
+          {/* On a phone the action earns its own full row — it's the primary tap, thumb-reachable.
+              `ActionRow` IS that row (it renders nothing when there is no action to offer), so the
+              card's gap closes by itself once the last one is gone. */}
+          <ActionRow items={actionItems} className="flex items-center justify-end gap-2" />
         </>
       ) : (
         // Roomy rail layout: times | who | status + total + action. The action lives INSIDE the right
@@ -309,7 +310,7 @@ const OrderTicket: React.FC<{
           <div className="flex shrink-0 flex-col items-end justify-center gap-2">
             {statusChip}
             {amount}
-            {actions}
+            <ActionRow items={actionItems} className="flex items-center gap-2" />
           </div>
         </div>
       )}

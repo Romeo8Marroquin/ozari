@@ -40,10 +40,12 @@ const BOX = { width: 320, height: 120 };
 const TICKS = 2;
 
 /** Height + axis gutter, declared once so the labels, the gridlines and the bars cannot drift apart.
- *  The axis is wide enough for `Q 500` (the unit rides on the top tick) plus its right padding. */
+ *  The axis is wide enough for `Q 500` (the unit rides on the top tick) plus its right padding —
+ *  narrower on a phone, where every pixel it keeps is a pixel the twelve month labels don't have:
+ *  at the desktop gutter the last one clipped to `a…` on a 320px screen. */
 const CHART_HEIGHT = 'h-32 sm:h-36';
-const AXIS_WIDTH = 'w-14';
-const AXIS_PAD = 'pl-14';
+const AXIS_WIDTH = 'w-12 sm:w-14';
+const AXIS_PAD = 'pl-12 sm:pl-14';
 
 /**
  * A vertical bar chart, drawn by hand (see `chartMath.ts` for why, and for the trigger to reach for
@@ -158,7 +160,15 @@ const BarChart: React.FC<BarChartProps> = ({
           aria-hidden
           viewBox={`0 0 ${BOX.width} ${BOX.height}`}
           preserveAspectRatio="none"
-          className={`min-w-0 flex-1 ${CHART_HEIGHT}`}
+          // ⚠️ `w-full` is LOAD-BEARING, and `min-w-0` cannot replace it. An `<svg>` with a viewBox
+          // is a REPLACED element with an intrinsic ratio, so with a definite height and an `auto`
+          // width its min-content contribution is the TRANSFERRED size — here 128px × 320/120 =
+          // 341px — which every ancestor then had to be at least that wide to hold. `min-width: 0`
+          // is a FLOOR, not a ceiling: it never lowers that contribution, which is why the whole
+          // dashboard scrolled sideways on a phone while this element looked correctly constrained.
+          // A percentage width makes the contribution resolve against the container instead, so the
+          // chart takes the width it is GIVEN — which is the whole point of `preserveAspectRatio`.
+          className={`w-full min-w-0 flex-1 ${CHART_HEIGHT}`}
         >
         <defs>
           {/* The brand gradient, top-down, so the bars deepen into blossom exactly like the tile and

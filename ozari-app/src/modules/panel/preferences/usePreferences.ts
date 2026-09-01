@@ -59,7 +59,7 @@ function usePreferencesCache() {
 export function useUpdatePreferenceSettings() {
   const patch = usePreferencesCache();
   const mutation = useMutation({
-    mutationFn: (settings: { key: string; value: number | string }[]) =>
+    mutationFn: (settings: { key: string; value: number | string | boolean }[]) =>
       api.put<OzariSuccessResponse<PreferenceSettingsEnvelope>>(
         '/preferences/settings',
         { settings },
@@ -231,3 +231,43 @@ export const settingsInGroup = (
   settings: PreferenceSetting[],
   group: string,
 ): PreferenceSetting[] => settings.filter((setting) => setting.group === group);
+
+/** One `bool` setting's value out of a settings list, or `fallback` when it is absent or of another
+ *  type — the same forgiving read `readLetterhead` does, for the same reason: a screen must not
+ *  break because a key it wants has not been published yet. */
+export const readBoolSetting = (
+  settings: readonly PreferenceSetting[] | undefined,
+  key: string,
+  fallback: boolean,
+): boolean => {
+  const found = settings?.find((setting) => setting.key === key);
+  return found?.type === 'bool' ? found.value : fallback;
+};
+
+/** The create forms that keep a draft — one preference key each, because the answer for one is not
+ *  the answer for the other. A new form adds a member here and a key in the API's registry. */
+export type DraftForm = 'orders' | 'products';
+
+const DRAFT_SETTING: Record<DraftForm, string> = {
+  orders: 'forms.saveDraftOrders',
+  products: 'forms.saveDraftProducts',
+};
+
+/**
+ * Whether THIS create form keeps a silent draft.
+ *
+ * **Defaults to ON while the query is in flight**, which is deliberate rather than lazy: the
+ * preferences answer arrives a moment after the form mounts, and defaulting to OFF would mean a
+ * refresh silently discards the draft it was about to restore — the exact loss the feature exists to
+ * prevent. Over-saving for a few hundred milliseconds costs a sessionStorage write nobody reads.
+ *
+ * `isLoading` travels with it so a caller can wait before ACTING on a restore: writing a draft
+ * early is harmless, but restoring one the admin has switched off is not.
+ */
+export function useFormDraftsEnabled(form: DraftForm): { enabled: boolean; isLoading: boolean } {
+  const { data, isPending } = usePreferences();
+  return {
+    enabled: readBoolSetting(data?.settings, DRAFT_SETTING[form], true),
+    isLoading: isPending,
+  };
+}

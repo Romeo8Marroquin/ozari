@@ -90,6 +90,62 @@ export const appConfig = {
     },
   },
 
+  calendar: {
+    // ── Google Calendar (the only calendar with a real write API — see EPIC-2-CALENDAR §1) ──────
+    google: {
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      revokeUrl: "https://oauth2.googleapis.com/revoke",
+      apiBase: "https://www.googleapis.com/calendar/v3",
+      userInfoUrl: "https://www.googleapis.com/oauth2/v3/userinfo",
+      // The NARROWEST scopes that do the job: write events (not `calendar`, which would also let us
+      // create, rename and delete whole calendars) plus the address to show in the UI. Asking for
+      // less is not a detail here — a broad calendar scope is what makes Google's verification
+      // review heavier, and it is what an admin sees on the consent screen.
+      scopes: [
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/userinfo.email",
+      ],
+      // How early a cached access token is treated as expired. Google's tokens last an hour; a
+      // minute of slack means a request never dies in flight on a token that expired mid-call.
+      accessTokenSkewSeconds: 60,
+      // Google's own bound on a reminder override. Anything larger is rejected by the API, so the
+      // clamp has to know it (`reminderMinutesFor`).
+      maxReminderMinutes: 40320, // 28 days
+    },
+    // The OAuth `state` is a short-lived signed JWT carrying the user id: the consent redirect comes
+    // back as a plain top-level navigation with no session of ours attached (the refresh cookie is
+    // scoped to /api/auth), so the state is the ONLY thing that says who is connecting. Short TTL
+    // because it is a bearer credential in a URL.
+    stateTtlSeconds: 600,
+
+    // ── The ICS subscription feed (every other calendar) ────────────────────────────────────────
+    // Raw token bytes for the feed URL. It is the ONLY credential on that request, so it is sized
+    // like a password-reset token and stored the way an email is: SHA for lookup, encrypted for
+    // redisplay (a second device needs the same URL).
+    feedTokenBytes: 32,
+    // How much of the schedule the feed carries. A subscription is a WINDOW, not an archive: a year
+    // ahead covers every real booking, and a month back keeps last week's jobs visible without
+    // shipping the whole history to a phone on every refresh.
+    feedPastDays: 30,
+    feedFutureDays: 365,
+    // What a subscribing client is ASKED to poll at. Apple honours it as a hint (the user can
+    // override per-subscription); Google ignores it entirely and refreshes on its own slow schedule
+    // — which is precisely why Google gets the API integration and not the feed.
+    feedRefreshMinutes: 15,
+    // The `PRODID` every generated calendar carries — identifies US as the generator, per RFC 5545.
+    icsProductId: "-//Party Rentals GT//Ozari//ES",
+    // The business's zone, published as a HINT (`X-WR-TIMEZONE`) so a client shows the calendar in
+    // the zone the business thinks in. Every instant is still emitted in UTC, which is the only
+    // form that needs no VTIMEZONE block and stays unambiguous on a phone that travels. Guatemala
+    // has no DST, which is what makes a single fixed zone honest here (EPIC-2 §1).
+    timeZone: "America/Guatemala",
+
+    // How long before an event the calendar should remind, when the `calendar.reminderMinutes`
+    // preference is missing or corrupt. A day's notice is the point of the feature.
+    defaultReminderMinutes: 1440,
+  },
+
   storage: {
     // Cloudflare R2 (S3-compatible) object storage for public assets (product images, …). Only the
     // NON-secret policy lives here; the connection/credentials are read from env by the storage helper
@@ -169,6 +225,11 @@ export const appConfig = {
   // 60s: the definition changes rarely, so this is ~free, and it bounds every kind of staleness.
   statusCatalogTtlSeconds: 60,
 
+  // Whether the create forms keep a silent draft of half-finished work. ON: losing twenty fields to
+  // a mis-tapped back button is the failure worth preventing, and the draft is per-tab and dies with
+  // it. Admin-editable — a shared machine is a real reason to want it off.
+  defaultSaveFormDrafts: true,
+
   // Fallbacks for the `documents.*` preferences — the letterhead of every quote and order document
   // (EPIC-2-DOCUMENTS §6). The business NAME has a real default because a document with no
   // letterhead is broken, and this is the business the whole deployment belongs to; the phone and
@@ -177,9 +238,19 @@ export const appConfig = {
   defaultDocumentBusinessName: "Party Rentals GT",
   defaultDocumentBusinessPhone: "",
   defaultDocumentTerms: "",
-  // How long a quote states it is valid for. Two weeks is long enough to be useful and short
-  // enough that seasonal pricing doesn't get quoted from a stale document.
-  defaultQuoteValidityDays: 15,
+  // The short conditions a document PRINTS, and the free-delivery line. Both default to EMPTY for
+  // the same reason the terms do, and it matters more here: these are statements made in the
+  // business's own voice on a page handed to a client. A missing row must print nothing rather than
+  // put a policy nobody wrote into their mouth. The SEED, which knows which business this is, starts
+  // them at the lines the old hand-made template carried — and the admin edits them from there.
+  defaultDocumentConditions: "",
+  defaultDocumentFreeDeliveryNote: "",
+  // How long a quote states it is valid for (owner decision 2026-08-26: ONE WEEK). Long enough for
+  // a client to decide, short enough that a stale document cannot be waved at us after prices or
+  // availability have moved — and a week is the unit the business actually thinks in. Admin-editable
+  // in Preferencias → Documentos, so this is only the value a database that has never seen the
+  // setting resolves to.
+  defaultQuoteValidityDays: 7,
 
   sensitiveKeys: ["password", "token", "secret", "creditCard", "cvv", "auth"],
   basePath: "/api",

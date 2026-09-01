@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import gsap from 'gsap';
 import type { ReactNode } from 'react';
@@ -43,6 +43,14 @@ vi.mock('./MfaDisableModal', () => ({
         </button>
       </div>
     ) : null,
+}));
+
+// The calendar section is Admin-only and has its own suite; here it stands in as a marker so what
+// the PAGE decides — who sees it at all — is what is asserted.
+const { useHasRole } = vi.hoisted(() => ({ useHasRole: vi.fn(() => true) }));
+vi.mock('@hooks/useRole', () => ({ useHasRole }));
+vi.mock('./CalendarSection', () => ({
+  default: () => <div data-testid="calendar-section" />,
 }));
 
 import { PanelPageTransitionContext, type PanelPageMotion } from '../PanelPageTransitionContext';
@@ -241,6 +249,20 @@ describe('SettingsPage', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'close-cpw' }));
     expect(screen.queryByTestId('cpw-modal')).not.toBeInTheDocument();
+  });
+
+  it('offers the CALENDARS section to an admin, and to nobody else', () => {
+    // Every `/calendar` route answers a non-admin 403, so rendering a section that could only fail
+    // is worse than not rendering it — the guard here mirrors the backend's rather than trusting it
+    // to produce a usable empty state.
+    setMe({ data: { id: 1, fullName: 'Ana', role: 'Admin', mfaEnabled: false, createdAt: '2026-01-01' } });
+    renderPage();
+    expect(screen.getByTestId('calendar-section')).toBeInTheDocument();
+    cleanup();
+
+    useHasRole.mockReturnValue(false);
+    renderPage();
+    expect(screen.queryByTestId('calendar-section')).not.toBeInTheDocument();
   });
 
   describe('registered page motion', () => {

@@ -32,8 +32,19 @@ export type SettingDefinition =
       minLength: number;
       maxLength: number;
       multiline: boolean;
+      /**
+       * What KIND of text this is — a token about the VALUE, not an instruction about the control
+       * (the `colorKey` doctrine: the API ships tokens, the client owns presentation). A client uses
+       * it to offer the right keyboard; today only a phone needs saying, and everything else is
+       * plain prose. Absent ⇒ plain.
+       */
+      format?: "phone";
       fallback: string;
-    };
+    }
+  // A switch. It carries no bounds because there is nothing to bound — which is the whole reason it
+  // is its own arm rather than an int constrained to 0..1: a client narrowing on `type` gets a
+  // boolean and a control to draw, instead of a number it has to know to render as a switch.
+  | { key: string; group: string; type: "bool"; fallback: boolean };
 
 /** A day, in minutes — the ceiling for the two clock rules. Anything larger stops being a spacing
  *  rule and becomes "don't take orders", which is not what this setting is for. */
@@ -83,10 +94,56 @@ export const PREFERENCE_SETTINGS: readonly SettingDefinition[] = [
     max: 120,
     fallback: appConfig.defaultEvidenceRetentionMonths,
   },
-  // The letterhead of every quote and order document (EPIC-2-DOCUMENTS §6). They live here rather
-  // than in the template for the same reason the spacing rule does: they are business policy the
-  // owner changes, not a constant a developer ships — and unlike an env var, changing one is not a
-  // redeploy.
+  // Whether each create FORM keeps a silent draft of half-finished work (sessionStorage: survives a
+  // refresh and a navigation, dies with the tab). ON by default, because losing twenty fields to a
+  // mis-tapped back button is the failure worth preventing — but it IS a choice: on a shared machine
+  // an admin may prefer that a half-typed order leaves nothing behind for the next shift.
+  //
+  // ONE SWITCH PER FORM (owner decision 2026-08-26), not a single global. The two forms are used by
+  // different people at different moments — an order is filled with a client on the phone, a product
+  // is set up once at a desk — so the answer for one is not the answer for the other. A form added
+  // later gets its own key here; nothing about this shape has to change.
+  // How long before a delivery or collection a connected calendar reminds. ONE value for both
+  // transports (the Google events and the ICS feed), because "how much warning do we want" is a
+  // single question — two controls would let a phone and a laptop disagree about the same job.
+  //
+  // It lives in Preferencias rather than beside the connection in Ajustes for the reason that splits
+  // those two screens: the CONNECTION is my account, the RULE is how the business runs. And it is
+  // honoured everywhere — clamped, and clamped again against the time actually remaining, so an
+  // order booked inside the window still gets its reminder (`reminderMinutesFor`).
+  {
+    key: "calendar.reminderMinutes",
+    group: "calendar",
+    type: "int",
+    // Zero is legitimate: "tell me when it starts". The ceiling is Google's own bound on a reminder
+    // override — asking for more is rejected by the API, so offering it would be a control that
+    // saves a value the calendar refuses.
+    min: 0,
+    max: 40320,
+    fallback: appConfig.calendar.defaultReminderMinutes,
+  },
+  {
+    key: "forms.saveDraftOrders",
+    group: "forms",
+    type: "bool",
+    fallback: appConfig.defaultSaveFormDrafts,
+  },
+  {
+    key: "forms.saveDraftProducts",
+    group: "forms",
+    type: "bool",
+    fallback: appConfig.defaultSaveFormDrafts,
+  },
+  // Everything a quote or order document says beyond the figures (EPIC-2-DOCUMENTS §6). It lives
+  // here rather than in the template for the same reason the spacing rule does: it is business
+  // policy the owner changes, not a constant a developer ships — and unlike an env var, changing one
+  // is not a redeploy.
+  //
+  // THREE groups, because they are three different things and one heading ("Membrete") described
+  // only the first (owner, 2026-08-26): `documents` is the LETTERHEAD — who the page is from;
+  // `documentConditions` is what the page DECLARES about the deal; `legal` is the terms, which the
+  // document never prints at all and the REGISTER screen publishes. Filing the terms under a
+  // letterhead heading was simply wrong.
   {
     key: "documents.businessName",
     group: "documents",
@@ -107,22 +164,54 @@ export const PREFERENCE_SETTINGS: readonly SettingDefinition[] = [
     minLength: 0,
     maxLength: 60,
     multiline: false,
+    // A phone number, so a client can offer the phone keypad rather than a prose keyboard.
+    format: "phone",
     fallback: appConfig.defaultDocumentBusinessPhone,
   },
   {
     key: "documents.terms",
-    group: "documents",
+    // NOT the letterhead: the document never prints these (see below) — the REGISTER screen
+    // publishes them through `GET /legal/terms`, which is the only place they are read.
+    group: "legal",
     type: "text",
     minLength: 0,
-    // A paragraph, not an essay — it has to fit in the footer of the last page without pushing the
-    // totals onto a page of their own.
+    // A paragraph, not an essay. Note that a document does NOT transcribe this (owner decision
+    // 2026-08-05, EPIC-2-DOCUMENTS §5): printing a wall of conditions on a quote makes it read like
+    // a contract nobody signed, and it pushes the totals — the thing the client is actually looking
+    // for — onto a second page. The document carries a short acceptance line REFERRING to these
+    // terms; the text itself is stored here so it can be quoted, sent, or shown on request.
     maxLength: 1200,
     multiline: true,
     fallback: appConfig.defaultDocumentTerms,
   },
   {
+    key: "documents.conditions",
+    group: "documentConditions",
+    type: "text",
+    minLength: 0,
+    // ONE LINE PER CONDITION, and deliberately short: this block is PRINTED on the page, unlike
+    // `documents.terms` above. Four lines of about a hundred characters is the most a document can
+    // carry without the conditions competing with the totals for the reader's attention — which is
+    // the exact failure that made the full terms a referenced document rather than a transcribed one.
+    maxLength: 400,
+    multiline: true,
+    fallback: appConfig.defaultDocumentConditions,
+  },
+  {
+    key: "documents.freeDeliveryNote",
+    group: "documentConditions",
+    type: "text",
+    minLength: 0,
+    maxLength: 120,
+    // A single sentence, so no newline: it is printed as one condition among the others.
+    multiline: false,
+    fallback: appConfig.defaultDocumentFreeDeliveryNote,
+  },
+  {
     key: "documents.quoteValidityDays",
-    group: "documents",
+    // How long the quote DECLARES itself valid for — something the page states about the deal, so
+    // it belongs with the conditions rather than with the business's name and phone.
+    group: "documentConditions",
     type: "int",
     // At least a day (a quote valid for zero days cannot be handed to anyone); a year is the
     // ceiling, past which "válida por N días" stops meaning anything.
@@ -157,7 +246,20 @@ export const settingDefinitionFor = (key: string): SettingDefinition | undefined
 export function readSettingValue(
   definition: SettingDefinition,
   stored: string | undefined,
-): number | string {
+): number | string | boolean {
+  if (definition.type === "bool") {
+    // Only the two strings we write are accepted. Anything else — a missing row, a hand-edited
+    // "yes", a leftover "1" — is a value we cannot honestly interpret, so it reads as the default
+    // rather than as `false`: silently turning a feature OFF because a row is malformed is the more
+    // surprising of the two failures.
+    if (stored === "true") {
+      return true;
+    }
+    if (stored === "false") {
+      return false;
+    }
+    return definition.fallback;
+  }
   if (definition.type === "text") {
     if (stored === undefined || stored.length < definition.minLength) {
       return definition.fallback;
@@ -178,6 +280,9 @@ const projectSetting = (
   stored: string | undefined,
 ): PreferenceSettingModel => {
   const value = readSettingValue(definition, stored);
+  if (definition.type === "bool") {
+    return { key: definition.key, type: "bool", value: value === true, group: definition.group };
+  }
   return definition.type === "text"
     ? {
         key: definition.key,
@@ -186,6 +291,7 @@ const projectSetting = (
         minLength: definition.minLength,
         maxLength: definition.maxLength,
         multiline: definition.multiline,
+        ...(definition.format !== undefined && { format: definition.format }),
         group: definition.group,
       }
     : {
@@ -223,7 +329,7 @@ export async function loadSettings(
  */
 export async function writeSettings(
   client: Pick<Prisma.TransactionClient, "appPreference">,
-  settings: readonly { key: string; value: number | string }[],
+  settings: readonly { key: string; value: number | string | boolean }[],
 ): Promise<void> {
   await Promise.all(
     settings.map((setting) => {

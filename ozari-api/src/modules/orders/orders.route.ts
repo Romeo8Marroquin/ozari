@@ -24,8 +24,11 @@ import {
   validateAdvanceOrder,
   validateOrderEvidenceUploads,
 } from "./advance/advance.validator.js";
-import { payOrder } from "./payment/payment.controller.js";
-import { validatePayOrder } from "./payment/payment.validator.js";
+import { payOrder, undoOrderPayment } from "./payment/payment.controller.js";
+import {
+  validatePayOrder,
+  validateUndoOrderPayment,
+} from "./payment/payment.validator.js";
 
 const router: RouterType = Router();
 
@@ -115,6 +118,17 @@ router.post(
   isGrantedRoles([RolesEnum.Admin]),
   validatePayOrder,
   payOrder,
+);
+// DELETING that record — the inverse write, and a hard delete: nothing is kept, so there is no undo
+// of the undo. Same guard, because recording money is the admin's and so is unrecording it. It is
+// NOT a refund (money travelling back to the client is a different event with its own amount, date
+// and method); this only touches our own books.
+router.delete(
+  "/:id/payment",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  validateUndoOrderPayment,
+  undoOrderPayment,
 );
 
 export default router;

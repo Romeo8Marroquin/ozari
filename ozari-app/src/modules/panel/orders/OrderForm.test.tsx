@@ -36,6 +36,16 @@ vi.mock('./useOrderAvailability', () => ({ useOrderAvailability }));
 const { success, error, warning } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
 vi.mock('@components/notifications/notify', () => ({ notify: { success, error, warning } }));
 
+// Only the draft SWITCH is stubbed; `usePreferences` itself stays real, because the quote button in
+// the footer reads it and a wholesale module mock would take that down with it.
+const { formDrafts } = vi.hoisted(() => ({
+  formDrafts: vi.fn(() => ({ enabled: true, isLoading: false })),
+}));
+vi.mock('../preferences/usePreferences', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../preferences/usePreferences')>()),
+  useFormDraftsEnabled: formDrafts,
+}));
+
 // The form defaults the "Asignar a" select to the current admin's id (from the token).
 const { getStoredUserId } = vi.hoisted(() => ({ getStoredUserId: vi.fn(() => 1) }));
 vi.mock('@hooks/useRole', () => ({ getStoredUserId }));
@@ -82,13 +92,17 @@ vi.mock('./ClientRegistryModal', () => ({
 }));
 
 import { QueryKeys } from '@constants/QueryKeys';
+import { StorageKeys } from '@constants/StorageKeys';
+import { Storage } from '@utils/storage';
 import { PanelNavContext, type PanelNav } from '../PanelNavContext';
 import type { Product } from '../products/product.types';
 import type { ClientRegistry, OrderCatalog, OrderDetail } from './order.types';
 import OrderForm from './OrderForm';
-import { reconcileToastDuration } from './SchemaCreateOrder';
+import { createOrderDefaultValues, reconcileToastDuration } from './SchemaCreateOrder';
 
 const KEY = 'modules.panel.orders.create';
+/** The draft note is ONE component shared by both create forms, so its copy is not per-form. */
+const DRAFT_KEY = 'modules.panel.formDraft';
 /** The logistics pad's own namespace — a driver conflict never borrows the stock keys. */
 const DKEY = 'modules.panel.orders.driverAvailability';
 
@@ -240,6 +254,12 @@ const FROZEN_NOW = new Date('2026-07-15T12:00:00').getTime();
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The form autosaves a silent draft to sessionStorage as it is filled, so without this every test
+  // after the first one would mount already carrying the previous test's half-typed order — which is
+  // the feature working, and cross-test pollution all the same.
+  sessionStorage.clear();
+  localStorage.clear();
+  formDrafts.mockReturnValue({ enabled: true, isLoading: false });
   vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW);
   useCreateOrder.mockReturnValue({ createOrder, isPending: false });
   useUpdateOrder.mockReturnValue({ updateOrder, isPending: false });
@@ -621,13 +641,29 @@ describe('OrderForm', () => {
     expect(options).toMatchObject({ title: `${KEY}.availability.reconciledTitle`, duration: reconcileToastDuration(2) });
 
     // The takeable amount now surfaces as a quiet hint UNDER each line's quantity (the dropdown shows
-    // only the product name). The kept line shows its count; a re-added sold-out product shows "Agotado".
+    // only the product name).
     expect(await screen.findByText(`${KEY}.availability.count`)).toBeInTheDocument();
     expect(within(byId(container, 'order-line-product-0')).queryByRole('option', { name: /availability/ })).toBeNull();
-    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    await user.selectOptions(byId(container, 'order-line-product-1'), '4');
-    expect(await screen.findByText(`${KEY}.availability.soldOut`)).toBeInTheDocument();
+
+    // And a product with nothing takeable is no longer OFFERED at all. Listing it only to reject the
+    // first quantity typed makes the admin discover what is unavailable one product at a time, in
+    // front of a client. "Vasos" was just measured at 0 for this window and "Silla plegable" is
+    // already on a line, so there is nothing left to add — and the button that would open an empty
+    // select is disabled rather than enabled.
+    expect(screen.getByRole('button', { name: `${KEY}.actions.addLine` })).toBeDisabled();
   }, 20000);
+
+  it('offers a product whose availability is UNKNOWN — unknown is not zero', async () => {
+    // A rental with no pickup chosen yet, or a product carrying no baseline, answers `undefined`.
+    // Treating that as sold out would hide half the catalogue until the dates are filled in, which
+    // is exactly backwards: the dates are usually the last thing typed.
+    const user = userEvent.setup({ delay: null });
+    const { container } = renderForm();
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    const options = within(byId(container, 'order-line-product-0')).getAllByRole('option');
+    expect(options.map((option) => option.textContent)).toContain('Silla plegable');
+    expect(options.map((option) => option.textContent)).toContain('Vasos');
+  });
 
   it('handles adjust-only, remove-only, and empty availability payloads', async () => {
     const user = userEvent.setup({ delay: null });
@@ -1087,6 +1123,113 @@ describe('OrderForm (edit mode)', () => {
     const { navigateTo } = renderForm({ mode: 'edit', order: existingOrder });
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.cancel` }));
     expect(navigateTo).toHaveBeenCalledWith('/panel/pedidos/12');
+  });
+});
+
+describe('OrderForm — silent draft', () => {
+  /** A draft good enough to prove restoration, without filling twenty fields. */
+  const seedDraft = (over: Record<string, unknown> = {}): void => {
+    Storage.set(StorageKeys.ORDER_CREATE_DRAFT, {
+      ...createOrderDefaultValues,
+      clientRegistryId: 3,
+      eventTypeId: 1,
+      deliveryName: 'Borrador guardado',
+      deliveryContact: '5555-0000',
+      deliveryAddress: 'Dirección del borrador',
+      deliveryAmount: '77',
+      ...over,
+    });
+  };
+
+  const noteContainer = (): Element | null =>
+    screen.getByText(`${DRAFT_KEY}.restored`, { exact: false }).closest('[aria-hidden]');
+
+  it('autosaves as the admin types, so a refresh loses nothing', async () => {
+    const { container } = renderForm();
+    await userEvent.type(byId(container, 'order-delivery-name'), 'María');
+    await waitFor(() =>
+      expect(
+        Storage.get<{ deliveryName: string }>(StorageKeys.ORDER_CREATE_DRAFT)?.deliveryName,
+      ).toBe('María'),
+    );
+  });
+
+  it('restores a stored draft with a visible note, and discards it on demand', async () => {
+    seedDraft();
+    const { container } = renderForm();
+    expect((byId(container, 'order-delivery-name') as HTMLInputElement).value).toBe(
+      'Borrador guardado',
+    );
+    expect(noteContainer()).toHaveAttribute('aria-hidden', 'false');
+
+    await userEvent.click(screen.getByRole('button', { name: `${DRAFT_KEY}.discard` }));
+    expect((byId(container, 'order-delivery-name') as HTMLInputElement).value).toBe('');
+    await waitFor(() => expect(Storage.get(StorageKeys.ORDER_CREATE_DRAFT)).toBeNull());
+    expect(noteContainer()).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('does NOT let the client prefill overwrite what the draft restored', async () => {
+    // The regression this whole seeding-vs-reset design exists to prevent: client 3's saved address
+    // is "Hacienda Real …", and mounting with a draft that names the same client must not re-run
+    // the prefill and replace the admin's own edits with the client's current defaults.
+    seedDraft();
+    const { container } = renderForm();
+    expect((byId(container, 'order-delivery-address') as HTMLInputElement).value).toBe(
+      'Dirección del borrador',
+    );
+    expect((byId(container, 'order-delivery-amount') as HTMLInputElement).value).toBe('77');
+  });
+
+  it('keeps the note collapsed (hidden and inert) when there is no draft to restore', () => {
+    renderForm();
+    expect(noteContainer()).toHaveAttribute('aria-hidden', 'true');
+    expect(noteContainer()).toHaveAttribute('inert');
+  });
+
+  it('offers the way OUT of the feature, not just out of this draft', async () => {
+    // An admin who did not want their half-typed order kept needs to know where the switch is;
+    // "Preferencias", three screens away, is not a discoverable answer on its own.
+    seedDraft();
+    const { navigateTo } = renderForm();
+    await userEvent.click(screen.getByRole('button', { name: `${DRAFT_KEY}.disable` }));
+    expect(navigateTo).toHaveBeenCalledWith('/panel/preferencias');
+  });
+
+  it('with the preference OFF, stores nothing and empties what was already stored', async () => {
+    // Switching the feature off has to mean "nothing of mine is being kept", not merely "nothing
+    // new will be" — a draft left behind would outlive the decision to stop making them.
+    seedDraft();
+    formDrafts.mockReturnValue({ enabled: false, isLoading: false });
+    const { container } = renderForm();
+    await waitFor(() => expect(Storage.get(StorageKeys.ORDER_CREATE_DRAFT)).toBeNull());
+    // Nothing was restored either — a form showing recovered values with no note explaining them is
+    // worse than a form that simply starts clean.
+    expect((byId(container, 'order-delivery-name') as HTMLInputElement).value).toBe('');
+    expect(noteContainer()).toHaveAttribute('aria-hidden', 'true');
+
+    await userEvent.type(byId(container, 'order-delivery-name'), 'María');
+    await waitFor(() =>
+      expect((byId(container, 'order-delivery-name') as HTMLInputElement).value).toBe('María'),
+    );
+    expect(Storage.get(StorageKeys.ORDER_CREATE_DRAFT)).toBeNull();
+  });
+
+  it('EDIT never drafts — server state is what an existing order is', async () => {
+    // A stale edit draft restored over an order somebody else already changed would silently
+    // resurrect old values; a refresh simply reloads the live order instead.
+    const { container } = renderForm({ mode: 'edit', order: existingOrder });
+    await userEvent.type(byId(container, 'order-delivery-name'), 'X');
+    await waitFor(() =>
+      expect((byId(container, 'order-delivery-name') as HTMLInputElement).value).toContain('X'),
+    );
+    expect(Storage.get(StorageKeys.ORDER_CREATE_DRAFT)).toBeNull();
+  });
+
+  it('clears the draft once the order actually exists', async () => {
+    const { container } = renderForm();
+    const handlers = await fillAndSubmit(container);
+    act(() => handlers.onSuccess());
+    expect(Storage.get(StorageKeys.ORDER_CREATE_DRAFT)).toBeNull();
   });
 });
 

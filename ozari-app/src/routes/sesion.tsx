@@ -1,4 +1,6 @@
 import { StorageKeys } from '@constants/StorageKeys';
+import { getStoredRole } from '@hooks/useRole';
+import { panelHomeFor } from '../modules/panel/navConfig';
 import SesionLayout from '@sesion/SesionLayout';
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { Storage } from '@utils/storage';
@@ -57,7 +59,10 @@ export const Route = createFileRoute('/sesion')({
         // typed `to` can't know a runtime-resolved path (`/panel/productos/6`) — the target was
         // already sanitized to an in-panel path by `validateSearch`.
         throw redirect({
-          to: (search.redirect ?? '/panel/productos') as never,
+          // The role's OWN front door (the dashboard for an Admin), never a fixed path — same rule
+          // as the login's, read from the same token, so the two can't disagree about where a
+          // signed-in person belongs.
+          to: (search.redirect ?? panelHomeFor(getStoredRole())) as never,
         });
       }
     }

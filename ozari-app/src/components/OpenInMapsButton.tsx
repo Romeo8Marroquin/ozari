@@ -4,7 +4,14 @@ import { HiOutlineMap } from 'react-icons/hi2';
 import Button from '@components/Button';
 import MapsAppIcon from '@components/MapsAppIcon';
 import Modal from '@components/Modal';
-import { buildMapsUrl, MAPS_APPS, type MapsApp, type MapsDestination } from '@utils/mapLinks';
+import {
+  buildMapsLink,
+  detectMapsPlatform,
+  MAPS_APPS,
+  openMapsLink,
+  type MapsApp,
+  type MapsDestination,
+} from '@utils/mapLinks';
 import { getMapsAppPreference, setMapsAppPreference } from '@utils/mapsPreference';
 
 const KEY = 'components.openInMaps';
@@ -54,10 +61,16 @@ const OpenInMapsButton: React.FC<OpenInMapsButtonProps> = ({
     : t(`${KEY}.action`);
 
   const open = (app: MapsApp): void => {
-    // `noopener` is required with `_blank`: without it the opened tab gets a handle back to this
-    // window. `_blank` (not a same-tab navigation) so the order stays exactly where the driver
-    // left it when they come back from navigating.
-    window.open(buildMapsUrl(app, destination), '_blank', 'noopener,noreferrer');
+    // The PLATFORM decides the mechanism, not this component: an Android intent, an iOS universal
+    // link in this tab, or a website in a new tab on a desktop. It is read at tap time rather than
+    // at render, so nothing here caches a device answer. See `mapLinks` for why each is what it is.
+    openMapsLink(
+      buildMapsLink(
+        app,
+        destination,
+        detectMapsPlatform(navigator.userAgent, navigator.maxTouchPoints),
+      ),
+    );
   };
 
   const openWith = (app: MapsApp): void => {

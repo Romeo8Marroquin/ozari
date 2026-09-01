@@ -2,6 +2,7 @@
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import UpNextCard from './UpNextCard';
+import type { OrderAction } from '../orders/order.types';
 import type { UpNextItem } from './dashboard.types';
 
 const KEY = 'modules.panel.dashboard.upNext';
@@ -46,11 +47,27 @@ const item = (overrides: Record<string, unknown> = {}): UpNextItem =>
     ...overrides,
   }) as UpNextItem;
 
+/** A forward move somebody DRIVES to perform — `tracksEvent` is what the navigation button hangs
+ *  off, exactly as the machine declares it (Entregado stamps DELIVERY, Recolectado COLLECTION;
+ *  En ruta and Listo stamp nothing). */
+const travellingTo = (statusName: string): OrderAction => ({
+  kind: 'forward',
+  statusId: 3,
+  statusName,
+  requiresEvidence: false,
+  minEvidence: 1,
+  maxEvidence: 10,
+  requiresReason: false,
+  inventoryEffect: 'none',
+  purgesEvidence: false,
+  tracksEvent: 'DELIVERY',
+});
+
 const renderCard = (overrides: Record<string, unknown> = {}, rank = 0) => {
   const onOpen = vi.fn();
   const onAdvance = vi.fn();
   const onPay = vi.fn();
-  render(
+  const view = render(
     <UpNextCard
       item={item(overrides)}
       rank={rank}
@@ -59,7 +76,7 @@ const renderCard = (overrides: Record<string, unknown> = {}, rank = 0) => {
       onPay={onPay}
     />,
   );
-  return { onOpen, onAdvance, onPay };
+  return { ...view, onOpen, onAdvance, onPay };
 };
 
 beforeEach(() => vi.clearAllMocks());
@@ -146,8 +163,17 @@ describe('UpNextCard', () => {
     expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
   });
 
-  it('shows it once the ORDER carries coordinates', () => {
-    renderCard({ deliveryCoords: { lat: 14.634915, lng: -90.506883 } });
+  it('shows it once the ORDER carries coordinates AND the next move is a trip', () => {
+    const PIN = { lat: 14.634915, lng: -90.506883 };
+    // The fixture's next move is "En ruta" — the loading, which nobody drives to. A pin alone is
+    // not a reason to offer directions: this card would otherwise put a Waze button on every
+    // pending order, including ones whose van has not been packed yet.
+    const { unmount } = renderCard({ deliveryCoords: PIN });
+    expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
+    unmount();
+
+    // The order is now out for delivery: its next move CONFIRMS an arrival, so it is a trip.
+    renderCard({ deliveryCoords: PIN, actions: [travellingTo('Entregado')] });
     expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
   });
 

@@ -30,6 +30,8 @@ const EXAMPLE_ADMIN_NAME = "Romeo Marroquín";
 const EXAMPLE_DELIVERY_AT = "2026-08-01T14:00:00.000Z";
 const EXAMPLE_PICKUP_AT = "2026-08-02T10:00:00.000Z";
 const EXAMPLE_ORDER_CREATED_AT = "2026-07-16T12:00:00.000Z";
+const EXAMPLE_FEED_URL =
+  "https://api.partyrentalsgt.com/api/calendar/feed/9f2c8a1b…d41.ics";
 
 // The two path params every catalog route shares.
 const catalogParam: OpenAPIV3.ParameterObject = {
@@ -1815,6 +1817,31 @@ export const paths: OpenAPIV3.PathsObject = {
       },
     },
   },
+  "/legal/terms": {
+    get: {
+      tags: ["System"],
+      summary: "The business's published terms and conditions",
+      operationId: "getTerms",
+      description:
+        "**PUBLIC** — no session, no role. The people who most need to read these are the ones " +
+        "being asked to ACCEPT them at registration, who by definition have no account yet.\n\n" +
+        "Deliberately NOT part of the Admin-only `/preferences`: publishing one paragraph must not " +
+        "mean handing an anonymous visitor every catalog, operational rule and bank account behind " +
+        "that endpoint. It reads the same `documents.terms` setting through the same registry, so " +
+        "the text a client accepts is exactly the text the admin wrote.\n\n" +
+        "An **empty string is a legitimate answer**, not a `404`: a business that has published no " +
+        "terms is a valid configuration, and a client should then offer nothing to read rather " +
+        "than show an error about a document that was never meant to exist. Public limiter (30/min).",
+      security: [{ ApiKeyAuth: [] }],
+      responses: {
+        "200": dataResponse("The terms, as written. May be empty.", "TermsResponse", {
+          terms: "Cualquier daño ocasionado al mobiliario será cobrado según el precio de reposición.",
+        }),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
   "/orders/{id}/payment": {
     post: {
       tags: ["Orders"],
@@ -1882,6 +1909,293 @@ export const paths: OpenAPIV3.PathsObject = {
           409,
           "This order already has a payment recorded",
         ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    delete: {
+      tags: ["Orders"],
+      summary: "Delete an order's payment record (admin)",
+      operationId: "undoOrderPayment",
+      description:
+        "**STRICTLY Admin.** Clears `paidAt`, drops the recorded method and returns the payment " +
+        "status to PENDING — the exact inverse of the POST, leaving the order as it stood before.\n\n" +
+        "**A hard delete, not a tombstone.** Nothing is kept, so there is no 'undone payment' state " +
+        "and no undo of the undo: re-recording is simply a new payment, stamped with the date it is " +
+        "actually made. Why the door exists at all is that recording payment is one " +
+        "irreversible-looking tap offered on three screens and the POST answers `409` on the second " +
+        "(rightly), so the state was otherwise unreachable from the UI.\n\n" +
+        "**It is not a refund.** Money travelling back to the client is a different event with its " +
+        "own amount, date and method, and would be its own door; this touches only our record.\n\n" +
+        "An order with NO payment answers `409`, the mirror of the POST's: it means the caller is " +
+        "looking at a stale screen, and succeeding silently would report deleting something that " +
+        "was already gone. It never touches the service status, the tracked actuals or stock.",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "integer", minimum: 1 },
+          example: 12,
+        },
+      ],
+      responses: {
+        "200": dataResponse(
+          "The updated order, in the detail shape.",
+          "OrderDetailResponse",
+          { order: { id: 12, isPaid: false } },
+          "Payment record undone",
+        ),
+        "400": errorResponse("The id is malformed.", 400, "The order id is not valid"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse("No order with that id.", 404, "The order does not exist"),
+        "409": errorResponse(
+          "The order has no payment to undo.",
+          409,
+          "This order has no payment recorded",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/calendar": {
+    get: {
+      tags: ["Calendar"],
+      summary: "Calendar connections and the subscription URL (admin)",
+      operationId: "getCalendarStatus",
+      description:
+        "**STRICTLY Admin.** Everything the calendar settings screen renders, in one call: whether " +
+        "this user has connected Google (and which account), their ICS subscription URL if they " +
+        "have minted one, the shared reminder lead time, and whether the deployment has Google " +
+        "credentials at all.\n\n" +
+        "`googleAvailable: false` means `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are unset — the " +
+        "UI then offers the ICS feed only and explains why, instead of showing a Connect button " +
+        "that could not work.\n\n" +
+        "It never returns an access or refresh token. The feed URL IS a secret and is returned on " +
+        "purpose: an admin has to be able to copy it onto a second device, which is why the token " +
+        "is stored encrypted as well as hashed.",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      responses: {
+        "200": dataResponse(
+          "The current calendar configuration.",
+          "CalendarStatusResponse",
+          {
+            calendar: {
+              google: { connected: true, isActive: true, accountEmail: EXAMPLE_EMAIL },
+              feed: { isActive: true, url: EXAMPLE_FEED_URL },
+              reminderMinutes: 1440,
+              googleAvailable: true,
+            },
+          },
+          "Calendar settings fetched",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/calendar/google/authorize": {
+    get: {
+      tags: ["Calendar"],
+      summary: "Start the Google Calendar consent flow (admin)",
+      operationId: "authorizeGoogleCalendar",
+      description:
+        "**STRICTLY Admin.** Returns the Google consent URL for the browser to visit — it does not " +
+        "redirect, so the caller keeps its session and can open it however it likes.\n\n" +
+        "The URL asks for `access_type=offline` and `prompt=consent`, which together are what " +
+        "produce a REFRESH token: without the first the grant expires in an hour, and without the " +
+        "second a re-connect of an already-authorised account returns no refresh token at all. The " +
+        "scopes are the narrowest that do the job (`calendar.events` + `userinfo.email`), never " +
+        "`auth/calendar`, which would also grant creating and deleting whole calendars.\n\n" +
+        "The `state` is a short-lived signed token carrying the user id — the callback arrives as a " +
+        "plain browser navigation with no session of ours, so it is the only thing that says who is " +
+        "connecting.",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      responses: {
+        "200": dataResponse(
+          "Where to send the browser for consent.",
+          "CalendarAuthorizeResponse",
+          { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth?client_id=…" },
+          "Authorization link generated",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+        "503": errorResponse(
+          "The deployment has no Google OAuth credentials configured.",
+          503,
+          "Google Calendar is not configured on this server",
+        ),
+      },
+    },
+  },
+
+  "/calendar/google/callback": {
+    get: {
+      tags: ["Calendar"],
+      summary: "Google's OAuth redirect target (public)",
+      operationId: "googleCalendarCallback",
+      description:
+        "**Not called by clients — Google redirects the admin's browser here after consent.**\n\n" +
+        "It is one of the two routes mounted BEFORE the API-key check, because it arrives as a " +
+        "top-level navigation carrying nothing we control: the signed `state` is its " +
+        "authentication, which is exactly what OAuth's state parameter is for. It carries its own " +
+        "strict limiter (20/min).\n\n" +
+        "**Every outcome is a redirect, never a JSON error.** The person on this request is looking " +
+        "at a browser tab, so a failure hands them back to `/panel/ajustes?calendario=error` and " +
+        "success to `?calendario=conectado`.",
+      security: [],
+      parameters: [
+        { name: "code", in: "query", required: true, schema: { type: "string" } },
+        {
+          name: "state",
+          in: "query",
+          required: true,
+          description: "The signed token minted by `/calendar/google/authorize`.",
+          schema: { type: "string" },
+        },
+      ],
+      responses: {
+        "302": {
+          description:
+            "Always — back to the settings screen, with `?calendario=conectado` or `=error`.",
+          headers: {
+            Location: {
+              description: "The frontend settings URL.",
+              schema: { type: "string" },
+            },
+          },
+        },
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/calendar/google": {
+    delete: {
+      tags: ["Calendar"],
+      summary: "Disconnect Google Calendar (admin)",
+      operationId: "disconnectGoogleCalendar",
+      description:
+        "**STRICTLY Admin.** Hard-deletes the connection (NO-TRASH: a disabled row holding a live " +
+        "refresh token is a credential nobody is watching) and revokes the grant with Google, so it " +
+        "disappears from the user's own third-party access list. The revoke is best-effort — our " +
+        "copy goes either way, and a network failure must not leave an admin unable to disconnect.\n\n" +
+        "**Events already written are deliberately LEFT in the calendar.** They are appointments " +
+        "the person still has to keep, and emptying somebody's week because they unlinked an " +
+        "integration would be a far worse surprise than a few entries that stop updating.",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      responses: {
+        "200": messageResponse(
+          "The connection is gone and the grant was revoked with Google.",
+          "Google Calendar disconnected successfully",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/calendar/feed": {
+    post: {
+      tags: ["Calendar"],
+      summary: "Mint or regenerate the ICS subscription URL (admin)",
+      operationId: "createCalendarFeed",
+      description:
+        "**STRICTLY Admin.** Returns a private subscription URL for Apple Calendar, Outlook or any " +
+        "other client. There is no write API for Apple Calendar, so this is not a fallback — it is " +
+        "THE mechanism for every calendar that is not Google.\n\n" +
+        "Calling it again REGENERATES, which is also how it is revoked: the new token replaces the " +
+        "old one, so every subscription made with the previous URL stops resolving immediately.",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      responses: {
+        "200": dataResponse(
+          "The subscription URL — a secret, returned so it can be copied to a device.",
+          "CalendarFeedResponse",
+          { url: EXAMPLE_FEED_URL },
+          "Subscription link generated",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    delete: {
+      tags: ["Calendar"],
+      summary: "Stop publishing the ICS feed (admin)",
+      operationId: "deleteCalendarFeed",
+      description:
+        "**STRICTLY Admin.** Hard-deletes the feed row, so the URL stops resolving for every device " +
+        "already subscribed to it. Same reasoning as the connection: a disabled row holding a live " +
+        "token is a credential nobody is watching.",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      responses: {
+        "200": messageResponse(
+          "The feed is gone; every subscribed device stops resolving the URL.",
+          "Subscription link deleted successfully",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/calendar/feed/{token}": {
+    get: {
+      tags: ["Calendar"],
+      summary: "The subscribable calendar (public, token in the path)",
+      operationId: "getCalendarFeed",
+      description:
+        "**Fetched by calendar apps, not by our client.** Returns `text/calendar` (RFC 5545) with " +
+        "one `VEVENT` per pending delivery and collection, each carrying a `VALARM` at the " +
+        "configured lead time.\n\n" +
+        "It is the second route mounted BEFORE the API-key check: Apple Calendar sends no header, " +
+        "cookie or origin we control, so **the 32-byte token in the path is the credential**. It is " +
+        "hashed in storage, and regenerating it invalidates every subscription at once. Its own " +
+        "strict limiter (20/min) applies — real clients poll at minutes, not seconds.\n\n" +
+        "**A subscription is a MIRROR, not a log**: whatever this returns IS the calendar, so a " +
+        "cancelled order, a confirmed step or a deleted order simply stops being emitted and " +
+        "disappears from the subscriber's calendar on its next refresh. The window is bounded " +
+        "(30 days back, a year ahead) because a working schedule is not an archive.\n\n" +
+        "An unknown token answers an empty `404` — this endpoint is spoken to by machines, and a " +
+        "JSON body they cannot parse is noise in somebody's console.",
+      security: [],
+      parameters: [
+        {
+          name: "token",
+          in: "path",
+          required: true,
+          description: "The feed token, with or without the `.ics` suffix.",
+          schema: { type: "string" },
+          example: "9f2c…a41.ics",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "The calendar.",
+          content: {
+            "text/calendar": {
+              schema: { type: "string" },
+              example:
+                "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:orden12d@ozari\r\n…",
+            },
+          },
+        },
+        "404": { description: "No such feed, or it was regenerated." },
         "429": rateLimited,
         "500": serverError,
       },

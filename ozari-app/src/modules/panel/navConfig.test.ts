@@ -106,6 +106,10 @@ describe('panelHomeFor', () => {
     // that hides the tab, so nobody is bounced off a screen they can't see.
     expect(panelHomeFor(Role.Admin)).toBe('/panel/inicio');
     expect(panelHomeFor(Role.Client)).toBe('/panel/productos');
+    // Admin has an EXPLICIT entry in `PANEL_HOME` — the one place a role's landing page is
+    // configured. Deriving it from "the first tab you can see" made the landing page a side-effect
+    // of the sidebar's ORDER, so reordering a tab would silently move somebody's home.
+    expect(panelHomeFor(Role.Admin)).toBe('/panel/inicio');
     expect(panelHomeFor(Role.Driver)).toBe('/panel/pedidos');
   });
 

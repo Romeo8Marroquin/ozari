@@ -28,6 +28,7 @@ export function clearAuthState(): void {
   Storage.remove(StorageKeys.CSRF);
   // User-scoped work-in-progress: another user on this browser must never inherit a draft.
   Storage.remove(StorageKeys.PRODUCT_CREATE_DRAFT);
+  Storage.remove(StorageKeys.ORDER_CREATE_DRAFT);
   clearRefreshTimer();
 
   // Every teardown means "we KNOW there is no session" — the /sesion guard must not fire its

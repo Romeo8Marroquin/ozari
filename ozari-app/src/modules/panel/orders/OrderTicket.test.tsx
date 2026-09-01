@@ -66,6 +66,14 @@ const forwardTo = (statusName: string): OrderAction => ({
   purgesEvidence: false,
 });
 
+/** The same move, but one somebody DRIVES to perform — `tracksEvent` is what the navigation button
+ *  hangs off, exactly as the machine declares it (Entregado stamps DELIVERY, Recolectado
+ *  COLLECTION; En ruta and Listo stamp nothing). */
+const travellingTo = (statusName: string): OrderAction => ({
+  ...forwardTo(statusName),
+  tracksEvent: 'DELIVERY',
+});
+
 const NEXT_STEP = 'modules.panel.orders.ticket.nextStep';
 
 /** The status PILL — the label morphs inside it, so the tone classes live on its wrapper. */
@@ -81,18 +89,31 @@ describe('OrderTicket', () => {
   const PIN = { lat: 14.634915, lng: -90.506883 };
 
   it('offers navigation on the SAME rule as the detail and the dashboard', () => {
-    // The agenda used to be the odd one out — the lean list carried no pin, so the button the other
-    // two surfaces showed simply could not exist here.
-    const { unmount } = render(<OrderTicket order={{ ...base(), deliveryCoords: PIN }} />);
+    // The rule is the machine's, not the calendar's: the move this order is waiting for has to be
+    // somebody DRIVING. The agenda used to be the odd one out in the other direction too — the lean
+    // list carried no pin, so the button the other two surfaces showed could not exist here at all.
+    const { unmount } = render(
+      <OrderTicket order={{ ...base(), deliveryCoords: PIN, actions: [travellingTo('Entregado')] }} />,
+    );
     expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
     unmount();
 
-    // No pin ⇒ nothing to navigate to.
-    const { unmount: second } = render(<OrderTicket order={base()} />);
+    // The next move is NOT a trip (Pendiente → En ruta is the loading, and nobody drives to it), so
+    // an order still sitting in the warehouse — possibly for next week — offers no directions.
+    const { unmount: second } = render(
+      <OrderTicket order={{ ...base(), deliveryCoords: PIN, actions: [forwardTo('En ruta')] }} />,
+    );
     expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
     second();
 
-    // Finished ⇒ no trip left to make, pin or no pin.
+    // No pin ⇒ nothing to navigate to, however much travelling is left.
+    const { unmount: third } = render(
+      <OrderTicket order={{ ...base(), actions: [travellingTo('Entregado')] }} />,
+    );
+    expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
+    third();
+
+    // Finished or cancelled ⇒ the engine offers no forward move at all, pin or no pin.
     render(
       <OrderTicket
         order={{ ...base(), deliveryCoords: PIN, readyAt: '2026-08-02T12:00:00.000Z' }}
@@ -116,7 +137,12 @@ describe('OrderTicket', () => {
 
   it('the maps action opens the app chooser, not the order', async () => {
     const onOpen = vi.fn();
-    render(<OrderTicket order={{ ...base(), deliveryCoords: PIN }} onOpen={onOpen} />);
+    render(
+      <OrderTicket
+        order={{ ...base(), deliveryCoords: PIN, actions: [travellingTo('Entregado')] }}
+        onOpen={onOpen}
+      />,
+    );
 
     const maps = screen.getByTestId('open-in-maps');
     // Keyboard activation must not bubble to the card-link either — the same guard as the click.

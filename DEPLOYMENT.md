@@ -50,9 +50,19 @@ Backend reads these at runtime from Secret Manager (see `cloudbuild.yaml` `--set
 | `ozari-email-key` | `EMAIL_KEY` | **Resend API key** (one per env) | API runtime |
 | `ozari-r2-access-key` | `R2_ACCESS_KEY` | R2 S3 **Access Key ID** (see §3b) | API runtime |
 | `ozari-r2-secret-key` | `R2_SECRET_KEY` | R2 S3 **Secret Access Key** (see §3b) | API runtime |
+| `ozari-google-client-id` | `GOOGLE_CLIENT_ID` | Google OAuth **client ID** (see §3d) | API runtime |
+| `ozari-google-client-secret` | `GOOGLE_CLIENT_SECRET` | Google OAuth **client secret** (see §3d) | API runtime |
 
-Plain (non-secret) runtime env vars: `NODE_ENV`, `LOG_LEVEL`, `APP_HOST`, and the three R2 URL/name
-vars `R2_ENDPOINT`/`R2_BUCKET_NAME`/`R2_PUBLIC_URL` (§3b). `PORT` is injected by Cloud Run (8080).
+Plain (non-secret) runtime env vars: `NODE_ENV`, `LOG_LEVEL`, `APP_HOST`, `API_PUBLIC_URL`, and the
+three R2 URL/name vars `R2_ENDPOINT`/`R2_BUCKET_NAME`/`R2_PUBLIC_URL` (§3b). `PORT` is injected by
+Cloud Run (8080).
+
+> **`APP_HOST` and `API_PUBLIC_URL` are not the same host.** `APP_HOST` is the **frontend** origin
+> (CORS, the API-key origin check, email links). `API_PUBLIC_URL` is the **API's own** origin, and it
+> exists because the Cloudflare Worker in front of Cloud Run rewrites the `Host` header to the
+> `run.app` name (§3c): the calendar's OAuth redirect URI and the ICS feed URL an admin pastes into
+> their phone are built from it, and neither may name `run.app`. Empty ⇒ derived from the request,
+> which is correct only for a deployment with nothing in front of it. No trailing slash (§3d).
 **Frontend:** `VITE_API_URL` (set 🔒 manually in Cloudflare Pages). **Not used:** `R2_TOKEN` (§3b).
 
 > ⚠️ `ENCRYPTION_KEY` **must never change** once data is encrypted with it — rotating it makes all
@@ -288,7 +298,8 @@ the third-party-cookie bug this whole exercise exists to fix.)
 
 | Thing | Where | Why it must move in the same change |
 |---|---|---|
-| CSP `connect-src` | `ozari-app/index.html` | A CSP blocks what it doesn't name; the app looks dead. Lists both API hosts **and** the `run.app` host so a DNS rollback needs no rebuild. |
+| CSP `connect-src` | `ozari-app/index.html` | A CSP blocks what it doesn't name; the app looks dead. Lists both API hosts + the exact R2 write endpoint. **The `run.app` fallback was removed (2026-08-06)** now that `api-staging.` serves: a DNS rollback now also needs a Pages rebuild (one click, ~1 min), which is the right trade for not carrying a standing exception. |
+| CSP response headers | `ozari-app/public/_headers` | `frame-ancestors`, `sandbox` and `report-uri` are IGNORED in a `<meta>` tag — they only work as real headers, so they live here (with `X-Frame-Options`, `nosniff`, `Permissions-Policy`, HSTS). It carries **framing only**; the full CSP stays in `index.html`, because two sources of one policy is how CSP bugs become unfindable. |
 | `_APP_HOST` fallback | `ozari-api/cloudbuild.yaml` | Used by manual builds when no trigger substitution overrides it. |
 | `app_host` default | `infrastructure/.../variables.tf` + `terraform.tfvars.example` | Terraform owns the trigger substitution; a stale default would revert the console edit on the next apply. |
 | Email logo | `ozari-api/src/config/app.ts` | Now **derived** from `APP_HOST` — nothing to edit, and it can't go stale again. |
@@ -334,6 +345,259 @@ fixed. Tightening to `Lax` buys a little defence-in-depth and is safe **only** o
 frontend talks to an API on another registrable domain (e.g. Pages preview deployments). It is a
 one-line change in `app.ts` — deliberately not bundled with the cutover, so that if sessions do
 misbehave there is exactly one variable in flight.
+
+---
+
+## 3d. Google Calendar OAuth (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`)
+
+The calendar integration (`EPIC-2-CALENDAR.md`) writes each order's delivery and collection into an
+admin's own Google Calendar, and keeps them in step for the rest of the order's life. It is **inert
+without these two variables** — `GET /calendar` answers `googleAvailable: false`, and the settings
+screen offers only the ICS subscription. That is a working product, just a slower one (a subscription
+is read-only from the calendar's side and polls on the calendar app's own schedule), so shipping
+without the OAuth client is a legitimate state, not a broken deploy.
+
+**There is no SDK, no service account and no JSON key file.** The backend talks to three documented
+Google endpoints with `fetch`, and every grant is authorised **per user, by that user**, through
+OAuth 2.0. Nothing here needs billing enabled.
+
+**Both halves are stored as Secret Manager secrets**, including the client ID. The ID is not itself
+secret (it travels in the consent URL), but binding it beside its secret means the pair is loaded,
+rotated and revoked as ONE credential — splitting it across a plain env var and a secret is how half
+a rotated client ends up live. `GOOGLE_CLIENT_SECRET` is a **server-side** value: it must never
+reach a `VITE_*` variable, the frontend bundle, or git.
+
+### What the implementation actually does (verified against the code)
+
+| Question | Answer | Where |
+|---|---|---|
+| Where are the credentials read? | `process.env` on every call, never cached at module load | `calendar/google.service.ts` → `googleCredentials()` |
+| Start of the flow | `GET /api/calendar/google/authorize` — **Admin only** (`verifyJwt` + `isGrantedRoles([Admin])`); returns `{ authorizeUrl }` as JSON, the SPA then navigates to it | `calendar.route.ts`, `calendar.controller.ts` |
+| Callback | `GET /api/calendar/google/callback` — mounted **before** the API-key check with its own 20/min limiter, because it arrives as a top-level browser navigation from Google carrying no header, cookie or origin of ours | `app.ts` → `mountCalendarPublicRoutes` |
+| Callback authentication | The signed `state` JWT (HS256 on `JWT_SECRET`, 10-minute TTL, `purpose: "calendar-connect"` so an access token cannot be replayed into it) | `signState` / `readState` |
+| Scopes requested | `https://www.googleapis.com/auth/calendar.events` and `https://www.googleapis.com/auth/userinfo.email` — exactly these two, nothing else | `appConfig.calendar.google.scopes` |
+| Offline access | `access_type=offline`, `prompt=consent`, `include_granted_scopes=true` | `buildGoogleAuthUrl` |
+| Token storage | `calendar_connections`, unique per `(user_id, provider)`. The refresh token, access token and account email are **AES-256-GCM encrypted at rest** (`*_kms` columns, the `ENCRYPTION_KEY` scheme). Events are written to `calendar_id`, default `"primary"` | `schema.prisma`, callback handler |
+| Refresh handling | A refresh persists the new access token, and writes `refresh_token_kms` **only when Google returns one** — Google omits it on an ordinary refresh, and writing `undefined` over the stored grant would disconnect the calendar on the first renewal | `calendar.sync.ts` → the token accessor |
+| Revoked grant | `invalid_grant` deactivates the connection instead of retrying forever | `GoogleGrantRevokedError` |
+| Disconnect | Hard-deletes the row and revokes the grant with Google (best effort). Events already written are deliberately **left** in the calendar | `DELETE /api/calendar/google` |
+
+The connected Google account has **no relationship to the admin's login email** and need not share
+our domain — an admin may link any Google account they control, including a personal Gmail one. The
+account address is stored (encrypted) only so the UI can show WHICH account is linked.
+
+### 🔒 One-time Google Cloud configuration
+
+**What exists today (2026-08-31):** ONE Web-application client in the API's GCP project, carrying all
+three redirect URIs (local, staging, production), audience **External**, still in **Testing**.
+
+That is a deliberate simplification and it has a trade-off worth knowing before you change it. One
+client means one consent screen, so **publishing/verification covers every environment at once** and
+there is a single pair of values to load — at the cost that a mistake in its redirect list touches
+production too, and that staging and production share the same client identity in Google's eyes.
+Splitting them later is additive: create a second client holding only the prod URI, and load ITS
+values into the prod secrets. Nothing in the code changes — the client is entirely an environment
+value.
+
+Google's console reorganises periodically (the OAuth settings now live under **Google Auth
+Platform**). The *shape* below is stable; where a label has moved, follow what the console shows.
+
+**1. Project + API.** Use the GCP project that owns the backend. Enable the **Google Calendar API**
+(APIs & Services → Library). No other API is required — the account-email lookup is a plain
+userinfo endpoint.
+
+**2. Audience → `External`.** Google Auth Platform → *Audience* → User type **External**.
+
+> This application is **not** owned by a Google Workspace / Cloud Identity organisation, and an admin
+> connects whichever Google account they want. `Internal` is only available to a Workspace
+> organisation and would restrict connections to accounts inside it — **do not select it** unless the
+> ownership model itself changes.
+
+**3. Test users (development only).** While the app is in **Testing**, only accounts listed under
+Google Auth Platform → *Audience* → *Test users* can complete consent; anyone else gets
+`access_denied`. Add each developer/admin account that will test the flow.
+
+> ⚠️ **Testing mode is not a production state.** Google currently issues refresh tokens with a
+> limited lifetime (about **7 days**) to apps in Testing that request scopes like ours. The visible
+> symptom is not an error: the calendar syncs for a week and then quietly stops, and every admin has
+> to reconnect. Registering the production redirect URI does **not** change this — only moving the
+> app out of Testing does (see the publishing checklist below).
+
+**4. Data Access → scopes.** Google Auth Platform → *Data Access* → add exactly:
+
+```
+https://www.googleapis.com/auth/calendar.events
+https://www.googleapis.com/auth/userinfo.email
+```
+
+These are what the code requests, so anything else configured here is either unused or a mismatch the
+consent screen will show the admin. **We deliberately do NOT request
+`https://www.googleapis.com/auth/calendar`**: `calendar.events` already covers reading and writing
+events, which is the whole feature, while the broader scope also grants creating, renaming and
+deleting entire calendars. Least privilege here is not decoration — a broader scope makes Google's
+verification review heavier and is displayed to the admin at the moment they decide whether to trust
+us.
+
+**5. Client.** Google Auth Platform → *Clients* → **Create OAuth client** → application type **Web
+application**. Name it for what it is, e.g. `Ozari Google Calendar` (record the name you used, so the
+next person recognises it in a list of clients). The client **secret stays server-side** — the SPA
+never sees it, because the whole flow is backend-driven.
+
+**6. Authorized redirect URIs.** These are the only URLs Google will return the browser to. The path
+is `appConfig.basePath` + the route, i.e. always `/api/calendar/google/callback`:
+
+```
+local:      http://localhost:3000/api/calendar/google/callback
+staging:    https://api-staging.partyrentalsgt.com/api/calendar/google/callback
+production: https://api.partyrentalsgt.com/api/calendar/google/callback
+```
+
+Google matches a redirect URI **exactly** — scheme, host, port, path and trailing slash all count,
+and `http` vs `https` or `api-staging` vs `staging-api` are different URIs. The mismatch surfaces as
+a `redirect_uri_mismatch` page **on Google's side**, which our code never sees and therefore cannot
+report. The same URI is sent twice (once for consent, once for the code exchange) and both come from
+`googleRedirectUri(publicBaseUrl(req))`, so the two can never disagree with each other — only with
+what is registered.
+
+⚠️ **The host must be the one `API_PUBLIC_URL` names** (§2). Behind the Cloudflare Worker the
+request reaches Cloud Run with `Host: …run.app`, so with `API_PUBLIC_URL` unset the backend would
+build its redirect from the `run.app` name — a URI nobody registered. It is set for staging in
+`cloudbuild.yaml` (`_API_PUBLIC_URL`) and `cloud-run.tf`, which also keeps the URI stable if the
+Cloud Run URL ever changes.
+
+**7. Authorized JavaScript origins — leave empty.** They are not needed here, and the fact that our
+frontend is a SPA/PWA is not a reason to add them. The distinction:
+
+- **JavaScript origins** matter when the *browser* runs Google's OAuth/API client directly.
+- **Redirect URIs** are where Google sends the authorization callback.
+
+Our flow is backend-driven end to end: the SPA only navigates to a URL the backend built, and Google
+returns to the **backend**. The backend then redirects the browser to
+`<APP_HOST>/panel/ajustes?calendario=conectado|error` — that hop is ours, entirely separate from
+Google's authorized redirect list, and the frontend origin must **not** be added to it.
+
+### Where the two variables live, per environment
+
+| Environment | Mechanism | Where to set it |
+|---|---|---|
+| **local** | `ozari-api/.env` (gitignored; keys documented in `.env.example`) | Paste the values, restart `pnpm dev`. Leave `API_PUBLIC_URL` empty — nothing fronts the dev server, so the redirect derives from the request and matches the `localhost:3000` entry by construction. Leaving the client empty is fine too: the settings screen then offers only the ICS feed. |
+| **staging** | Secret Manager `ozari-google-client-id` / `ozari-google-client-secret`, bound in `cloudbuild.yaml` (`--set-secrets`) **and** `cloud-run.tf` | The ordered rollout below. |
+| **production** | Identical, in the prod project's own secrets (its own OAuth client) | §5 Step 2c + Step 5. |
+
+The same OAuth client may carry the local and the staging redirect URIs, so one staging client is
+enough to develop against. Production gets its own.
+
+### Ordered rollout on a deployed environment
+
+Values before bindings, same as R2 (§3b) and for the same reason: Cloud Run binds `:latest`, and a
+binding to a secret with **no version fails the whole deploy** — not just the calendar.
+
+```
+1. Create the secret CONTAINERS only (targeted apply — no binding yet, so no version needed).
+   In PowerShell, QUOTE each -target or it gets split:
+      terraform apply "-target=google_secret_manager_secret.ozari_google_client_id" "-target=google_secret_manager_secret.ozari_google_client_secret"
+
+   If the containers already exist (created by hand), adopt them instead — imports.tf carries an
+   import block for each, exactly as ozari-email-key does. Without that, apply fails with a 409.
+
+2. Load the VALUES via gcloud (never in Git):
+      "<client id>"     | gcloud secrets versions add ozari-google-client-id --data-file=- --project <project>
+      "<client secret>" | gcloud secrets versions add ozari-google-client-secret --data-file=- --project <project>
+
+3. Full apply — creates the run SA's secretAccessor bindings and adds the env to Cloud Run:
+      terraform apply       (or scripts/apply-staging.ps1)
+
+4. Redeploy the API so a revision picks the values up (push to the build branch, or re-run the
+   trigger). cloudbuild.yaml already carries both in --set-secrets; nothing there needs touching.
+```
+
+**The IAM binding is the step people skip.** The runtime SA has no project-level secret access — each
+secret is granted individually in `iam.tf` (`run_sa_accessible_secrets`). A deploy binding a secret
+the SA cannot read fails at revision creation.
+
+**Rotation** = a new version on each secret, then a redeploy (`:latest` resolves at revision creation,
+not per request). A rotated client invalidates existing grants, so every connected admin reconnects
+once.
+
+### Post-deploy smoke test
+
+1. Redeploy/restart the backend after the variables are in place, and confirm on the revision's
+   *Variables* tab that both are bound.
+2. Sign in as an **Admin** → **Ajustes → Calendarios**. A "Conectar" button (rather than the
+   ICS-only state) means the backend reports `googleAvailable: true`.
+3. Click connect → Google asks which account to use.
+4. **Read the consent screen**: it must request Calendar *events* access and your email address, and
+   nothing more. Anything broader means the console's Data Access config and the code disagree.
+5. Grant it. The callback must return you to `/panel/ajustes?calendario=conectado` with no
+   `redirect_uri_mismatch` on the way.
+6. The settings screen shows the connected Google account's address.
+7. Create an order with a delivery date and check the event appears in that calendar, at the
+   logistics block's window (`at − gap/2` … `at + gap/2`) with a reminder.
+8. Exercise the sync's other paths: edit the order's delivery time (the event moves), advance it past
+   the delivery (the event disappears — only PENDING events are written), rewind (it comes back),
+   cancel or delete the order (its events go).
+9. Restart the backend / wait out a cold start and repeat a change — stored credentials must survive,
+   since they live in the database, not in memory.
+10. **Verify the refresh path**, which is the one failure that hides for an hour: after more than an
+    hour without activity (the access token's life), make another change and confirm the event still
+    updates. In logs, a successful renewal is silent; a failure logs the sync error.
+
+### Production publishing & Google verification
+
+**What actually changes when prod arrives.** The console's redirect list already carries the prod URI,
+so — assuming the single-client setup above — there is **nothing further to add there**. The work is:
+
+```
+1. Load GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET into the PROD secret store  (§5 Step 2c + Step 5)
+   — same values as staging while one client serves both; different values if you split clients.
+2. Prod Terraform carries the same two secret containers + IAM + Cloud Run bindings as staging,
+   and API_PUBLIC_URL = https://api.partyrentalsgt.com  (copied from envs/staging, §5 Step 4).
+3. Move the OAuth app OUT of Testing and complete Google's verification for the scopes.
+   ← this is the only step with an external dependency; start it BEFORE you need it.
+4. Re-run the smoke test above against production, including the >1h refresh check.
+```
+
+Steps 1–2 are ours and take minutes. Step 3 is Google's and takes days — and until it lands, a
+production calendar syncs for about a week per connection and then stops. That is the whole reason it
+appears this early in the runbook.
+
+Because the app is **External** and Calendar access can be classified as sensitive, a production
+rollout has requirements beyond our own infrastructure. Google's rules and console change — treat the
+list below as the shape of the work and **follow what Google Auth Platform / the Verification Center
+shows at the time you deploy**:
+
+```
+[ ] Google Auth Platform → Branding: app name, support email, logo, home page,
+    privacy policy URL and authorized domains all accurate for PRODUCTION
+[ ] Data Access lists ONLY calendar.events + userinfo.email, each with a justification
+    that matches what the app does
+[ ] The production redirect URI is registered:
+    https://api.partyrentalsgt.com/api/calendar/google/callback
+[ ] GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET loaded into the PROD secret store (§5 Step 5)
+[ ] The OAuth app is moved OUT of Testing — otherwise refresh tokens expire in ~7 days and
+    production sync stops weekly
+[ ] Every requirement shown in the Verification Center is completed (scope justification,
+    domain ownership, a demo video and a review are all possible asks for sensitive scopes;
+    plan for days, not minutes)
+[ ] A real production OAuth run with an authorized Google account, end to end
+[ ] An event created by the deployed system is visible in that calendar
+[ ] The connection still works after the access token expires (refresh renewal proven)
+```
+
+**A working test-user flow is not approval.** It proves the wiring; it says nothing about whether the
+app may serve users outside the test list, or whether its refresh tokens will outlive the week.
+
+### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `redirect_uri_mismatch` on Google's page | The URI the backend built is not registered. It is `<API_PUBLIC_URL or the request's own origin>/api/calendar/google/callback` — compare it character by character with the console list, and check `API_PUBLIC_URL` on the revision (behind the Worker, an unset value yields the `run.app` host). |
+| `access_denied`, or an account cannot authorize | The app is in Testing and that Google account is not under *Audience → Test users*. Add it, or publish the app. |
+| The settings screen offers only the ICS feed | `googleAvailable: false` ⇒ one or both variables are missing from the **backend** environment. Check the revision's Variables tab, then that the secret has a version and the run SA can read it. Deploy or restart after fixing — the values are read at request time, but the container must have them. |
+| Connecting succeeds, then sync stops days later | Either the app is still in Testing (7-day refresh tokens), or the grant was revoked from the Google account (the code marks the connection inactive on `invalid_grant`; reconnecting is the fix). Refresh responses omitting a refresh token are handled — the stored one is kept, never overwritten with `undefined`. |
+| The consent screen asks for the wrong permissions | The console's *Data Access* scopes disagree with `appConfig.calendar.google.scopes`. The code is the authority on what is requested; align the console to it. |
+| "google returned no refresh token" in the logs | Google withheld one because the account had already granted this client and the request lost `prompt=consent`. The code refuses to store such a connection (it would die within the hour). Revoke the app's access in the Google account's *Third-party apps* and connect again. |
+| Consent works, but the return lands nowhere useful | The backend's final hop uses `APP_HOST`. A stale `APP_HOST` sends the admin to the wrong frontend origin. |
 
 ---
 
@@ -391,12 +655,22 @@ Create the prod bucket + public read (custom domain recommended) + an R2 API tok
 **§3b**. This yields `R2_ENDPOINT`/`R2_BUCKET_NAME`/`R2_PUBLIC_URL` (plain → `terraform.tfvars`) and
 `R2_ACCESS_KEY`/`R2_SECRET_KEY` (→ secrets `ozari-r2-access-key`/`ozari-r2-secret-key`).
 
+### Step 2c — 🔒 Google Calendar OAuth client (optional feature, but do it here)
+Create the **prod** OAuth client — full detail in **§3d**: enable the Calendar API, audience
+**External**, the two `calendar.events` + `userinfo.email` scopes, a Web-application client, and the
+prod redirect URI `https://api.partyrentalsgt.com/api/calendar/google/callback`. This yields
+`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (→ secrets `ozari-google-client-id`/
+`ozari-google-client-secret`). It is done **now** because Step 4 binds those secrets and Step 5 loads
+them; the publishing/verification work (§3d) runs in parallel and only gates *durable* production
+sync, not the deploy. Skipping this step entirely is fine — the app ships with the ICS feed only.
+
 ### Step 3 — 🔒 Generate the remaining secret values
 `ozari-jwt-secret`, `ozari-jwt-refresh-secret` (two distinct random 32+ byte secrets),
 `ozari-encryption-key` (exactly 32 bytes hex), `ozari-api-key` (random). Keep them only in your local
 gitignored `infrastructure/secrets/prod.env` (mirrors `staging.env`). The two R2 credentials
-(`ozari-r2-access-key`/`ozari-r2-secret-key`) go here too — load them **values-first** (§3b) since
-Cloud Run binds them at `:latest`.
+(`ozari-r2-access-key`/`ozari-r2-secret-key`) and the two Google OAuth values
+(`ozari-google-client-id`/`ozari-google-client-secret`) go here too — load them **values-first**
+(§3b, §3d) since Cloud Run binds every one of them at `:latest`.
 
 ### Step 4 — GCP project + Terraform (infra)
 1. Create the prod GCP project; enable billing.
@@ -414,6 +688,8 @@ Cloud Run binds them at `:latest`.
 ### Step 5 — 🔒 Load secret values
 `infrastructure/scripts/load-secrets-*` (mirror for prod) reads your local `prod.env` and
 `gcloud secrets versions add`s each of the 7 secrets. **No values touch git.** The app reads `:latest`.
+The R2 pair (§3b) and the Google OAuth pair (§3d) are added the same way (`gcloud secrets versions
+add`); **every secret Cloud Run binds needs a version before Step 6**, or the deploy fails.
 
 ### Step 6 — First backend build & deploy
 Trigger the prod Cloud Build (first push to `main`, or run the trigger manually). The pipeline
@@ -440,13 +716,17 @@ on every later deploy — migrations don't seed, and it's safe to re-run but unn
 - `/api/docs` is **absent** in prod (correct — production-gated).
 - Smoke test: register → login → forgot-password (email arrives from Resend) → reset → login.
 - Confirm CORS: the browser app talks to the API; a random Origin is rejected.
+- If the calendar is configured: run the **§3d smoke test** (connect as Admin, check the consent
+  screen's permissions, confirm an order's event lands in that calendar), then work through §3d's
+  publishing checklist — a Testing-mode app syncs for about a week and then stops.
 
 ---
 
 ## 6. Cloud Build substitutions & env ownership (the "param replacement")
 
-`cloudbuild.yaml` is parameterised by **substitutions** (`_APP_HOST`, `_NODE_ENV`, `_IMAGE_URL`,
-`_REGION`, `_RUN_SA`, `_SERVICE_NAME`, `_MAX_INSTANCES`, `_LOG_LEVEL`, and the `*_SECRET` names).
+`cloudbuild.yaml` is parameterised by **substitutions** (`_APP_HOST`, `_API_PUBLIC_URL`, `_NODE_ENV`,
+`_IMAGE_URL`, `_REGION`, `_RUN_SA`, `_SERVICE_NAME`, `_MAX_INSTANCES`, `_LOG_LEVEL`, and the
+`*_SECRET` names).
 **Terraform owns the trigger's substitution values** (`cloud-build.tf` + `variables.tf`); the YAML only
 provides fallback defaults. So to change `APP_HOST` (or any managed substitution) in a deployed env you
 edit **Terraform**, not the Console:
@@ -570,10 +850,14 @@ call its own backend.
 [ ] 1  Neon prod DB created; db-roles.sql run as owner; pooled(ozari_api)+direct(owner) URLs ready
 [ ] 2  Resend prod API key created
 [ ] 2b R2 PROD bucket + public read + API token — CORS lists ONLY prod origins, never localhost (§3b)
+[ ] 2c Google OAuth client for PROD (§3d): Calendar API on, audience External, scopes
+       calendar.events + userinfo.email ONLY, Web-application client, prod redirect URI
+       https://api.partyrentalsgt.com/api/calendar/google/callback  ← skip if not shipping calendar
 [ ] 3  JWT x2, ENCRYPTION_KEY (32B hex), API_KEY generated into local prod.env (gitignored)
 [ ] 4  envs/prod/ Terraform (state prefix ozari/prod, NODE_ENV=production, app_host=FRONTEND origin,
        no imports.tf) → init/plan/apply → containers, SAs, registry, Cloud Run shell, main trigger
-[ ] 5  load-secrets (prod) → all 7 secret versions added
+[ ] 5  load-secrets (prod) → all 7 secret versions added; then the R2 pair (§3b) and the Google
+       OAuth pair (§3d) via gcloud — every bound secret needs a version BEFORE the first deploy
 [ ] 6  First build on main → verify/build/migrate/deploy → record the generated run.app URL
 [ ] 7  pnpm db:seed once against the fresh prod DB
 [ ] 8  DNS: CNAME `api` → the prod run.app host, PROXIED (one label — Universal SSL covers it)
@@ -584,8 +868,15 @@ call its own backend.
 [ ] 9  Pages env VITE_API_URL=https://api.partyrentalsgt.com  → then TRIGGER A REBUILD (inlined!)
 [ ] 10 Confirm APP_HOST on the prod Cloud Run revision == the prod FRONTEND origin, no trailing slash
 [ ] 10 index.html CSP connect-src already lists api.partyrentalsgt.com — confirm before the build
+[ ] 10 CSP connect-src pins the R2 WRITE endpoint by account id — if prod uses a DIFFERENT
+       Cloudflare account, add its endpoint too (reads need nothing: R2_PUBLIC_URL is our own
+       domain, already covered by *.partyrentalsgt.com in img-src)
 [ ] 11 Verify: /api/health/check, /api/docs ABSENT (NODE_ENV=production), register→login→reset smoke
        test, a product photo upload (proves R2 CORS), and the §3c.4 iPhone >15min session gate
+[ ] 11 Calendar (if shipped): §3d smoke test — connect as Admin, consent shows ONLY events+email,
+       an order's event lands in the calendar, and it still syncs an hour later (refresh works)
+[ ] 12 Calendar (if shipped): move the OAuth app OUT of Testing and complete whatever the Google
+       Verification Center asks for the sensitive scope — until then sync dies after ~7 days (§3d)
 ```
 
 `appConfig.email.logoUrl` is **no longer a checklist item** — it derives from `APP_HOST`.

@@ -11,6 +11,9 @@ import { getMapsAppPreference, setMapsAppPreference } from '@utils/mapsPreferenc
 import { useMe } from '../hooks/useMe';
 import { staggerIn, staggerOut } from '../pageMotion';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
+import { Role } from '@constants/Roles';
+import { useHasRole } from '@hooks/useRole';
+import CalendarSection from './CalendarSection';
 import ChangePasswordModal from './ChangePasswordModal';
 import MfaDisableModal from './MfaDisableModal';
 import MfaEnableModal from './MfaEnableModal';
@@ -130,6 +133,7 @@ const AccountError: React.FC<{ onRetry: () => void; retrying: boolean }> = ({ on
 const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
   const { data: me, isLoading, isError, isFetching, refetch } = useMe();
+  const isAdmin = useHasRole([Role.Admin]);
   const root = useRef<HTMLDivElement>(null);
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
   const [mfaModalOpen, setMfaModalOpen] = useState(false);
@@ -304,6 +308,14 @@ const SettingsPage: React.FC = () => {
           />
         </div>
       </SettingsSection>
+
+      {/* ── Calendars ───────────────────────────────────────────────────────────────────
+          Admin-only, and gated HERE as well as server-side because every `/calendar` route answers
+          a non-admin 403: rendering a section that can only fail is worse than not rendering it.
+          It sits in Ajustes for the same reason the maps preference does — a Google account and a
+          device's subscription are MINE, while the reminder lead (how much warning the business
+          wants) stays in Preferencias, which is where rules live. */}
+      {isAdmin && <CalendarSection />}
 
       <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
       <MfaEnableModal open={mfaModalOpen} onClose={() => setMfaModalOpen(false)} />

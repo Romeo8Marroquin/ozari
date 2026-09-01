@@ -42,6 +42,17 @@ variable "app_host" {
   default     = "https://staging.partyrentalsgt.com"
 }
 
+variable "api_public_url" {
+  # The API's OWN origin, as the outside world reaches it. Staging sits behind a Cloudflare Worker
+  # that rewrites the Host header to the run.app name (DEPLOYMENT.md §3c), so the API cannot derive
+  # this from a request — and it is what the calendar's OAuth redirect URI and the ICS feed URL are
+  # built from (an admin pastes the latter into their phone). Keep it identical to cloudbuild.yaml's
+  # `_API_PUBLIC_URL`. Empty = derive from the request, which is right only with no proxy in front.
+  description = "The API's public origin (API_PUBLIC_URL env var). No trailing slash."
+  type        = string
+  default     = "https://api-staging.partyrentalsgt.com"
+}
+
 variable "node_env" {
   description = "NODE_ENV runtime value."
   type        = string

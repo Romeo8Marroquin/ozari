@@ -56,6 +56,19 @@ describe('BarChart', () => {
     expect(screen.queryByText('m0')).not.toBeInTheDocument();
   });
 
+  it('gives the plot a PERCENTAGE width, so its viewBox ratio cannot widen the page', () => {
+    // jsdom has no layout, so this asserts the CLASS rather than a measurement — and it is worth
+    // asserting because the failure is invisible everywhere except a narrow real screen. An `<svg>`
+    // with a viewBox is a replaced element: with a definite height and an `auto` width its
+    // min-content contribution is the transferred size (128px × 320/120 = 341px), which every
+    // ancestor must then be wide enough to hold. `min-w-0` is a floor and never lowered it, so the
+    // whole dashboard scrolled sideways on a phone while this element looked constrained.
+    const { container } = render(
+      <BarChart data={data} formatValue={String} ariaLabel="Ingresos" />,
+    );
+    expect(container.querySelector('svg')).toHaveClass('w-full');
+  });
+
   it('renders with no data at all rather than dividing by an empty domain', () => {
     const { container } = render(
       <BarChart data={[]} formatValue={String} ariaLabel="Vacío" />,

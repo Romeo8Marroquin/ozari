@@ -17,6 +17,15 @@ vi.mock('../hooks/useAuthCard', () => ({
 }));
 vi.mock('@components/notifications/notify', () => ({ notify: notifyMock }));
 
+// The public terms read — mocked at the hook so this suite needs no query client, and so each test
+// can decide whether the business HAS published terms. `hasReadableTerms` stays real: deciding
+// whether there is anything worth offering is the behaviour under test, not a fixture.
+const { useTerms } = vi.hoisted(() => ({ useTerms: vi.fn() }));
+vi.mock('./useTerms', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./useTerms')>()),
+  useTerms,
+}));
+
 import RegisterPage from './RegisterPage';
 
 const VALID_NAME = 'Juan Perez';
@@ -56,6 +65,7 @@ async function submitAndGetHandlers(user: ReturnType<typeof userEvent.setup>) {
 beforeEach(() => {
   vi.clearAllMocks();
   state.isPending = false;
+  useTerms.mockReturnValue({ data: 'Primera condición.\nSegunda condición.' });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -153,6 +163,65 @@ describe('RegisterPage', () => {
     fireEvent.submit(container.querySelector('form')!);
     await new Promise((r) => setTimeout(r, 30));
     expect(registerUser).not.toHaveBeenCalled();
+  });
+
+  describe('terms and conditions', () => {
+    const TERMS_KEY = 'modules.sesion.register.terms';
+    const openLink = () => screen.queryByRole('button', { name: `${TERMS_KEY}.open` });
+
+    it('lets the visitor READ what they are being asked to accept', async () => {
+      const user = userEvent.setup();
+      render(<RegisterPage />);
+      await user.click(openLink()!);
+
+      const dialog = await screen.findByRole('dialog');
+      // Rendered as TEXT with its line breaks kept — never as markup, which is what stops a
+      // preferences field from becoming an injection surface.
+      expect(dialog).toHaveTextContent('Primera condición.');
+      expect(dialog).toHaveTextContent('Segunda condición.');
+    });
+
+    it('closes again and leaves the form exactly as it was', async () => {
+      const user = userEvent.setup();
+      render(<RegisterPage />);
+      await user.type(screen.getByTestId('fullName-input'), VALID_NAME);
+
+      await user.click(openLink()!);
+      await user.click(await screen.findByRole('button', { name: `${TERMS_KEY}.close` }));
+      // A modal rather than a route precisely so nothing typed is lost.
+      expect(screen.getByTestId('fullName-input')).toHaveValue(VALID_NAME);
+    });
+
+    it('offers NOTHING to read when the business has published no terms', () => {
+      // A link opening an empty dialog reads as the business having no terms AND the app being
+      // broken, when the truth is only the first.
+      useTerms.mockReturnValue({ data: '' });
+      const { unmount } = render(<RegisterPage />);
+      expect(openLink()).not.toBeInTheDocument();
+      unmount();
+
+      // Whitespace is not terms either.
+      useTerms.mockReturnValue({ data: '   \n  ' });
+      const blank = render(<RegisterPage />);
+      expect(openLink()).not.toBeInTheDocument();
+      blank.unmount();
+
+      // Nor is a read that failed or has not landed — the form works perfectly well without it.
+      useTerms.mockReturnValue({ data: undefined });
+      render(<RegisterPage />);
+      expect(openLink()).not.toBeInTheDocument();
+    });
+
+    it('keeps the link OUT of the checkbox label, so one click cannot do two things', async () => {
+      const user = userEvent.setup();
+      render(<RegisterPage />);
+      const checkbox = screen.getByRole('checkbox');
+      expect(checkbox).not.toBeChecked();
+
+      // Opening the terms must not silently accept them on the way past.
+      await user.click(openLink()!);
+      expect(checkbox).not.toBeChecked();
+    });
   });
 
   it('navigates to login when the login link is clicked', async () => {

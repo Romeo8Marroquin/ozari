@@ -88,3 +88,27 @@ resource "google_secret_manager_secret" "ozari_r2_secret_key" {
     auto {}
   }
 }
+
+# Google Calendar OAuth client (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET). The client ID is not
+# strictly a secret — it travels in the consent URL — but it is bound the same way as its secret so
+# the pair is loaded, rotated and revoked as ONE credential; splitting it across an env var and a
+# secret is how half a rotated client ends up live. NEW containers: the first apply CREATES them, so
+# load the VALUES out-of-band BEFORE Cloud Run binds them (DEPLOYMENT.md §3d) or the deploy fails on
+# a :latest with no version.
+#   printf '%s' "<client id>"     | gcloud secrets versions add ozari-google-client-id --data-file=-
+#   printf '%s' "<client secret>" | gcloud secrets versions add ozari-google-client-secret --data-file=-
+resource "google_secret_manager_secret" "ozari_google_client_id" {
+  project   = var.project_id
+  secret_id = "ozari-google-client-id"
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret" "ozari_google_client_secret" {
+  project   = var.project_id
+  secret_id = "ozari-google-client-secret"
+  replication {
+    auto {}
+  }
+}

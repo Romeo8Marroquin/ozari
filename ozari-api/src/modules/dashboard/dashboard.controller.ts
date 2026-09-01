@@ -70,6 +70,15 @@ export const getDashboard = async (
         _sum: { totalAmount: true },
         _count: { _all: true },
       });
+    // CASH IN, scoped by `paidAt` — the one monthly figure deliberately NOT scoped by delivery date.
+    // An order delivered in July and settled in August is July's revenue and August's cash, and the
+    // gap between the two is what `outstanding` totals. Without it the screen could report a strong
+    // month while nothing had actually arrived.
+    const collectedAggregate = (from: Date, to: Date) =>
+      prismaClient.service.aggregate({
+        where: { ...LIVE, paidAt: inRange(from, to) },
+        _sum: { totalAmount: true },
+      });
 
     const [
       context,
@@ -82,6 +91,8 @@ export const getDashboard = async (
       activeOrders,
       currentMonth,
       previousMonth,
+      collectedThisMonth,
+      collectedLastMonth,
       cancelledThisMonth,
       cancelledLastMonth,
       trendRows,
@@ -137,6 +148,8 @@ export const getDashboard = async (
       prismaClient.service.count({ where: { ...LIVE, readyAt: null } }),
       monthAggregate(thisMonth.from, thisMonth.to),
       monthAggregate(lastMonth.from, lastMonth.to),
+      collectedAggregate(thisMonth.from, thisMonth.to),
+      collectedAggregate(lastMonth.from, lastMonth.to),
       // CANCELLED orders, scoped by delivery date like every other monthly figure. They are excluded
       // from `LIVE` everywhere else — which is right for revenue and for "in progress", but it left
       // them invisible on the whole screen. A cancellation IS business information: it is the one
@@ -270,6 +283,10 @@ export const getDashboard = async (
           averageOrder: compare(
             ordersNow === 0 ? 0 : round2(revenueNow / ordersNow),
             ordersPrev === 0 ? 0 : round2(revenuePrev / ordersPrev),
+          ),
+          collected: compare(
+            round2(Number(collectedThisMonth._sum.totalAmount ?? 0)),
+            round2(Number(collectedLastMonth._sum.totalAmount ?? 0)),
           ),
           cancelled: compare(cancelledThisMonth, cancelledLastMonth),
         },

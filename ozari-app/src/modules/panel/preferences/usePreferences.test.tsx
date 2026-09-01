@@ -20,8 +20,10 @@ import { useProductCatalog } from '../products/useProductCatalog';
 import type { PreferencesResponse } from './preference.types';
 import {
   CATALOG_FIELD,
+  readBoolSetting,
   settingsInGroup,
   useCatalogRowMutations,
+  useFormDraftsEnabled,
   usePreferences,
   useUpdatePreferenceSettings,
 } from './usePreferences';
@@ -58,6 +60,51 @@ beforeEach(() => {
     defaultOptions: { queries: { retry: false, gcTime: Infinity }, mutations: { retry: false } },
   });
   client.setQueryData([QueryKeys.PREFERENCES], payload());
+});
+
+describe('readBoolSetting', () => {
+  const settings = [{ key: 'forms.saveDraftOrders', type: 'bool' as const, value: false, group: 'forms' }];
+
+  it('reads the stored value', () => {
+    expect(readBoolSetting(settings, 'forms.saveDraftOrders', true)).toBe(false);
+  });
+
+  it('falls back when the key is absent, the list is, or the arm is wrong', () => {
+    // The same forgiving read `readLetterhead` does: a screen must not break because a key it wants
+    // has not been published yet, or because a stale row still calls itself an int.
+    expect(readBoolSetting(settings, 'forms.nope', true)).toBe(true);
+    expect(readBoolSetting(undefined, 'forms.saveDraftOrders', true)).toBe(true);
+    const wrongArm = [
+      { key: 'forms.saveDraftOrders', type: 'int' as const, value: 0, min: 0, max: 1, group: 'forms' },
+    ];
+    expect(readBoolSetting(wrongArm, 'forms.saveDraftOrders', true)).toBe(true);
+  });
+});
+
+describe('useFormDraftsEnabled', () => {
+  it('reads ON while the preference is still in flight', async () => {
+    // Deliberate direction: the answer arrives a moment after a create form mounts, and defaulting
+    // to OFF would make a refresh silently discard the draft it was about to restore — the exact
+    // loss the feature exists to prevent. Over-saving for a few hundred ms costs a write nobody reads.
+    client.clear();
+    apiGet.mockReturnValue(new Promise(() => {}));
+    const { result } = renderHook(() => useFormDraftsEnabled('orders'), { wrapper });
+    expect(result.current).toEqual({ enabled: true, isLoading: true });
+  });
+
+  it('honours what the admin actually chose once it arrives', async () => {
+    client.clear();
+    apiGet.mockResolvedValue({
+      data: {
+        data: {
+          ...payload(),
+          settings: [{ key: 'forms.saveDraftOrders', type: 'bool', value: false, group: 'forms' }],
+        },
+      },
+    });
+    const { result } = renderHook(() => useFormDraftsEnabled('orders'), { wrapper });
+    await waitFor(() => expect(result.current.enabled).toBe(false));
+  });
 });
 
 describe('usePreferences', () => {

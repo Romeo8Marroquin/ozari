@@ -28,6 +28,16 @@ vi.mock('../pageMotion', async (importOriginal) => ({
   growCardIn,
 }));
 
+// The document action has its OWN suite (which is where "not on a cancelled order", the letterhead
+// and the paid balance are pinned). Here it is a marker, like the dialogs below: the page's job is
+// only to offer it to an admin. Standing in also keeps this suite free of the preferences query the
+// real button reads.
+vi.mock('../documents/OrderDocumentButton', () => ({
+  default: ({ order }: { order: { id: number } }) => (
+    <span data-testid="order-document">{order.id}</span>
+  ),
+}));
+
 // The three dialogs have their own suites; here they stand in as markers so the PAGE's job —
 // deciding which action opens which one — is what's asserted.
 // The payment dialog has its own suite (and its own query client); the page only has to open it.
@@ -38,6 +48,20 @@ vi.mock('./OrderPaymentModal', () => ({
         {order.id}
         <button type="button" onClick={onClose}>
           cerrar-pago
+        </button>
+      </div>
+    ) : null,
+}));
+
+// The undo dialog likewise: its own suite owns the copy and the 409; the page only has to offer it
+// (and only to an admin, only once the money is in) and open it.
+vi.mock('./OrderPaymentUndoModal', () => ({
+  default: ({ order, onClose }: { order?: { id: number }; onClose: () => void }) =>
+    order ? (
+      <div data-testid="payment-undo-modal">
+        {order.id}
+        <button type="button" onClick={onClose}>
+          cerrar-deshacer-pago
         </button>
       </div>
     ) : null,
@@ -240,44 +264,47 @@ describe('OrderDetailPage', () => {
 
   const PIN = { lat: 14.634915, lng: -90.506883 };
 
-  it('offers navigation while there is still a TRIP to make, not only on the arrival step', async () => {
-    // Gating on the machine's `tracksEvent` hid the button through "En ruta" — the exact moment the
-    // driver is leaving — because that flag marks the step which CONFIRMS arrival (Entregado).
+  it('offers navigation only when the next move is a TRIP, on the same rule as every other screen', async () => {
+    // Out for delivery: the next move CONFIRMS an arrival (`tracksEvent`), so somebody is driving.
     setOrder({
-      data: order({ deliveryCoords: PIN, actions: [action({ kind: 'forward' })] }),
+      data: order({
+        deliveryCoords: PIN,
+        actions: [action({ kind: 'forward', statusName: 'Entregado', tracksEvent: 'DELIVERY' })],
+      }),
     });
     const { unmount } = renderPage();
     expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
     unmount();
 
-    // Delivered, with the collection still ahead ⇒ there IS still a trip.
+    // Delivered, with the collection still ahead ⇒ the return trip is next.
     setOrder({
       data: order({
         deliveryCoords: PIN,
         deliveredAt: '2026-08-01T14:10:00.000Z',
-        actions: [action({ kind: 'forward' })],
+        actions: [action({ kind: 'forward', statusName: 'Recolectado', tracksEvent: 'COLLECTION' })],
       }),
     });
     const second = renderPage();
     expect(screen.getByTestId('open-in-maps')).toBeInTheDocument();
     second.unmount();
 
-    // Delivered on a purchase-only order (no pickup) ⇒ nothing left to drive to.
+    // Still pending: the next move is "En ruta", which tracks nothing — it is the loading, and the
+    // van has not left. Offering directions here is what put a Waze button on next week's orders.
     setOrder({
-      data: order({
-        deliveryCoords: PIN,
-        pickupAt: undefined,
-        deliveredAt: '2026-08-01T14:10:00.000Z',
-        actions: [],
-      }),
+      data: order({ deliveryCoords: PIN, actions: [action({ kind: 'forward' })] }),
     });
     const third = renderPage();
     expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
     third.unmount();
 
-    // Cancelled ⇒ nothing will be performed at all.
+    // A rewind or a cancel is desk work — neither can qualify, so an order whose only offers are
+    // disruptive gets nothing.
     setOrder({
-      data: order({ deliveryCoords: PIN, cancelledAt: '2026-08-01T09:00:00.000Z', actions: [] }),
+      data: order({
+        deliveryCoords: PIN,
+        cancelledAt: '2026-08-01T09:00:00.000Z',
+        actions: [action({ kind: 'disruptive' })],
+      }),
     });
     renderPage();
     expect(screen.queryByTestId('open-in-maps')).not.toBeInTheDocument();
@@ -336,6 +363,49 @@ describe('OrderDetailPage', () => {
     setOrder({ data: order({ isPaid: false }) });
     renderPage();
     expect(screen.queryByRole('button', { name: `${KEY}.actions.pay` })).not.toBeInTheDocument();
+  });
+
+  it('offers the way BACK from a payment, and only where a considered tap belongs', async () => {
+    // Recording payment is one irreversible-looking tap on three screens and the API answers 409 on
+    // the second, so a mis-tap had no way back at all. The undo lives HERE and nowhere else: the
+    // agenda and the dashboard are scanning surfaces where an undo beside "Registrar pago" is an
+    // invitation to hit the wrong one at a glance.
+    setOrder({ data: order({ isPaid: true }) });
+    const { unmount } = renderPage();
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.undoPay` }));
+    expect(screen.getByTestId('payment-undo-modal')).toBeInTheDocument();
+    // Dismissing it leaves the order exactly where it was — the action is still there to take.
+    await userEvent.click(screen.getByRole('button', { name: 'cerrar-deshacer-pago' }));
+    expect(screen.queryByTestId('payment-undo-modal')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `${KEY}.actions.undoPay` })).toBeInTheDocument();
+    unmount();
+
+    // Nothing to undo while the money is still out.
+    setOrder({ data: order({ isPaid: false }) });
+    const { unmount: second } = renderPage();
+    expect(screen.queryByRole('button', { name: `${KEY}.actions.undoPay` })).not.toBeInTheDocument();
+    second();
+
+    // Money is the admin's — correcting it too.
+    useHasRole.mockReturnValue(false);
+    setOrder({ data: order({ isPaid: true }) });
+    renderPage();
+    expect(screen.queryByRole('button', { name: `${KEY}.actions.undoPay` })).not.toBeInTheDocument();
+  });
+
+  it('offers the DOCUMENT to an admin regardless of payment, and never to anyone else', () => {
+    // Its own suite decides when it renders nothing (a cancelled order); the page's job is simply
+    // to put it in an admin's hands — including once the order is paid, when the same document
+    // becomes the client's proof rather than their bill.
+    setOrder({ data: order({ isPaid: true }) });
+    const { unmount } = renderPage();
+    expect(screen.getByTestId('order-document')).toBeInTheDocument();
+    unmount();
+
+    useHasRole.mockReturnValue(false);
+    setOrder({ data: order() });
+    renderPage();
+    expect(screen.queryByTestId('order-document')).not.toBeInTheDocument();
   });
 
   it('gives a NON-admin no admin powers: no status control, no delete', () => {

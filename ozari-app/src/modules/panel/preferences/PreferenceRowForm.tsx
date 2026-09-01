@@ -21,6 +21,17 @@ const ACCOUNT_NUMBER_MAX = 34;
 const HOLDER_MIN = 2;
 const HOLDER_MAX = 120;
 
+/**
+ * One cell of the editor's grid, marked so it joins the slot's entrance wave (`editorSlotIn`): the
+ * box opens, the form follows, the fields fill in just behind it — the same nested cascade a section
+ * card uses. `min-w-0` for the usual reason: a grid item defaults to `min-width: auto`.
+ */
+const Field: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div data-editor-field className="min-w-0">
+    {children}
+  </div>
+);
+
 interface PreferenceRowFormProps {
   catalog: CatalogKey;
   /** The row being edited; absent = a new one. */
@@ -167,112 +178,130 @@ const PreferenceRowForm: React.FC<PreferenceRowFormProps> = ({
       }}
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        <CustomInput
-          id="preference-row-name"
-          label={t(`${KEY}.rowForm.name`)}
-          aria-label={t(`${KEY}.rowForm.name`)}
-          value={name}
-          disabled={busy}
-          onChange={(event) => setName(event.target.value)}
-          error={showError(nameError) !== undefined}
-        />
-        <CustomInput
-          id="preference-row-description"
-          label={t(`${KEY}.rowForm.description`)}
-          aria-label={t(`${KEY}.rowForm.description`)}
-          value={description}
-          disabled={busy}
-          onChange={(event) => setDescription(event.target.value)}
-          error={showError(descriptionError) !== undefined}
-        />
-        {catalog === 'event-types' && (
+        <Field>
           <CustomInput
-            id="preference-row-lead"
-            type="number"
-            min={0}
-            inputMode="numeric"
-            label={t(`${KEY}.rowForm.leadHours`)}
-            aria-label={t(`${KEY}.rowForm.leadHours`)}
-            value={leadHours}
+            id="preference-row-name"
+            label={t(`${KEY}.rowForm.name`)}
+            aria-label={t(`${KEY}.rowForm.name`)}
+            value={name}
             disabled={busy}
-            onChange={(event) => setLeadHours(event.target.value)}
-            error={showError(leadError) !== undefined}
+            onChange={(event) => setName(event.target.value)}
+            error={showError(nameError) !== undefined}
           />
+        </Field>
+        <Field>
+          <CustomInput
+            id="preference-row-description"
+            label={t(`${KEY}.rowForm.description`)}
+            aria-label={t(`${KEY}.rowForm.description`)}
+            value={description}
+            disabled={busy}
+            onChange={(event) => setDescription(event.target.value)}
+            error={showError(descriptionError) !== undefined}
+          />
+        </Field>
+        {catalog === 'event-types' && (
+          <Field>
+            <CustomInput
+              id="preference-row-lead"
+              type="number"
+              min={0}
+              inputMode="numeric"
+              label={t(`${KEY}.rowForm.leadHours`)}
+              aria-label={t(`${KEY}.rowForm.leadHours`)}
+              value={leadHours}
+              disabled={busy}
+              onChange={(event) => setLeadHours(event.target.value)}
+              error={showError(leadError) !== undefined}
+            />
+          </Field>
         )}
         {catalog === 'zones' && (
           <>
-            <CustomSelect
-              id="preference-row-municipality"
-              label={t(`${KEY}.rowForm.municipality`)}
-              aria-label={t(`${KEY}.rowForm.municipality`)}
-              placeholderOption={t(`${KEY}.rowForm.municipalityPlaceholder`)}
-              value={municipalityId}
-              disabled={busy}
-              onChange={(event) => setMunicipalityId(event.target.value)}
-              options={municipalities.map((municipality) => ({
-                value: String(municipality.id),
-                label: municipality.name,
-              }))}
-              error={showError(municipalityError) !== undefined}
-            />
-            <CustomInput
-              id="preference-row-fee"
-              inputMode="decimal"
-              label={t(`${KEY}.rowForm.fee`)}
-              aria-label={t(`${KEY}.rowForm.fee`)}
-              placeholder={t(`${KEY}.rowForm.feePlaceholder`)}
-              value={fee}
-              disabled={busy}
-              onChange={(event) => setFee(event.target.value)}
-              error={showError(feeError) !== undefined}
-            />
+            <Field>
+              <CustomSelect
+                id="preference-row-municipality"
+                label={t(`${KEY}.rowForm.municipality`)}
+                aria-label={t(`${KEY}.rowForm.municipality`)}
+                placeholderOption={t(`${KEY}.rowForm.municipalityPlaceholder`)}
+                value={municipalityId}
+                disabled={busy}
+                onChange={(event) => setMunicipalityId(event.target.value)}
+                options={municipalities.map((municipality) => ({
+                  value: String(municipality.id),
+                  label: municipality.name,
+                }))}
+                error={showError(municipalityError) !== undefined}
+              />
+            </Field>
+            <Field>
+              <CustomInput
+                id="preference-row-fee"
+                inputMode="decimal"
+                label={t(`${KEY}.rowForm.fee`)}
+                aria-label={t(`${KEY}.rowForm.fee`)}
+                placeholder={t(`${KEY}.rowForm.feePlaceholder`)}
+                value={fee}
+                disabled={busy}
+                onChange={(event) => setFee(event.target.value)}
+                error={showError(feeError) !== undefined}
+              />
+            </Field>
           </>
         )}
         {isBank && (
           <>
             {/* "Sin logo" is the placeholder AND a real selection, not a prompt to pick something
                 else — so it carries no error state and needs no "selecciona…" copy. */}
-            <CustomSelect
-              id="preference-row-bank"
-              label={t(`${KEY}.rowForm.bank`)}
-              aria-label={t(`${KEY}.rowForm.bank`)}
-              placeholderOption={t(`${KEY}.rowForm.bankNone`)}
-              value={bankKey}
-              disabled={busy}
-              onChange={(event) => setBankKey(event.target.value)}
-              options={BANK_KEYS.map((key) => ({ value: key, label: t(bankLabelKey(key)) }))}
-            />
-            <CustomInput
-              id="preference-row-account-type"
-              label={t(`${KEY}.rowForm.accountType`)}
-              aria-label={t(`${KEY}.rowForm.accountType`)}
-              placeholder={t(`${KEY}.rowForm.accountTypePlaceholder`)}
-              value={accountType}
-              disabled={busy}
-              onChange={(event) => setAccountType(event.target.value)}
-              error={showError(accountTypeError) !== undefined}
-            />
-            <CustomInput
-              id="preference-row-account-number"
-              label={t(`${KEY}.rowForm.accountNumber`)}
-              aria-label={t(`${KEY}.rowForm.accountNumber`)}
-              // `inputMode` only, never `type="number"`: account numbers carry dashes and leading
-              // zeros, both of which a numeric input would eat.
-              inputMode="numeric"
-              value={accountNumber}
-              disabled={busy}
-              onChange={(event) => setAccountNumber(event.target.value)}
-              error={showError(accountNumberError) !== undefined}
-            />
-            <CustomInput
-              id="preference-row-holder"
-              label={t(`${KEY}.rowForm.holder`)}
-              aria-label={t(`${KEY}.rowForm.holder`)}
-              value={holder}
-              disabled={busy}
-              onChange={(event) => setHolder(event.target.value)}
-              error={showError(holderError) !== undefined}
-            />
+            <Field>
+              <CustomSelect
+                id="preference-row-bank"
+                label={t(`${KEY}.rowForm.bank`)}
+                aria-label={t(`${KEY}.rowForm.bank`)}
+                placeholderOption={t(`${KEY}.rowForm.bankNone`)}
+                value={bankKey}
+                disabled={busy}
+                onChange={(event) => setBankKey(event.target.value)}
+                options={BANK_KEYS.map((key) => ({ value: key, label: t(bankLabelKey(key)) }))}
+              />
+            </Field>
+            <Field>
+              <CustomInput
+                id="preference-row-account-type"
+                label={t(`${KEY}.rowForm.accountType`)}
+                aria-label={t(`${KEY}.rowForm.accountType`)}
+                placeholder={t(`${KEY}.rowForm.accountTypePlaceholder`)}
+                value={accountType}
+                disabled={busy}
+                onChange={(event) => setAccountType(event.target.value)}
+                error={showError(accountTypeError) !== undefined}
+              />
+            </Field>
+            <Field>
+              <CustomInput
+                id="preference-row-account-number"
+                label={t(`${KEY}.rowForm.accountNumber`)}
+                aria-label={t(`${KEY}.rowForm.accountNumber`)}
+                // `inputMode` only, never `type="number"`: account numbers carry dashes and leading
+                // zeros, both of which a numeric input would eat.
+                inputMode="numeric"
+                value={accountNumber}
+                disabled={busy}
+                onChange={(event) => setAccountNumber(event.target.value)}
+                error={showError(accountNumberError) !== undefined}
+              />
+            </Field>
+            <Field>
+              <CustomInput
+                id="preference-row-holder"
+                label={t(`${KEY}.rowForm.holder`)}
+                aria-label={t(`${KEY}.rowForm.holder`)}
+                value={holder}
+                disabled={busy}
+                onChange={(event) => setHolder(event.target.value)}
+                error={showError(holderError) !== undefined}
+              />
+            </Field>
           </>
         )}
       </div>
@@ -285,7 +314,9 @@ const PreferenceRowForm: React.FC<PreferenceRowFormProps> = ({
         {...(touched && { errorMessage: firstError })}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* The actions ride the same wave as the fields — they are the last row of the form, so they
+          arrive last, which is also the order the eye reads them in. */}
+      <div data-editor-field className="flex flex-wrap items-center justify-between gap-3">
         <Switch
           checked={isActive}
           disabled={busy}

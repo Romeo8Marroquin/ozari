@@ -159,21 +159,24 @@ describe('Sidebar (inline, desktop/tablet)', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('brand link navigates home through the controller (which no-ops when already home)', async () => {
+  it('brand link goes to the ROLE\'s home, not a fixed path', async () => {
+    // `panelHomeFor` — the one place a role's landing page is configured. This suite runs as Admin,
+    // whose home is the dashboard; the brand was pinned to `/panel/productos` from before the
+    // dashboard existed, which is how an admin's brand click kept landing on the product grid.
     setViewport('desktop');
-    currentPath.value = '/panel/ajustes'; // not home (home is products)
+    currentPath.value = '/panel/ajustes'; // not home
     const { navigate } = renderSidebar();
     await userEvent.click(screen.getByRole('link', { name: 'modules.panel.brand' }));
-    expect(navigate).toHaveBeenCalledWith('/panel/productos');
+    expect(navigate).toHaveBeenCalledWith('/panel/inicio');
   });
 
   it('brand link always forwards the intent, and ignores modified clicks', async () => {
     setViewport('desktop');
-    currentPath.value = '/panel/productos'; // home
+    currentPath.value = '/panel/inicio'; // home
     const { navigate } = renderSidebar();
     const brand = screen.getByRole('link', { name: 'modules.panel.brand' });
     await userEvent.click(brand); // plain click → forwarded (controller no-ops when idle at home)
-    expect(navigate).toHaveBeenCalledWith('/panel/productos');
+    expect(navigate).toHaveBeenCalledWith('/panel/inicio');
 
     navigate.mockClear();
     fireEvent.click(brand, { metaKey: true }); // modified → falls through

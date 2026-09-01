@@ -57,6 +57,10 @@ vi.mock('../hooks/useAuthCard', () => ({
 vi.mock('@tanstack/react-router', () => ({ useSearch: () => searchState.value }));
 vi.mock('@components/notifications/notify', () => ({ notify: notifyMock }));
 vi.mock('@hooks/useUserGesture', () => ({ hasUserGestured: () => gestureState.value }));
+// After a successful login the destination is the ROLE's own home (`panelHomeFor`), read from the
+// token the session just stored — never a fixed path. Stubbed as an Admin here, whose home is the
+// dashboard; the login was pinned to `/panel/productos` from before the dashboard existed.
+vi.mock('@hooks/useRole', () => ({ getStoredRole: () => 2 })); // 2 = Role.Admin
 
 import LoginPage from './LoginPage';
 
@@ -129,7 +133,7 @@ describe('LoginPage', () => {
     const handlers = await submitAndGetHandlers(user);
 
     act(() => handlers.onSuccess({ data: {}, headers: { authorization: 'Bearer T' } }));
-    expect(redirectAfterSuccess).toHaveBeenCalledWith('/panel/productos');
+    expect(redirectAfterSuccess).toHaveBeenCalledWith('/panel/inicio');
     act(() => handlers.onSettled());
   });
 
@@ -171,7 +175,7 @@ describe('LoginPage', () => {
     await screen.findByTestId('mfa-step');
 
     act(() => mfaStep.props?.onVerified());
-    expect(redirectAfterSuccess).toHaveBeenCalledWith('/panel/productos');
+    expect(redirectAfterSuccess).toHaveBeenCalledWith('/panel/inicio');
   });
 
   it('MFA expired (401) reverts to the credentials step with a message', async () => {

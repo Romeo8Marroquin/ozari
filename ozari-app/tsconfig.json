@@ -13,6 +13,11 @@
       "@contexts/*": ["./src/contexts/*"],
       "@api/*": ["./src/api/*"]
     },
+    // Declared here as well as in `tsconfig.app.json`. `tsc -b` ignores it (this file is
+    // references-only, `files: []`), but tools that resolve the NEAREST tsconfig for a file — tsx,
+    // editors — read this one for anything under `src`, and without it they transpile with the
+    // classic JSX runtime and fail on the first component. Keep it in step with the app config.
+    "jsx": "react-jsx",
     "types": ["vite/client", "node"]
   }
 }

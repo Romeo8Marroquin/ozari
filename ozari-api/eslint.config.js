@@ -41,6 +41,14 @@ export default [
         clearTimeout: "readonly",
         clearInterval: "readonly",
         crypto: "readonly",
+        // The WHATWG globals Node has had since 18 — used by the calendar module's plain-`fetch`
+        // Google client (no SDK) and by the ICS line folder, which counts OCTETS.
+        fetch: "readonly",
+        Response: "readonly",
+        RequestInit: "readonly",
+        URL: "readonly",
+        URLSearchParams: "readonly",
+        TextEncoder: "readonly",
       },
     },
     plugins: {

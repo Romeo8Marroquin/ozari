@@ -62,6 +62,20 @@ import {
   id = "projects/ozari-500103/secrets/ozari-email-key"
 }
 
+# Same story as ozari-email-key: the Google Calendar OAuth pair was created (and filled) by hand
+# before Terraform declared it, so adopt both instead of letting apply try to create secrets that
+# already exist — an un-imported container fails the apply with a 409, and the run SA then never
+# gets the IAM binding the Cloud Run deploy depends on.
+import {
+  to = google_secret_manager_secret.ozari_google_client_id
+  id = "projects/ozari-500103/secrets/ozari-google-client-id"
+}
+
+import {
+  to = google_secret_manager_secret.ozari_google_client_secret
+  id = "projects/ozari-500103/secrets/ozari-google-client-secret"
+}
+
 import {
   to = google_cloud_run_v2_service.ozari_api
   id = "projects/ozari-500103/locations/northamerica-south1/services/ozari-api"

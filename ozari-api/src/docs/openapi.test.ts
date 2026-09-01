@@ -38,6 +38,14 @@ const EXPECTED_OPERATIONS: ReadonlyArray<readonly [string, string]> = [
   ["/client-registries", "post"],
   ["/client-registries/{id}", "put"],
   ["/orders/{id}/payment", "post"],
+  ["/orders/{id}/payment", "delete"],
+  ["/calendar", "get"],
+  ["/calendar/google/authorize", "get"],
+  ["/calendar/google/callback", "get"],
+  ["/calendar/google", "delete"],
+  ["/calendar/feed", "post"],
+  ["/calendar/feed", "delete"],
+  ["/calendar/feed/{token}", "get"],
   ["/dashboard", "get"],
   ["/preferences", "get"],
   ["/preferences/settings", "put"],
@@ -45,6 +53,7 @@ const EXPECTED_OPERATIONS: ReadonlyArray<readonly [string, string]> = [
   ["/preferences/catalogs/{catalog}/{id}", "put"],
   ["/preferences/catalogs/{catalog}/{id}", "delete"],
   ["/health/check", "get"],
+  ["/legal/terms", "get"],
 ];
 
 // Collect every `$ref` string anywhere in the document.
@@ -96,9 +105,12 @@ describe("openApiDocument", () => {
     expect(Array.isArray(operation.security)).toBe(true);
 
     const responses = operation.responses as Record<string, unknown>;
-    // A 2xx and rate-limit + server-error coverage on every operation (health returns 503 not 500).
+    // A SUCCESS response and rate-limit + server-error coverage on every operation (health returns
+    // 503 not 500). Success is 2xx everywhere except the OAuth callback, whose every outcome is a
+    // REDIRECT: the caller on that request is a browser Google sent back, so there is nothing on
+    // the other end to read a body.
     const codes = Object.keys(responses);
-    expect(codes.some((c) => c.startsWith("2"))).toBe(true);
+    expect(codes.some((c) => c.startsWith("2") || c.startsWith("3"))).toBe(true);
     expect(codes).toContain("429");
     expect(codes).toContain(path === "/health/check" ? "503" : "500");
   });
