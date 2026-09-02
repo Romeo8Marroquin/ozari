@@ -17,6 +17,8 @@ infrastructure/
   bootstrap/                  create-tfstate-bucket.ps1 | .sh   (the only pre-Terraform step)
   scripts/
     tf.ps1                    plan/apply for any environment + stack
+    gcp-import.ps1            adopt a LIVE GCP environment (secret versions, SA IAM)
+    cf-import.ps1             adopt a LIVE Cloudflare environment + inventory what is not ours
     new-secrets.ps1           generate JWT / encryption / API key material
     db-bootstrap.ps1 | .sh    create or rotate the least-privileged database role
     db-roles.sql              the grants it applies
@@ -90,6 +92,27 @@ that the environment's `secrets.auto.tfvars` exists before a `gcp apply`, that
 
 **There is no `destroy` verb, deliberately.** Destroying an environment is a documented procedure
 (`REBUILD.md` §5), not a flag.
+
+### Before the FIRST apply against an environment that ALREADY EXISTS
+
+Terraform assumes anything in config that is not in state must be **created**. Against a live
+environment that produces "already exists" at best, and at worst it overwrites something that was
+working. Import first — both scripts are read-only against the provider and write one local file:
+
+```powershell
+./scripts/gcp-import.ps1 -Environment staging        # secret VERSIONS + the SA actsAs binding
+./scripts/cf-import.ps1  -Environment staging        # DNS, Worker, route, Pages, R2, ruleset
+```
+
+⚠️ **The GCP one is not optional on a working environment.** Terraform owns the secret payloads, but
+staging's versions were created by hand and are not in state. Without the import, the first apply
+creates a new version of every secret from `secrets.auto.tfvars` — and any value that is not
+byte-identical to the live one silently becomes the new live value, killing the service at its next
+cold start. With the versions imported and `secret_version_triggers` left empty, a wrong value in
+that file does nothing at all.
+
+A correct adoption plan shows imports, the `moved.tf` moves, and in-place updates. **No destroys, and
+no new secret versions.**
 
 ### Before the FIRST Cloudflare apply in any environment
 

@@ -302,29 +302,38 @@ procedure with different inputs, which is the point of the whole exercise.
 and what belongs to the unrelated `qa-ulew` landing page), the complete ordered list of manual steps,
 the teardown, the rebuild sequence and the verification.
 
-The adoption path below is kept as a fallback, for the case where the rebuild has to wait and a fix
-is needed sooner.
+**Path A — adopt the live environment in place (no downtime).** Fully supported, and the right choice
+any time a change is needed before the rebuild window. Three mechanisms cover the three kinds of
+object:
 
-**Path A — adopt in place (no downtime).** The state prefix is unchanged and `envs/staging/gcp/moved.tf`
-maps every old resource address into the module, so Terraform sees moves rather than destroys.
+| Object | Mechanism | Touches an API? |
+|---|---|---|
+| Resources already in Terraform state, at their old flat addresses | `envs/staging/gcp/moved.tf` | No — pure state bookkeeping |
+| GCP objects that were **never** in state (secret VERSIONS, the SA-actsAs binding) | `scripts/gcp-import.ps1` → import blocks | Read-only discovery |
+| Cloudflare objects (all of them) | `scripts/cf-import.ps1` → import blocks | Read-only discovery |
 
 ```
-1. Run db-verify.sql against staging FIRST — it is read-only and answers the DB question.
+1. Run db-verify.sql against staging FIRST — read-only, and it answers the DB question.
 2. Delete the stale provider cache: infrastructure/terraform/envs/staging/.terraform
-3. Write secrets.auto.tfvars with the CURRENT values (read them back with
-   `gcloud secrets versions access latest --secret=ozari-...` — you need them anyway).
-4. tf.ps1 staging gcp plan
+3. Write secrets.auto.tfvars. Read the current values back if you do not have them:
+      gcloud secrets versions access latest --secret=ozari-<name> --project ozari-500103
+4. ./scripts/gcp-import.ps1 -Environment staging     # secret versions + SA IAM
+5. ./scripts/tf.ps1 staging gcp plan
 ```
 
-⚠️ **Read that plan carefully. Expect:** ~25 moves, in-place updates on the registry (cleanup
-policies), the service (labels) and the trigger (substitutions), and **11 new
-`google_secret_manager_secret_version` creates**. That last group is the one to understand: Terraform
-does not know the current values (write-only arguments leave no trace), so it adds one new version
-per secret with the values you supplied. That is harmless — the app reads `:latest` — but it bills
-until you destroy the superseded ones. **Expect ZERO destroys of the service, the registry, the
-service accounts or any secret container.** If you see one, stop.
+⚠️ **What a correct adoption plan looks like:** ~25 moves, the imports from step 4, and in-place
+updates on the registry (cleanup policies), the service (labels) and the trigger (substitutions).
 
-**Path B — rebuild.** The chosen path. See [`REBUILD.md`](./REBUILD.md).
+**It must show ZERO destroys** of the service, the registry, a service account or a secret container
+— **and no new secret version.** A new-version line means step 4 was skipped or a secret was missed;
+stop, because that path rotates the secret to whatever is in your tfvars, and if that value is not
+byte-identical to the live one, staging dies at its next cold start with a credential error that
+points at nothing. This is why `secret_version_triggers` defaults to **null** rather than `1`: an
+imported version carries no trigger, so config and state agree and a wrong value in the file is
+inert.
+
+**Path B — tear down and rebuild.** The eventual plan, and the honest test of this document. See
+[`REBUILD.md`](./REBUILD.md).
 
 ---
 

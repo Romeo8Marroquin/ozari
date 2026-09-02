@@ -9,10 +9,16 @@ urgent, and every step is reversible only in the sense that you can do it again 
 
 > **Why the rebuild is the preferred path, not the fallback.** Staging holds no data anyone needs and
 > production does not exist yet, so this is the last moment where "delete it and do it properly" is
-> free. Adopting the current environment in place is possible (`INFRASTRUCTURE-PLAN.md` §7) and leaves
-> behind: a database role nobody can prove is least-privileged, secret versions Terraform did not
-> create, a Cloud Build connection referenced by a hand-copied resource string, and Cloudflare objects
-> Terraform must import rather than own. A rebuild starts with none of that.
+> free. A rebuild starts with none of what adoption leaves behind: a database role nobody can prove
+> is least-privileged, secret versions Terraform did not create, a Cloud Build connection referenced
+> by a hand-copied resource string.
+>
+> **Until then, staging is live and must be treated that way.** Any change made before the rebuild
+> window goes through the ADOPTION path — `INFRASTRUCTURE-PLAN.md` §7 — which imports what exists
+> before changing anything. Two scripts do the discovery (`gcp-import.ps1`, `cf-import.ps1`), and the
+> rule for reading the resulting plan is short: **no destroys, and no new secret versions.** Never
+> point this Terraform at the live environment without importing first; the failure mode is not a
+> refusal, it is a silent secret rotation to whatever your tfvars happens to contain.
 
 **Read first:** `INFRASTRUCTURE-PLAN.md` (what is automated and why) · `DEPLOYMENT.md` (ongoing
 operations) · `infrastructure/README.md` (how to run Terraform).

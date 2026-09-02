@@ -189,7 +189,11 @@ variable "secret_version_triggers" {
   description = <<-EOT
     Rotation counters, keyed like `secret_values`. A write-only argument leaves no trace in state, so
     Terraform cannot tell that a value changed — this number is how you tell it. Bump the entry to
-    push a new version; leave it alone and an apply touches nothing.
+    push a new version; leave it absent and an apply touches nothing.
+
+    ABSENT means null, not zero, and that is deliberate: an IMPORTED version has no trigger in state,
+    so an absent key makes config and state agree and the plan stays empty. It is what allows a
+    working environment to be adopted without rotating all of its secrets on the first apply.
 
     Bumping REPLACES the version resource, and the superseded version is DESTROYED (deletion_policy
     defaults to DELETE). That is deliberate: Secret Manager bills every enabled version forever, and
