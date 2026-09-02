@@ -1,234 +1,221 @@
 # Ozari Infrastructure (Terraform)
 
-Infrastructure-as-Code for Ozari's **existing** GCP **staging** environment. This is a
-first **adoption** pass: Terraform is wired to *import* and then own the resources that
-already exist — it does **not** create a new environment from scratch.
+Infrastructure-as-Code for every Ozari environment. **The plan, the automation map and the reasoning
+live in [`INFRASTRUCTURE-PLAN.md`](../INFRASTRUCTURE-PLAN.md) at the repo root** — read that first if
+you are asking *what is automated and what isn't*. This file is the operating manual: how to run it.
 
-> **Public repo safety:** this directory must never contain secret values, service
-> account key JSON, or Terraform state. Those are gitignored (see root `.gitignore`).
-> Terraform manages secret **containers and IAM only**, never secret **payloads**.
+> **Public repo safety.** This directory must never contain secret values, service-account key JSON,
+> or Terraform state. All of those are gitignored. Every file with real values has a committed
+> `.example` beside it holding the same keys and no values.
+
+---
 
 ## Layout
 
 ```
 infrastructure/
-  README.md                     # this file
-  bootstrap/                    # one-time / idempotent state-bucket setup
-    create-tfstate-bucket.ps1
-    create-tfstate-bucket.sh
+  bootstrap/                  create-tfstate-bucket.ps1 | .sh   (the only pre-Terraform step)
+  scripts/
+    tf.ps1                    plan/apply for any environment + stack
+    new-secrets.ps1           generate JWT / encryption / API key material
+    db-bootstrap.ps1 | .sh    create or rotate the least-privileged database role
+    db-roles.sql              the grants it applies
+    db-verify.sql             proves the role cannot do DDL (non-zero exit if it can)
   terraform/
+    bootstrap/                creates a GCP project + its state bucket        (state: ozari/bootstrap)
+    modules/
+      gcp-env/                every Google Cloud resource an environment needs
+      cloudflare-env/         DNS, the edge Worker, Pages, R2, zone settings
     envs/
-      staging/                  # the staging environment (see its own README.md)
-  secrets/                      # LOCAL, gitignored secret material (only .gitkeep tracked)
-  scripts/                      # plan/apply/load-secrets helpers (ps1 + sh)
+      staging/gcp/            inputs only                                     (state: ozari/staging)
+      staging/cloudflare/     inputs only                        (state: ozari/staging-cloudflare)
+      prod/gcp/               inputs only                                        (state: ozari/prod)
+      prod/cloudflare/        inputs only                           (state: ozari/prod-cloudflare)
 ```
+
+**An environment is a set of inputs, not a copy of the code.** Everything real lives in `modules/`.
+If production ever needs something staging does not have, it goes into the module behind a variable —
+never as a file that exists in one environment only, because a file that exists in one environment
+only is a file nobody tests until the day it matters.
+
+**GCP and Cloudflare are separate roots** with separate states: different credentials, different
+blast radius. The one value that crosses (the `run.app` hostname the Worker proxies to) is read from
+the GCP root's state, not copied by hand.
+
+---
 
 ## Prerequisites
 
-- **Terraform >= 1.5** (import blocks are used; 1.5+ required). Check: `terraform version`.
-- **gcloud CLI** authenticated:
+- **Terraform >= 1.11.** Not a preference: `secret_data_wo` (write-only arguments) is what lets
+  Terraform own secret values without persisting them, and on an older Terraform the config does not
+  merely warn — it fails to parse. `tf.ps1` checks this before doing anything.
+- **gcloud**, authenticated for Terraform:
   ```sh
   gcloud auth login
-  gcloud auth application-default login
-  gcloud config set project ozari-500103
+  gcloud auth application-default login   # this is what the provider actually uses
   ```
-  `application-default login` is what the Terraform Google provider uses (ADC).
+- **A Cloudflare API token**, for the cloudflare stacks only:
+  ```powershell
+  $env:CLOUDFLARE_API_TOKEN = "..."
+  ```
+  ⚠️ An environment variable, never a tfvars value — a token passed as a provider argument is written
+  into state. Scopes: Zone → DNS:Edit, Zone Settings:Edit, Workers Routes:Edit; Account → Workers
+  Scripts:Edit, Cloudflare Pages:Edit, Workers R2 Storage:Edit.
+- **psql or Docker**, for the database scripts. `db-bootstrap` falls back to `postgres:17-alpine` in
+  Docker, so there is nothing to install on Windows.
 
-## State bucket
+⚠️ **Every `.ps1` in `scripts/` must be saved as UTF-8 WITH a BOM.** Windows PowerShell 5.1 reads a
+BOM-less file as ANSI, so the `⚠`, `—` and `·` characters in these scripts become mojibake and can
+break tokenization outright — the script fails to parse with an error pointing at a line that looks
+perfectly fine. (PowerShell 7 reads UTF-8 by default and hides the problem, which is why it is worth
+writing down.) The `.sh` and `.sql` files must NOT have one: a BOM ahead of `#!/usr/bin/env bash`
+stops it being a shebang, and psql sends it as part of the first statement.
 
-Remote state lives in a **pre-existing** GCS bucket:
+---
 
-```
-bucket = ozari-500103-tfstate
-prefix = ozari/staging
-```
-
-The bucket already exists — you do **not** need to create it. The bootstrap scripts are
-**idempotent** and safe to re-run; they only verify the bucket and ensure versioning:
-
-```powershell
-# PowerShell
-./bootstrap/create-tfstate-bucket.ps1
-```
-```sh
-# bash
-./bootstrap/create-tfstate-bucket.sh
-```
-
-## Adoption workflow
-
-Do this from `infrastructure/terraform/envs/staging/` (or use the helper scripts).
-
-1. **Check the state bucket** (idempotent): run a bootstrap script above.
-2. **`terraform init`** — initializes the GCS backend + downloads the provider.
-3. **`terraform validate`** — config sanity check.
-4. **`terraform plan`** — with `imports.tf` present, this shows the **import/adoption**
-   plan for existing resources plus any config drift.
-5. **Review the import/adoption plan carefully.** Expect: imports of the SA(s), Artifact
-   Registry repo, 6 secrets, Cloud Run service, and the build trigger; "create" lines
-   for additive IAM members (safe — they just re-assert existing membership). Watch for
-   unexpected **replace/destroy** lines and for secret-reference normalization diffs on
-   Cloud Run (short id vs `projects/<number>/secrets/<name>`).
-6. **`terraform apply` — only after human approval.** Use `./scripts/apply-staging.ps1`
-   (it requires you to type `apply staging`).
-7. **`terraform plan` again** — it should now be clean (no changes), confirming the
-   state matches reality.
-
-Helper scripts:
+## Everyday commands
 
 ```powershell
-./scripts/plan-staging.ps1     # init + validate + plan (read-only)
-./scripts/apply-staging.ps1    # init + apply, with explicit confirmation
+./scripts/tf.ps1 staging gcp plan
+./scripts/tf.ps1 staging gcp apply          # asks you to type the environment name
+./scripts/tf.ps1 staging cloudflare plan
+./scripts/tf.ps1 prod gcp apply
+./scripts/tf.ps1 bootstrap - apply          # one-time: create a new project + state bucket
+./scripts/tf.ps1 staging gcp output
 ```
 
-## Secrets are loaded separately (and gitignored)
+The wrapper is not sugar; it does four checks that are easy to skip by hand: the Terraform version,
+that the environment's `secrets.auto.tfvars` exists before a `gcp apply`, that
+`CLOUDFLARE_API_TOKEN` is set before a cloudflare stack, and a typed confirmation before any apply.
 
-Terraform owns secret **containers** + **IAM**. The actual values are pushed as Secret
-Manager **versions** out-of-band, from a local gitignored file
-(`infrastructure/secrets/staging.env`), using:
+**There is no `destroy` verb, deliberately.** Destroying an environment is a documented procedure
+(`REBUILD.md` §5), not a flag.
+
+### Before the FIRST Cloudflare apply in any environment
 
 ```powershell
-./scripts/load-secrets-staging.ps1
-```
-```sh
-./scripts/load-secrets-staging.sh
+$env:CLOUDFLARE_API_TOKEN = "..."
+./scripts/cf-import.ps1 -Environment staging        # add -InventoryOnly to look without writing
 ```
 
-These scripts contain **no** secret values; they read `KEY=VALUE` lines from the local
-file and `gcloud secrets versions add` each one. The app reads `:latest`.
+The zone is live. Without this, every object that already exists looks to Terraform like something
+to *create*, and the apply dies with "already exists". The script inventories the account, marks each
+object **OURS** or **not ours** (the unrelated `qa-ulew` landing page), and writes import blocks for
+the OURS rows only — never for anything else. After importing, a plan shows the real differences;
+if the live config already matches, the plan is empty and the objects are simply now managed.
 
-## Configuration ownership — what Terraform manages and how to change it
+⚠️ **The domain and the zone are never managed.** There is no `cloudflare_zone` or registrar resource
+in this repo and none may be added: the registration is a purchased, user-facing asset like the
+Google OAuth client. Terraform owns the records *inside* the zone, so a destroy removes records — it
+cannot remove, transfer or fail to renew the domain.
 
-> **Manual Google Cloud Console edits are emergency-only.** Terraform is the source of
-> truth for the resources below. If you edit them by hand in the Console, the next
-> `terraform plan` will detect the drift and `terraform apply` will **restore the
-> declared state** (your manual change will be reverted). Only edit in the Console for
-> emergency recovery, then reconcile the change back into this code immediately.
+---
 
-### Cloud Build trigger substitutions are Terraform-managed
+## Setting up an environment's files
 
-The Cloud Build trigger substitutions are now managed by Terraform
-(`cloud-build.tf`), **not** edited by hand in the Cloud Console during normal
-operation. Managed substitutions:
+Two gitignored files per environment, both with committed examples:
 
-- `_APP_HOST`
-- `_IMAGE_URL`
-- `_NODE_ENV`
-- `_REGION`
-- `_RUN_SA`
-- `_SERVICE_NAME`
-
-**To change a substitution:**
-
-1. Edit `infrastructure/terraform/envs/staging/variables.tf` (the value) and/or
-   `cloud-build.tf` (the mapping).
-2. `terraform plan` and review.
-3. `terraform apply` after review.
-4. Do **not** change it manually in the Console except for emergency recovery (and then
-   fold the change back into Terraform).
-
-### `variables.tf` defaults are the staging source of truth
-
-The defaults in `variables.tf` are the **staging source of truth for all non-secret
-configuration**. `terraform.tfvars` is **optional, gitignored, and only for local
-overrides** — staging does **not** require a `terraform.tfvars`. Use
-`terraform.tfvars.example` as a reference if you choose to create local overrides.
-
-### Cloud Run runtime configuration (env vars)
-
-Cloud Run runtime config is owned by **Terraform** (structural config: scaling,
-concurrency, timeout, env vars, secret bindings, SA, ingress) **and** the **Cloud Build
-deploy command** (`ozari-api/cloudbuild.yaml`, which sets env vars + image on each
-deploy). Because both `terraform apply` and `gcloud run deploy` use `--set-env-vars`
-(full replacement), the two **must stay in sync** or they will fight on each run.
-
-**When you add a new runtime env var, update all that apply:**
-
-| File | When |
-|---|---|
-| `variables.tf` | Always — declare the input (with a staging default). |
-| `terraform.tfvars.example` | If you want it documented as an overridable value. |
-| `cloud-run.tf` | Always — add the `env { }` (plain) or `value_source` (secret) block. |
-| `cloud-build.tf` substitutions | Only if Cloud Build needs to pass the value (managed substitution). |
-| `ozari-api/cloudbuild.yaml` deploy command | If Cloud Build sets it on `gcloud run deploy --set-env-vars` — keep this list identical to the env vars Terraform declares. |
-
-> Settings that do **not** vary per environment are **not** env vars — they live in
-> code as preferences (`ozari-api/src/config/app.ts` → `appConfig`, e.g. the API base
-> path and all TOTP/MFA parameters). Change those in code and redeploy.
->
-> **June 2026 cleanup:** `APP_ENV` and `API_BASE_PATH` were removed from the runtime
-> env. `APP_ENV` was redundant (`NODE_ENV` is the single environment switch); the API
-> base path is the code preference `appConfig.basePath`, not an env var.
-
-### Secret values are NOT managed by Terraform
-
-Terraform manages only the secret **containers** and the **IAM access** to them. Secret
-**payloads/versions are never** in Terraform or Git — they live in Secret Manager and
-are loaded out-of-band (see `scripts/load-secrets-staging.*`). The app reads `:latest`.
-
-### Cloudflare Pages `VITE_API_URL` is NOT managed by Terraform
-
-The frontend's API URL is still configured **manually in Cloudflare Pages** and is
-**not** managed by this Terraform (Terraform here only owns GCP):
-
-```
-VITE_API_URL=https://ozari-api-694756660984.northamerica-south1.run.app
+```powershell
+cd terraform/envs/staging/gcp
+cp terraform.tfvars.example      terraform.tfvars        # non-secret, account-identifying
+cp secrets.auto.tfvars.example   secrets.auto.tfvars     # the 11 secret values
 ```
 
-If the Cloud Run URL changes, update this value in the Cloudflare Pages project
-settings by hand.
+`*.auto.tfvars` is loaded automatically, so `apply` needs no extra flag. Generate what can be
+generated:
+
+```powershell
+./scripts/new-secrets.ps1                                        # jwt / encryption / api key
+./scripts/db-bootstrap.ps1 -DirectUrl "postgresql://owner:...@ep-xxx.../neondb?sslmode=require"
+```
+
+The rest (Resend key, R2 token, Google OAuth client) are minted in their own dashboards — see
+`INFRASTRUCTURE-PLAN.md` §3 for the full table of where each value comes from.
+
+---
+
+## Secrets
+
+**Terraform owns the containers, the IAM *and* the versions.** The values reach Secret Manager
+through `secret_data_wo`, a Terraform 1.11 write-only argument: the value is sent to the API and then
+forgotten. It is never written to `terraform.tfstate` and never appears in a saved plan file.
+
+This replaced a separate `load-secrets-*.ps1` script, and with it a two-phase apply and the standing
+chore of destroying superseded versions by hand. **To rotate a secret:**
+
+1. put the new value in `secrets.auto.tfvars`;
+2. bump its entry in `secret_version_triggers` (`1` → `2`);
+3. apply.
+
+The new version is created and the superseded one is **destroyed in the same operation** — which is
+what keeps the Secret Manager bill flat, since it charges for every enabled version forever. The
+consequence to know: a rotation is not reversible from Google's side. To roll back, re-apply the
+previous value with a further bump.
+
+⚠️ **Terraform cannot detect drift on a write-only value.** If someone adds a version with `gcloud`,
+Terraform will neither notice nor correct it. That is the trade for values never touching state; the
+counter is the record of intent. Adding a version by hand is a legitimate break-glass move — just
+bump the counter afterwards so the two agree.
+
+### Adding a new secret
+
+One entry in `modules/gcp-env/secrets.tf`. It gets its container, version, IAM binding, Cloud Run
+env binding and Cloud Build `--set-secrets` entry from that single declaration. Then add the value
+to each environment's `secrets.auto.tfvars` and to both `.example` files.
+
+---
+
+## The runtime environment contract
+
+`--set-env-vars` and `--set-secrets` **replace** rather than merge, and both Terraform and Cloud
+Build set them. When each kept its own hand-written copy of the list, adding a variable to one
+silently wiped it from the service on the other's next run.
+
+They are now one list. `modules/gcp-env/locals.tf` computes `_SET_ENV_VARS` and `_SET_SECRETS` and
+passes them to the trigger as substitutions; `ozari-api/cloudbuild.yaml` forwards them verbatim and
+enumerates nothing. **Do not expand them back into a literal list in the YAML.**
+
+To add a plain runtime variable: one line in `locals.tf`'s `runtime_env_vars`. Everything else
+follows. (Settings that do not vary per environment are not env vars at all — they belong in
+`ozari-api/src/config/app.ts` as code preferences.)
+
+---
+
+## Database roles
+
+```powershell
+./scripts/db-bootstrap.ps1 -DirectUrl "<owner connection string>"
+```
+
+Creates or rotates `ozari_api`: DML only, no DDL, no ownership, no group memberships. Then runs
+`db-verify.sql`, which **fails the script** if the result is not actually least-privileged.
+
+⚠️ **This is a script and not a Terraform resource for a specific reason.** A role created through
+the Neon Console, API, CLI or the community Terraform provider is automatically granted
+`neon_superuser` — CREATEDB, CREATEROLE, full DDL. The provider therefore cannot express the role
+this application needs, and a role that can drop your tables looks completely normal in the dashboard
+and works perfectly. `db-verify.sql`'s group-membership check is what catches it.
+
+Run the verify on its own any time; it is read-only:
+
+```powershell
+psql "$DIRECT_DATABASE_URL" -v app_role=ozari_api -f scripts/db-verify.sql
+```
+
+---
+
+## Console edits are emergency-only
+
+Terraform is the source of truth for everything it declares. A manual change in the Google Cloud or
+Cloudflare console will be detected as drift by the next `plan` and **reverted** by the next `apply`.
+Edit in a console only to recover from an outage, then fold the change back into code immediately.
+
+---
 
 ## ⚠️ `terraform destroy` is dangerous
 
-`terraform destroy` against this config can **remove the Cloud Run service, Artifact
-Registry repository, the Cloud Build trigger, the Secret Manager secret containers, and
-the service accounts** — i.e. it can take down staging and delete secret containers.
-Never run it casually. There is no destroy helper script on purpose.
-
-## Old / unused resources — cleanup candidates (NOT managed here)
-
-These are intentionally left **unmanaged** in this first pass; review and clean up later:
-
-- **`jwt-secret`**, **`neon-database-url`**, **`neon-direct-url`** — old/unused secrets superseded by
-  the `ozari-*` names; nothing in `cloudbuild.yaml` or Terraform references them. Together with three
-  superseded VERSIONS (`ozari-jwt-secret` has 3 enabled, `ozari-jwt-refresh-secret` has 2) they are
-  **$0.36/month of the bill** — Secret Manager charges per enabled version, forever. Verify, then
-  delete; see `INFRASTRUCTURE-PLAN.md` §6/§8. **Do not delete
-  `ozari-github-github-oauthtoken-c19aef`** — that one is Cloud Build's GitHub connection token.
-- **No Artifact Registry cleanup policy** — 27 images / 3.8 GB accumulated by 2026-09-01, oldest from
-  June, ~$0.42/month. A `cleanup_policies` block takes it under the free tier
-  (`INFRASTRUCTURE-PLAN.md` §3.1).
-- **Default compute service account has `roles/editor`** — over-privileged; scope down.
-- **Cloud Build service agent has `roles/secretmanager.admin`** — scope down to
-  `secretAccessor` on specific secrets.
-- **Cloud Run timeout** — reduced from 300s to **60s** (backstop above the app's own
-  30s request/response timeout). Done.
-- **Artifact Registry vulnerability scanning is disabled** — intentionally left off for
-  cost (~$0.26 per image scanned ≈ several $/month at this deploy cadence). Dependency
-  CVEs are tracked manually via `pnpm audit` instead. Revisit if budget allows.
-
-## Production (future) — and the full-IaC rebuild
-
-> **The plan for both lives in [`INFRASTRUCTURE-PLAN.md`](../INFRASTRUCTURE-PLAN.md)** (repo root):
-> the complete ownership map (what is Terraform today, what can move into it, and what has no API and
-> never will), the ordered bootstrap for a brand-new environment, the staging teardown-and-rebuild
-> procedure with what is irrecoverably lost, the irreducible list of manual steps, and the measured
-> cost model. Read it before creating `envs/prod/` — several decisions there (shared registry vs. one
-> per environment, Neon project vs. branch, whether Cloudflare joins Terraform) change the shape of
-> that directory, and are cheaper to make before it exists than after.
-
-Production does **not** exist yet. When it does, mirror this layout under a separate
-env directory and keep everything isolated:
-
-```
-infrastructure/terraform/envs/prod/
-```
-
-- Ideally a **separate GCP project** (hard isolation from staging).
-- **Separate secrets**, **separate Cloud Build trigger**, and a **separate state
-  prefix/bucket** (e.g. prefix `ozari/prod`).
-
-## Hardening TODOs (tracked, not done in this pass)
-
-See the cleanup candidates above plus inline `TODO` comments in `iam.tf`,
-`cloud-run.tf`, `cloud-build.tf`, and `ozari-api/cloudbuild.yaml`.
+Against a `gcp` root it removes the Cloud Run service, the Artifact Registry repository and its
+images, the build trigger, the secret containers **and their versions**, and the service accounts.
+Against a `cloudflare` root it removes DNS records, the Worker and the R2 bucket. There is no helper
+script for it, on purpose. The deliberate procedure is `INFRASTRUCTURE-PLAN.md` §8, which also lists
+what is irrecoverably lost.

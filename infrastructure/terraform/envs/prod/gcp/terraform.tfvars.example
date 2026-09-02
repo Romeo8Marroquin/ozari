@@ -1,0 +1,20 @@
+# Copy to `terraform.tfvars` (gitignored) and fill in. Nothing here is secret; these are public
+# identifiers kept out of the repo because they name your project, account and bucket.
+
+# From `terraform output` in infrastructure/terraform/bootstrap.
+project_id     = "ozari-prod"
+project_number = "<12-digit project number>"
+
+# --- Cloudflare R2, plain half ----------------------------------------------
+r2_endpoint    = "https://<cloudflare-account-id>.r2.cloudflarestorage.com"
+r2_bucket_name = "ozari-assets-prod"
+# Production earns a custom domain: this URL is embedded in every stored image reference and in
+# printed documents, so it should not be a bucket-shaped r2.dev address you might want to change.
+r2_public_url = "https://assets.partyrentalsgt.com"
+
+# --- Cloud Build GitHub connection ------------------------------------------
+# The number in the URL of: github.com → Settings → Applications → Google Cloud Build → Configure.
+github_app_installation_id = "<installation id>"
+
+# --- Optional ----------------------------------------------------------------
+# enable_cleanup_job = true

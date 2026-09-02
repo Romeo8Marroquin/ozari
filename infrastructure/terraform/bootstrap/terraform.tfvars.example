@@ -1,0 +1,20 @@
+# Copy to `terraform.tfvars` (gitignored).
+#
+# Prerequisites the caller must already hold — check them BEFORE the first apply, because a failure
+# here leaves a half-created project:
+#   · roles/resourcemanager.projectCreator  (implicit on a personal Google Cloud account)
+#   · roles/billing.user on the billing account below (without it the project is created UNLINKED,
+#     and every later API enablement fails with a billing error that names neither cause)
+#
+#   gcloud billing accounts list          # find the ID
+#   gcloud auth application-default login # the credentials Terraform uses
+
+project_id            = "ozari-prod"
+project_name          = "Ozari Production"
+billing_account       = "XXXXXX-XXXXXX-XXXXXX"
+
+# ⚠️ Must match the `backend "gcs" { bucket = … }` literal in envs/prod/gcp/main.tf and
+# envs/prod/cloudflare/main.tf. Terraform cannot interpolate a backend block, so this is the one
+# value in the repo that is duplicated by hand.
+state_bucket_name     = "ozari-prod-tfstate"
+state_bucket_location = "northamerica-south1"

@@ -65,6 +65,21 @@ is settled; the reasoning matters more than the individual strings, because it g
 | 19 | **The rule under a table is a SECTION divider, not the table's bottom border** (2026-08-26). What makes the difference is DETACHMENT, not weight: drawn tight under the last row it reads as a border the table's other three sides do not have, while 9pt of air above it reads as the rule between one block and the next. Thinning it to 0.5pt was tried at the same time and reverted — once the rule is no longer touching the table it has to carry the separation alone, and a hairline is too quiet for that. **Detached and full weight** is the pair that works. The space BELOW it is deliberately unequal: another group's table is one step away (`groupTitle.marginTop` 16), the summary is a section away (`summary.marginTop` 26). At equal spacing the summary read as a third table in the same list. |
 | 20 | **The one-page target (#15) is the ORDINARY order, and #18–19 spend part of the budget.** With the letterhead this business has — two accounts — a five-line order with a discount and a deposit ends on page one with ~35pt to spare (`pnpm doc:preview:free`; measure it by scanning the raster for the last non-white row rather than eyeballing). A THIRD bank account costs ~44pt and pushes that same order to two pages, which is correct rather than broken: the closing block is `wrap={false}`, so conditions, deposit details and totals travel together and page two is a coherent page, never a stray line. **Do not buy that edge case back by tightening the fact cards or the table rhythm** — tried on 2026-08-26, cost readability everywhere, still missed by ~17pt, reverted. When the budget genuinely needs a few points, take them from slack that is not spacing at all: `page.paddingBottom` only has to clear the two pieces of `fixed` furniture. |
 
+**Addendum to #19 — how the divider is actually implemented** (supersedes the "`groupTitle.marginTop`
+/ `summary.marginTop`" mechanism described above, which was the first attempt):
+
+- The rule is **HALF the content width and centred by explicit margins**, not `alignSelf: 'center'` —
+  react-pdf resolved a percentage width against a box that put it off to one side (`documentTheme.ts`).
+- **The divider OWNS the whole gap** (`DIVIDER_GAP_TABLE = { above: 15, below: 10 }`,
+  `DIVIDER_GAP_SECTION = { above: 21, below: 16 }`) and the element that follows carries **no top
+  margin of its own**. Two elements each contributing half of a gap is how the rule ended up nearer
+  one side, and a rule nearer one side reads as BELONGING to that block — at 9pt under a table and
+  16pt above the next it looked like the first table's bottom border, which is the reading the
+  detachment exists to prevent.
+- The gap still differs by context, which is decision #19's point: one table to the next is a step
+  within a list (`DIVIDER_GAP_TABLE`), the tables to the summary is a change of section
+  (`DIVIDER_GAP_SECTION`). `OrderDocument` picks between them by whether the group is the last one.
+
 ---
 
 ## 3. Library — `@react-pdf/renderer` (MIT)

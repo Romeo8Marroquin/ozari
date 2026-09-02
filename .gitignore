@@ -57,6 +57,9 @@ secrets.auto.tfvars
 # Real tfvars are ignored; commit only the *.example templates
 *.tfvars
 !*.tfvars.example
+# Generated import blocks (infrastructure/scripts/cf-import.ps1). Not secret — zone/record ids — but
+# environment-specific and regenerable, and stale ones are worse than none.
+imports.generated.tf
 # Keep .terraform.lock.hcl committed (do NOT ignore it)
 
 # Terraform-loaded secret material (never commit)

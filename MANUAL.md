@@ -221,8 +221,10 @@ editable** — son un punto de partida, no una obligación.
   exigir un **tiempo mínimo de anticipación**: si intenta agendar demasiado justo, el formulario lo
   avisa.
 - **Entrega** — fecha y hora. Al crear, no puede estar en el pasado.
-- **Recolección** — fecha y hora. **Déjela vacía si el pedido es solo de venta**: sin recolección, el
-  pedido termina al entregarse. Si la pone, debe ser posterior a la entrega.
+- **Recolección** — fecha y hora. **Déjela vacía en un pedido de solo venta**: no hay nada que
+  recoger. Si la pone, debe ser posterior a la entrega.
+  *(Ojo: lo que decide si el pedido lleva recolección en su ciclo son los **productos**, no este
+  campo — ver §7.)*
 
 **Productos**
 Agregue líneas con **Agregar producto**. Bajo cada línea aparece el subtotal y, en alquileres, los
@@ -289,10 +291,15 @@ el siguiente evento hay limpieza.
 ## 7. El ciclo de vida de un pedido
 
 ```
-Pendiente → En ruta → Entregado → Recolectado → Listo
-                                     └─ (los pedidos de solo venta terminan en Entregado)
+ALQUILER   Pendiente → En ruta → Entregado → Recolectado → Listo
+SOLO VENTA Pendiente → En ruta → Entregado ✔ (termina aquí)
+
 Cancelado ← se puede llegar desde cualquier paso
 ```
+
+**El sistema decide solo cuál de los dos recorridos aplica**, mirando los productos del pedido: si
+hay **al menos un producto de alquiler**, el pedido hace el ciclo completo; si **todos** son de venta,
+termina en *Entregado*. No hay nada que marcar.
 
 Se avanza con **un botón**, desde el tablero, desde la agenda o desde el pedido. El botón siempre dice
 el siguiente paso: *Marcar En ruta*, *Marcar Entregado*…
@@ -319,8 +326,15 @@ corresponde —incluida la hora registrada— y el pedido vuelve a aparecer dond
 cancela un pedido que aún no salió, las unidades vuelven a estar libres; si cancela uno ya terminado,
 no se libera nada porque ya no tenía nada tomado. Lea esa línea: cambia según el estado.
 
-**Eliminar** borra el pedido y su historial para siempre. Cancelar conserva el registro; eliminar no.
-Para un pedido que sí ocurrió, cancele.
+**Un pedido de solo venta termina solo.** Al confirmar *Entregado*, el sistema ve que ya no queda
+nada por hacer, lo da por cerrado y **pasa a Historial automáticamente** — no aparece un botón de
+"finalizar" ni hay que moverlo a mano. (Si retrocede ese paso, vuelve a la Agenda.)
+
+**Eliminar** está en **Zona de riesgo**, al final del pedido, y **está disponible en cualquier
+momento, sin importar el estado** —incluido un pedido pendiente o ya entregado—. Borra el pedido y
+todo lo que existe por él: historial, evidencia y su registro de cobro, para siempre.
+Cancelar conserva el registro; eliminar no. **Para cerrar un pedido que sí ocurrió, cancélelo.**
+Eliminar es para lo que nunca debió existir: una prueba, un duplicado, un error de captura.
 
 **Todo queda registrado.** Cada cambio de estado guarda quién, cuándo y —si la hubo— la evidencia. El
 historial se ve al final del pedido.

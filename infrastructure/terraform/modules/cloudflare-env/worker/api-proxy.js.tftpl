@@ -1,0 +1,21 @@
+// Ozari API edge proxy — generated from Terraform (modules/cloudflare-env/worker/api-proxy.js.tftpl).
+//
+// WHY THIS EXISTS. Cloud Run domain mappings are unavailable in northamerica-south1 and Google
+// documents them as not production-ready anywhere, so the brand hostname cannot be attached to the
+// service directly. DNS resolves, it does not redirect: the browser still sends
+// `Host: ${api_hostname}`, one IP fronts every Cloud Run service, and that header is the only thing
+// identifying ours. Unknown host means a Google 404.
+//
+// So something must rewrite Host before the request reaches Google, and it must PROXY rather than
+// redirect — a 3xx would land the browser back on run.app and re-create the third-party-cookie bug
+// that kills sessions on Safari/iOS, which is the entire reason for the custom domain.
+//
+// Rewriting the URL's hostname on the subrequest carries both the Host header and the TLS SNI,
+// which is what Cloud Run needs to route to the right service.
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    url.hostname = '${cloud_run_hostname}';
+    return fetch(new Request(url, request));
+  },
+};

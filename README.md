@@ -41,25 +41,31 @@ Backend deploys to **Google Cloud Run** through **Cloud Build**; the frontend de
 **Cloudflare Pages**; the database is **Neon PostgreSQL**; product images live in **Cloudflare R2**;
 transactional email goes through **Resend**.
 
-- **Terraform** (`infrastructure/terraform/envs/staging/`, GCS state backend) owns the staging GCP
-  footprint: the Cloud Run service's structural config, Artifact Registry, the Cloud Build trigger
-  and its substitutions, both service accounts, the Secret Manager containers + IAM (never secret
-  values), and narrow project IAM. Cloud Build owns the container image tag. Console edits are
-  emergency-only; `terraform plan` detects drift. Full ownership rules: `infrastructure/README.md`.
+- **Terraform** (`infrastructure/terraform/`, GCS state backend) owns both clouds. An environment is
+  a set of *inputs* to a shared module, not a copied directory: `modules/gcp-env` (Cloud Run,
+  Artifact Registry with cleanup policies, Cloud Build connection + trigger, service accounts, IAM,
+  Secret Manager containers **and versions**) and `modules/cloudflare-env` (DNS, the edge Worker that
+  rewrites `Host` in front of Cloud Run, Pages including `VITE_API_URL`, R2 with its CORS policy,
+  zone SSL). GCP and Cloudflare are separate roots with separate states.
 - **Staging shape**: project `ozari-500103`, region `northamerica-south1`, service `ozari-api`
-  (port 8080, min 0 / max 3 instances, concurrency 40, 1 CPU / 512 Mi). Plain env vars are only
-  `NODE_ENV`, `LOG_LEVEL`, `APP_HOST`; everything else comes from Secret Manager.
-- **Secrets** (Secret Manager, loaded out-of-band by `infrastructure/scripts/load-secrets-staging.*`):
-  database URLs (pooled + direct), JWT secrets, encryption key, API key, Resend key. Never in
-  Terraform, never committed.
+  (port 8080, min 0 / max 3 instances, concurrency 40, 1 CPU / 512 Mi). Cloud Build owns the image
+  tag; Terraform owns everything structural. Console edits are emergency-only — `plan` detects drift.
+- **Secrets** live in Secret Manager and are applied by Terraform through **write-only arguments**,
+  so values never enter state or a saved plan. Real values sit in gitignored `secrets.auto.tfvars`
+  files with committed `.example` templates. Rotation is a value plus a counter bump, and the
+  superseded version is destroyed in the same apply.
 - **CI/CD**: the Cloud Build trigger (`ozari-api/cloudbuild.yaml`) verifies (install, build,
   type-check), builds and pushes the Docker image, runs `prisma migrate deploy` against the direct
-  URL, then deploys to Cloud Run. Cloudflare Pages builds the frontend on pushes to `dev`
-  (`VITE_API_URL` is set manually in Cloudflare, not by Terraform).
+  URL, then deploys to Cloud Run — with the env and secret lists **computed by Terraform**, so the
+  pipeline and the declared service cannot disagree. Cloudflare Pages builds the frontend on `dev`.
+- **The database role is a script, not Terraform** (`infrastructure/scripts/db-bootstrap.*`): the
+  application connects as a DML-only role that cannot alter the schema, and `db-verify.sql` proves it.
 
-The ordered from-zero runbook (Neon, secrets, Terraform, Cloud Build, Cloud Run, Cloudflare,
-Resend, R2 CORS, production cutover plan, DB role model, migration-squash strategy) is
-**[DEPLOYMENT.md](./DEPLOYMENT.md)**.
+**[INFRASTRUCTURE-PLAN.md](./INFRASTRUCTURE-PLAN.md)** is the automation map — what is code, what is
+a click and why, plus the per-environment configuration matrix and the cost model.
+**[DEPLOYMENT.md](./DEPLOYMENT.md)** is the ordered from-zero runbook, and
+**[REBUILD.md](./REBUILD.md)** is the teardown-and-recreate procedure with the complete list of
+manual steps.
 
 ## Backend (`ozari-api`)
 
@@ -82,18 +88,37 @@ Auth mirrors the backend contract: silent token refresh, forced-logout choreogra
 overlay with health polling, and mirrored Zod validation. Details:
 **[ozari-app/README.md](./ozari-app/README.md)**.
 
-## Planning
+## Documentation map
 
-Work is organized in epics; each epic file is the deep plan and decision record for its module.
+`CLAUDE.md` is the always-loaded conventions layer (structure, invariants, tripwires). Everything
+deeper lives in a companion doc it points at.
+
+**Reference — what is built and how it must behave:**
+
+| Document | Scope |
+|----------|-------|
+| [CLAUDE.md](./CLAUDE.md) | Repo conventions, doctrines and the documentation map |
+| [MODULES.md](./MODULES.md) | Per-module state of the built product and the rules that live nowhere else |
+| [FRONTEND-DOCTRINE.md](./FRONTEND-DOCTRINE.md) | UI doctrine: motion, modals/z-index, forms, responsive layout, tokens |
+| [AUTH-AND-SECURITY.md](./AUTH-AND-SECURITY.md) | Auth chain, sessions/rotation, MFA, password reset, throttling, email |
+| [DEPLOYMENT.md](./DEPLOYMENT.md) | The deploy runbook (secrets, domains, R2, OAuth, rollout) |
+| [INFRASTRUCTURE-PLAN.md](./INFRASTRUCTURE-PLAN.md) | What is automated, what cannot be, the config matrix and the cost model |
+| [REBUILD.md](./REBUILD.md) | Erasing and recreating an environment: ownership register, ordered manual steps, teardown |
+
+**Planning — epics are the deep plan and decision record for their module:**
 
 | Document | Scope | Status |
 |----------|-------|--------|
 | [ROADMAP.md](./ROADMAP.md) | Cross-epic compass and the standing quality bar | living |
 | [EPIC-1-INVENTORY.md](./EPIC-1-INVENTORY.md) | Product catalog + inventory (roles, pricing, gallery, CRUD) | **completed** — kept as the decision record |
-| [EPIC-2-ORDERS.md](./EPIC-2-ORDERS.md) | Orders, period availability, delivery logistics, receipts, calendar | in progress (EPIC-2A, the Employee→Driver role refactor, is **done**; orders themselves are next) |
+| [EPIC-2-ORDERS.md](./EPIC-2-ORDERS.md) | Orders, period availability, delivery logistics, client registries | in progress |
+| [EPIC-2-ORDER-LIFECYCLE.md](./EPIC-2-ORDER-LIFECYCLE.md) | The data-driven status machine (`advance`, holds, evidence) | built; admin editor deferred |
+| [EPIC-2-DRIVER-AVAILABILITY.md](./EPIC-2-DRIVER-AVAILABILITY.md) | The logistics pad — driver spacing, assignment, the `.ics` block | built |
+| [EPIC-2-DOCUMENTS.md](./EPIC-2-DOCUMENTS.md) | Cotización + comprobante PDF | built |
+| [EPIC-2-CALENDAR.md](./EPIC-2-CALENDAR.md) | Google Calendar API + private ICS subscription | built |
 
 Completed epics are retained, not deleted: they document the owner decisions and architectural
-patterns later modules inherit, and `CLAUDE.md` and the epic files cross-reference each other.
+patterns later modules inherit, and the reference docs cross-reference them.
 
 ## Prerequisites
 

@@ -1,0 +1,22 @@
+# Copy to `terraform.tfvars` (gitignored) and fill in.
+#
+# ⚠️ The Cloudflare API token is an ENVIRONMENT VARIABLE, never a value in this file:
+#     PowerShell:  $env:CLOUDFLARE_API_TOKEN = "..."
+#     bash:        export CLOUDFLARE_API_TOKEN="..."
+
+cloudflare_account_id = "<32-hex account id>"
+cloudflare_zone_id    = "<32-hex zone id>"
+
+# Everything else has a production default in variables.tf. Override only if the naming changes.
+# app_hostname       = "partyrentalsgt.com"
+# pages_project_name = "ozari-prod"
+# r2_bucket_name     = "ozari-assets-prod"
+# r2_custom_domain   = "assets.partyrentalsgt.com"
+
+# Resend's DNS records live in whichever environment owns email for the domain — production, since
+# it is the same verified sending domain. Copy the exact values from Resend → Domains.
+extra_dns_records = {
+  # resend_dkim = { name = "resend._domainkey.partyrentalsgt.com", type = "TXT", content = "p=..." }
+  # resend_spf  = { name = "send.partyrentalsgt.com", type = "TXT", content = "v=spf1 include:amazonses.com ~all" }
+  # resend_mx   = { name = "send.partyrentalsgt.com", type = "MX",  content = "feedback-smtp.us-east-1.amazonses.com", priority = 10 }
+}

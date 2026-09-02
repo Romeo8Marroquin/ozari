@@ -1,53 +1,111 @@
 -- ============================================================================
--- Ozari — database roles (least privilege)
+-- Ozari — database roles (least privilege). Idempotent; safe to re-run.
 -- ============================================================================
--- Two roles per database, matching the two connection strings the app already uses:
+-- Run it with scripts/db-bootstrap.ps1 (or .sh), which generates the password and passes the
+-- variables. By hand:
 --
---   • OWNER role  → DIRECT_DATABASE_URL (secret `ozari-direct-database-url`)
---     Full DDL. Used ONLY by the migration pipeline (`prisma migrate deploy`) and
---     for manual admin/psql access. This is Neon's default owner role.
+--   psql "$DIRECT_DATABASE_URL" \
+--     -v app_role=ozari_api -v app_password='<generated>' -v db_name=neondb \
+--     -f db-roles.sql
 --
---   • ozari_api   → DATABASE_URL (secret `ozari-database-url`, the POOLED URL)
---     DML only (SELECT/INSERT/UPDATE/DELETE). NO CREATE/ALTER/DROP, no ownership.
---     Used by the API at runtime, so a compromised app can read/write rows but can
---     never change the schema. Schema changes only ever happen through migrations
---     run as the owner.
+-- ---------------------------------------------------------------------------
+-- WHY THIS EXISTS, and why it cannot be a Terraform resource.
 --
--- HOW TO RUN: connect to the target database AS THE OWNER (via the direct URL) and
--- run this whole file once per database (staging and, later, prod). It is idempotent.
---   psql "$DIRECT_DATABASE_URL" -v db_name=neondb -f db-roles.sql
--- Replace `neondb` with the actual database name if different.
+-- Neon has a Terraform provider and it can create roles — but any role created through the Neon
+-- Console, API, CLI or that provider is automatically granted `neon_superuser`, which carries
+-- CREATEDB, CREATEROLE and full DDL. That is the opposite of what this file is for. A genuinely
+-- least-privileged application role can only be made with SQL, by the owner. So this stays a
+-- script deliberately; moving it into Terraform would silently undo the whole point.
 --
--- The password below is a PLACEHOLDER. Set a strong password (Neon console or the
--- CREATE ROLE line), then store the resulting POOLED connection string for ozari_api
--- ONLY in Secret Manager as `ozari-database-url` — never here, never in git.
+-- THE SPLIT, which mirrors the two connection strings the app already uses:
+--
+--   OWNER role  → DIRECT_DATABASE_URL (secret `ozari-direct-database-url`)
+--                 Full DDL. Used ONLY by `prisma migrate deploy` in the build pipeline and by a
+--                 human at a psql prompt. The running application never receives it — it is not
+--                 bound to the Cloud Run service at all (modules/gcp-env/secrets.tf, env_var = null).
+--
+--   app role    → DATABASE_URL (secret `ozari-database-url`, the POOLED URL)
+--                 SELECT / INSERT / UPDATE / DELETE and nothing else. No CREATE, no ALTER, no DROP,
+--                 no ownership. A compromised API can read and write rows; it cannot drop a table,
+--                 add a column, or create a role to escalate with.
+--
+-- ⚠️ psql does NOT expand :variables inside dollar-quoted blocks, so this file uses `\gexec`
+-- (run a generated statement) rather than DO $$ … $$. A DO block here looks correct and silently
+-- receives the literal text ":'app_role'".
 -- ============================================================================
 
--- 1) Create the runtime role (idempotent). Prefer setting the password in the Neon
---    console; if you set it here, replace the placeholder and do NOT commit the real one.
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ozari_api') THEN
-    CREATE ROLE ozari_api LOGIN PASSWORD 'CHANGE_ME_STORE_ONLY_IN_SECRET_MANAGER';
-  END IF;
-END
-$$;
+\set ON_ERROR_STOP on
 
--- 2) Let it connect and use the schema (but not create objects in it).
-GRANT CONNECT ON DATABASE :"db_name" TO ozari_api;
-GRANT USAGE  ON SCHEMA public        TO ozari_api;
+-- ---------------------------------------------------------------------------
+-- 1) The role.
+--
+-- CREATE ROLE's defaults are already NOSUPERUSER / NOCREATEDB / NOCREATEROLE / NOBYPASSRLS /
+-- NOREPLICATION, so the ALTER only asserts the two attributes a non-superuser owner is actually
+-- permitted to set. The rest are CHECKED, not set, by db-verify.sql — on a managed Postgres the
+-- owner is not a true superuser and `ALTER ROLE … NOSUPERUSER` would fail outright, taking the
+-- whole script with it.
+--
+-- Re-running rotates the password. That is the rotation procedure: run this again, then put the new
+-- URL in secrets.auto.tfvars and bump its entry in secret_version_triggers.
+-- ---------------------------------------------------------------------------
 
--- 3) DML on all EXISTING tables + sequences (no structural privileges).
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA public TO ozari_api;
-GRANT USAGE, SELECT                  ON ALL SEQUENCES  IN SCHEMA public TO ozari_api;
+SELECT format('CREATE ROLE %I NOLOGIN', :'app_role')
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_role')
+\gexec
 
--- 4) The same DML automatically on FUTURE tables/sequences the owner creates, so new
---    migrations "just work" without re-granting. Must be run AS THE OWNER (these default
---    privileges attach to objects created by the role that runs this statement).
+SELECT format(
+  'ALTER ROLE %I LOGIN NOCREATEDB NOCREATEROLE PASSWORD %L',
+  :'app_role', :'app_password'
+)
+\gexec
+
+-- ---------------------------------------------------------------------------
+-- 2) Connect and resolve names, but do not build.
+--
+-- USAGE lets the role see into the schema; CREATE is what lets a role make objects, and is withheld
+-- from it and revoked from PUBLIC. On Postgres 15+ PUBLIC no longer holds CREATE on `public` by
+-- default, but revoking costs nothing and keeps the intent true on a database restored from an
+-- older server.
+-- ---------------------------------------------------------------------------
+
+GRANT CONNECT ON DATABASE :"db_name" TO :"app_role";
+GRANT USAGE ON SCHEMA public TO :"app_role";
+
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+REVOKE CREATE ON SCHEMA public FROM :"app_role";
+
+-- ---------------------------------------------------------------------------
+-- 3) DML on everything that exists today.
+-- ---------------------------------------------------------------------------
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA public TO :"app_role";
+GRANT USAGE, SELECT                  ON ALL SEQUENCES IN SCHEMA public TO :"app_role";
+
+-- ---------------------------------------------------------------------------
+-- 4) …and automatically on everything a future migration creates.
+--
+-- ⚠️ ALTER DEFAULT PRIVILEGES attaches to the role that RUNS it and applies only to objects that
+-- role later creates. It is therefore correct exactly as long as migrations keep running as this
+-- same owner. If the owner ever changes — a new Neon role, a branch restored under a different
+-- owner — re-run this file AS THE NEW OWNER, or the next migration's tables will be invisible to
+-- the app, which presents as a permission error on a table that plainly exists.
+-- ---------------------------------------------------------------------------
+
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ozari_api;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO :"app_role";
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO ozari_api;
+  GRANT USAGE, SELECT ON SEQUENCES TO :"app_role";
 
--- Deliberately NOT granted: CREATE on the schema, table ownership, or any DDL. If you
--- ever add a migration that creates a NEW schema (not `public`), re-run steps 2–4 for it.
+-- Prisma's `_prisma_migrations` table is written by `migrate deploy` as the OWNER. The absence of a
+-- grant is deliberate: the application has no reason to read, and no business writing, the record of
+-- which migrations have run.
+
+-- ⚠️ SEQUENCES ARE GRANTED `USAGE, SELECT` — NOT `UPDATE`, AND THAT IS THE POINT.
+-- USAGE covers nextval(), which is all an INSERT needs. It does NOT cover setval(), which rewrites
+-- the counter. So `pnpm db:seed` — which resets serial sequences after upserting reference data —
+-- MUST be run with DATABASE_URL pointing at the OWNER (direct) URL, once, by hand. Run as the app
+-- role it fails partway, having already inserted rows. Granting UPDATE here to make the seed
+-- convenient would hand the running API the ability to rewrite every primary-key counter.
+
+\echo ''
+\echo 'Role configured. Run db-verify.sql before putting the connection string into secrets.'
