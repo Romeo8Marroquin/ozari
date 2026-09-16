@@ -1,0 +1,27 @@
+# Copy to `terraform.tfvars` (gitignored) and fill in.
+#
+# NOTHING HERE IS SECRET — these are public infrastructure identifiers. They live in a gitignored
+# file only because they name your account and bucket, which a public repo has no reason to publish.
+# Secret PAYLOADS go in `secrets.auto.tfvars`; see `secrets.auto.tfvars.example`.
+#
+# Every value below already has a working default in `variables.tf`; override only what differs.
+
+# --- Cloudflare R2, the plain half (credentials are secrets, not these) -------
+r2_endpoint    = "https://<cloudflare-account-id>.r2.cloudflarestorage.com"
+r2_bucket_name = "ozari-assets-staging"
+r2_public_url  = "https://<bucket-public-domain>" # r2.dev URL or a custom domain. NO trailing slash.
+
+# --- Cloud Build GitHub connection -------------------------------------------
+# Leave manage_github_connection = false while the console-created connection is in use. Set it to
+# true during the rebuild, and then this installation id is required. Find it in the URL of
+# github.com → Settings → Applications → Google Cloud Build → Configure.
+# manage_github_connection   = true
+# github_app_installation_id = "12345678"
+
+# --- Optional ----------------------------------------------------------------
+# Nightly `cleanup:sessions` as a Cloud Run Job + Scheduler. Safe to leave off at this scale.
+# enable_cleanup_job = true
+
+# ⚠️ AUTHORITATIVE IAM — read modules/gcp-env/iam.tf before enabling. Declares that NOBODY holds
+# roles/editor on the project, which is the intended end state but removes every existing editor.
+# revoke_default_compute_sa_editor = true

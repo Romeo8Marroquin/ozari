@@ -7,6 +7,7 @@ import CustomTextarea from '@components/CustomTextarea';
 import Switch from '@components/Switch';
 import { notify } from '@components/notifications/notify';
 import { toFormError } from '@utils/apiError';
+import { integerInput } from '@utils/numericInput';
 import { useUpdatePreferenceSettings } from './usePreferences';
 import type { PreferenceSetting } from './preference.types';
 
@@ -214,10 +215,11 @@ const PreferenceSettingsCard: React.FC<PreferenceSettingsCardProps> = ({ setting
               ) : (
                 <CustomInput
                   id={`preference-${leaf}`}
-                  type="number"
-                  inputMode="numeric"
-                  min={setting.min}
-                  max={setting.max}
+                  // An `int` setting, so: digits only, and the BOUNDS stay out of the element. As
+                  // `min`/`max` attributes they were constraint validation, which the browser
+                  // enforces with its own untranslated bubble instead of letting `rangeError` speak
+                  // — the reason this form carries `noValidate` at all.
+                  {...integerInput}
                   label={label}
                   aria-label={label}
                   value={field.text}

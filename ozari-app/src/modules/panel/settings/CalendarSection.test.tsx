@@ -145,6 +145,39 @@ describe('CalendarSection', () => {
     expect(success).toHaveBeenCalledWith(`${KEY}.google.disconnectedToast`);
   });
 
+  it('SAYS SO when the grant died, instead of still claiming to be connected', async () => {
+    // The failure this exists for: Google answers `invalid_grant` (access revoked, or the refresh
+    // token expired — which it does in ~7 days while the OAuth app is in Testing), the sync
+    // deactivates the connection and stays quiet, and the row goes on reading "Conectado como
+    // a@b.com" while no order reaches the calendar again. The row is still there (`connected`), so
+    // `isActive` is the only thing that tells the two apart.
+    const assign = vi.fn();
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, assign, search: '' },
+      configurable: true,
+    });
+    setStatus({
+      data: status({ google: { connected: true, isActive: false, accountEmail: 'a@b.com' } }),
+    });
+    render(<CalendarSection />);
+
+    expect(screen.getByText(`${KEY}.google.expired`)).toBeInTheDocument();
+    expect(screen.queryByText(`${KEY}.google.connectedAs`)).not.toBeInTheDocument();
+    // And the way out is offered right there — consenting again is the only thing that fixes it.
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.google.reconnect` }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('https://accounts.google.com/consent'));
+    // Disconnecting stays available: the other honest answer is to stop using the integration.
+    expect(screen.getByRole('button', { name: `${KEY}.google.disconnect` })).toBeInTheDocument();
+  });
+
+  it('still explains a dead grant when the account was never labelled', async () => {
+    // `accountEmail` is best-effort (the `userinfo` call is allowed to fail), so the message has to
+    // stand without it — a warning that renders "El permiso de undefined caducó" is not a warning.
+    setStatus({ data: status({ google: { connected: true, isActive: false } }) });
+    render(<CalendarSection />);
+    expect(screen.getByText(`${KEY}.google.expired`)).toBeInTheDocument();
+  });
+
   it('keeps showing the copy it was OPENED with while it closes', async () => {
     // The dialog stays mounted through its exit animation, so it renders again with no action. It
     // used to fall back to a fixed member there, which meant dismissing the subscription dialog

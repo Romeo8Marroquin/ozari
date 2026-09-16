@@ -33,6 +33,8 @@ import type {
  * outage.
  */
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /** Every possible entry id for an order — used to work out what must be REMOVED. Because ids are
  *  deterministic there are only ever two, so "delete what is no longer wanted" needs no bookkeeping
  *  table: it is this set minus the set we just wrote. */
@@ -59,19 +61,11 @@ const calendarOrderSelect = {
   serviceDetails: { where: { isActive: true }, select: { quantity: true } },
 } satisfies Prisma.ServiceSelect;
 
-/** Loads and decrypts one order into the calendar's own shape. `null` when the order is gone — which
- *  is not an error here: a deleted order simply has nothing left to put in a calendar. */
-export async function loadCalendarOrder(
-  client: Pick<Prisma.TransactionClient, "service">,
-  orderId: number,
-): Promise<CalendarOrderModel | null> {
-  const row = await client.service.findFirst({
-    where: { id: orderId, isActive: true },
-    select: calendarOrderSelect,
-  });
-  if (!row) {
-    return null;
-  }
+/** One selected row → the calendar's own shape, decrypting the two fields an entry shows. Shared by
+ *  the per-order load and the connect-time backfill so the two can never build a different event. */
+function toCalendarOrder(
+  row: Prisma.ServiceGetPayload<{ select: typeof calendarOrderSelect }>,
+): CalendarOrderModel {
   return {
     id: row.id,
     deliveryAt: row.deliveryAt,
@@ -87,6 +81,19 @@ export async function loadCalendarOrder(
     eventTypeName: row.eventType.name,
     itemCount: row.serviceDetails.reduce((total, line) => total + line.quantity, 0),
   };
+}
+
+/** Loads and decrypts one order into the calendar's own shape. `null` when the order is gone — which
+ *  is not an error here: a deleted order simply has nothing left to put in a calendar. */
+export async function loadCalendarOrder(
+  client: Pick<Prisma.TransactionClient, "service">,
+  orderId: number,
+): Promise<CalendarOrderModel | null> {
+  const row = await client.service.findFirst({
+    where: { id: orderId, isActive: true },
+    select: calendarOrderSelect,
+  });
+  return row ? toCalendarOrder(row) : null;
 }
 
 /**
@@ -236,6 +243,85 @@ export async function syncOrderCalendars(orderId: number): Promise<void> {
     // The outer catch is the promise this function makes to its callers: an order is never lost
     // because a calendar could not be reached.
     logger.error(i18next.t("calendar.logs.syncFailed", { id: orderId }), { error });
+  }
+}
+
+/**
+ * Everything this user still has to perform, written into a calendar that has JUST been connected.
+ *
+ * **Without this, connecting is a promise about the future only.** The sync runs on an order's own
+ * doors — create, edit, advance, delete — so a calendar linked today stays empty until somebody
+ * touches each existing order, and the jobs already on the books simply never appear. That is the
+ * shape of the bug the settings dialog was already denying out loud ("puedes volver a conectar
+ * cuando quieras; se vuelven a sincronizar los pedidos pendientes"), and it bites hardest in exactly
+ * the case that matters: a grant that expired, went quiet, and is being RECONNECTED to recover the
+ * schedule it stopped delivering.
+ *
+ * It writes **what the ICS feed would publish for the same person** — same window, same entry
+ * builder — so the two transports agree from the first second rather than converging later. Only
+ * writes: an entry that is no longer wanted is left alone, which is the same stance disconnecting
+ * takes (an appointment already in somebody's calendar is one they still have to keep), and the
+ * order's own next sync removes it properly.
+ *
+ * Best-effort like everything else here: the admin is mid-redirect from Google's consent screen, and
+ * a calendar that could not be filled must never turn a successful connection into an error page.
+ */
+export async function backfillUserCalendar(userId: number): Promise<void> {
+  try {
+    const prismaClient = await getPrismaClient();
+    const connection = (await activeCalendarConnections(prismaClient)).find(
+      (candidate) => candidate.userId === userId,
+    );
+    if (!connection) {
+      return;
+    }
+    const now = new Date();
+    const [orders, { spacingMinutes }, reminderMinutes] = await Promise.all([
+      prismaClient.service.findMany({
+        where: {
+          isActive: true,
+          cancelledAt: null,
+          assignedUserId: userId,
+          deliveryAt: {
+            gte: new Date(now.getTime() - appConfig.calendar.feedPastDays * DAY_MS),
+            lte: new Date(now.getTime() + appConfig.calendar.feedFutureDays * DAY_MS),
+          },
+        },
+        select: calendarOrderSelect,
+        orderBy: { deliveryAt: "asc" },
+        // A bound on how much a single consent redirect can cost. A schedule this long is not a
+        // schedule any more, and the orders beyond it still reach the calendar the next time each
+        // one is touched — the sync has always been self-healing.
+        take: appConfig.calendar.backfillMaxOrders,
+      }),
+      loadOrderTimingPreferences(prismaClient),
+      loadCalendarReminderMinutes(prismaClient),
+    ]);
+    // ONE token for the whole pass: `ensureAccessToken` works from the connection object it is
+    // given, so calling it per order would refresh once per order instead of once.
+    const accessToken = await ensureAccessToken(connection, now);
+    const entries = orders.flatMap((row) =>
+      calendarEntriesFor(toCalendarOrder(row), {
+        gapMinutes: spacingMinutes,
+        reminderMinutes,
+        now,
+      }),
+    );
+    // In small batches rather than one at a time: this runs while the browser waits on the OAuth
+    // redirect, and a season's worth of pending jobs one-by-one is a blank tab for half a minute.
+    const size = appConfig.calendar.backfillBatchSize;
+    for (let index = 0; index < entries.length; index += size) {
+      await Promise.all(
+        entries
+          .slice(index, index + size)
+          .map((entry) => upsertGoogleEvent(accessToken, connection.calendarId, entry)),
+      );
+    }
+    logger.info(
+      i18next.t("calendar.logs.backfilled", { userId, count: entries.length }),
+    );
+  } catch (error) {
+    logger.error(i18next.t("calendar.logs.backfillFailed", { userId }), { error });
   }
 }
 

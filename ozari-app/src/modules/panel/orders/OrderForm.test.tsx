@@ -1005,8 +1005,10 @@ describe('OrderForm', () => {
     setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
     await user.selectOptions(byId(container, 'order-line-product-0'), '3');
-    // The input advertises the takeable ceiling as its native max.
-    expect(byId(container, 'order-line-quantity-0')).toHaveAttribute('max', '5');
+    // The ceiling is STATED under the field (never a native `max`, which would block the submit
+    // with the browser's own words and stop an admin correcting paperwork from typing a real number).
+    expect(await screen.findByText(`${KEY}.availability.count`)).toBeInTheDocument();
+    expect(byId(container, 'order-line-quantity-0')).not.toHaveAttribute('max');
     // Typing over the baseline + submitting is blocked with the per-line "only N available" message.
     await user.type(byId(container, 'order-line-quantity-0'), '9');
     await waitFor(() => expect(byId(container, 'order-pickup-at')).toBeInTheDocument());
@@ -1031,9 +1033,10 @@ describe('OrderForm (edit mode)', () => {
     expect(byId(container, 'order-client')).toHaveValue('3');
     expect(byId(container, 'order-delivery-address')).toHaveValue('Salón del club, entrada norte');
     expect(byId(container, 'order-delivery-contact')).toHaveValue('5555-0000');
-    expect(byId(container, 'order-delivery-amount')).toHaveValue(75);
+    // Strings, because these are TEXT inputs the schema parses (see `@utils/numericInput`).
+    expect(byId(container, 'order-delivery-amount')).toHaveValue('75');
     expect(byId(container, 'order-assigned-user')).toHaveValue('5');
-    expect(byId(container, 'order-line-quantity-0')).toHaveValue(25);
+    expect(byId(container, 'order-line-quantity-0')).toHaveValue('25');
 
     await userEvent.click(screen.getByRole('button', { name: `${EKEY}.actions.submit` }));
     await waitFor(() => expect(updateOrder).toHaveBeenCalled());

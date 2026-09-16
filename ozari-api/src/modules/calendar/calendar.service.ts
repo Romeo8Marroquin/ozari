@@ -299,8 +299,9 @@ export function icsEvent(entry: CalendarEntryModel, stamp: Date): string[] {
  *
  * **A subscription is a MIRROR, not a log**: whatever this returns IS the calendar, so an order that
  * stops appearing here disappears from the subscriber's calendar on its next refresh. That is what
- * makes cancellation and deletion work without a single `METHOD:CANCEL` — the entry is simply not
- * emitted, because `calendarEntriesFor` already declined to build it.
+ * makes cancellation and deletion work without any scheduling message at all — the entry is simply
+ * not emitted, because `calendarEntriesFor` already declined to build it. (It is also why this
+ * calendar carries no `METHOD`; see the note below.)
  *
  * `REFRESH-INTERVAL` / `X-PUBLISHED-TTL` ask the client how often to come back. Apple honours it as
  * a default the user can change; Google ignores it and refreshes on its own (slow) schedule — which
@@ -316,7 +317,14 @@ export function buildIcs(
     "VERSION:2.0",
     `PRODID:${appConfig.calendar.icsProductId}`,
     "CALSCALE:GREGORIAN",
-    "METHOD:PUBLISH",
+    // ⚠️ **No `METHOD`, deliberately.** `METHOD` belongs to iTIP (RFC 5546), the protocol for
+    // SCHEDULING MESSAGES — an invitation, a reply, a cancellation. RFC 5545 §3.7.2 is explicit that
+    // a calendar object without it is "a set of calendar data" instead, which is exactly what a
+    // subscription is. Publishing `METHOD:PUBLISH` therefore told every client this body was a
+    // scheduling message, and under iTIP such a message is INVALID without an `ORGANIZER` — so the
+    // feed was simultaneously claiming to be something it is not and failing that thing's rules.
+    // What it looks like in practice is a client offering to IMPORT "2 events" (Apple's behaviour
+    // for an iTIP file) rather than treating the URL as a calendar it keeps in step.
     `X-WR-CALNAME:${icsEscape(options.name)}`,
     `X-WR-TIMEZONE:${appConfig.calendar.timeZone}`,
     `REFRESH-INTERVAL;VALUE=DURATION:${ttl}`,

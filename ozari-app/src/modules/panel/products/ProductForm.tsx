@@ -13,6 +13,7 @@ import { notify } from '@components/notifications/notify';
 import { QueryKeys } from '@constants/QueryKeys';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { toFormError } from '@utils/apiError';
+import { decimalInput, integerInput } from '@utils/numericInput';
 import {
   detailRowIn,
   detailRowOut,
@@ -455,8 +456,11 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
     <div ref={viewRoot} className="flex w-full flex-1 flex-col">
     <RequiredPatternsContext.Provider value={requiredPatternsValue}>
       <FormProvider {...methods}>
+        {/* `noValidate`: our mirrored messages are the ones that speak here, never the browser's
+            untranslated bubble — the rule the preferences forms and the order form state too. */}
         <form
           id={FORM_ID}
+          noValidate
           onSubmit={handleSubmit(onSubmit)}
           aria-busy={isLoading}
           className="flex flex-col gap-6"
@@ -565,10 +569,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
                         <CustomInputForm<CreateProductFormType>
                           id="product-rent-price"
                           name="rentPrice"
-                          type="number"
-                          inputMode="decimal"
-                          min={0}
-                          step="0.01"
+                          {...decimalInput}
                           label={t(`${KEY}.fields.rentPriceLabel`)}
                           placeholder={t(`${KEY}.fields.pricePlaceholder`)}
                           aria-label={t(`${KEY}.fields.rentPriceLabel`)}
@@ -588,10 +589,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
                       <CustomInputForm<CreateProductFormType>
                         id="product-sell-price"
                         name="sellPrice"
-                        type="number"
-                        inputMode="decimal"
-                        min={0}
-                        step="0.01"
+                        {...decimalInput}
                         label={t(`${KEY}.fields.sellPriceLabel`)}
                         placeholder={t(`${KEY}.fields.pricePlaceholder`)}
                         aria-label={t(`${KEY}.fields.sellPriceLabel`)}
@@ -607,10 +605,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
                         <CustomInputForm<CreateProductFormType>
                           id="product-replacement-price"
                           name="replacementPrice"
-                          type="number"
-                          inputMode="decimal"
-                          min={0}
-                          step="0.01"
+                          {...decimalInput}
                           optionalLabel
                           label={t(`${KEY}.fields.replacementPriceLabel`)}
                           placeholder={t(`${KEY}.fields.pricePlaceholder`)}
@@ -623,10 +618,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
                       <CustomInputForm<CreateProductFormType>
                         id="product-quantity"
                         name="quantity"
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        step={1}
+                        {...integerInput}
                         label={t(`${KEY}.fields.quantityLabel`)}
                         placeholder={t(`${KEY}.fields.quantityPlaceholder`)}
                         aria-label={t(`${KEY}.fields.quantityLabel`)}

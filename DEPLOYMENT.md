@@ -27,14 +27,17 @@ services (Neon, Cloudflare, Resend).
 
 | Component | Purpose | Managed by |
 |---|---|---|
-| **Neon (PostgreSQL)** | The database. Two URLs: **pooled** (runtime) + **direct** (migrations). | 🔒 manual (Neon console) + `db-roles.sql` |
-| **GCP Secret Manager** | Holds all backend secret values. | Terraform owns the **containers + IAM**; values loaded 🔒 manually (`load-secrets-*`) |
-| **GCP Artifact Registry** | Stores the API Docker image. | Terraform |
-| **GCP Cloud Build** | CI/CD pipeline: verify → build → migrate → deploy. | Terraform owns the **trigger + substitutions**; steps in `ozari-api/cloudbuild.yaml` |
+| **GCP project + state bucket** | Where an environment lives. | Terraform (`terraform/bootstrap`) |
+| **Neon (PostgreSQL)** | The database. Two URLs: **pooled** (runtime, least-privileged) + **direct** (migrations, owner). | 🔒 manual project creation + `scripts/db-bootstrap.*` for the role. ⚠️ Deliberately NOT the Neon TF provider — a role it creates is auto-granted `neon_superuser` and can do DDL. |
+| **GCP Secret Manager** | Holds all backend secret values. | **Terraform — containers, IAM AND versions.** Values reach it via write-only arguments and never enter state (Terraform >= 1.11). |
+| **GCP Artifact Registry** | Stores the API Docker image. | Terraform, with **cleanup policies** that keep it inside the free tier |
+| **GCP Cloud Build** | CI/CD pipeline: verify → build → migrate → deploy. | Terraform owns the **connection, trigger and every substitution**; steps in `ozari-api/cloudbuild.yaml` |
 | **GCP Cloud Run** | Runs the API container. | Terraform owns **structure**; Cloud Build owns the **image tag** |
-| **Cloudflare Pages** | Builds + hosts the frontend, serves the apex domain. | 🔒 manual (Cloudflare dashboard) |
-| **Cloudflare R2** | Public object storage for asset images (product photos, …). S3-compatible. | 🔒 manual (bucket + token) — secrets in Secret Manager; see §3b |
-| **Resend** | Transactional email (welcome, reset, security). Domain `partyrentalsgt.com` is verified. | 🔒 manual (Resend dashboard) — one API key per env |
+| **Cloudflare Pages** | Builds + hosts the frontend, serves the apex domain. | Terraform (project, custom domain, `VITE_API_URL`). 🔒 The GitHub OAuth authorization is a one-time click. |
+| **Cloudflare Worker + DNS** | Puts the brand hostname in front of Cloud Run by rewriting `Host`. | Terraform |
+| **Cloudflare R2** | Public object storage for asset images. S3-compatible. | Terraform (bucket, **CORS**, custom domain). 🔒 The API token is minted by hand — a TF-created one lands in state. |
+| **Resend** | Transactional email (welcome, reset, security). Domain `partyrentalsgt.com` is verified. | 🔒 manual API key per env; its **DNS records are Terraform** |
+| **Google OAuth client** (Calendar) | Consent screen + client credentials. | 🔒 **manual, permanently** — no API exists (§3d) |
 
 **Environment switch:** `NODE_ENV` is the single switch. `staging` → audit logging on, `/api/docs`
 served. `production` → `/api/docs` disabled (`isProductionEnvironment()` gate), audit logging on.
@@ -116,15 +119,24 @@ reach the runtime via both `cloud-run.tf` **and** the Cloud Build trigger substi
 or a deploy and an apply overwrite each other — §6). The two **credentials** are Secret Manager secrets.
 **The frontend needs NO R2 creds** — it uploads to the presigned URL and reads via `R2_PUBLIC_URL`.
 
-### 🔒 Cloudflare dashboard (once per environment)
-1. Create the bucket (e.g. `ozari-assets-staging`).
-2. Enable **public read** — the bucket's `r2.dev` URL or a **custom domain** (recommended for prod,
-   e.g. `https://assets.partyrentalsgt.com`) → this is `R2_PUBLIC_URL`.
-3. Create an **R2 API token** scoped to that bucket (Object Read & Write) → copy the **Access Key ID**
-   (`R2_ACCESS_KEY`) and **Secret Access Key** (`R2_SECRET_KEY`). The **Account ID** is in the endpoint.
-4. Set the bucket's **CORS policy** (bucket → Settings → CORS) — REQUIRED for uploads: the browser
-   PUTs to the presigned URL **directly** (a cross-origin request to the S3 endpoint), so without
-   this every gallery upload fails preflight. Allow each frontend origin (no trailing slash):
+### Cloudflare — what is code and what is a click
+
+**The bucket, its CORS policy and its custom domain are Terraform** (`modules/cloudflare-env/r2.tf`).
+An earlier version of this runbook said the CORS policy might have no Terraform resource; it does —
+`cloudflare_r2_bucket_cors`. **Only the API token is minted by hand**, because a Terraform-created
+token writes its secret into state.
+
+1. ~~Create the bucket~~ → `r2.tf`.
+2. **Public read**: a custom domain is `r2_custom_domain` in the cloudflare stack (recommended for
+   prod, e.g. `https://assets.partyrentalsgt.com`); the bucket's `r2.dev` URL is dashboard-only.
+   Either way the result is `R2_PUBLIC_URL` in the gcp stack.
+3. 🔒 **Create an R2 API token** scoped to that bucket (Object Read & Write) → the **Access Key ID**
+   (`r2_access_key`) and **Secret Access Key** (`r2_secret_key`) go into the environment's gitignored
+   `secrets.auto.tfvars`. The **Account ID** is in the endpoint.
+4. ~~Set the CORS policy~~ → `r2_cors_allowed_origins`. It is REQUIRED for uploads: the browser PUTs
+   to the presigned URL **directly** (a cross-origin request to the S3 endpoint), so a missing or
+   stale origin fails every gallery upload at preflight while the rest of the app looks healthy. The
+   declared origins are (no trailing slash):
 
    ```json
    [
@@ -153,35 +165,30 @@ or a deploy and an apply overwrite each other — §6). The two **credentials** 
    **never localhost** — so a compromised dev machine's browser context can't even preflight
    against prod assets. Add the apex domain when the frontend moves.
 
-### Ordered rollout on staging (the code + Terraform edits already exist in the repo)
+### Ordered rollout
 
-> The secret **containers** must exist and be **filled with values BEFORE** Cloud Run binds them (a
-> binding to `:latest` with no version fails to deploy). Hence the values-first, two-phase apply.
+> **The old two-phase apply is gone.** It existed because a Cloud Run binding to `:latest` on a
+> secret with no version fails the deploy, and secret values were loaded out-of-band — so the
+> operator had to remember to apply the containers, load the values, then apply the rest. Terraform
+> now owns the versions too, and the service `depends_on` them, so the ordering is an edge in the
+> graph rather than a step you can forget.
 
 ```
-1. Put the 3 plain values into infrastructure/terraform/envs/staging/terraform.tfvars (gitignored):
-      r2_endpoint / r2_bucket_name / r2_public_url        (see terraform.tfvars.example)
+1. Plain values → infrastructure/terraform/envs/<env>/gcp/terraform.tfvars   (gitignored)
+      r2_endpoint / r2_bucket_name / r2_public_url
 
-2. Create the secret CONTAINERS only (targeted apply — no binding yet, so no version needed). In
-   PowerShell, QUOTE each -target or it gets split:
-      terraform apply "-target=google_secret_manager_secret.ozari_r2_access_key" "-target=google_secret_manager_secret.ozari_r2_secret_key"
-   (IAM + bindings are created by the full apply in step 5 — the service depends_on the IAM member.)
+2. Credentials → the same directory's secrets.auto.tfvars                    (gitignored)
+      r2_access_key / r2_secret_key
 
-3. Load the secret VALUES via gcloud (never in Git):
-      "<R2 Access Key ID>"     | gcloud secrets versions add ozari-r2-access-key --data-file=- --project ozari-500103
-      "<R2 Secret Access Key>" | gcloud secrets versions add ozari-r2-secret-key --data-file=- --project ozari-500103
+3. ./scripts/tf.ps1 <env> gcp apply
 
-4. Full apply — now Cloud Run can bind the R2 env (plain + secret):
-      terraform apply       (or scripts/apply-staging.ps1)
-
-5. Redeploy the API so it picks up the new env (next push to the build branch, or a manual
-   `gcloud run deploy` / re-run the trigger). cloudbuild.yaml is already updated to keep them set.
+4. Redeploy the API so the new revision picks up the env (push to the build branch, or re-run
+   the trigger).
 ```
 
-**Answering the specific questions:** yes — add the values then `terraform apply`, but in the
-values-first order above. Only `R2_ACCESS_KEY`/`R2_SECRET_KEY` are secrets (the `gcloud secrets versions
-add` in step 3); the three `R2_*` URL/name vars are **plain** and are defined in Cloud Build (via the
-trigger substitution) + Terraform, not in Secret Manager. `R2_TOKEN` is **not needed** at all.
+Only `R2_ACCESS_KEY` / `R2_SECRET_KEY` are secrets; the three `R2_*` URL/name vars are **plain** and
+flow to both Cloud Run and the build trigger from one variable. `R2_TOKEN` (the Cloudflare REST-API
+bearer) is **not used at all** — the S3 SDK does not read it.
 
 ---
 
@@ -226,7 +233,7 @@ the third-party-cookie bug this whole exercise exists to fix.)
 | **Cloudflare Worker** ⭐ | **free** (100K req/day) | What we shipped. A proxied `CNAME` + a Worker route that rewrites the hostname on a subrequest — which carries BOTH the `Host` header and the SNI. |
 | Cloudflare Origin Rules / Snippets | **Pro, US$20/mo** | The "proper" declarative way — and the trap: the Host/SNI rewrite fields are visible on Free but paywalled on click. Snippets are Pro+ too. Don't plan around either on a Free zone. |
 | Global external Application LB + serverless NEG | ~US$18–25/mo | Google-native, Google-managed cert, Terraform-able. Bills hourly whether or not anyone visits — more than the rest of this infra costs. |
-| Move the service to a mapping-capable region | free | Native mapping, no proxy at all. **Worth a real look:** Neon lives in `us-east-1`, so `us-east4` would put compute next to the database (DB round trips ~1–5 ms instead of ~60–80 ms) *and* unlock domain mapping. Costs ~30 ms on the single client hop against saving that several times per request. Decide it on its own merits, not mid-cutover. |
+| Move the service to a mapping-capable region | free | ⚠️ **Re-checked 2026-09-01 and this is no longer an escape hatch.** Google now documents domain mappings as *"not production-ready and not supported at General Availability"* — **in every region**, not just the ones that lack them — and recommends a load balancer or Firebase Hosting instead. The *latency* argument still stands on its own (Neon lives in `us-east-1`, so `us-east4` would cut DB round trips from ~60–80 ms to ~1–5 ms at the cost of ~30 ms on one client hop) — but decide that as a latency question, because it no longer buys native domain mapping worth having. |
 
 > **`trust proxy` / rate limiting.** `app.ts` sets `trust proxy = 1`, and the login + global rate
 > limiters key on `req.ip`. Cloudflare inserts one more hop into `X-Forwarded-For` (it forwards the
@@ -235,71 +242,38 @@ the third-party-cookie bug this whole exercise exists to fix.)
 > visitor shares one bucket and the limiter throttles the whole app at once. The fix is a
 > `keyGenerator` reading `CF-Connecting-IP` — do it only if the check shows it's needed.
 
-> **`trust proxy` / rate limiting.** `app.ts` sets `trust proxy = 1`, and the login + global rate
-> limiters key on `req.ip`. Adding Cloudflare inserts one more hop into `X-Forwarded-For`. **Verify
-> after cutover** (§3c.4): if `req.ip` ever resolves to a Cloudflare edge address, every visitor
-> shares one bucket and the limiter starts throttling the whole app at once. The fix is a
-> `keyGenerator` reading `CF-Connecting-IP` — do it only if the check shows it's needed.
+### 3c.1 — This is Terraform now (was a nine-step console procedure)
 
-### 3c.1 — 🔒 Console steps (Cloudflare)
+⚠️ **Everything that used to be clicked here is declared in
+`infrastructure/terraform/modules/cloudflare-env/`.** Apply it with
+`./scripts/tf.ps1 <env> cloudflare apply`. The steps are kept below as a description of *what gets
+built and why*, because the constraints are still real and a reviewer of that plan needs them —
+but do not perform them by hand. A console edit will be reverted by the next apply.
 
-1. **DNS** → add a record on `partyrentalsgt.com`:
-   - Type `CNAME`, Name `api-staging`, Target `ozari-api-694756660984.northamerica-south1.run.app`,
-     **Proxy status: Proxied** (orange cloud).
-   ⚠️ **One label, with a hyphen.** `api.staging.…` is two levels; Universal SSL covers the apex plus
-   ONE, so Cloudflare flags *"this hostname is not covered by a certificate"* and every request dies
-   with `SSL alert 40 / handshake_failure` — before it ever reaches the Worker. Covering it would
-   mean Advanced Certificate Manager (~US$10/mo). The hyphen form is covered by the existing wildcard
-   immediately, with no issuance wait.
-2. **Workers & Pages → Create → Workers → Start with Hello World!**
-   - Name it `api-staging-proxy` → **Deploy** (the starter deploys first; the editor opens after).
-   - **`</> Edit code`** → replace everything with:
-     ```js
-     export default {
-       async fetch(request) {
-         const url = new URL(request.url);
-         url.hostname = 'ozari-api-694756660984.northamerica-south1.run.app';
-         return fetch(new Request(url, request));
-       },
-     };
-     ```
-   - **Deploy** again.
-   - **Domains → Custom Domains and Routes → Add Route** → zone `partyrentalsgt.com`, pattern
-     **`api-staging.partyrentalsgt.com/*`**.
-     ⚠️ The field pre-fills `*.partyrentalsgt.com/*` — that would swallow `staging.` too and proxy
-     the FRONTEND into the API. Replace it.
-     ⚠️ **Route, not Add Domain**: a Custom Domain creates its own DNS record and collides with the
-     CNAME above.
-   - Once verified, turn OFF the **Worker URL → Production** `…workers.dev` toggle, so the backend
-     isn't reachable through a second public address. (Leave it on while debugging — it exercises the
-     Worker independently of DNS and TLS.)
-3. **SSL/TLS** → *Overview* → encryption mode **Full (strict)** (Cloud Run presents a valid public
-   cert). If *Edge Certificates → Always Use HTTPS* interferes with issuance, turn it off until the
-   certificate is active, then back on.
-4. **R2** → bucket `ozari-assets-staging` → *Settings → CORS* → make `AllowedOrigins` match §3b.4
-   (the browser PUTs gallery photos straight to R2 from the app origin — a stale origin here breaks
-   every image upload with a preflight failure, while the rest of the app looks fine).
-5. **Pages** (project `ozari-c28`) → *Settings → Environment variables* → set
-   `VITE_API_URL = https://api-staging.partyrentalsgt.com` → **redeploy** (Vite inlines it at BUILD
-   time; an env change alone does nothing until the next build).
-6. *(Optional but recommended, now that staging lives on the brand domain)* **Rules → Transform Rules
-   → Modify Response Header** → when `Hostname equals staging.partyrentalsgt.com`, *set static*
-   `X-Robots-Tag: noindex, nofollow`. `public/robots.txt` ships `Allow: /` for the future marketing
-   site, so without this a crawler may index the staging app under your own domain. Header-level, so
-   it applies per host without forking the build.
+| What | Where it is declared | The constraint that made it tricky |
+|---|---|---|
+| `api-staging` CNAME → the run.app host, **Proxied** | `dns.tf` | ⚠️ **One label, with a hyphen.** `api.staging.…` is two levels; Universal SSL covers the apex plus ONE, so Cloudflare flags *"not covered by a certificate"* and every request dies with `SSL alert 40 / handshake_failure` before reaching the Worker. Covering it needs Advanced Certificate Manager (~US$10/mo). The module rejects a two-level hostname at plan time. |
+| The proxy Worker | `worker.tf` + `worker/api-proxy.js.tftpl` | The run.app hostname is read from the GCP state, not pasted. Uses `cloudflare_worker` + `_worker_version` + `_workers_deployment`; the old `cloudflare_workers_script` is deprecated. |
+| Its route, `api-staging.partyrentalsgt.com/*` | `worker.tf` | ⚠️ A **route**, not a Custom Domain — a Custom Domain creates its own DNS record and collides with the CNAME. And the pattern must name the host exactly: the dashboard pre-fills `*.partyrentalsgt.com/*`, which would swallow the FRONTEND host and proxy the app into the API. |
+| `workers.dev` subdomain **off** | `worker.tf` (`subdomain.enabled = false`) | Otherwise the API has a second public address that bypasses the zone's protections. |
+| SSL mode **Full (strict)**, Always Use HTTPS | `zone.tf` | Zone-wide, so exactly one environment owns them (`manage_zone_settings`). |
+| R2 bucket + **CORS** | `r2.tf` | The browser PUTs gallery photos straight to R2, so a stale origin breaks every upload at preflight while the rest of the app looks fine. |
+| Pages project, custom domain, **`VITE_API_URL`** | `pages.tf` | ⚠️ Vite inlines it at BUILD time — Terraform setting it is necessary, not sufficient. **Redeploy the frontend afterwards.** |
+| `X-Robots-Tag: noindex` on the staging host | `zone.tf` | `public/robots.txt` ships `Allow: /` for the future marketing site, so without this a crawler indexes the staging app under the brand domain. |
 
-### 3c.2 — 🔒 Console steps (GCP)
+**What is still manual here:** minting the Cloudflare API token Terraform authenticates with, minting
+the R2 access/secret key pair (a Terraform-created token would be written into state), and the
+one-time OAuth click that authorizes Cloudflare Pages against GitHub.
 
-7. **Cloud Build** → *Triggers* → `ozari-api-dev` → *Edit* → **Substitution variables** →
-   `_APP_HOST = https://staging.partyrentalsgt.com`. *(Terraform owns this trigger — the repo
-   default in `variables.tf` now matches, so a later `terraform apply` won't fight it. If you prefer,
-   set `app_host` in `terraform.tfvars` and `terraform apply` instead of editing the console.)*
-8. **Redeploy the API** (push to `dev`, or re-run the trigger) so Cloud Run picks up the new
-   `APP_HOST`. Verify on the service's *Revisions → Variables* tab that `APP_HOST` is the new origin.
+### 3c.2 — GCP side
 
-> **Do these two in this order with step 5:** while `APP_HOST` still names the old origin, the API
-> **rejects** the new frontend with a CORS/API-key failure. If `staging.partyrentalsgt.com` is
-> already live and calls are failing, step 6 is the reason.
+`APP_HOST` is a Terraform variable (`envs/<env>/gcp/variables.tf`), applied to both the Cloud Run
+service and the build trigger from one place. Change it there, `apply`, then redeploy the API so the
+new revision picks it up — verify on *Revisions → Variables*.
+
+> **Order matters with the Pages step:** while `APP_HOST` still names the old origin, the API
+> **rejects** the new frontend with a CORS/API-key failure. If the new frontend host is live and every
+> call fails, this is why.
 
 ### 3c.3 — What changes in the repo (already committed, no action)
 
@@ -496,27 +470,23 @@ enough to develop against. Production gets its own.
 
 ### Ordered rollout on a deployed environment
 
-Values before bindings, same as R2 (§3b) and for the same reason: Cloud Run binds `:latest`, and a
-binding to a secret with **no version fails the whole deploy** — not just the calendar.
+The container, the version, the IAM binding and the Cloud Run env are one declaration now
+(`modules/gcp-env/secrets.tf`), and the service `depends_on` the versions — so the ordering that used
+to require a targeted, values-first apply is handled by the dependency graph.
 
 ```
-1. Create the secret CONTAINERS only (targeted apply — no binding yet, so no version needed).
-   In PowerShell, QUOTE each -target or it gets split:
-      terraform apply "-target=google_secret_manager_secret.ozari_google_client_id" "-target=google_secret_manager_secret.ozari_google_client_secret"
+1. Put both halves in the environment's secrets.auto.tfvars (GITIGNORED):
+      google_client_id     = "..."
+      google_client_secret = "..."
 
-   If the containers already exist (created by hand), adopt them instead — imports.tf carries an
-   import block for each, exactly as ozari-email-key does. Without that, apply fails with a 409.
+2. ./scripts/tf.ps1 <env> gcp apply
 
-2. Load the VALUES via gcloud (never in Git):
-      "<client id>"     | gcloud secrets versions add ozari-google-client-id --data-file=- --project <project>
-      "<client secret>" | gcloud secrets versions add ozari-google-client-secret --data-file=- --project <project>
-
-3. Full apply — creates the run SA's secretAccessor bindings and adds the env to Cloud Run:
-      terraform apply       (or scripts/apply-staging.ps1)
-
-4. Redeploy the API so a revision picks the values up (push to the build branch, or re-run the
-   trigger). cloudbuild.yaml already carries both in --set-secrets; nothing there needs touching.
+3. Redeploy the API so a revision picks the values up (push to the build branch, or re-run the
+   trigger). cloudbuild.yaml needs no change — it forwards the computed --set-secrets.
 ```
+
+Shipping without the calendar is fine: leave both as empty strings (the keys must still be present)
+and the API answers `googleAvailable: false`, offering only the ICS feed.
 
 **The IAM binding is the step people skip.** The runtime SA has no project-level secret access — each
 secret is granted individually in `iam.tf` (`run_sa_accessible_secrets`). A deploy binding a secret
@@ -646,11 +616,19 @@ So the order is **backend first, then frontend**:
   Terraform **state prefix** (`ozari/prod`), and separate secrets/trigger.
 
 ### Step 1 — 🔒 Neon database
-1. Create the prod Neon project (or a prod branch, isolated from staging).
-2. Note the **pooled** and **direct** connection strings.
-3. Run the role setup as the owner: `psql "<direct-url>" -v db_name=<db> -f infrastructure/scripts/db-roles.sql`.
-4. Build the two final connection strings: pooled-as-`ozari_api` (→ `ozari-database-url`) and
-   direct-as-owner (→ `ozari-direct-database-url`).
+1. Create a **separate prod Neon project** (not a branch). The free plan allows 100 projects, and
+   quotas — 100 CU-hours and 0.5 GB storage — are **per project**, so a staging load test cannot eat
+   production's compute allowance.
+2. Copy the **direct** (owner) connection string.
+3. Run the role bootstrap; it generates the password, applies the grants, **proves** the result is
+   least-privileged, and prints the pooled URL to paste into `secrets.auto.tfvars`:
+   ```powershell
+   ./infrastructure/scripts/db-bootstrap.ps1 -DirectUrl "<owner direct url>"
+   ```
+   ⚠️ **Do not create this role in the Neon console.** A role created through the console, API, CLI
+   or the community Terraform provider is automatically granted `neon_superuser` — full DDL. It
+   works perfectly and can drop your tables. `db-verify.sql` (run automatically here) is what
+   catches that.
 
 ### Step 2 — 🔒 Resend key
 Domain `partyrentalsgt.com` is already verified (shared account). Create a **separate prod API key**
@@ -671,32 +649,46 @@ prod redirect URI `https://api.partyrentalsgt.com/api/calendar/google/callback`.
 them; the publishing/verification work (§3d) runs in parallel and only gates *durable* production
 sync, not the deploy. Skipping this step entirely is fine — the app ships with the ICS feed only.
 
-### Step 3 — 🔒 Generate the remaining secret values
-`ozari-jwt-secret`, `ozari-jwt-refresh-secret` (two distinct random 32+ byte secrets),
-`ozari-encryption-key` (exactly 32 bytes hex), `ozari-api-key` (random). Keep them only in your local
-gitignored `infrastructure/secrets/prod.env` (mirrors `staging.env`). The two R2 credentials
-(`ozari-r2-access-key`/`ozari-r2-secret-key`) and the two Google OAuth values
-(`ozari-google-client-id`/`ozari-google-client-secret`) go here too — load them **values-first**
-(§3b, §3d) since Cloud Run binds every one of them at `:latest`.
+### Step 3 — Generate the remaining secret values
+```powershell
+./infrastructure/scripts/new-secrets.ps1
+```
+Produces `jwt_secret`, `jwt_refresh_secret`, `encryption_key` (exactly 32 bytes hex) and `api_key`.
+They go into `infrastructure/terraform/envs/prod/gcp/secrets.auto.tfvars` (**gitignored**), alongside
+the R2 pair (§3b), the Resend key and the Google OAuth pair (§3d).
+
+⚠️ **Every value must differ from staging.** A shared `jwt_secret` means a staging token
+authenticates against production; a shared `encryption_key` means a staging dump decrypts production
+PII. And `encryption_key` is generated **once and never rotated** — every `*_kms` column becomes
+permanently unreadable if it changes.
 
 ### Step 4 — GCP project + Terraform (infra)
-1. Create the prod GCP project; enable billing.
-2. Create the prod Terraform env: **copy `infrastructure/terraform/envs/staging/` → `envs/prod/`**,
-   then change: `backend.tf` state prefix → `ozari/prod`; `variables.tf` defaults (project id, region,
-   `_NODE_ENV=production`, `_APP_HOST=<apex>`, service name, etc.); set the R2 plain values
-   (`r2_endpoint`/`r2_bucket_name`/`r2_public_url`) in the prod `terraform.tfvars`; drop `imports.tf`
-   (prod is created fresh, not adopted). Everything else mirrors staging (incl. the R2 secret
-   containers + IAM + Cloud Run/trigger R2 wiring).
-3. Create the state bucket (or reuse with the new prefix): `infrastructure/bootstrap/create-tfstate-bucket.*`.
-4. `terraform init && terraform plan` (review) → `terraform apply` (🔒 after human approval). This
-   creates: APIs, service accounts, Artifact Registry, **secret containers + IAM**, the Cloud Run
-   service shell, and the Cloud Build trigger (pointed at **`main`**).
+```powershell
+# 1. Project + billing + state bucket, from code.
+cp infrastructure/terraform/bootstrap/terraform.tfvars.example .../terraform.tfvars   # fill in
+./infrastructure/scripts/tf.ps1 bootstrap - apply
+#    → record project_id and project_number from the outputs
 
-### Step 5 — 🔒 Load secret values
-`infrastructure/scripts/load-secrets-*` (mirror for prod) reads your local `prod.env` and
-`gcloud secrets versions add`s each of the 7 secrets. **No values touch git.** The app reads `:latest`.
-The R2 pair (§3b) and the Google OAuth pair (§3d) are added the same way (`gcloud secrets versions
-add`); **every secret Cloud Run binds needs a version before Step 6**, or the deploy fails.
+# 2. The environment itself.
+cp infrastructure/terraform/envs/prod/gcp/terraform.tfvars.example .../terraform.tfvars  # fill in
+./infrastructure/scripts/tf.ps1 prod gcp plan     # review
+./infrastructure/scripts/tf.ps1 prod gcp apply
+```
+
+**There is no copying of directories.** `envs/prod/` holds inputs only; the resources live in the
+shared module staging already uses, which is what stops the two environments from drifting.
+
+One apply creates the APIs, the service accounts, IAM, Artifact Registry (with cleanup policies), the
+secret containers **and their versions**, the Cloud Run service shell, the GitHub connection and the
+build trigger (pointed at **`main`**). Prerequisites for the connection: the Cloud Build GitHub App
+installed on the repository, and a GitHub PAT (REPO_ADMIN scope) in the secret named by
+`github_oauth_token_secret_id`.
+
+### Step 5 — ~~Load secret values~~ (no longer a step)
+Terraform owns the secret versions, so they were created in Step 4 from `secrets.auto.tfvars`. The
+old values-first, two-phase apply is gone: the Cloud Run service `depends_on` the versions, so the
+ordering is part of the graph rather than something to remember. To rotate later, change the value
+and bump its counter in `secret_version_triggers`.
 
 ### Step 6 — First backend build & deploy
 Trigger the prod Cloud Build (first push to `main`, or run the trigger manually). The pipeline
@@ -710,12 +702,23 @@ Register/login depend on `user_roles` + `token_types` rows. Run the idempotent s
 the fresh prod DB: `pnpm db:seed` (with `DATABASE_URL` = the direct/owner URL for this one-off). Skip
 on every later deploy — migrations don't seed, and it's safe to re-run but unnecessary.
 
-### Step 8 — 🔒 Frontend (Cloudflare Pages)
-1. Create the Pages project from this repo; build command `pnpm build`, output `dist`, root
-   `ozari-app`, production branch `main`.
-2. Set **`VITE_API_URL`** = the backend URL from Step 6.
-3. Add the **custom apex domain** (must equal `APP_HOST`, no trailing slash) and point DNS at Pages.
-4. Confirm `ozari-app/public/email-logo.png` is served at `<origin>/email-logo.png`, and set
+### Step 8 — Frontend + edge (Cloudflare)
+```powershell
+cp infrastructure/terraform/envs/prod/cloudflare/terraform.tfvars.example .../terraform.tfvars
+$env:CLOUDFLARE_API_TOKEN = "<token>"
+./infrastructure/scripts/tf.ps1 prod cloudflare plan     # check against REBUILD.md §1 register
+./infrastructure/scripts/tf.ps1 prod cloudflare apply
+```
+Creates the Pages project (build `pnpm build`, output `dist`, root `ozari-app`, branch `main`), its
+custom apex domain, **`VITE_API_URL`**, the API's DNS record, the proxy Worker and its route, the R2
+bucket with its CORS policy, and the zone's SSL settings. The Worker's target comes from the gcp
+root's state, so nothing is copied from Step 6.
+
+Then, by hand:
+1. 🔒 Authorize Cloudflare Pages against GitHub (one OAuth click per account) if it has not been done.
+2. **Redeploy the frontend.** ⚠️ `VITE_API_URL` is inlined at BUILD time — setting it changes nothing
+   until the next build.
+3. Confirm `ozari-app/public/email-logo.png` is served at `<origin>/email-logo.png`, and set
    `appConfig.email.logoUrl` to the prod origin (code change + redeploy backend).
 
 ### Step 9 — Verify
@@ -731,19 +734,32 @@ on every later deploy — migrations don't seed, and it's safe to re-run but unn
 
 ## 6. Cloud Build substitutions & env ownership (the "param replacement")
 
-`cloudbuild.yaml` is parameterised by **substitutions** (`_APP_HOST`, `_API_PUBLIC_URL`, `_NODE_ENV`,
-`_IMAGE_URL`, `_REGION`, `_RUN_SA`, `_SERVICE_NAME`, `_MAX_INSTANCES`, `_LOG_LEVEL`, and the
-`*_SECRET` names).
-**Terraform owns the trigger's substitution values** (`cloud-build.tf` + `variables.tf`); the YAML only
-provides fallback defaults. So to change `APP_HOST` (or any managed substitution) in a deployed env you
-edit **Terraform**, not the Console:
+`cloudbuild.yaml` is parameterised by **substitutions**, and **Terraform owns every one of them**
+(`modules/gcp-env/cloud-build.tf`). The YAML's literals are fallbacks for a manual
+`gcloud builds submit` with no trigger; a real deploy always overrides them. To change `APP_HOST` — or
+anything else the runtime reads — you edit **Terraform**, never the Console:
 
-1. Edit `envs/<env>/variables.tf` (value) and/or `cloud-build.tf` (mapping) → `plan` → `apply`.
+1. Edit `envs/<env>/gcp/variables.tf` (or the environment's `terraform.tfvars`) → `plan` → `apply`.
 
-**The one rule that bites:** both `terraform apply` and `gcloud run deploy --set-env-vars` do a **full
-replacement** of the env vars. So the env-var list in `cloud-run.tf` and the `--set-env-vars` line in
-`cloudbuild.yaml` **must stay identical**, or each deploy/apply will thrash the other. When you add a
-runtime env var, update **both** (see the checklist in `infrastructure/README.md`).
+**The rule that used to bite, and why it no longer can.** Both `terraform apply` and
+`gcloud run deploy --set-env-vars` do a **full replacement** of the environment. This file previously
+told you to keep the list in `cloud-run.tf` and the list in `cloudbuild.yaml` identical by hand —
+which is a rule you can follow perfectly for a year and break once, after which a deploy silently
+drops a variable an apply had set.
+
+Since 2026-09-01 there is only one list. `modules/gcp-env/locals.tf` derives **`_SET_ENV_VARS`** and
+**`_SET_SECRETS`** from the same declarations that define the Cloud Run service, and the YAML forwards
+them verbatim:
+
+```yaml
+- --set-env-vars=${_SET_ENV_VARS}
+- --set-secrets=${_SET_SECRETS}
+```
+
+So **adding a runtime env var is one line in `locals.tf`**, and adding a secret is one entry in
+`secrets.tf` — which also gives it its container, its version, its IAM and its Cloud Run binding.
+⚠️ **Do not expand those substitutions back into a literal list in the YAML.** That is the bug, not
+the documentation of it.
 
 Terraform deliberately **ignores the container image tag** — Cloud Build owns it (each build deploys
 `:$COMMIT_SHA`).
@@ -757,8 +773,10 @@ Once Part 1 is done, releases are **automated**:
 - **Backend:** merge to `main` → the prod Cloud Build trigger fires → verify → build → **migrate
   deploy** (applies only new migrations; a no-op when none are pending) → deploy. Zero manual steps.
 - **Frontend:** merge to `main` → Cloudflare Pages auto-builds and deploys.
-- **Secrets/infra changes** are the only manual paths: rotate a secret via `load-secrets-*` (+ redeploy
-  to pick up `:latest`), or change infra via Terraform `plan`/`apply`.
+- **Secrets/infra changes** are the only manual paths, and both are now the same one: put the new
+  value in the environment's gitignored `secrets.auto.tfvars`, bump its counter in
+  `secret_version_triggers`, and `apply` (then redeploy so the service picks up `:latest`). The
+  superseded Secret Manager version is destroyed in the same operation.
 
 Nothing else is required for a normal release. Structural changes (scaling, a new env var, IAM) go
 through Terraform; app changes go through `main`.
@@ -815,9 +833,12 @@ migrations into ONE baseline so prod starts clean and dev + prod share one histo
 
 | Thing | Staging | Production |
 |---|---|---|
-| GCP project | `ozari-500103` | **separate project** (recommended) |
-| Terraform state prefix | `ozari/staging` | `ozari/prod` |
-| Terraform env dir | `envs/staging/` (adopts existing) | `envs/prod/` (creates fresh; no `imports.tf`) |
+| GCP project | `ozari-500103` | **separate project**, created by `terraform/bootstrap` |
+| Terraform state | `ozari-500103-tfstate` / `ozari/staging` + `ozari/staging-cloudflare` | `ozari-prod-tfstate` / `ozari/prod` + `ozari/prod-cloudflare` |
+| Terraform env dir | `envs/staging/{gcp,cloudflare}/` — inputs only | `envs/prod/{gcp,cloudflare}/` — inputs only, same shared module |
+| Neon | its own project | **its own project** (free plan allows 100; quotas are per project) |
+| Cloud Build GitHub connection | console-created, referenced by string | Terraform-managed (`manage_github_connection = true`) |
+| Registry cleanup | keep 3 / 30-day stale window | keep 2 / 14-day stale window |
 | Cloud Build trigger branch | dev branch | `main` |
 | `NODE_ENV` | `staging` | `production` (disables `/api/docs`) |
 | `APP_HOST` | `https://staging.partyrentalsgt.com` | apex domain, e.g. `https://partyrentalsgt.com` |
@@ -854,25 +875,26 @@ call its own backend.
 [ ] 0  Decide the host PAIR up front — frontend + api MUST share the registrable domain, and each
        host must be ONE label (api.partyrentalsgt.com, never api.prod.partyrentalsgt.com — §3c)
 [ ] 0  Separate prod GCP project decided
-[ ] 1  Neon prod DB created; db-roles.sql run as owner; pooled(ozari_api)+direct(owner) URLs ready
+[ ] 1  terraform/bootstrap applied → prod project + billing + state bucket; record project_number
+[ ] 1  Neon prod PROJECT created (not a branch); scripts/db-bootstrap.ps1 run → db-verify.sql PASSED
 [ ] 2  Resend prod API key created
-[ ] 2b R2 PROD bucket + public read + API token — CORS lists ONLY prod origins, never localhost (§3b)
+[ ] 2b R2 API token minted (bucket + CORS are Terraform; CORS must list ONLY prod origins — §3b)
 [ ] 2c Google OAuth client for PROD (§3d): Calendar API on, audience External, scopes
        calendar.events + userinfo.email ONLY, Web-application client, prod redirect URI
        https://api.partyrentalsgt.com/api/calendar/google/callback  ← skip if not shipping calendar
-[ ] 3  JWT x2, ENCRYPTION_KEY (32B hex), API_KEY generated into local prod.env (gitignored)
-[ ] 4  envs/prod/ Terraform (state prefix ozari/prod, NODE_ENV=production, app_host=FRONTEND origin,
-       no imports.tf) → init/plan/apply → containers, SAs, registry, Cloud Run shell, main trigger
-[ ] 5  load-secrets (prod) → all 7 secret versions added; then the R2 pair (§3b) and the Google
-       OAuth pair (§3d) via gcloud — every bound secret needs a version BEFORE the first deploy
-[ ] 6  First build on main → verify/build/migrate/deploy → record the generated run.app URL
+[ ] 3  Cloud Build GitHub App installed + PAT stored; Cloudflare Pages authorized against GitHub
+[ ] 3  scripts/new-secrets.ps1 → jwt x2, ENCRYPTION_KEY (32B hex), API_KEY into
+       envs/prod/gcp/secrets.auto.tfvars (gitignored) — ALL values distinct from staging
+[ ] 4  tf.ps1 prod gcp plan → REVIEW → apply. One pass: APIs, SAs, IAM, registry, secrets AND
+       versions, Cloud Run shell, GitHub connection, main trigger. (No two-phase apply any more.)
+[ ] 6  First build on main → verify/build/migrate/deploy
 [ ] 7  pnpm db:seed once against the fresh prod DB
-[ ] 8  DNS: CNAME `api` → the prod run.app host, PROXIED (one label — Universal SSL covers it)
-[ ] 8  Worker `api-prod-proxy` (or reuse the pattern) + Route `api.partyrentalsgt.com/*`; disable its
-       workers.dev URL afterwards. SSL/TLS = Full (strict)   ← Origin Rules/Snippets are Pro-only
+[ ] 8  tf.ps1 prod cloudflare plan → nothing outside REBUILD.md §1's OURS list → apply. Creates DNS,
+       Worker + route (workers.dev off), SSL Full(strict), Pages + domain + VITE_API_URL, R2 + CORS
+[ ] 8  Set manage_zone_settings = false in envs/staging/cloudflare — exactly one env owns them
 [ ] 8  VERIFY the API on its own host BEFORE touching the frontend: /api/health/check (§3c.4 step 0)
-[ ] 9  Cloudflare Pages: custom domain = the prod frontend origin; email-logo.png served
-[ ] 9  Pages env VITE_API_URL=https://api.partyrentalsgt.com  → then TRIGGER A REBUILD (inlined!)
+[ ] 9  TRIGGER A FRONTEND REBUILD — VITE_API_URL is inlined at build time; setting it is not enough
+[ ] 9  email-logo.png served from the prod origin
 [ ] 10 Confirm APP_HOST on the prod Cloud Run revision == the prod FRONTEND origin, no trailing slash
 [ ] 10 index.html CSP connect-src already lists api.partyrentalsgt.com — confirm before the build
 [ ] 10 CSP connect-src pins the R2 WRITE endpoint by account id — if prod uses a DIFFERENT

@@ -15,6 +15,7 @@ import ActionRow from '../ActionRow';
 import type { ActionRowItem } from '../ActionRow';
 import { fadeIn, fadeOut, revealInScroller } from '../pageMotion';
 import useMorphOnChange from '../useMorphOnChange';
+import SettingRow from './SettingRow';
 import SettingsSection from './SettingsSection';
 import CalendarConfirmModal from './CalendarConfirmModal';
 import type { CalendarConfirmAction } from './CalendarConfirmModal';
@@ -32,39 +33,18 @@ const SECONDARY_COLOR = '#262626';
 const DANGER_COLOR = '#dc2626';
 const SKELETON = 'animate-pulse rounded bg-charcoal/10 motion-reduce:animate-none';
 
-/** A settings row: what it is on the left, the controls on the right. Matches the security rows so
- *  the screen reads as one surface rather than a page with a widget bolted on.
+/** These rows are {@link SettingRow}s — the same primitive the security card uses, so the screen
+ *  reads as one surface rather than a page with a widget bolted on. Two things are local to this
+ *  card: the region's FLIP identity (so when a row above grows or disappears, this one glides into
+ *  its new place instead of teleporting) and `morphDescription`, because these descriptions really
+ *  do rewrite themselves ("Conecta tu cuenta…" → "Conectado como a@b.com").
  *
- *  It carries the region's FLIP identity, so when a row above it grows or disappears this one glides
- *  into its new place instead of teleporting. The description is a `MorphSwap`, because it genuinely
- *  rewrites itself ("Conecta tu cuenta…" → "Conectado como a@b.com") and a plain React swap of a
- *  sentence mid-card is exactly the kind of blink this screen was full of. */
-const CalendarRow: React.FC<{
-  id: string;
-  label: string;
-  description: string;
-  children: React.ReactNode;
-}> = ({ id, label, description, children }) => (
-  <div
-    data-flip-id={id}
-    className="calendar-flip flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
-  >
-    <div className="min-w-0">
-      <span className="text-sm font-medium text-charcoal">{label}</span>
-      <MorphSwap block swapKey={description} className="mt-0.5">
-        <p className="text-sm leading-relaxed text-charcoal/55">{description}</p>
-      </MorphSwap>
-    </div>
-    {/* ⚠️ EVERY layer between here and the buttons must be able to WRAP and to SHRINK, or the group
-        becomes an atomic box wider than the card and simply overflows its padding — which is exactly
-        what "Quitar enlace" did on an iPhone, hanging outside the card's right edge. `shrink-0` was
-        the other half of that: it told this group never to give way, so at `sm` and up it would push
-        past the row instead of folding. With `flex-wrap` all the way down, the group's minimum is one
-        BUTTON rather than the whole row, so it folds onto a second line long before anything
-        overflows. */}
-    <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">{children}</div>
-  </div>
-);
+ *  ⚠️ EVERY layer between the row and the buttons must be able to WRAP, or the group becomes an
+ *  atomic box wider than the card. `SettingRow` owns the outer half of that rule; the wrapping
+ *  classes on `SkeletonFade`'s layers and on `ActionRow` below are the inner half, and they must
+ *  stay `flex-wrap` — with `sm:justify-end` so a folded second line stays right-aligned under the
+ *  first, matching the row it belongs to. */
+const ACTIONS = 'flex flex-wrap items-center gap-2 sm:justify-end';
 
 /**
  * CALENDARS — connect Google, or subscribe from anything else.
@@ -116,6 +96,18 @@ const CalendarSection: React.FC = () => {
 
   const feedUrl = data?.feed.url;
   const googleConnected = data?.google.connected === true;
+  /**
+   * ⚠️ A connection can be PRESENT and DEAD, and the difference is the whole feature.
+   *
+   * When Google answers `invalid_grant` — the admin revoked access, or the refresh token expired
+   * (which it does in ~7 days while the OAuth app is in Testing) — the sync deactivates the row
+   * rather than retrying forever, and then says nothing, because a calendar failure must never
+   * surface on the order that triggered it. The row stays in the database, so `connected` is still
+   * true, and this screen used to read ONLY that: it kept saying "Conectado como a@b.com" while
+   * every order silently stopped reaching the calendar. The one signal that tells them apart is
+   * `isActive`, which the API has always returned and this screen never read.
+   */
+  const googleExpired = googleConnected && data?.google.isActive === false;
   const googleAvailable = data?.googleAvailable !== false;
 
   /**
@@ -127,13 +119,13 @@ const CalendarSection: React.FC = () => {
    * therefore animates nothing, which is the entire point of keying it.
    */
   const body = useMorphOnChange<HTMLDivElement>(
-    `${isLoading}|${isError}|${googleAvailable}|${googleConnected}|${data?.google.accountEmail ?? ''}|${feedUrl ?? ''}|${data?.reminderMinutes ?? ''}`,
+    `${isLoading}|${isError}|${googleAvailable}|${googleConnected}|${googleExpired}|${data?.google.accountEmail ?? ''}|${feedUrl ?? ''}|${data?.reminderMinutes ?? ''}`,
     '.calendar-flip',
     // The ROWS only move when a row is added, removed or re-wrapped. Keyed on the full state they
     // re-glided on a regenerate and on a lead-time change — the whole card drifting for a swap that
     // moved nothing, which is what `itemsKey` exists to prevent (the catalog card's lesson). The URL
     // VALUE and the reminder are deliberately absent: they morph in place, inside a fixed box.
-    `${isLoading}|${isError}|${googleAvailable}|${googleConnected}|${feedUrl !== undefined}`,
+    `${isLoading}|${isError}|${googleAvailable}|${googleConnected}|${googleExpired}|${feedUrl !== undefined}`,
   );
 
   /** The subscription block — held so its ARRIVAL can rise in and its DEPARTURE can play out before
@@ -297,6 +289,28 @@ const CalendarSection: React.FC = () => {
     ? []
     : googleConnected
       ? [
+          // A dead grant is only fixable by consenting again, so the row leads with that — and keeps
+          // "Desconectar" beside it, because the other honest answer is to stop using the
+          // integration. Its own key, so it ARRIVES rather than morphing out of "Desconectar".
+          ...(googleExpired
+            ? [
+                {
+                  key: 'reconnect',
+                  node: (
+                    <Button
+                      color={SECONDARY_COLOR}
+                      size="sm"
+                      loading={connecting}
+                      disabled={busy}
+                      startIcon={<HiOutlineLink className="size-4" />}
+                      onClick={startConnect}
+                    >
+                      {t(`${KEY}.google.reconnect`)}
+                    </Button>
+                  ),
+                },
+              ]
+            : []),
           {
             key: 'disconnect',
             node: (
@@ -385,42 +399,49 @@ const CalendarSection: React.FC = () => {
         ) : (
           <div className="divide-y divide-charcoal/[0.06]">
             {/* ── Google ───────────────────────────────────────────────────────────────────── */}
-            <CalendarRow
-              id="google"
+            <SettingRow
+              flipId="google"
+              className="calendar-flip"
+              morphDescription
               label={t(`${KEY}.google.label`)}
               description={
                 !googleAvailable
                   ? t(`${KEY}.google.unavailable`)
-                  : googleConnected
-                    ? t(`${KEY}.google.connectedAs`, {
+                  : googleExpired
+                    ? t(`${KEY}.google.expired`, {
                         account: data?.google.accountEmail ?? t(`${KEY}.google.unknownAccount`),
                       })
-                    : t(`${KEY}.google.description`)
+                    : googleConnected
+                      ? t(`${KEY}.google.connectedAs`, {
+                          account: data?.google.accountEmail ?? t(`${KEY}.google.unknownAccount`),
+                        })
+                      : t(`${KEY}.google.description`)
               }
             >
               <SkeletonFade
                 loading={isLoading}
-                contentClassName="flex min-w-0 flex-wrap items-center gap-2"
-                skeleton={<span aria-hidden className={`inline-block h-9 w-28 ${SKELETON}`} />}
+                contentClassName={ACTIONS}
+                skeleton={<span aria-hidden className={`inline-block h-11 w-32 ${SKELETON}`} />}
               >
-                <ActionRow items={googleActions} className="flex flex-wrap items-center gap-2" />
+                <ActionRow items={googleActions} className={ACTIONS} />
               </SkeletonFade>
-            </CalendarRow>
+            </SettingRow>
 
             {/* ── The subscription: Apple Calendar, Outlook, anything ──────────────────────── */}
-            <CalendarRow
-              id="feed"
+            <SettingRow
+              flipId="feed"
+              className="calendar-flip"
               label={t(`${KEY}.feed.label`)}
               description={t(`${KEY}.feed.description`)}
             >
               <SkeletonFade
                 loading={isLoading}
-                contentClassName="flex min-w-0 flex-wrap items-center gap-2"
-                skeleton={<span aria-hidden className={`inline-block h-9 w-28 ${SKELETON}`} />}
+                contentClassName={ACTIONS}
+                skeleton={<span aria-hidden className={`inline-block h-11 w-32 ${SKELETON}`} />}
               >
-                <ActionRow items={feedActions} className="flex flex-wrap items-center gap-2" />
+                <ActionRow items={feedActions} className={ACTIONS} />
               </SkeletonFade>
-            </CalendarRow>
+            </SettingRow>
 
             {feedUrl && (
               <div
@@ -460,8 +481,9 @@ const CalendarSection: React.FC = () => {
             )}
 
             {/* ── The rule both halves obey ────────────────────────────────────────────────── */}
-            <CalendarRow
-              id="reminder"
+            <SettingRow
+              flipId="reminder"
+              className="calendar-flip"
               label={t(`${KEY}.reminder.label`)}
               description={t(`${KEY}.reminder.description`)}
             >
@@ -470,14 +492,17 @@ const CalendarSection: React.FC = () => {
                 contentClassName="inline-flex"
                 skeleton={<span aria-hidden className={`inline-block h-4 w-20 ${SKELETON}`} />}
               >
+                {/* A VALUE, not a control — and it obeys the same alignment as the buttons above it:
+                    right-aligned, centred on its description. `text-right` matters only for the one
+                    case the row cannot help with, a value long enough to wrap. */}
                 <MorphSwap
                   swapKey={data?.reminderMinutes ?? 0}
-                  className="text-sm font-medium text-charcoal"
+                  className="text-right text-sm font-medium text-charcoal"
                 >
                   {data ? t(`${KEY}.reminder.${lead.key}`, { count: lead.count }) : ''}
                 </MorphSwap>
               </SkeletonFade>
-            </CalendarRow>
+            </SettingRow>
           </div>
         )}
       </div>

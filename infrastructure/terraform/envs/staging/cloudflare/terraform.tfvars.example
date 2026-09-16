@@ -1,0 +1,51 @@
+# Copy to `terraform.tfvars` (gitignored) and fill in.
+#
+# ⚠️ The Cloudflare API TOKEN does NOT go here. Export it instead, so it never touches a file:
+#     PowerShell:  $env:CLOUDFLARE_API_TOKEN = "..."
+#     bash:        export CLOUDFLARE_API_TOKEN="..."
+# A token passed as a provider argument would be written to Terraform state.
+#
+# Token scopes (create it as a Custom Token in the Cloudflare dashboard):
+#   Zone   → DNS: Edit · Zone Settings: Edit · Workers Routes: Edit    (scoped to partyrentalsgt.com)
+#   Account→ Workers Scripts: Edit · Cloudflare Pages: Edit · Workers R2 Storage: Edit
+
+cloudflare_account_id = "<32-hex account id>"
+cloudflare_zone_id    = "<32-hex zone id>"
+
+pages_project_name = "ozari-c28"
+r2_bucket_name     = "ozari-assets-staging"
+
+# Exactly one environment may own the zone-wide SSL settings. Set false here once production exists
+# and takes them over.
+manage_zone_settings = true
+
+# ---------------------------------------------------------------------------
+# Records this environment is responsible for. Resend's are here because email deliverability is
+# part of the environment, and they are DNS records like any other.
+#
+# ⚠️ Only list what THIS environment owns. Anything belonging to the marketing site or another
+# project on this shared zone must stay out of Terraform until somebody deliberately adopts it —
+# an unmanaged record is safe; a wrongly-adopted one gets destroyed by a plan nobody read closely.
+# Copy the exact values from Resend → Domains → partyrentalsgt.com.
+# ---------------------------------------------------------------------------
+extra_dns_records = {
+  # resend_dkim = {
+  #   name    = "resend._domainkey.partyrentalsgt.com"
+  #   type    = "TXT"
+  #   content = "p=MIGfMA0GCSq..."
+  #   comment = "Resend DKIM"
+  # }
+  # resend_spf = {
+  #   name    = "send.partyrentalsgt.com"
+  #   type    = "TXT"
+  #   content = "v=spf1 include:amazonses.com ~all"
+  #   comment = "Resend SPF (return-path subdomain)"
+  # }
+  # resend_mx = {
+  #   name     = "send.partyrentalsgt.com"
+  #   type     = "MX"
+  #   content  = "feedback-smtp.us-east-1.amazonses.com"
+  #   priority = 10
+  #   comment  = "Resend bounce handling"
+  # }
+}

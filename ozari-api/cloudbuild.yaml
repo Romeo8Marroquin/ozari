@@ -1,55 +1,44 @@
-# TODO(terraform-ownership): Once the infrastructure/ Terraform adoption is applied,
-# this pipeline should ideally do build + push + run-migrations + update-image ONLY,
-# and let Terraform (google_cloud_run_v2_service) own the structural Cloud Run
-# configuration (scaling, concurrency, timeout, env vars, secret bindings, SA, ingress).
-# The Terraform cloud-run resource already ignores changes to the container image tag
-# so this build's `gcloud run deploy --image` keeps working without fighting Terraform.
+# =============================================================================
+# Ozari API — build, migrate, deploy.
+#
+# ONE file serves every environment. Nothing here names staging or production: the trigger's
+# substitutions do, and Terraform owns those (modules/gcp-env/cloud-build.tf). Staging deploys this
+# from `dev` in its project; production deploys the same file from `main` in its own project.
+#
+# ⚠️ `_SET_ENV_VARS` and `_SET_SECRETS` are COMPUTED BY TERRAFORM from the same locals that define
+# the Cloud Run service (modules/gcp-env/locals.tf + secrets.tf). Do not expand them back into a
+# hand-written list here. `gcloud run deploy --set-env-vars` REPLACES the whole environment, so when
+# this file and Terraform each kept their own copy of that list, adding a variable to one silently
+# wiped it from the service on the next deploy by the other. That class of bug is now unexpressible.
+#
+# The literal values below are FALLBACKS for a manual `gcloud builds submit` with no trigger. They
+# describe staging. A real deploy always overrides them.
+# =============================================================================
 substitutions:
   _REGION: northamerica-south1
-  # Staging Cloud Run service is named ozari-api (NOT ozari-api-staging). Do not rename.
+  # Staging's Cloud Run service is named ozari-api (NOT ozari-api-staging). Do not rename.
   _SERVICE_NAME: ozari-api
-  _REPOSITORY: ozari-images
   _IMAGE_URL: northamerica-south1-docker.pkg.dev/$PROJECT_ID/ozari-images/ozari-api
   _RUN_SA: ozari-run-sa@$PROJECT_ID.iam.gserviceaccount.com
-  # The FRONTEND origin — CORS, the API-key browser-origin check and every email link compare
-  # against it, so a stale value locks the app out of its own API. No trailing slash (the browser's
-  # `Origin` header never has one). The Terraform trigger substitution (`cloud-build.tf`) OVERRIDES
-  # this in the deployed trigger; this literal is the fallback for a manual/local build, so the two
-  # must be changed together (DEPLOYMENT.md §3c).
-  _APP_HOST: https://staging.partyrentalsgt.com
-  # The API's OWN public origin. Needed because the Cloudflare Worker in front of Cloud Run rewrites
-  # the Host header to the run.app name (DEPLOYMENT.md §3c), so a request cannot see the brand host —
-  # and the calendar's OAuth redirect + the ICS feed URL an admin pastes into their phone are built
-  # from it. No trailing slash. Empty = derive from the request (correct for a deployment with no
-  # proxy in front). Terraform's trigger substitution overrides this fallback, like _APP_HOST.
-  _API_PUBLIC_URL: https://api-staging.partyrentalsgt.com
-  _NODE_ENV: staging
-  _LOG_LEVEL: info
+
+  # The runtime contract. Terraform overrides both; see the warning above.
+  _SET_ENV_VARS: >-
+    NODE_ENV=staging,LOG_LEVEL=info,APP_HOST=https://staging.partyrentalsgt.com,API_PUBLIC_URL=https://api-staging.partyrentalsgt.com,R2_ENDPOINT=,R2_BUCKET_NAME=,R2_PUBLIC_URL=
+  _SET_SECRETS: >-
+    DATABASE_URL=ozari-database-url:latest,JWT_SECRET=ozari-jwt-secret:latest,JWT_REFRESH_SECRET=ozari-jwt-refresh-secret:latest,ENCRYPTION_KEY=ozari-encryption-key:latest,API_KEY=ozari-api-key:latest,EMAIL_KEY=ozari-email-key:latest,R2_ACCESS_KEY=ozari-r2-access-key:latest,R2_SECRET_KEY=ozari-r2-secret-key:latest,GOOGLE_CLIENT_ID=ozari-google-client-id:latest,GOOGLE_CLIENT_SECRET=ozari-google-client-secret:latest
+
+  # Cloud Run shape. Terraform sets these from the same variables it uses for the service, so an
+  # apply and a deploy cannot disagree about the spend cap or the timeout.
+  _MIN_INSTANCES: '0'
   _MAX_INSTANCES: '3'
-  _DATABASE_URL_SECRET: ozari-database-url
+  _CONCURRENCY: '40'
+  # A backstop above the app's own 30s request/response timeout.
+  _TIMEOUT: '60'
+  _CPU: '1'
+  _MEMORY: 512Mi
+
+  # Migrations run as the OWNER role. This secret is never bound to the running service.
   _DIRECT_DATABASE_URL_SECRET: ozari-direct-database-url
-  _JWT_SECRET_SECRET: ozari-jwt-secret
-  _JWT_REFRESH_SECRET_SECRET: ozari-jwt-refresh-secret
-  _ENCRYPTION_KEY_SECRET: ozari-encryption-key
-  _API_KEY_SECRET: ozari-api-key
-  _EMAIL_KEY_SECRET: ozari-email-key
-  # Cloudflare R2 object storage. The plain values are env-specific and semi-sensitive (bucket/account),
-  # so they are LEFT EMPTY here and provided by the Terraform trigger substitutions (cloud-build.tf,
-  # sourced from gitignored terraform.tfvars) — never published in this public repo. They MUST still be
-  # listed in --set-env-vars below, or each deploy would wipe the values Terraform sets on the service.
-  _R2_ENDPOINT: ""
-  _R2_BUCKET_NAME: ""
-  _R2_PUBLIC_URL: ""
-  # Secret NAMES are safe in the repo (they're identifiers, like the other *_SECRET subs above).
-  _R2_ACCESS_KEY_SECRET: ozari-r2-access-key
-  _R2_SECRET_KEY_SECRET: ozari-r2-secret-key
-  # Google Calendar OAuth client. These bind :latest like every other secret, so their VERSIONS must
-  # exist before a deploy runs (load values via gcloud first — DEPLOYMENT.md §3d), or `gcloud run
-  # deploy` fails on a secret with no version. The integration itself is optional: with the values
-  # absent the API answers `googleAvailable: false` and the settings screen offers only the ICS feed —
-  # but the BINDING is not optional once it is listed here.
-  _GOOGLE_CLIENT_ID_SECRET: ozari-google-client-id
-  _GOOGLE_CLIENT_SECRET_SECRET: ozari-google-client-secret
 
 steps:
   - id: verify-api
@@ -86,6 +75,8 @@ steps:
       - --all-tags
       - ${_IMAGE_URL}
 
+  # Migrations run from the image that is about to be deployed, so the schema and the code that
+  # expects it are always the same commit.
   - id: apply-prisma-migrations
     name: gcr.io/cloud-builders/docker
     entrypoint: bash
@@ -114,16 +105,14 @@ steps:
       - --service-account=${_RUN_SA}
       - --allow-unauthenticated
       - --port=8080
-      - --min-instances=0
+      - --min-instances=${_MIN_INSTANCES}
       - --max-instances=${_MAX_INSTANCES}
-      - --cpu=1
-      - --memory=512Mi
-      - --concurrency=40
-      # Matches Terraform's timeout_seconds (60): a backstop above the app's own 30s request timeout.
-      # Keep these two in sync or Cloud Build and Terraform will thrash the value on each deploy/apply.
-      - --timeout=60
-      - --set-env-vars=NODE_ENV=${_NODE_ENV},LOG_LEVEL=${_LOG_LEVEL},APP_HOST=${_APP_HOST},API_PUBLIC_URL=${_API_PUBLIC_URL},R2_ENDPOINT=${_R2_ENDPOINT},R2_BUCKET_NAME=${_R2_BUCKET_NAME},R2_PUBLIC_URL=${_R2_PUBLIC_URL}
-      - --set-secrets=DATABASE_URL=${_DATABASE_URL_SECRET}:latest,JWT_SECRET=${_JWT_SECRET_SECRET}:latest,JWT_REFRESH_SECRET=${_JWT_REFRESH_SECRET_SECRET}:latest,ENCRYPTION_KEY=${_ENCRYPTION_KEY_SECRET}:latest,API_KEY=${_API_KEY_SECRET}:latest,EMAIL_KEY=${_EMAIL_KEY_SECRET}:latest,R2_ACCESS_KEY=${_R2_ACCESS_KEY_SECRET}:latest,R2_SECRET_KEY=${_R2_SECRET_KEY_SECRET}:latest,GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID_SECRET}:latest,GOOGLE_CLIENT_SECRET=${_GOOGLE_CLIENT_SECRET_SECRET}:latest
+      - --cpu=${_CPU}
+      - --memory=${_MEMORY}
+      - --concurrency=${_CONCURRENCY}
+      - --timeout=${_TIMEOUT}
+      - --set-env-vars=${_SET_ENV_VARS}
+      - --set-secrets=${_SET_SECRETS}
 
 images:
   - ${_IMAGE_URL}:$COMMIT_SHA

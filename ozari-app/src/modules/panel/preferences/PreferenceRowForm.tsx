@@ -5,6 +5,7 @@ import AnimatedMessage from '@components/AnimatedMessage';
 import CustomInput from '@components/CustomInput';
 import CustomSelect from '@components/CustomSelect';
 import Switch from '@components/Switch';
+import { decimalInput, integerInput } from '@utils/numericInput';
 import { BANK_KEYS, bankLabelKey } from './bankLogos';
 import type { CatalogKey, CatalogRow, CatalogRowBody, LookupRow } from './preference.types';
 
@@ -204,9 +205,7 @@ const PreferenceRowForm: React.FC<PreferenceRowFormProps> = ({
           <Field>
             <CustomInput
               id="preference-row-lead"
-              type="number"
-              min={0}
-              inputMode="numeric"
+              {...integerInput}
               label={t(`${KEY}.rowForm.leadHours`)}
               aria-label={t(`${KEY}.rowForm.leadHours`)}
               value={leadHours}
@@ -237,7 +236,7 @@ const PreferenceRowForm: React.FC<PreferenceRowFormProps> = ({
             <Field>
               <CustomInput
                 id="preference-row-fee"
-                inputMode="decimal"
+                {...decimalInput}
                 label={t(`${KEY}.rowForm.fee`)}
                 aria-label={t(`${KEY}.rowForm.fee`)}
                 placeholder={t(`${KEY}.rowForm.feePlaceholder`)}

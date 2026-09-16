@@ -27,6 +27,9 @@ interface CustomInputFormProps<T extends FieldValues>
   deps?: Path<T>[];
   /** Forwarded to {@link CustomInput}: called when this field is autofilled. */
   onAutofill?: () => void;
+  /** Forwarded to {@link CustomInput}: cleans each keystroke before it reaches the form, so the
+   *  field can only hold a shape the schema understands (see `@utils/numericInput`). */
+  transform?: (value: string) => string;
 }
 
 const CustomInputForm = function <T extends FieldValues>({

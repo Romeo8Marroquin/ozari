@@ -24,6 +24,7 @@ import { QueryKeys } from '@constants/QueryKeys';
 import { getStoredUserId } from '@hooks/useRole';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { getStatus, toFormError } from '@utils/apiError';
+import { decimalInput, integerInput } from '@utils/numericInput';
 import {
   detailRowIn,
   detailRowOut,
@@ -925,10 +926,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   // the button stays enabled and opens a select with nothing in it.
   const canAddLine = lines.fields.length < products.filter(offerable).length;
   // The takeable ceiling for a line's product — the window amount once probed, else the product's
-  // current availability. Caps the quantity input's `max` (the resolver enforces the same limit),
-  // so it must be ABSENT wherever the cap isn't real: on an order that reserves nothing, a `max`
-  // would physically stop the admin from typing the number they are correcting the paperwork to,
-  // and the hint below would quote a ceiling that isn't one.
+  // current availability. It feeds the resolver's per-line cap and the hint under the field, and it
+  // must be ABSENT wherever the cap isn't real: on an order that reserves nothing there is no
+  // ceiling, and the hint would otherwise quote a number that is not one.
   const availableFor = (productId: number | null | undefined): number | undefined =>
     productId == null || !enforcesStock
       ? undefined
@@ -1002,8 +1002,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
       ) : (
         <RequiredPatternsContext.Provider value={requiredPatternsValue}>
           <FormProvider {...methods}>
+            {/* `noValidate` for the same reason the preferences forms carry it: the browser's own
+                constraint validation would block the submit with an untranslated bubble, and the
+                mirrored message — plus the `touched` flip that reveals it — would never run. The
+                numeric fields no longer declare bounds, but the `datetime-local` pickers still
+                report `badInput` for a half-typed date, which is exactly that case. */}
             <form
               id={FORM_ID}
+              noValidate
               onSubmit={handleSubmit(onSubmit)}
               aria-busy={isLoading}
               className="flex flex-col gap-6"
@@ -1142,11 +1148,11 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                               <CustomInputForm<CreateOrderFormType>
                                 id={`order-line-quantity-${index}`}
                                 name={`lines.${index}.quantity`}
-                                type="number"
-                                inputMode="numeric"
-                                min={1}
-                                step={1}
-                                max={availableFor(lineValues[index]?.productId)}
+                                // Whole units, digits-only keypad, no `min`/`max`/`step`: the cap is
+                                // the LIVE availability one (`appendLineAvailabilityErrors` + the
+                                // hint below), which is a moving number the browser cannot know and
+                                // would only block the submit over, in its own untranslated words.
+                                {...integerInput}
                                 instructions={availabilityHint(lineValues[index]?.productId)}
                                 label={t(`${KEY}.fields.lineQuantityLabel`)}
                                 aria-label={t(`${KEY}.fields.lineQuantityLabel`)}
@@ -1338,10 +1344,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                       <CustomInputForm<CreateOrderFormType>
                         id="order-delivery-amount"
                         name="deliveryAmount"
-                        type="number"
-                        inputMode="decimal"
-                        min={0}
-                        step="0.01"
+                        {...decimalInput}
                         optionalLabel
                         label={t(`${KEY}.fields.deliveryAmountLabel`)}
                         placeholder={t(`${KEY}.fields.moneyPlaceholder`)}
@@ -1351,10 +1354,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                       <CustomInputForm<CreateOrderFormType>
                         id="order-deposit-amount"
                         name="depositAmount"
-                        type="number"
-                        inputMode="decimal"
-                        min={0}
-                        step="0.01"
+                        {...decimalInput}
                         optionalLabel
                         label={t(`${KEY}.fields.depositAmountLabel`)}
                         placeholder={t(`${KEY}.fields.moneyPlaceholder`)}
