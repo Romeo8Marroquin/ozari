@@ -254,8 +254,9 @@ describe('PreferencesPage groups', () => {
 
     // Rendered FROM the API's list — a setting added server-side appears with no frontend change
     // beyond its two strings.
-    expect(screen.getByLabelText(`${KEY}.settings.logisticsSpacingMinutes.label`)).toHaveValue(60);
-    expect(screen.getByLabelText(`${KEY}.settings.evidenceRetentionMonths.label`)).toHaveValue(24);
+    // Strings: an `int` setting is a TEXT input with a numeric keypad (see `@utils/numericInput`).
+    expect(screen.getByLabelText(`${KEY}.settings.logisticsSpacingMinutes.label`)).toHaveValue('60');
+    expect(screen.getByLabelText(`${KEY}.settings.evidenceRetentionMonths.label`)).toHaveValue('24');
     // Eight cards in one column meant eight simultaneous morphs and a cascade long enough to read as
     // lag — the catalogs live under their own tabs now.
     expect(screen.queryByText(`${KEY}.catalogs.eventTypes.title`)).not.toBeInTheDocument();
@@ -588,7 +589,7 @@ describe('PreferenceSettingsCard', () => {
     setState({ data: clamped });
     rerender(<PreferencesPage />);
 
-    expect(screen.getByLabelText(`${KEY}.settings.turnaroundMinutes.label`)).toHaveValue(240);
+    expect(screen.getByLabelText(`${KEY}.settings.turnaroundMinutes.label`)).toHaveValue('240');
     expect(screen.getAllByRole('button', { name: `${KEY}.settings.save` })[0]!).toBeDisabled();
   });
 
@@ -838,7 +839,13 @@ describe('PreferenceCatalogCard editing', () => {
     await userEvent.click(within(zones).getByRole('button', { name: `${KEY}.actions.add` }));
     await userEvent.type(within(zones).getByLabelText(`${KEY}.rowForm.name`), 'Zona 26');
     await userEvent.selectOptions(within(zones).getByLabelText(`${KEY}.rowForm.municipality`), '4');
-    await userEvent.type(within(zones).getByLabelText(`${KEY}.rowForm.fee`), 'gratis');
+    // Letters never reach a money field — the keypad filter drops them (`@utils/numericInput`), so
+    // there is no invalid value to reject and no message to read.
+    const fee = within(zones).getByLabelText(`${KEY}.rowForm.fee`);
+    await userEvent.type(fee, 'gratis');
+    expect(fee).toHaveValue('');
+    // A half-typed amount still IS malformed — the one the mirrored rule has to speak up about.
+    await userEvent.type(fee, '12.');
     await userEvent.click(within(zones).getByRole('button', { name: `${KEY}.rowForm.save` }));
     expect(await screen.findByText(`${KEY}.rowForm.feeError`)).toBeInTheDocument();
   });
@@ -852,7 +859,7 @@ describe('PreferenceCatalogCard editing', () => {
       within(card).getAllByRole('button', { name: `${KEY}.actions.editRow` })[0]!,
     );
     expect(within(card).getByLabelText(`${KEY}.rowForm.name`)).toHaveValue('Evento familiar');
-    expect(within(card).getByLabelText(`${KEY}.rowForm.leadHours`)).toHaveValue(24);
+    expect(within(card).getByLabelText(`${KEY}.rowForm.leadHours`)).toHaveValue('24');
     expect(within(card).getByLabelText(`${KEY}.rowForm.description`)).toHaveValue('Cumpleaños');
 
     await userEvent.click(within(card).getByRole('button', { name: `${KEY}.rowForm.cancel` }));

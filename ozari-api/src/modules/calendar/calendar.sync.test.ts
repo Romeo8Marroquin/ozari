@@ -25,6 +25,7 @@ import { encryptKms } from "@helpers/encryption.js";
 import { GoogleGrantRevokedError } from "./google.service.js";
 import {
   activeCalendarConnections,
+  backfillUserCalendar,
   ensureAccessToken,
   loadCalendarOrder,
   loadCalendarReminderMinutes,
@@ -323,5 +324,55 @@ describe("syncOrderCalendars", () => {
   it("NEVER throws — an order is not lost because a calendar could not be reached", async () => {
     (getPrismaClient as Mock).mockRejectedValue(new Error("db down"));
     await expect(syncOrderCalendars(12)).resolves.toBeUndefined();
+  });
+});
+
+describe("backfillUserCalendar", () => {
+  /** The connect-time read: every pending order of ONE user, rather than one order by id. */
+  const withOrders = (rows: ReturnType<typeof orderRow>[]) =>
+    mockPrisma({ service: { findFirst: vi.fn(async () => null), findMany: vi.fn(async () => rows) } });
+
+  it("writes what is ALREADY on the books into a calendar that was just connected", async () => {
+    // Without this, connecting only ever promises the future: the sync runs on an order's own doors,
+    // so every order that already existed would stay out of the calendar until somebody touched it —
+    // and a reconnect after an expired grant would recover nothing at all.
+    withOrders([orderRow(), orderRow({ id: 13 })]);
+    await backfillUserCalendar(2);
+    // Two orders, each with a delivery and a collection.
+    expect(upsertGoogleEvent).toHaveBeenCalledTimes(4);
+    // A backfill only WRITES: an entry already in somebody's calendar is an appointment they still
+    // have to keep, which is the same stance disconnecting takes.
+    expect(deleteGoogleEvent).not.toHaveBeenCalled();
+  });
+
+  it("asks the user's OWN orders for, and only for, the window the feed publishes", async () => {
+    const client = withOrders([]);
+    await backfillUserCalendar(2);
+    const where = (client.service.findMany as Mock).mock.calls[0]?.[0]?.where as {
+      assignedUserId: number;
+      cancelledAt: null;
+    };
+    expect(where.assignedUserId).toBe(2);
+    expect(where.cancelledAt).toBeNull();
+    expect(upsertGoogleEvent).not.toHaveBeenCalled();
+  });
+
+  it("skips a user with no live connection, and never mints a token for one", async () => {
+    withOrders([orderRow()]);
+    await backfillUserCalendar(99);
+    expect(refreshGoogleAccessToken).not.toHaveBeenCalled();
+    expect(upsertGoogleEvent).not.toHaveBeenCalled();
+  });
+
+  it("drops what is already done, exactly like every other sync", async () => {
+    withOrders([orderRow({ deliveredAt: new Date("2026-08-02T14:05:00.000Z") })]);
+    await backfillUserCalendar(2);
+    expect(upsertGoogleEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("NEVER throws — the admin is mid-redirect from Google's consent screen", async () => {
+    withOrders([orderRow()]);
+    upsertGoogleEvent.mockRejectedValue(new Error("google is down"));
+    await expect(backfillUserCalendar(2)).resolves.toBeUndefined();
   });
 });

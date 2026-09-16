@@ -802,6 +802,8 @@
       "callbackError": "Error al completar la conexión con Google Calendar: {{-error}}.",
       "revokeFailed": "No se pudo revocar el acceso en Google: {{-error}}.",
       "syncFailed": "No se pudo sincronizar el pedido {{id}} con los calendarios conectados.",
+      "backfilled": "Se escribieron {{count}} eventos pendientes en el calendario del usuario {{userId}} al conectar.",
+      "backfillFailed": "No se pudieron escribir los pedidos pendientes en el calendario del usuario {{userId}} al conectar.",
       "statusError": "Error al obtener la configuración de calendario: {{-error}}.",
       "disconnectError": "Error al desconectar Google Calendar: {{-error}}.",
       "feedError": "Error en el enlace de suscripción de calendario: {{-error}}."

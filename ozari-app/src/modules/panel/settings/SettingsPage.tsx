@@ -17,6 +17,7 @@ import CalendarSection from './CalendarSection';
 import ChangePasswordModal from './ChangePasswordModal';
 import MfaDisableModal from './MfaDisableModal';
 import MfaEnableModal from './MfaEnableModal';
+import SettingRow from './SettingRow';
 import SettingsSection from './SettingsSection';
 
 // One shimmer bar for any loading placeholder, sized by the caller — the same skeleton language
@@ -81,21 +82,6 @@ const MfaToggle: React.FC<{ enabled: boolean; onEnable: () => void; onDisable: (
     />
   );
 };
-
-/** A security setting row: label + description on the left, a right-side action control. */
-const SecurityRow: React.FC<{
-  label: string;
-  description: string;
-  action: React.ReactNode;
-}> = ({ label, description, action }) => (
-  <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-    <div className="min-w-0">
-      <span className="text-sm font-medium text-charcoal">{label}</span>
-      <p className="mt-0.5 text-sm leading-relaxed text-charcoal/55">{description}</p>
-    </div>
-    <div className="shrink-0">{action}</div>
-  </div>
-);
 
 /**
  * Honest error state for the account card when `/auth/me` fails with no cached data to fall back on:
@@ -240,37 +226,35 @@ const SettingsPage: React.FC = () => {
         description={t('modules.panel.settings.security.description')}
       >
         <div className="divide-y divide-charcoal/[0.06]">
-          <SecurityRow
+          <SettingRow
             label={t('modules.panel.settings.security.password.label')}
             description={t('modules.panel.settings.security.password.description')}
-            action={
-              <Button
-                variant="soft"
-                color={SECONDARY_COLOR}
-                size="sm"
-                onClick={() => setPasswordModalOpen(true)}
-              >
-                {t('modules.panel.settings.security.password.action')}
-              </Button>
-            }
-          />
-          <SecurityRow
+          >
+            <Button
+              variant="soft"
+              color={SECONDARY_COLOR}
+              size="sm"
+              onClick={() => setPasswordModalOpen(true)}
+            >
+              {t('modules.panel.settings.security.password.action')}
+            </Button>
+          </SettingRow>
+          <SettingRow
             label={t('modules.panel.settings.security.mfa.label')}
             description={t('modules.panel.settings.security.mfa.description')}
-            action={
-              <SkeletonFade
-                loading={loading}
-                contentClassName="inline-flex"
-                skeleton={<span aria-hidden className={`inline-block h-6 w-11 rounded-full ${SKELETON}`} />}
-              >
-                <MfaToggle
-                  enabled={Boolean(me?.mfaEnabled)}
-                  onEnable={() => setMfaModalOpen(true)}
-                  onDisable={() => setMfaDisableModalOpen(true)}
-                />
-              </SkeletonFade>
-            }
-          />
+          >
+            <SkeletonFade
+              loading={loading}
+              contentClassName="inline-flex"
+              skeleton={<span aria-hidden className={`inline-block h-6 w-11 rounded-full ${SKELETON}`} />}
+            >
+              <MfaToggle
+                enabled={Boolean(me?.mfaEnabled)}
+                onEnable={() => setMfaModalOpen(true)}
+                onDisable={() => setMfaDisableModalOpen(true)}
+              />
+            </SkeletonFade>
+          </SettingRow>
         </div>
       </SettingsSection>
 
@@ -283,10 +267,17 @@ const SettingsPage: React.FC = () => {
         description={t('modules.panel.settings.device.description')}
       >
         <div className="divide-y divide-charcoal/[0.06]">
-          <SecurityRow
+          <SettingRow
             label={t('modules.panel.settings.device.mapsApp.label')}
             description={t('modules.panel.settings.device.mapsApp.description')}
-            action={
+          >
+            {/* The select renders `w-full` of its own box, so it needs a box with a WIDTH to be full
+                of: full-bleed in the stacked layout, and a fixed column beside the description from
+                `sm` up. `w-52` holds the longest option ("Preguntar cada vez") plus the chevron
+                gutter, so nothing ellipsizes — and a declared width is what keeps the control the
+                same size on Chromium's `appearance: base-select` rendering (which sizes to the
+                CURRENT selection) as it is on the native one (which sizes to the widest option). */}
+            <div className="w-full sm:w-52">
               <CustomSelect
                 id="settings-maps-app"
                 label={t('modules.panel.settings.device.mapsApp.selectLabel')}
@@ -304,8 +295,8 @@ const SettingsPage: React.FC = () => {
                   })),
                 ]}
               />
-            }
-          />
+            </div>
+          </SettingRow>
         </div>
       </SettingsSection>
 

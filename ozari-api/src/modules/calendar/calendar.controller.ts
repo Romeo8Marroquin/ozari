@@ -14,7 +14,7 @@ import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
 import { loadOrderTimingPreferences } from "../orders/orders.service.js";
 import { buildIcs, calendarEntriesFor } from "./calendar.service.js";
-import { loadCalendarReminderMinutes } from "./calendar.sync.js";
+import { backfillUserCalendar, loadCalendarReminderMinutes } from "./calendar.sync.js";
 import {
   buildGoogleAuthUrl,
   exchangeGoogleCode,
@@ -230,6 +230,12 @@ export const googleCalendarCallback = async (
       create: { userId, provider: CalendarProviderEnum.GOOGLE, ...secrets },
     });
     logger.info(i18next.t("calendar.logs.connected", { userId }));
+    // ⚠️ **Connecting has to look backwards, not only forwards.** The sync runs on an order's own
+    // doors, so without this the calendar that was just linked stays empty until somebody edits or
+    // advances each existing order — and a RECONNECT after an expired grant (Google drops refresh
+    // tokens in ~7 days while the OAuth app is in Testing) would recover nothing, which is exactly
+    // when the schedule matters most. It never throws and is bounded so the redirect stays quick.
+    await backfillUserCalendar(userId);
     res.redirect(settingsRedirect("conectado"));
   } catch (error) {
     logger.error(i18next.t("calendar.logs.callbackError"), { error });

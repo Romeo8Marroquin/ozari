@@ -137,6 +137,15 @@ export const appConfig = {
     // shipping the whole history to a phone on every refresh.
     feedPastDays: 30,
     feedFutureDays: 365,
+    // ── Connecting a calendar BACKFILLS what is already on the books ─────────────────────────────
+    // The sync runs on an order's own doors, so without a backfill a calendar connected today would
+    // only ever receive orders touched after today — and a RECONNECT after an expired grant would
+    // recover nothing at all. It writes the same window the feed publishes, so both transports agree
+    // from the first second. These two numbers are what keep it inside one consent redirect: the
+    // browser is waiting on it, so the pass is bounded and batched rather than unbounded and serial.
+    // Anything past the cap still reaches the calendar the next time that order is touched.
+    backfillMaxOrders: 100,
+    backfillBatchSize: 5,
     // What a subscribing client is ASKED to poll at. Apple honours it as a hint (the user can
     // override per-subscription); Google ignores it entirely and refreshes on its own slow schedule
     // — which is precisely why Google gets the API integration and not the feed.

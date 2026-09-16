@@ -25,6 +25,16 @@ interface CustomInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   iconTabbable?: boolean;
   /** Called when this input is autofilled by the browser / a password manager. */
   onAutofill?: () => void;
+  /**
+   * Rewrites what the user just typed BEFORE anyone hears about it — the field can then only ever
+   * hold a shape the form understands (see `@utils/numericInput`, which supplies the numeric ones).
+   *
+   * It runs on the event itself, so every consumer — this component's own filled-state, an RHF
+   * `Controller`, a plain `useState` — receives the cleaned value and no one has to remember to
+   * clean it again. A rejected character therefore never reaches form state, never renders, and
+   * never becomes a validation message about something the user cannot see.
+   */
+  transform?: (value: string) => string;
 }
 
 const bgClass: Record<string, string> = {
@@ -57,6 +67,7 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
       iconTabbable = true,
       onAutofill,
       onChange,
+      transform,
       ...props
     }: CustomInputProps,
     ref,
@@ -89,10 +100,29 @@ const CustomInput = forwardRef<HTMLInputElement, CustomInputProps>(
 
     const localChange = useCallback(
       (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (transform) {
+          const raw = e.target.value;
+          const next = transform(raw);
+          if (next !== raw) {
+            // Writing to the node is what makes the rejected character disappear immediately — the
+            // controlled `value` prop comes back identical (the state never saw the raw text), so
+            // React has no re-render to correct the DOM with.
+            /* v8 ignore next -- `selectionStart` is null only on an input type with no selection
+               (number, email); a `transform` is only ever put on a text one. */
+            const caret = e.target.selectionStart ?? next.length;
+            e.target.value = next;
+            // Assigning `value` drops the caret at the end, which on a mid-string edit throws the
+            // user back to the right of the field. Put it back where it was, minus whatever was
+            // removed ahead of it. (A `text` input can do this; a `number` input throws — one more
+            // reason these fields are text.)
+            const moved = Math.max(0, caret - (raw.length - next.length));
+            e.target.setSelectionRange(moved, moved);
+          }
+        }
         setIsFilledOnChange(Boolean(e.target.value));
         onChange?.(e);
       },
-      [onChange],
+      [onChange, transform],
     );
     const passwordIcon = isPasswordVisible ? <HiEyeSlash /> : <HiEye />;
     const iconToShow = type === 'password' ? passwordIcon : icon;

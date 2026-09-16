@@ -248,6 +248,10 @@ describe("ICS serialisation", () => {
     expect(ics.match(/END:VEVENT/gu)).toHaveLength(2);
     // The UID is the deterministic entry id, so a refresh updates rather than duplicating.
     expect(ics).toContain("UID:orden12d@ozari");
+    // ⚠️ NO `METHOD`: it belongs to iTIP (a scheduling message), and a subscription is a set of
+    // calendar data. Declaring `METHOD:PUBLISH` made clients read the feed as an invitation to
+    // IMPORT — and made it invalid under iTIP's own rules, which require an `ORGANIZER`.
+    expect(ics).not.toContain("METHOD:");
   });
 
   it("omits LOCATION when there is none, rather than printing an empty field", () => {

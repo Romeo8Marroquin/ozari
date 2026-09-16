@@ -36,6 +36,24 @@ is not: we control the feed, so creating, moving and cancelling all propagate. W
 LATENCY — the client decides when to re-read (Apple: user-configurable, as low as five minutes;
 Google: hours, undocumented and slow). That single fact is why Google gets the API and not the feed.
 
+⚠️ **A subscription also never NOTIFIES in Google.** Google ignores `VALARM` on a calendar added by
+URL — read-only subscriptions get no alerts at all, ever. Apple honours the alarm, unless the
+subscribe sheet's *Remove alarms* toggle was left on. So the reminder (§3) is real for the Google
+API integration and for Apple, and is silently absent for anyone who added the .ics to Google. When
+somebody reports "the event is there but nothing warned me", that is the first thing to check.
+
+### ⚠️ The feed carries NO `METHOD` (fixed 2026-09-16)
+
+`METHOD` belongs to **iTIP** (RFC 5546) — the protocol for scheduling MESSAGES: an invitation, a
+reply, a cancellation. RFC 5545 §3.7.2 says a calendar object without it is "a set of calendar data"
+instead, which is exactly what a subscription is. The feed used to publish `METHOD:PUBLISH`, which
+did two things at once: it told every client the body was a scheduling message, and it made that
+message **invalid**, because iTIP requires an `ORGANIZER` the feed has no business inventing.
+
+What it looks like from the outside is the symptom that found it: opening the URL offers to IMPORT
+"2 events" (Apple's handling of an iTIP file) instead of behaving like a calendar the client keeps in
+step. Asserted in `calendar.service.test.ts` — do not add it back, in either transport.
+
 ## 2. What is written
 
 One entry per **pending** logistics event, so at most two per order.
@@ -98,7 +116,8 @@ The split is the one Ajustes and Preferencias always draw:
 ## 5. The sync
 
 `syncOrderCalendars(orderId)` is the single hook, called after **create**, **update**, **every
-lifecycle move** and **delete**.
+lifecycle move** and **delete** — plus `backfillUserCalendar(userId)` once, when a calendar is
+connected (below).
 
 - **Declarative**, like the order update it follows: it computes what the order should have now and
   makes the calendar match. It never diffs. That is why one call serves every door, why a *missed*
@@ -109,6 +128,34 @@ lifecycle move** and **delete**.
   logged. A failure against one admin's calendar cannot stop another's.
 - **After the commit, never inside the transaction.** Holding a DB transaction open across a call to
   a third party is how a slow external service becomes a lock-contention outage.
+
+### ⚠️ Connecting looks BACKWARDS too — `backfillUserCalendar`
+
+The sync runs on an order's own doors, so on its own it only ever promises the future: a calendar
+linked today would receive nothing that already existed until somebody edited or advanced each
+order, one by one. The case that makes it urgent is the **reconnect** — a grant expires (see §7),
+the sync goes quiet, and the admin reconnects precisely to get their schedule back.
+
+So the OAuth callback awaits a backfill before it redirects. It writes **what the ICS feed would
+publish for that person** — same window, same entry builder — so both transports agree from the
+first second instead of converging later. Three properties:
+
+- **Writes only.** An entry that is no longer wanted is left alone, the same stance disconnecting
+  takes (§6), and the order's own next sync removes it properly.
+- **Bounded** (`backfillMaxOrders`, `backfillBatchSize`): a browser is waiting on the redirect, so
+  the pass is capped and written in small concurrent batches rather than unbounded and serial.
+  Anything past the cap still arrives the next time that order is touched — the sync self-heals.
+- **Never throws.** A calendar that could not be filled must not turn a successful connection into
+  an error page.
+
+### A DEAD connection must say so — the panel reads `isActive`
+
+`ensureAccessToken` deactivates a connection on `invalid_grant` and stays silent, because a calendar
+failure may never surface on the order that triggered it. The row remains, so `connected` is still
+true — and Ajustes used to render only that, which meant the screen kept saying "Conectado como
+a@b.com" while no order had reached the calendar for days. `GET /calendar` has always returned
+`isActive`; the section now branches on it and offers **Reconectar** with an explanation. Any future
+consumer of that payload must treat `connected && !isActive` as *broken*, not as connected.
 
 ### Deterministic ids — why there is no mapping table
 
@@ -203,7 +250,10 @@ Three decisions are load-bearing, and each is a trap if reversed:
 - ⚠️ **Testing mode expires refresh tokens in ~7 days.** The sync then stops without an error, and
   every admin has to reconnect. Registering a production redirect URI does not change that — only
   moving the app out of Testing does, which for a sensitive scope means Google's verification review.
-  Budget days for it, before the feature is announced.
+  Budget days for it, before the feature is announced. **This is the single most likely explanation
+  for "it worked and now nothing appears"** — the panel now says so (`isActive`, §5) and reconnecting
+  restores the pending orders (`backfillUserCalendar`, §5), but while the app is in Testing it will
+  keep happening every week.
 
 `API_PUBLIC_URL` is what the redirect URI and the feed URL are built from. It is REQUIRED wherever
 something rewrites the Host in front of Cloud Run — which is exactly staging and production, since

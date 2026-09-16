@@ -319,6 +319,35 @@ once each, not per page: GSAP owns choreography here, and that includes the scro
   empty-selection sentinel is **`null`** end-to-end (selects map `'' ↔ null`); use `useWatch`, not
   `watch()` (the React Compiler lint rejects `watch`).
 
+### ⚠️ A numeric field is `type="text"` + `inputMode` — never `type="number"`
+
+Every field in the app that holds a number (a quantity, a price, a count of minutes) keeps its value
+as a **string** and lets the mirrored schema parse it. Spread the bundle that says which kind it is —
+**`integerInput`** or **`decimalInput`** from `@utils/numericInput`** — and pass **no `min`, `max` or
+`step`**. The bundle carries the input type, the mobile keyboard (`inputMode: 'numeric'` = a
+digits-only pad, `'decimal'` = the same pad with a separator key — `inputMode`, not `type`, is what
+actually chooses the keyboard on iOS and Android) and a `transform` that filters each keystroke.
+
+`type="number"` looks like the honest choice and is four bugs:
+
+1. **It blanks what the user typed.** Content the browser cannot parse (`1.2.3`, `1e`, `--`, a `,` in
+   a locale that does not use one) reports `value === ''` while still SHOWING the text, so the form
+   stores `''` — the field looks filled and the error says "requerido", or a save goes out with the
+   value missing.
+2. **The scroll wheel edits it** whenever it has focus, so scrolling past a half-filled form quietly
+   changes a price.
+3. **`min`/`max`/`step` are constraint validation** — the browser blocks the submit with its own
+   untranslated bubble and our mirrored message never runs (§8). Bounds belong in Zod, which is the
+   mirror of the backend; a LIVE bound (an availability cap) belongs in the resolver and in the hint
+   under the field, never on the element.
+4. **`setSelectionRange` throws on it**, so a filtered value can only ever drop the caret at the end.
+
+`transform` (on `CustomInput`, so RHF and plain-`useState` call sites both get it) rewrites the value
+on the event before anyone sees it and restores the caret. That is what makes the decimal keyboard
+safe: Android offers `,` and `-` beside the digits, so `12,5` arrives as `12.5` instead of failing
+with "monto inválido". Money stops at two decimals — the API stores cents, and a third digit the
+user watches themselves type would be truncated away later.
+
 ### Unsaved work = silent draft, never `beforeunload`
 
 Autosave to sessionStorage on change (`productDraft.ts` / `orderDraft.ts` + a `useWatch` effect),
@@ -458,12 +487,15 @@ prop. When the submit button lives in a `Modal` footer (outside the form element
 `<Button type="submit" form={FORM_ID}>` — the pattern `ChangePasswordModal` / `MfaDisableModal` /
 `ClientRegistryModal` already use.
 
-**A form whose inputs carry `min`/`max`/`required` needs `noValidate`.** Otherwise the browser blocks
-submission with its own untranslated bubble, our mirrored message never renders, and Enter reads as
-"nothing happened" — the exact failure the form element was added to fix. The app owns its validation
-language; native constraint UI is a different, unstyled one. (`ProductForm` and `OrderForm` set
-`min`/`max` on number inputs without `noValidate` — pre-existing, so an out-of-range value there still
-surfaces the native bubble instead of the inline error. Worth aligning when either is next touched.)
+**A form whose inputs can fail constraint validation needs `noValidate`.** Otherwise the browser
+blocks submission with its own untranslated bubble, our mirrored message never renders, and Enter
+reads as "nothing happened" — the exact failure the form element was added to fix. The app owns its
+validation language; native constraint UI is a different, unstyled one. All four of the app's real
+forms now carry it (`PreferenceRowForm`, `PreferenceSettingsCard`, `ProductForm`, `OrderForm`).
+
+It is not only `min`/`max`/`required`: a `datetime-local` reports **`badInput`** for a half-typed
+date, which blocks the submit just as hard. That is why the two entity forms keep `noValidate` even
+though their numeric fields no longer declare any bounds (§5).
 
 Multiline fields are the exception: Enter inserts a newline in a `<textarea>`, so a reason/notes field
 is submitted by its button (`OrderAdvanceModal`). A search box commits on Enter via its own
@@ -502,6 +534,31 @@ a phone, reading as neither aligned nor centred (the orders header). Two fixes, 
 the control group `w-full … sm:w-auto` so it owns the wrapped line (start ↔ end becomes a real
 space-between), and put `ml-auto` on the action so it stays right even when it drops to a line of its
 own. Both are inert once the group is content-width at `sm`, so the desktop layout is untouched.
+
+### ⚠️ A label/control row: the control group WRAPS — it never shrinks and never holds firm
+
+The settings-style row (description on the left, buttons or a value on the right — `SettingRow`, used
+by security, device and calendars) breaks in two opposite ways, and both look like the fix for the
+other:
+
+- **`shrink-0` on the group** = "never give way", so at `sm` and up it pushes past the card's padding
+  and hangs outside its right edge (what "Quitar enlace" did on an iPhone).
+- **`min-w-0` on the group** = "squash me to nothing", so flex sizes it *below* its own buttons. The
+  buttons are `whitespace-nowrap`, so they paint outside the box — and because the group is
+  `justify-end`, that overflow runs LEFTWARD, straight over the description. This is the "Generar
+  enlace sits on top of the text" overlap.
+
+The answer is the **default** (`min-width: auto`) plus **`flex-wrap`**: the group's floor becomes its
+widest BUTTON, so when space runs out the actions fold onto a second line, right-aligned, and nothing
+overlaps or overflows. `flex-wrap` must hold on **every** layer between the row and the buttons (a
+`SkeletonFade`'s layers, an `ActionRow`'s own className), or the innermost nowrap layer becomes the
+floor for all of them. The text side takes `min-w-0 sm:flex-1` so it is what gives way — wrapping a
+sentence is free, wrapping buttons is not. (`sm:flex-1` is gated at `sm` because `flex-1` in the
+stacked `flex-col` layout sets a zero basis on the block axis and collapses the column.)
+
+Alignment is `sm:items-center`, not `items-start`: a button, a switch, a dropdown and a plain value
+all sit on the middle of their description. A control pinned to the first line of a two-line
+description reads as a mistake beside the centred row above it.
 
 ### A floating label leaves its own box — stacked fields need `gap-field`
 

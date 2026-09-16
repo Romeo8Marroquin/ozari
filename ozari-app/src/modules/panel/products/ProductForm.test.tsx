@@ -246,7 +246,7 @@ describe('ProductForm — conditional pricing UI', () => {
       '1',
     );
     const rentPrice = await screen.findByLabelText(new RegExp(`${KEY}.fields.rentPriceLabel`));
-    expect(rentPrice).toHaveValue(null); // an empty number input
+    expect(rentPrice).toHaveValue(''); // empty — a money field is a text input (`@utils/numericInput`)
     expect(screen.getByLabelText(new RegExp(`${KEY}.fields.rentTimeUnitLabel`))).toHaveValue('2');
   });
 });
@@ -544,8 +544,9 @@ describe('ProductForm — edit mode', () => {
     renderEdit();
 
     expect(screen.getByLabelText(new RegExp(`${KEY}.fields.nameLabel`))).toHaveValue('Mesa redonda');
-    expect(screen.getByLabelText(new RegExp(`${KEY}.fields.quantityLabel`))).toHaveValue(40);
-    expect(screen.getByLabelText(new RegExp(`${KEY}.fields.rentPriceLabel`))).toHaveValue(75);
+    // Strings: the numeric fields are text inputs the schema parses (see `@utils/numericInput`).
+    expect(screen.getByLabelText(new RegExp(`${KEY}.fields.quantityLabel`))).toHaveValue('40');
+    expect(screen.getByLabelText(new RegExp(`${KEY}.fields.rentPriceLabel`))).toHaveValue('75');
     expect(screen.getByLabelText(new RegExp(`${KEY}.fields.detailValueLabel`))).toHaveValue('Blanco nieve');
 
     // The gallery holds the EXISTING photos (remote previews), the flagged one starred.
