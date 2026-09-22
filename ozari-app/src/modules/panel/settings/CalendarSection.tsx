@@ -42,9 +42,11 @@ const SKELETON = 'animate-pulse rounded bg-charcoal/10 motion-reduce:animate-non
  *  ⚠️ EVERY layer between the row and the buttons must be able to WRAP, or the group becomes an
  *  atomic box wider than the card. `SettingRow` owns the outer half of that rule; the wrapping
  *  classes on `SkeletonFade`'s layers and on `ActionRow` below are the inner half, and they must
- *  stay `flex-wrap` — with `sm:justify-end` so a folded second line stays right-aligned under the
- *  first, matching the row it belongs to. */
-const ACTIONS = 'flex flex-wrap items-center gap-2 sm:justify-end';
+ *  stay `flex-wrap`. Deliberately NO `justify-*`: the row aligns this group by letting the
+ *  description grow, so it is already flush right while the row is split, and when it folds onto
+ *  its own line it starts at the card's left edge — under the label it belongs to, which is also
+ *  where a phone has always put it. */
+const ACTIONS = 'flex flex-wrap items-center gap-2';
 
 /**
  * CALENDARS — connect Google, or subscribe from anything else.
@@ -456,11 +458,15 @@ const CalendarSection: React.FC = () => {
                       spaces to wrap at, and a fixed-width font because it will be compared by eye.
                       It MORPHS on a regenerate — the URL is the one thing on this card a person is
                       actually reading, so replacing it in a single frame is how you fail to notice
-                      that the link you just copied is not the one on screen. */}
+                      that the link you just copied is not the one on screen.
+                      `grow basis-56`, not `flex-1`: `flex-1`'s zero basis let the box shrink to a
+                      sliver beside the button on a narrow card, printing the URL two characters per
+                      line. With a floor it keeps a readable width and the button folds underneath
+                      instead — the same rule the rows above follow. */}
                   <MorphSwap
                     block
                     swapKey={feedUrl}
-                    className="min-w-0 flex-1 rounded-control bg-charcoal/[0.04] px-3 py-2"
+                    className="min-w-0 grow basis-56 rounded-control bg-charcoal/[0.04] px-3 py-2"
                   >
                     <code className="block break-all text-xs text-charcoal/80">{feedUrl}</code>
                   </MorphSwap>

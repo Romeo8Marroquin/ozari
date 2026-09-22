@@ -178,7 +178,9 @@ const PreferenceRowForm: React.FC<PreferenceRowFormProps> = ({
         submit();
       }}
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      {/* Paired by the CARD's width, not the window's — see `PreferenceSettingsCard` for the case
+          this breaks on (a wide window whose card is only ~400px). */}
+      <div className="grid gap-4 @min-[32rem]:grid-cols-2">
         <Field>
           <CustomInput
             id="preference-row-name"
