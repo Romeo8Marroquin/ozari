@@ -535,30 +535,59 @@ the control group `w-full … sm:w-auto` so it owns the wrapped line (start ↔ 
 space-between), and put `ml-auto` on the action so it stays right even when it drops to a line of its
 own. Both are inert once the group is content-width at `sm`, so the desktop layout is untouched.
 
-### ⚠️ A label/control row: the control group WRAPS — it never shrinks and never holds firm
+### ⚠️ A `sm:`/`md:` variant measures the WINDOW — which, inside the panel, is not your box
+
+Three things sit between a panel card and the window: a **sidebar the user can expand** (72px ↔
+256px), the page's own padding, and a section that may only be **two thirds** of the column. A
+viewport variant inside a card is therefore asking about something it cannot see, and the answer it
+gets is routinely off by 400px. What that looked like (owner, 2026-09-21): at a **793px window** —
+wide by any breakpoint's reckoning — Ajustes had a **306px** card, because `md:grid-cols-3` had split
+a 489px section into thirds; `sm:flex-row` inside it then put the calendar's buttons beside the
+description, and the description came out **one word per line** down a 90px ribbon.
+
+**Inside `/panel`, a card's contents respond to the CARD and a section responds to the SECTION** —
+`@container` + `@min-[…]:` (see `SettingsSection.tsx`, which declares both containers, and
+`ProductCard.tsx`, which measures a tile). A container query can never read the element it is written
+on, so a component that measures itself needs a wrapper to carry `@container`; and a query written on
+the container element resolves against the container ABOVE it, which is why a card's own padding is
+not a card query.
+
+Viewport variants stay where the viewport genuinely IS the box: the page's own column, and a
+**portaled modal** (`fixed inset-0`), which the window alone sizes.
+
+### ⚠️ A label/control row: it WRAPS by its own width — it never shrinks and never holds firm
 
 The settings-style row (description on the left, buttons or a value on the right — `SettingRow`, used
-by security, device and calendars) breaks in two opposite ways, and both look like the fix for the
-other:
+by security, device and calendars; `AccountField` and the preferences field grids follow the same
+rule) has now broken three times, each fix looking like the previous one's opposite:
 
-- **`shrink-0` on the group** = "never give way", so at `sm` and up it pushes past the card's padding
-  and hangs outside its right edge (what "Quitar enlace" did on an iPhone).
+- **`shrink-0` on the group** = "never give way", so it pushes past the card's padding and hangs
+  outside its right edge (what "Quitar enlace" did on an iPhone).
 - **`min-w-0` on the group** = "squash me to nothing", so flex sizes it *below* its own buttons. The
-  buttons are `whitespace-nowrap`, so they paint outside the box — and because the group is
-  `justify-end`, that overflow runs LEFTWARD, straight over the description. This is the "Generar
-  enlace sits on top of the text" overlap.
+  buttons are `whitespace-nowrap`, so they paint outside the box — and with `justify-end` that
+  overflow runs LEFTWARD, straight over the description. This is the "Generar enlace sits on top of
+  the text" overlap.
+- **A `sm:flex-row` breakpoint** asks the window, per the rule above, and splits a row inside a card
+  far too narrow to hold two columns.
 
-The answer is the **default** (`min-width: auto`) plus **`flex-wrap`**: the group's floor becomes its
-widest BUTTON, so when space runs out the actions fold onto a second line, right-aligned, and nothing
-overlaps or overflows. `flex-wrap` must hold on **every** layer between the row and the buttons (a
-`SkeletonFade`'s layers, an `ActionRow`'s own className), or the innermost nowrap layer becomes the
-floor for all of them. The text side takes `min-w-0 sm:flex-1` so it is what gives way — wrapping a
-sentence is free, wrapping buttons is not. (`sm:flex-1` is gated at `sm` because `flex-1` in the
-stacked `flex-col` layout sets a zero basis on the block axis and collapses the column.)
+The answer measures nothing: **the ROW wraps, and the description carries a `basis-56` floor** (14rem
+≈ 32 characters — the width below which a sentence stops reading as one). While that floor and the
+group's natural width both fit they sit side by side, with `grow` on the description handing it the
+leftover space — which is also what pins the actions to the right edge, so the group needs no
+`justify-*` at all. The moment they do not fit, the actions fold onto their own line below the
+description, starting at the card's left edge, under the label they belong to. The fold is therefore
+decided by the real widths of the real content — these buttons, in this card, at this sidebar state —
+and every layout from a 288px phone card to an 896px desktop section falls out of one rule.
 
-Alignment is `sm:items-center`, not `items-start`: a button, a switch, a dropdown and a plain value
-all sit on the middle of their description. A control pinned to the first line of a two-line
-description reads as a mistake beside the centred row above it.
+`flex-wrap` must hold on **every** layer between the row and the buttons (a `SkeletonFade`'s layers,
+an `ActionRow`'s own className), or the innermost nowrap layer becomes the floor for all of them. A
+control that needs a DECLARED width (the maps `CustomSelect`, because Chromium's `appearance:
+base-select` sizes to the current selection) must declare it at every size: the folded line
+shrink-wraps, so `w-full` there resolves to the control's own content width.
+
+Alignment is `items-center`: a button, a switch, a dropdown and a plain value all sit on the middle of
+their description. A control pinned to the first line of a two-line description reads as a mistake
+beside the centred row above it.
 
 ### A floating label leaves its own box — stacked fields need `gap-field`
 

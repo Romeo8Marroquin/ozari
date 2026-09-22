@@ -277,7 +277,11 @@ const PreferenceCatalogCard: React.FC<PreferenceCatalogCardProps> = ({
                       </span>
                     )}
                     {extraLabel(row) !== undefined && (
-                      <span className="shrink-0 rounded-chip bg-charcoal/[0.04] px-2 py-0.5 text-[11px] font-medium tabular-nums text-charcoal/55">
+                      // `max-w-full truncate` because this chip carries USER text (a bank account's
+                      // type is up to 40 characters). `shrink-0` alone let it hold a width wider
+                      // than the whole card on a phone — or on a tablet with the sidebar open,
+                      // where this card is no wider than a phone's.
+                      <span className="max-w-full shrink-0 truncate rounded-chip bg-charcoal/[0.04] px-2 py-0.5 text-[11px] font-medium tabular-nums text-charcoal/55">
                         {extraLabel(row)}
                       </span>
                     )}

@@ -147,7 +147,11 @@ const PreferenceSettingsCard: React.FC<PreferenceSettingsCardProps> = ({ setting
         save();
       }}
     >
-      <div className="grid gap-5 sm:grid-cols-2">
+      {/* Two columns is a question about the CARD, never the window (`@container` lives on the card
+          in `SettingsSection`). `sm:grid-cols-2` paired two fields at 640px of WINDOW — which on a
+          tablet with the sidebar open is a ~400px card, i.e. two 190px columns whose floating labels
+          ellipsize. 32rem is the width at which a pair is still two usable fields. */}
+      <div className="grid gap-5 @min-[32rem]:grid-cols-2">
         {fields.map((field) => {
           const { setting } = field;
           const leaf = settingLeaf(setting.key);
@@ -164,7 +168,7 @@ const PreferenceSettingsCard: React.FC<PreferenceSettingsCardProps> = ({ setting
             <div
               key={setting.key}
               className={`card-item flex min-w-0 flex-col gap-1 ${
-                multiline || setting.type === 'bool' ? 'sm:col-span-2' : ''
+                multiline || setting.type === 'bool' ? '@min-[32rem]:col-span-2' : ''
               }`}
             >
               {setting.type === 'bool' ? (

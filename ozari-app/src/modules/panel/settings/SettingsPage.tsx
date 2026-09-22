@@ -38,16 +38,22 @@ const formatJoinDate = (iso?: string): string => {
   return date.toLocaleDateString('es-GT', { day: 'numeric', month: 'long', year: 'numeric' });
 };
 
-/** A label/value row inside the account card. Stacks on mobile, splits left/right from `sm`. */
+/**
+ * A label/value row inside the account card. Splits label-left / value-right while both fit, and
+ * stacks the value under its label when they don't — by the row's OWN width, exactly as
+ * {@link SettingRow} does and for the same reason (this card is ~250px wide on a phone and on a
+ * tablet with the sidebar open, whatever the window says). The label grows, so it is the side that
+ * gives way; `basis-40` is the floor below which it folds instead of shredding.
+ */
 const AccountField: React.FC<{ label: string; value: string; loading: boolean; skeletonWidth: string }> = ({
   label,
   value,
   loading,
   skeletonWidth,
 }) => (
-  <div className="flex flex-col gap-1 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-    <dt className="text-sm text-charcoal/55">{label}</dt>
-    <dd className="text-sm font-medium text-charcoal sm:text-right">
+  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 py-4">
+    <dt className="min-w-0 grow basis-40 text-sm text-charcoal/55">{label}</dt>
+    <dd className="text-sm font-medium text-charcoal">
       <SkeletonFade
         loading={loading}
         contentClassName="inline-block"
@@ -272,12 +278,15 @@ const SettingsPage: React.FC = () => {
             description={t('modules.panel.settings.device.mapsApp.description')}
           >
             {/* The select renders `w-full` of its own box, so it needs a box with a WIDTH to be full
-                of: full-bleed in the stacked layout, and a fixed column beside the description from
-                `sm` up. `w-52` holds the longest option ("Preguntar cada vez") plus the chevron
-                gutter, so nothing ellipsizes — and a declared width is what keeps the control the
-                same size on Chromium's `appearance: base-select` rendering (which sizes to the
-                CURRENT selection) as it is on the native one (which sizes to the widest option). */}
-            <div className="w-full sm:w-52">
+                of — and it is DECLARED at every size, never `w-full`, because the row can now fold
+                the control onto its own line: there the action group shrink-wraps, so `w-full`
+                would resolve to the control's own content width and Chromium's `appearance:
+                base-select` rendering (which sizes to the CURRENT selection, unlike the native one,
+                which sizes to the widest option) would make the control change size as you pick.
+                `w-52` holds the longest option ("Preguntar cada vez") plus the chevron gutter, so
+                nothing ellipsizes; `max-w-full` is the only concession, for a card narrower than
+                the control itself. */}
+            <div className="w-52 max-w-full">
               <CustomSelect
                 id="settings-maps-app"
                 label={t('modules.panel.settings.device.mapsApp.selectLabel')}
