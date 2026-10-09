@@ -1,3 +1,5 @@
+import type { SettingsAnchor } from './settingsSections';
+
 /**
  * The two-column scaffold every settings section shares: a title + description column on the
  * left, and the content card on the right. When there isn't room for both, the two stack (title
@@ -25,13 +27,23 @@ const SettingsSection: React.FC<{
   description: string;
   /** Optional muted tag beside the title (e.g. "Próximamente" while a section's actions are pending). */
   badge?: string;
+  /**
+   * Makes the section a destination (`openSettingsSection`): findable by name, and focusable from
+   * script only (`tabIndex={-1}` — never a Tab stop), so arriving moves focus here rather than
+   * leaving it on the menu that sent the user.
+   */
+  anchor?: SettingsAnchor;
   children: React.ReactNode;
-}> = ({ title, description, badge, children }) => (
+}> = ({ title, description, badge, anchor, children }) => (
   // `reveal-block` marks the whole section (label + card) as ONE entrance unit — the settings
   // entrance moves only these few blocks, not every element inside them. It rides the SAME element
   // as `@container` on purpose: a container query can never read the element it is written on, so
   // the grid below needs an ancestor to measure, and this wrapper is it.
-  <div className="reveal-block @container">
+  <div
+    className="reveal-block @container outline-none"
+    data-settings-section={anchor}
+    tabIndex={anchor ? -1 : undefined}
+  >
     {/* Both columns need `min-w-0`: grid items default to `min-width: auto`, so without it a long
         unbreakable value inside (a full name, an email) propagates its untruncated width up through
         the section and pushes the whole page wider than a phone viewport — the inner `truncate`s

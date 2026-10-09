@@ -42,4 +42,24 @@ describe('SettingsSection', () => {
     );
     expect(screen.queryByText('Próximamente')).not.toBeInTheDocument();
   });
+
+  it('is a DESTINATION only when anchored: findable by name, focusable from script, never a Tab stop', () => {
+    const { container, rerender } = render(
+      <SettingsSection anchor="security" title="Seguridad" description="d">
+        <p>c</p>
+      </SettingsSection>,
+    );
+    const wrapper = container.firstElementChild as HTMLElement;
+    expect(wrapper.dataset.settingsSection).toBe('security');
+    expect(wrapper.tabIndex).toBe(-1);
+
+    // Preferencias reuses this scaffold with no anchors — its sections must stay inert.
+    rerender(
+      <SettingsSection title="Seguridad" description="d">
+        <p>c</p>
+      </SettingsSection>,
+    );
+    expect(wrapper).not.toHaveAttribute('data-settings-section');
+    expect(wrapper).not.toHaveAttribute('tabindex');
+  });
 });

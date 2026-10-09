@@ -40,16 +40,18 @@ vi.mock('./useCalendar', () => ({
 const { success, error } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock('@components/notifications/notify', () => ({ notify: { success, error } }));
 
-// The motion is real everywhere else; only the two calls whose INTENT is being asserted are spied.
+// The motion is real everywhere else; only the calls whose INTENT is being asserted are spied.
 // (Under the suite's reduced-motion they are no-ops, so nothing else can observe them.)
-const { fadeIn, revealInScroller } = vi.hoisted(() => ({
+const { fadeIn, revealInScroller, hasMotion } = vi.hoisted(() => ({
   fadeIn: vi.fn(),
   revealInScroller: vi.fn(),
+  hasMotion: vi.fn(),
 }));
 vi.mock('../pageMotion', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../pageMotion')>()),
   fadeIn,
   revealInScroller,
+  hasMotion,
 }));
 
 import CalendarSection from './CalendarSection';
@@ -79,6 +81,8 @@ afterEach(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Reduced motion: the region never animates anything, so nothing has claimed the block.
+  hasMotion.mockReturnValue(false);
   setStatus();
   useConnectGoogleCalendar.mockReturnValue({ connect, isPending: false });
   useDisconnectGoogleCalendar.mockReturnValue({
@@ -290,6 +294,34 @@ describe('CalendarSection', () => {
     expect(fadeIn).toHaveBeenCalledTimes(1);
   });
 
+  it('never gives the link a SECOND entrance when the region already rose it in', async () => {
+    // Two entrances on one element kill each other halfway: the second one stopped the region's
+    // after it had shrunk the block to 96% and before it could restore it, so the link sat there
+    // slightly too small until something else moved the card.
+    hasMotion.mockReturnValue(true);
+    const { rerender } = render(<CalendarSection />);
+    setStatus({ data: status({ feed: { isActive: true, url: FEED_URL } }) });
+    rerender(<CalendarSection />);
+    await screen.findByText(FEED_URL);
+    expect(fadeIn).not.toHaveBeenCalled();
+    // Bringing it into view is a separate question, and still the right thing to do.
+    expect(revealInScroller).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes cleanly even when the link vanished while the dialog was open', async () => {
+    // The screen re-reads itself on focus, so another tab or device can take the link away under an
+    // open confirmation. There is then nothing left to fade, and the removal must still complete.
+    setStatus({ data: status({ feed: { isActive: true, url: FEED_URL } }) });
+    const { rerender } = render(<CalendarSection />);
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.feed.remove` }));
+
+    setStatus();
+    rerender(<CalendarSection />);
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.confirm.feedRemove.confirm` }));
+    await waitFor(() => expect(commitDelete).toHaveBeenCalled());
+    expect(success).toHaveBeenCalledWith(`${KEY}.feed.removedToast`);
+  });
+
   it('does NOT animate a link that was ALREADY there when the screen opened', () => {
     // It did not just appear, and a second entrance would fight the settings page's own.
     setStatus({ data: status({ feed: { isActive: true, url: FEED_URL } }) });
@@ -337,6 +369,26 @@ describe('CalendarSection', () => {
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.confirm.feedRemove.confirm` }));
     await waitFor(() => expect(commitDelete).toHaveBeenCalled());
     expect(deleteFeed).toHaveBeenCalled();
+  });
+
+  it('commits the SERVER’S ANSWER, so the screen changes the moment it arrives', async () => {
+    // Committing nothing and waiting for a re-read was a whole round trip of a card that had
+    // already been told "yes" and still showed the old state.
+    createFeed.mockResolvedValue(FEED_URL);
+    render(<CalendarSection />);
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.feed.create` }));
+    await waitFor(() => expect(commitCreate).toHaveBeenCalledWith(FEED_URL));
+  });
+
+  it('keeps ONE button for both labels, named only by the one on show', () => {
+    // Both words share a grid cell so the button never changes width mid-transition; the hidden one
+    // must not leak into its accessible name.
+    render(<CalendarSection />);
+    expect(screen.getByRole('button', { name: `${KEY}.feed.create` })).toBeInTheDocument();
+
+    setStatus({ data: status({ feed: { isActive: true, url: FEED_URL } }) });
+    render(<CalendarSection />);
+    expect(screen.getByRole('button', { name: `${KEY}.feed.regenerate` })).toBeInTheDocument();
   });
 
   it('CONFIRMS a regenerate too — it silently revokes the URL already in use', async () => {

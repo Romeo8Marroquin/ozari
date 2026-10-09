@@ -18,6 +18,8 @@ interface RegionSnapshot {
   /** False when it was taken while something was still moving, so the boxes it holds are a lie.
    *  An untrusted snapshot eases the height and skips the glide rather than inventing a journey. */
   trusted: boolean;
+  /** The panel's scroll offset the boxes were recorded at (null outside the panel). */
+  scrollTop: number | null;
 }
 
 /**
@@ -52,16 +54,25 @@ export default function useMorphOnChange<T extends HTMLElement = HTMLDivElement>
   /** The pending re-capture frame — one at a time, and cancelled on unmount. */
   const frame = useRef(0);
 
-  /** Record the region as it stands right now, and say whether that record can be believed. */
-  const capture = (element: T): void => {
+  /**
+   * Record the region as it stands right now, and say whether that record can be believed.
+   *
+   * `interrupt` is true ONLY for the capture taken at a real change, where a glide still running
+   * from the previous one must finish before the next starts. Every other capture is a passive
+   * record — the settle loop, a same-key commit, a scroll — and must leave a running glide alone:
+   * an interrupting capture there finished it on its second frame (see `captureGalleryLayout`).
+   */
+  const capture = (element: T, interrupt = false): void => {
     previous.current = {
       key: swapKey,
       itemsKey,
       // Measured BEFORE animating: `animateHeightFrom` pins its from-height synchronously, so
       // reading afterwards would record the height we are easing away from as if it were the new one.
       height: element.offsetHeight,
-      state: itemSelector === undefined ? null : captureGalleryLayout(element, itemSelector),
+      state:
+        itemSelector === undefined ? null : captureGalleryLayout(element, itemSelector, interrupt),
       trusted: !isRegionSettling(element, itemSelector),
+      scrollTop: panelScroller()?.scrollTop ?? null,
     };
   };
 
@@ -94,12 +105,23 @@ export default function useMorphOnChange<T extends HTMLElement = HTMLDivElement>
     const element = ref.current;
     if (!element) return;
     const before = previous.current;
-    capture(element);
-    if (before === null || before.key === swapKey) return;
+    const changed = before !== null && before.key !== swapKey;
+    capture(element, changed);
+    if (!changed) return;
     animateHeightFrom(element, before.height);
+    // ⚠️ Measuring the new state laid out a region that may now be SHORTER, and if this region sits
+    // near the bottom of the panel the browser clamped the scroll on that read — before the height
+    // above was pinned back — so the whole page jumped down by up to the size of what left (a
+    // removed subscription block at the foot of Ajustes: ~170–270px in one frame). The pin has
+    // restored the room, so restore the offset too; the height then eases shut and the clamp rides
+    // down with it, which is the behaviour `revealInScroller` documents for a removal.
+    const scroller = panelScroller();
+    if (scroller && before.scrollTop !== null && scroller.scrollTop < before.scrollTop) {
+      scroller.scrollTop = before.scrollTop;
+    }
     // The glide runs only when the ITEMS moved, and only from boxes we actually trust.
     if (itemSelector !== undefined && before.trusted && before.itemsKey !== itemsKey) {
-      animateListReflow(element, itemSelector, before.state);
+      animateListReflow(element, itemSelector, before.state, true);
     }
     // The height tween just started, so the record taken a moment ago is already out of date.
     settle();
@@ -118,9 +140,13 @@ export default function useMorphOnChange<T extends HTMLElement = HTMLDivElement>
    *
    * Re-snapshotting as the panel scrolls fixes it at the source. Coalesced to one frame, and only for
    * regions that actually track items (a height-only region has no rects to go stale).
+   *
+   * The recorded OFFSET is kept for every region, and synchronously: it is what the clamp repair in
+   * the layout effect restores, so a stale one would yank the page back to where the user scrolled
+   * away from. (Synchronous is safe — the browser delivers the clamp's own scroll event on a later
+   * frame, after the repair has already run.)
    */
   useEffect(() => {
-    if (itemSelector === undefined) return;
     const scroller = panelScroller();
     if (!scroller) return;
     let scrollFrame = 0;
@@ -128,12 +154,16 @@ export default function useMorphOnChange<T extends HTMLElement = HTMLDivElement>
       scrollFrame = 0;
       const element = ref.current;
       const record = previous.current;
-      if (!element || !record) return;
-      record.state = captureGalleryLayout(element, itemSelector);
+      if (!element || !record || itemSelector === undefined) return;
+      // Passive: a scroll mid-glide (`revealInScroller` following a new block down) must not end it.
+      record.state = captureGalleryLayout(element, itemSelector, false);
       record.trusted = !isRegionSettling(element, itemSelector);
     };
     const onScroll = (): void => {
-      if (scrollFrame === 0) scrollFrame = requestAnimationFrame(resnapshot);
+      if (previous.current) previous.current.scrollTop = scroller.scrollTop;
+      if (itemSelector !== undefined && scrollFrame === 0) {
+        scrollFrame = requestAnimationFrame(resnapshot);
+      }
     };
     scroller.addEventListener('scroll', onScroll, { passive: true });
     return () => {

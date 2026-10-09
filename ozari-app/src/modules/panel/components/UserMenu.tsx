@@ -16,6 +16,7 @@ import { decodeToken } from '@utils/jwt';
 import { getFirstName, getInitials } from '@utils/nameFormat';
 import { useMe, type MeData } from '../hooks/useMe';
 import { usePanelNavigate } from '../PanelNavContext';
+import { openSettingsSection } from '../settings/settingsSections';
 import LogoutConfirmModal from './LogoutConfirmModal';
 
 // The on-brand keyboard focus indicator, matching the rest of the panel chrome (header, sidebar).
@@ -60,8 +61,10 @@ interface MenuAction {
  * click-outside dismissal, and focus returned to the trigger on close. When closed it's
  * `inert`, so it's out of the tab order and the a11y tree entirely.
  *
- * "Seguridad" navigates to the settings page; "Mi perfil" is still an intentional placeholder
- * (its route doesn't exist yet) — but everything around them (design, motion, a11y) is production-ready.
+ * "Mi perfil" and "Seguridad" open Ajustes AT their section (the account card and the security
+ * card), scrolling only when that section is not already on screen and moving focus to it — from
+ * any page, including Ajustes itself, where a plain navigation would do nothing at all
+ * (`openSettingsSection`).
  */
 const UserMenu: React.FC = () => {
   const { t } = useTranslation();
@@ -157,14 +160,14 @@ const UserMenu: React.FC = () => {
       key: 'profile',
       icon: HiOutlineUserCircle,
       label: t('modules.panel.user.menu.profile'),
-      // TODO(panel): navigate to the profile page once it exists.
-      onSelect: () => {},
+      // The profile lives in Ajustes' account card — there is no separate page to keep in step.
+      onSelect: () => openSettingsSection('account', panelNavigate),
     },
     {
       key: 'security',
       icon: HiOutlineShieldCheck,
       label: t('modules.panel.user.menu.security'),
-      onSelect: () => panelNavigate('/panel/ajustes'),
+      onSelect: () => openSettingsSection('security', panelNavigate),
     },
     {
       key: 'signOut',
