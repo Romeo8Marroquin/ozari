@@ -18,6 +18,9 @@ vi.mock('./LogoutConfirmModal', () => ({
     ) : null,
 }));
 
+const { openSettingsSection } = vi.hoisted(() => ({ openSettingsSection: vi.fn() }));
+vi.mock('../settings/settingsSections', () => ({ openSettingsSection }));
+
 import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from '@utils/storage';
 import { PanelNavContext } from '../PanelNavContext';
@@ -211,23 +214,18 @@ describe('UserMenu', () => {
     expect(btn).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('the "Seguridad" item navigates to the settings tab and closes the menu', async () => {
+  it.each([
+    ['security', 'modules.panel.user.menu.security'],
+    ['account', 'modules.panel.user.menu.profile'],
+  ])('opens Ajustes at its %s section, and closes the menu', async (anchor, name) => {
+    // "Mi perfil" used to do nothing at all: the profile IS Ajustes' account card, so both items
+    // are the same move to a different section. Where they land is `settingsSections`' suite.
     setMe({ data: successProfile });
     const { navigate } = renderMenu();
     await userEvent.click(trigger());
-    await userEvent.click(screen.getByRole('menuitem', { name: 'modules.panel.user.menu.security' }));
+    await userEvent.click(screen.getByRole('menuitem', { name }));
 
-    expect(navigate).toHaveBeenCalledWith('/panel/ajustes');
-    expect(trigger()).toHaveAttribute('aria-expanded', 'false');
-  });
-
-  it('the "Mi perfil" item is a no-op that just closes the menu', async () => {
-    setMe({ data: successProfile });
-    const { navigate } = renderMenu();
-    await userEvent.click(trigger());
-    await userEvent.click(screen.getByRole('menuitem', { name: 'modules.panel.user.menu.profile' }));
-
-    expect(navigate).not.toHaveBeenCalled();
+    expect(openSettingsSection).toHaveBeenCalledWith(anchor, navigate);
     expect(trigger()).toHaveAttribute('aria-expanded', 'false');
   });
 

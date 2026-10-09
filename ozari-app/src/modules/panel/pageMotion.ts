@@ -737,6 +737,44 @@ export function revealInScroller(element: HTMLElement | null, marginPx = 24): vo
   });
 }
 
+/**
+ * Bring a whole block into the panel's view because the user ASKED for it (a menu item that names a
+ * section) — the destination-side twin of {@link revealInScroller}, which follows growth instead.
+ *
+ * - **Only if needed.** A block already fully on screen stays where it is; on a tall desktop window
+ *   that is the common case, and scrolling anyway would move a page the user can already read.
+ * - **Aligned to the page's own top gutter**, read from `.panel-screen`'s padding, so the block lands
+ *   exactly where a page's first block sits at every breakpoint (16 / 24 / 32px) instead of flush
+ *   against the header.
+ * - **Clamped** to the scroll range: a block near the foot of a short page goes as high as the page
+ *   allows, and the tween never chases an offset the browser would refuse.
+ *
+ * `smooth: false` is for a page that is about to make its entrance there — it jumps before paint, so
+ * the entrance plays in place and the scroll is never seen. Reduced motion always jumps.
+ */
+export function bringIntoPanelView(element: HTMLElement, { smooth }: { smooth: boolean }): void {
+  const scroller = panelScroller();
+  if (!scroller) return;
+  const view = scroller.getBoundingClientRect();
+  const box = element.getBoundingClientRect();
+  if (box.top >= view.top && box.bottom <= view.bottom) return;
+  const screen = element.closest<HTMLElement>('.panel-screen');
+  const gutter = screen ? Number.parseFloat(getComputedStyle(screen).paddingTop) || 0 : 0;
+  const max = Math.max(scroller.scrollHeight - scroller.clientHeight, 0);
+  const to = Math.min(Math.max(scroller.scrollTop + box.top - view.top - gutter, 0), max);
+  if (!smooth || prefersReducedMotion()) {
+    gsap.killTweensOf(scroller, 'scrollTop');
+    scroller.scrollTop = to;
+    return;
+  }
+  gsap.to(scroller, {
+    scrollTop: to,
+    duration: PAGE_ENTER.duration,
+    ease: PAGE_ENTER.ease,
+    overwrite: true,
+  });
+}
+
 /** Swap an inline icon with a soft vertical "blink" (the password-eye motion): collapse to a line,
  *  run `swap` at the midpoint, expand back. Instant under reduced motion. */
 export function iconSwapBlink(el: HTMLElement | null, swap: () => void): void {
@@ -775,10 +813,23 @@ export function detailRowOut(
 export function captureGalleryLayout(
   scope: HTMLElement | null,
   selector = '.gallery-flip',
+  /**
+   * ⚠️ `Flip.getState` FINISHES any flip still running on the targets — it jumps them to their end
+   * state — unless told `kill: false`. That is right for a capture taken just before a mutation (the
+   * old glide must not fight the new one), and fatal for a capture that only RECORDS the region
+   * while it is moving: `useMorphOnChange` re-snapshots on the frame after it starts a glide, so
+   * every glide it ran was cut off after ONE frame and the rows teleported (2026-10-09). Pass
+   * `false` for a passive record.
+   */
+  interrupt = true,
 ): Flip.FlipState | null {
   if (!scope || prefersReducedMotion()) return null;
-  return Flip.getState(scope.querySelectorAll(selector));
+  return Flip.getState(scope.querySelectorAll(selector), interrupt ? undefined : PASSIVE_CAPTURE);
 }
+
+/** `Flip.getState`'s `kill: false`. GSAP reads it (`FlipState`'s constructor: "soft" when
+ *  `vars.kill === false`) but its typings omit it, hence the cast. */
+const PASSIVE_CAPTURE = { kill: false } as unknown as Flip.FlipStateVars;
 
 /**
  * Is anything still MOVING this region — itself, an ancestor carrying it, or the items inside it?
@@ -803,6 +854,23 @@ export function isRegionSettling(scope: HTMLElement, itemSelector?: string): boo
   return items.length > 0 && gsap.isTweening(items);
 }
 
+/** How long a region takes to ease to its new height ({@link animateHeightFrom}) — shared with the
+ *  in-flow glide in {@link animateListReflow} so the two read as one movement. */
+const HEIGHT_MORPH_DURATION = 0.35;
+
+/**
+ * Has something already claimed this element's motion — a tween running, or one created this frame
+ * that has not rendered yet (an `animateListReflow` arrival, which `Flip.from` starts synchronously)?
+ *
+ * For a caller that owns a FALLBACK entrance for an element a region usually animates itself: two
+ * entrances on one element kill each other halfway (the second's `overwrite` stops the first after
+ * it applied its from-state and before it could clear it), so the fallback must only run when
+ * nothing else is going to.
+ */
+export function hasMotion(element: HTMLElement): boolean {
+  return gsap.getTweensOf(element).length > 0;
+}
+
 /**
  * A refetch-driven LIST DIFF, phase 2 (see `useGridListTransition`): after the new list commits,
  * SURVIVING cards (matched across different DOM nodes by `data-flip-id` — the grid's slots are
@@ -815,6 +883,19 @@ export function animateListReflow(
   scope: HTMLElement | null,
   selector: string,
   state: Flip.FlipState | null,
+  /**
+   * For items that sit IN FLOW and can change SIZE (a region's rows), rather than a grid of
+   * fixed-size cards: glide POSITION only.
+   *
+   * Flip also eases each item's width/height back from its old size — and in normal flow that
+   * resizing MOVES every later sibling, whose offsets Flip had already computed against the final
+   * layout. So they started off by the size difference and drifted back: the reminder row under a
+   * re-wrapping subscription row dipped 52px on a removal, then crept home (measured 2026-10-09).
+   * Dropping the size tweens makes every offset true again. Nothing is lost: a row's contents
+   * change in one frame regardless, and the region's own height tween (`useMorphOnChange`) is what
+   * eases the space around them.
+   */
+  inFlow = false,
 ): void {
   if (!scope || !state || prefersReducedMotion()) return;
   const targets = scope.querySelectorAll(selector);
@@ -826,7 +907,10 @@ export function animateListReflow(
   gsap.set(targets, { clearProps: 'opacity,visibility,transform' });
   Flip.from(state, {
     targets,
-    duration: 0.4,
+    // In flow, the glide runs on the SAME clock as the region's height (same ease, `power3.out`):
+    // when the region sits at the foot of the page, the scroll clamp rides that height, and a glide
+    // on a different clock swayed the rows ~18px against it before they settled.
+    duration: inFlow ? HEIGHT_MORPH_DURATION : 0.4,
     ease: 'power3.out',
     overwrite: true,
     onEnter: (elements) =>
@@ -844,6 +928,14 @@ export function animateListReflow(
         },
       ),
   });
+  if (inFlow) {
+    // `Flip.from` has already fitted every item to its OLD size (inline width/height, plus the
+    // min/max clamps it adds) and queued tweens back to the new one; take both away, so each item
+    // sits at its final size and only its transform travels. The arrivals' `onEnter` tweens carry
+    // no size, so they are untouched.
+    gsap.killTweensOf(targets, 'width,height');
+    gsap.set(targets, { clearProps: 'width,height,minWidth,minHeight,maxWidth,maxHeight' });
+  }
 }
 
 /**
@@ -1045,7 +1137,7 @@ export function animateHeightFrom(
     { height: fromHeight, overflow: 'hidden' },
     {
       height: toHeight,
-      duration: 0.35,
+      duration: HEIGHT_MORPH_DURATION,
       ease: PAGE_ENTER.ease,
       overwrite: true,
       clearProps: 'height,overflow',

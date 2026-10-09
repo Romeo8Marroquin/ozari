@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { revealInScroller } from './pageMotion';
+import gsap from 'gsap';
+import { hasMotion, revealInScroller } from './pageMotion';
 
 /**
  * `pageMotion` is coverage-excluded as visual-only orchestration, and it mostly is. `revealInScroller`
@@ -88,5 +89,22 @@ describe('revealInScroller', () => {
     revealInScroller(row);
     expect(scroller.scrollTop).toBe(0);
     expect(() => revealInScroller(null)).not.toThrow();
+  });
+});
+
+describe('hasMotion', () => {
+  it('sees a tween the moment it is created — including one nested in a timeline', () => {
+    // The case it exists for: `Flip.from` adds an arrival's entrance to its OWN timeline, in the
+    // same synchronous call, and a fallback entrance checked right after must see it — or the
+    // element gets two entrances that kill each other halfway.
+    const element = document.createElement('div');
+    expect(hasMotion(element)).toBe(false);
+
+    const timeline = gsap.timeline();
+    timeline.add(gsap.to(element, { x: 10, duration: 1 }));
+    expect(hasMotion(element)).toBe(true);
+
+    gsap.killTweensOf(element);
+    expect(hasMotion(element)).toBe(false);
   });
 });

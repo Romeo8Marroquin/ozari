@@ -19,6 +19,7 @@ import MfaDisableModal from './MfaDisableModal';
 import MfaEnableModal from './MfaEnableModal';
 import SettingRow from './SettingRow';
 import SettingsSection from './SettingsSection';
+import { revealPendingSettingsSection } from './settingsSections';
 
 // One shimmer bar for any loading placeholder, sized by the caller — the same skeleton language
 // the header pill/menu use, so a slow `/auth/me` reads as "loading", never as a fake value.
@@ -149,6 +150,11 @@ const SettingsPage: React.FC = () => {
   // entrance runs on every appearance (fresh load or tab change); the registered pair lets the
   // layout play the exit before ANY departure and resume the entrance if a departure is cancelled.
   useLayoutEffect(() => {
+    // Opened to a section from the header menu ("Mi perfil", "Seguridad")? Jump there FIRST —
+    // pre-paint, and measured before the entrance offsets the blocks — so the entrance plays where
+    // the user is going rather than at the top, followed by a scroll. This runs after
+    // `PanelScrollMemory`'s restore (its effect precedes every page's), so the request wins.
+    revealPendingSettingsSection();
     staggerIn(root.current, '.reveal-block');
   }, []);
 
@@ -163,11 +169,18 @@ const SettingsPage: React.FC = () => {
   );
 
   return (
-    <div ref={root} className="mx-auto flex max-w-4xl flex-col gap-8 sm:gap-10">
-      <p className="reveal-block text-sm text-charcoal/55">{t('modules.panel.settings.lead')}</p>
+    // ⚠️ `w-full` is load-bearing. `.panel-screen` is a flex COLUMN, and `mx-auto` on a flex item
+    // turns off `stretch`, so without a declared width this box shrink-wraps its content. Every
+    // section is an `@container`, and inline-size containment makes a container contribute ZERO to
+    // its parent's intrinsic width — so the only thing left to size the page was the lead sentence,
+    // and the whole screen rendered as a ~335px phone column in the middle of a 1900px window (owner,
+    // 2026-10-09). Same root shape and clamp as Preferencias, so the two screens read as one family.
+    <div ref={root} className="mx-auto flex w-full max-w-5xl flex-col gap-8 sm:gap-10">
+      <p className="reveal-block max-w-prose text-sm text-charcoal/55">{t('modules.panel.settings.lead')}</p>
 
       {/* ── Account ─────────────────────────────────────────────────────────────────── */}
       <SettingsSection
+        anchor="account"
         title={t('modules.panel.settings.account.title')}
         description={t('modules.panel.settings.account.description')}
       >
@@ -228,6 +241,7 @@ const SettingsPage: React.FC = () => {
 
       {/* ── Security ────────────────────────────────────────────────────────────────── */}
       <SettingsSection
+        anchor="security"
         title={t('modules.panel.settings.security.title')}
         description={t('modules.panel.settings.security.description')}
       >

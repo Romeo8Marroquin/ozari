@@ -10,10 +10,13 @@ vi.mock('@api/client', () => ({
   api: { get: apiGet, post: apiPost, delete: apiDelete },
 }));
 
-const { invalidateQueries } = vi.hoisted(() => ({ invalidateQueries: vi.fn() }));
+const { invalidateQueries, setQueryData } = vi.hoisted(() => ({
+  invalidateQueries: vi.fn(),
+  setQueryData: vi.fn(),
+}));
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQueryClient: () => ({ invalidateQueries }),
+  useQueryClient: () => ({ invalidateQueries, setQueryData }),
 }));
 
 import { QueryKeys } from '@constants/QueryKeys';
@@ -85,27 +88,79 @@ describe('useConnectGoogleCalendar', () => {
   });
 });
 
+/** Run the updater `commit` handed to `setQueryData` against a cache value. */
+const applied = (current: unknown): unknown => {
+  const updater = setQueryData.mock.calls[0]?.[1] as (value: unknown) => unknown;
+  return updater(current);
+};
+
+const CACHED = { ...STATUS, google: { connected: true, isActive: true, accountEmail: 'a@b.com' } };
+const NEW_URL = 'https://api.example.com/api/calendar/feed/new.ics';
+
 describe('the writes', () => {
   it.each([
-    ['disconnect', useDisconnectGoogleCalendar, () => apiDelete, '/calendar/google'],
-    ['createFeed', useCreateCalendarFeed, () => apiPost, '/calendar/feed'],
-    ['deleteFeed', useDeleteCalendarFeed, () => apiDelete, '/calendar/feed'],
-  ])('%s calls its endpoint, and only REPORTS', async (name, hook, verb, path) => {
-    verb().mockResolvedValue({ data: {} });
+    [
+      'disconnect',
+      useDisconnectGoogleCalendar,
+      () => apiDelete,
+      '/calendar/google',
+      {},
+      { ...CACHED, google: { connected: false, isActive: false } },
+    ],
+    [
+      'createFeed',
+      useCreateCalendarFeed,
+      () => apiPost,
+      '/calendar/feed',
+      { data: { url: NEW_URL } },
+      { ...CACHED, feed: { isActive: true, url: NEW_URL } },
+    ],
+    [
+      'deleteFeed',
+      useDeleteCalendarFeed,
+      () => apiDelete,
+      '/calendar/feed',
+      {},
+      { ...CACHED, feed: { isActive: false } },
+    ],
+  ])('%s calls its endpoint, and only REPORTS', async (name, hook, verb, path, body, expected) => {
+    verb().mockResolvedValue({ data: body });
     const { result } = renderHook(() => hook(), { wrapper: createQueryWrapper() });
     const write = (result.current as unknown as Record<string, () => Promise<unknown>>)[name]!;
-    await write();
+    const answer = await write();
 
     expect(verb()).toHaveBeenCalled();
     expect(verb().mock.calls[0]?.[0]).toBe(path);
-    // THE POINT OF THE SPLIT: a successful write does NOT refresh the screen by itself. The caller
-    // owns that moment, because the outgoing content has to play its exit BEFORE the re-read takes
+    // THE POINT OF THE SPLIT: a successful write does NOT change the screen by itself. The caller
+    // owns that moment, because the outgoing content has to play its exit BEFORE the commit takes
     // it out of the DOM — animate-then-commit, never commit-then-try-to-animate-nothing.
+    expect(setQueryData).not.toHaveBeenCalled();
     expect(invalidateQueries).not.toHaveBeenCalled();
 
-    result.current.commit();
-    // Nothing else in the app reads this query, so there is no wider invalidation to do.
+    (result.current.commit as (value: unknown) => void)(answer);
+    // The ANSWER lands in the cache at once — waiting for a re-read is the stall the owner saw —
+    // and the re-read still runs behind it. Nothing else in the app reads this query.
+    expect(setQueryData).toHaveBeenCalledWith([QueryKeys.CALENDAR], expect.any(Function));
+    expect(applied(CACHED)).toEqual(expected);
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: [QueryKeys.CALENDAR] });
+  });
+
+  it('leaves an empty cache alone — there is nothing to apply an answer to', async () => {
+    apiDelete.mockResolvedValue({ data: {} });
+    const { result } = renderHook(() => useDeleteCalendarFeed(), { wrapper: createQueryWrapper() });
+    await result.current.deleteFeed();
+    result.current.commit(undefined);
+    expect(applied(undefined)).toBeUndefined();
+  });
+
+  it('does not invent a link the answer did not carry', async () => {
+    // The background re-read brings whatever the server really holds; the cache is not guessed at.
+    apiPost.mockResolvedValue({ data: {} });
+    const { result } = renderHook(() => useCreateCalendarFeed(), { wrapper: createQueryWrapper() });
+    const url = await result.current.createFeed();
+    expect(url).toBeUndefined();
+    result.current.commit(url);
+    expect(applied(CACHED)).toBe(CACHED);
   });
 
   it('REJECTS a failed write, so the caller can keep the dialog open and say why', async () => {
