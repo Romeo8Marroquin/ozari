@@ -107,11 +107,12 @@ variable "log_level" {
 
 variable "registration_open" {
   description = <<-EOT
-    REGISTRATION_OPEN: whether POST /auth/user accepts new accounts. Each environment's value is
-    COMMITTED in envs/<env>/environment.json (both start open) and changed only by
-    `infrastructure/scripts/registration.ps1 <env> open|close`, so no apply can flip it by omission.
-    The default here (false) only matters if a root forgets to pass it — and the API fails closed on
-    anything but "true" too.
+    REGISTRATION_OPEN: whether POST /auth/user accepts new accounts. A business decision per
+    environment, so it lives in no file: the LIVE service is the record. tf.ps1 reads it from Cloud
+    Run and passes it back unchanged on every plan (a brand-new environment starts open), and only
+    `infrastructure/scripts/registration.ps1 <env> open|close` passes a different value — so no apply
+    can flip it by omission. The default here (false) only matters if a root forgets to pass it, and
+    the API fails closed on anything but "true" too.
   EOT
   type        = bool
   default     = false

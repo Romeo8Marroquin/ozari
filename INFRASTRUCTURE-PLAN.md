@@ -136,7 +136,7 @@ DKIM/SPF/MX records already on the zone are left alone (see `REBUILD.md` §1).
 
 | # | File | In git? | Holds |
 |---|---|---|---|
-| 1 | `infrastructure/terraform/envs/<env>/environment.json` | **committed** | project id/name, region, state bucket, Neon project/region/version/CU, `registration_open` (the sign-up switch, changed only by `registration.ps1`) |
+| 1 | `infrastructure/terraform/envs/<env>/environment.json` | **committed** | project id/name, region, state bucket, Neon project/region/version/CU |
 | 2 | `infrastructure/terraform/envs/<env>/*/variables.tf` | **committed** | the environment's non-secret shape: hostnames, names, sizes, branch |
 | 3 | `infrastructure/secrets/account.json` | **gitignored** | billing account, GitHub App installation id, Cloudflare account/zone id + API token, Neon API key |
 | 4 | `infrastructure/secrets/<env>.json` | **gitignored** | the 12 secret values + rotation counters |

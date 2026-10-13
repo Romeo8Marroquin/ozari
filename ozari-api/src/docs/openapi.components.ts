@@ -1600,8 +1600,8 @@ export const schemas: Record<string, Schema> = {
     required: ["open"],
     description:
       "Whether `POST /auth/user` accepts new accounts in this environment (a deployed environment " +
-      "is open only when its committed switch says so); the app hides the sign-up link and form " +
-      "when `false`.",
+      "is open only while its switch says so); the app hides the sign-up link and form when " +
+      "`false`.",
     properties: {
       open: { type: "boolean", example: false },
     },

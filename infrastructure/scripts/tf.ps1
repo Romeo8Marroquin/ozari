@@ -14,8 +14,8 @@
 # documented procedure (REBUILD.md), not a flag on a convenience script.
 #
 # What it supplies, so no root needs a hand-written tfvars file:
-#   · backend bucket, project_id, project_name, region, state_bucket,
-#     registration_open (gcp only)                                    ← envs/<env>/environment.json
+#   · backend bucket, project_id, project_name, region, state_bucket  ← envs/<env>/environment.json
+#   · registration_open (gcp only)        ← the LIVE service's value (registration.ps1 changes it)
 #   · account values (TF_VAR_*), CLOUDFLARE_API_TOKEN                   ← secrets/account.json
 #   · TF_VAR_secret_values / _secret_version_triggers (gcp only)        ← secrets/<env>.json
 # All as variables of THIS process only, removed again on exit.
@@ -105,13 +105,15 @@ try {
     Import-OzAccount -Require $require | Out-Null
 
     if ($Stack -eq "gcp" -and $Action -ne "output") {
-        # The registration switch is part of the environment's COMMITTED identity, never a
-        # default: an apply must not silently reopen (or close) sign-up. registration.ps1 edits it.
-        $regProp = $envConfig.PSObject.Properties["registration_open"]
-        if (-not $regProp -or $regProp.Value -isnot [bool]) {
-            throw "envs/$Environment/environment.json must set `"registration_open`": true or false (registration.ps1 manages it)."
+        # The registration switch: registration.ps1 sets TF_VAR_registration_open explicitly; every
+        # other plan KEEPS whatever the live service runs with, so no apply can reopen or close
+        # sign-up by accident. A brand-new environment (no service yet) starts OPEN.
+        if (-not $env:TF_VAR_registration_open) {
+            $live = Get-OzLiveRegistration $Environment
+            $env:TF_VAR_registration_open = $(if ($live -eq "false") { "false" } else { "true" })
+            $shown = $(if ($null -eq $live) { "new environment -> OPEN" } elseif ($live -eq "false") { "CLOSED" } else { "OPEN" })
+            Write-Host "Registration: keeping the live value ($shown). Change it only with registration.ps1." -ForegroundColor DarkGray
         }
-        $env:TF_VAR_registration_open = $(if ($regProp.Value) { "true" } else { "false" })
 
         $secrets = Read-OzSecrets $Environment
         $missing = @(Get-OzMissing $secrets $Environment)

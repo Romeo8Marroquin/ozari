@@ -304,6 +304,36 @@ function Invoke-OzNeonCtl {
     return ($out -join "`n")
 }
 
-Export-ModuleMember -Function Get-OzInfraRoot, Get-OzRepoRoot, Get-OzEnvironment, Get-OzSecretsPath, Read-OzSecrets,
+function Get-OzLiveRegistration {
+    # The registration switch AS THE LIVE SERVICE RUNS IT — the switch's only record. It is not in any
+    # file: opening or closing sign-up is a business decision per environment, not a code change.
+    #   "true" / "false"  the service's REGISTRATION_OPEN
+    #   ""                the service exists without the variable (deployed before the switch existed)
+    #   $null             no service yet — a brand-new environment (the Run API may not even be on)
+    # Any other failure THROWS: guessing here could silently reopen or close sign-up.
+    param([Parameter(Mandatory = $true)][ValidateSet("staging", "prod")][string]$Environment)
+
+    $e = Get-OzEnvironment $Environment
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $out = @(& gcloud run services describe ozari-api --region=$($e.region) --project=$($e.project_id) --format=json 2>&1)
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    $stdout = ($out | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
+    $stderr = ($out | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" }) -join " "
+    if ($code -ne 0) {
+        if ($stderr -match "NOT_FOUND|could not be found|Cannot find service|has not been used|SERVICE_DISABLED|is disabled") { return $null }
+        throw "Could not read the live registration switch (Cloud Run ozari-api in $($e.project_id)): $stderr"
+    }
+    $vars = @(($stdout | ConvertFrom-Json).spec.template.spec.containers[0].env)
+    $entry = $vars | Where-Object { $_ -and $_.name -eq "REGISTRATION_OPEN" } | Select-Object -First 1
+    if ($entry) { return [string]$entry.value }
+    return ""
+}
+
+Export-ModuleMember -Function Get-OzLiveRegistration, Get-OzInfraRoot, Get-OzRepoRoot, Get-OzEnvironment, Get-OzSecretsPath, Read-OzSecrets,
     Save-OzSecrets, Get-OzSecretKeys, Get-OzValue, Set-OzValue, Get-OzMissing, Import-OzAccount, Clear-OzProcessSecrets,
     New-OzHexSecret, Get-OzTarget, Read-OzHidden, Invoke-OzNeonCtl

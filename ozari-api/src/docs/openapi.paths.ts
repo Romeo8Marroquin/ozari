@@ -140,8 +140,8 @@ export const paths: OpenAPIV3.PathsObject = {
         "**Public, when the environment is open.** Creates a normal `Client` account, active " +
         "immediately. Never grants admin (promote in the database). No session is issued — the user " +
         "signs in afterwards. PII is encrypted at rest.\n\n" +
-        "Registration is a per-environment switch (`REGISTRATION_OPEN`, committed per environment " +
-        "and applied by Terraform; see `GET /auth/registration`). When closed the request is refused " +
+        "Registration is a per-environment switch (`REGISTRATION_OPEN`, applied by Terraform; see " +
+        "`GET /auth/registration`). When closed the request is refused " +
         "with `403` BEFORE validation, so a closed environment reveals nothing about the body it was " +
         "sent.",
       security: [{ ApiKeyAuth: [] }],
@@ -180,8 +180,8 @@ export const paths: OpenAPIV3.PathsObject = {
         "**Public** — the visitor asking has no session by definition. The app reads it to decide " +
         "whether to offer the sign-up link and the register form at all, instead of guessing; " +
         "`POST /auth/user` enforces the same answer.\n\n" +
-        "Deployed environments fail CLOSED: only `REGISTRATION_OPEN=true` opens it (committed per " +
-        "environment, changed with `infrastructure/scripts/registration.ps1`). Local development " +
+        "Deployed environments fail CLOSED: only `REGISTRATION_OPEN=true` opens it (a new " +
+        "environment starts open; `infrastructure/scripts/registration.ps1` changes it). Local development " +
         "is open unless the variable is `false`. `Cache-Control: no-store`, like every `/auth` " +
         "response.",
       security: [{ ApiKeyAuth: [] }],

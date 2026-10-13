@@ -27,11 +27,10 @@ export const getAppHost = (): string =>
  * Whether `POST /auth/user` accepts new accounts (`REGISTRATION_OPEN`).
  *
  * A deployed environment FAILS CLOSED: only the exact string `"true"` opens it, so a missing or
- * mistyped variable can never let strangers in. The value is committed per environment
- * (`registration_open` in `infrastructure/terraform/envs/<env>/environment.json`, both starting
- * open), applied by Terraform, and changed with `infrastructure/scripts/registration.ps1 <env>
- * open|close` once there are enough users. Locally (and in tests) it stays OPEN unless set to
- * `"false"`, so a developer's machine keeps working without a new `.env` line.
+ * mistyped variable can never let strangers in. Per environment, a new deployment starts open and
+ * `infrastructure/scripts/registration.ps1 <env> open|close` changes it (every other Terraform apply
+ * keeps the live value). Locally (and in tests) it stays OPEN unless set to `"false"`, so a
+ * developer's machine keeps working without a new `.env` line.
  */
 export const isRegistrationOpen = (): boolean => {
   const value = process.env["REGISTRATION_OPEN"];
