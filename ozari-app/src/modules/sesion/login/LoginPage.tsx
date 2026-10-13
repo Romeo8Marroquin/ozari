@@ -21,6 +21,7 @@ import { panelHomeFor } from '../../panel/navConfig';
 import useLogin from '../hooks/useLogin';
 import { useSearch } from '@tanstack/react-router';
 import useAuthCard from '../hooks/useAuthCard';
+import { useRegistrationStatus } from '../hooks/useRegistrationStatus';
 import MfaLoginStep from './MfaLoginStep';
 import ForgotPasswordStep from './ForgotPasswordStep';
 import useDesktopAutoFocus from '@hooks/useDesktopAutoFocus';
@@ -37,6 +38,10 @@ const LoginPage: React.FC = () => {
   });
   const { reset, handleSubmit, trigger, getValues, setValue } = methods;
   const { login, isPending } = useLogin();
+  // The sign-up link is offered only when the API confirms this environment is open (registration is
+  // closed per environment once it has enough users): a link into a form the server would refuse is
+  // a dead end, not an invitation.
+  const { data: registrationOpen } = useRegistrationStatus();
   // Latched once a real session exists and we begin animating to the panel. The form is
   // cleared at that point (so it's invalid), which on register disables the button via
   // `formState.isValid`. Login can't gate the button by validity (mobile/iOS autofill
@@ -319,17 +324,19 @@ const LoginPage: React.FC = () => {
                   </button>
                 </div>
 
-                <p className="form-element text-xs text-gray-500 flex flex-col items-center">
-                  <span>{t('modules.sesion.login.form.noAccount')}</span>
-                  <button
-                    type="button"
-                    onClick={handleRegister}
-                    className="mt-0.5 cursor-pointer rounded px-1 py-0.5 font-medium text-magenta outline-none transition-colors hover:underline focus-visible:underline focus-visible:ring-2 focus-visible:ring-magenta focus-visible:ring-offset-2"
-                  >
-                    {t('modules.sesion.login.form.signUpLink')}{' '}
-                    {t('modules.sesion.login.form.here')}
-                  </button>
-                </p>
+                {registrationOpen && (
+                  <p className="form-element text-xs text-gray-500 flex flex-col items-center">
+                    <span>{t('modules.sesion.login.form.noAccount')}</span>
+                    <button
+                      type="button"
+                      onClick={handleRegister}
+                      className="mt-0.5 cursor-pointer rounded px-1 py-0.5 font-medium text-magenta outline-none transition-colors hover:underline focus-visible:underline focus-visible:ring-2 focus-visible:ring-magenta focus-visible:ring-offset-2"
+                    >
+                      {t('modules.sesion.login.form.signUpLink')}{' '}
+                      {t('modules.sesion.login.form.here')}
+                    </button>
+                  </p>
+                )}
               </form>
             </FormProvider>
           </RequiredPatternsContext.Provider>

@@ -61,6 +61,11 @@ vi.mock('@hooks/useUserGesture', () => ({ hasUserGestured: () => gestureState.va
 // token the session just stored — never a fixed path. Stubbed as an Admin here, whose home is the
 // dashboard; the login was pinned to `/panel/productos` from before the dashboard existed.
 vi.mock('@hooks/useRole', () => ({ getStoredRole: () => 2 })); // 2 = Role.Admin
+// The environment's registration switch, as the API reports it (the sign-up link depends on it).
+const registrationState = vi.hoisted(() => ({ data: true as boolean | undefined }));
+vi.mock('../hooks/useRegistrationStatus', () => ({
+  useRegistrationStatus: () => ({ data: registrationState.data }),
+}));
 
 import LoginPage from './LoginPage';
 
@@ -101,6 +106,7 @@ beforeEach(() => {
   state.isPending = false;
   searchState.value = {};
   gestureState.value = false;
+  registrationState.data = true;
   mfaStep.props = null;
   forgotStep.props = null;
   swapFormColumn.mockImplementation((commit: () => void) => commit());
@@ -293,6 +299,18 @@ describe('LoginPage', () => {
     render(<LoginPage />);
     await user.click(screen.getByRole('button', { name: /signUpLink/ }));
     expect(leaveTo).toHaveBeenCalledWith('/sesion/registro');
+  });
+
+  it('offers NO sign-up link unless the API confirms registration is open', () => {
+    // Closed (the deployed default) and not-yet-known both hide it: the link must never lead into a
+    // form the server would refuse.
+    for (const data of [false, undefined]) {
+      registrationState.data = data;
+      const { unmount } = render(<LoginPage />);
+      expect(screen.queryByRole('button', { name: /signUpLink/ })).not.toBeInTheDocument();
+      expect(screen.queryByText('modules.sesion.login.form.noAccount')).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
   it('clears the pending blur timer on unmount', async () => {

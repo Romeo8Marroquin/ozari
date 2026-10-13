@@ -6,6 +6,7 @@ import { DOCS_JSON_PATH, DOCS_PATH, mountApiDocs } from "./swagger.js";
 // Every endpoint that is CURRENTLY mounted (WIP modules are intentionally excluded).
 const EXPECTED_OPERATIONS: ReadonlyArray<readonly [string, string]> = [
   ["/auth/user", "post"],
+  ["/auth/registration", "get"],
   ["/auth/signin", "post"],
   ["/auth/mfa/verify-login", "post"],
   ["/auth/refresh", "post"],

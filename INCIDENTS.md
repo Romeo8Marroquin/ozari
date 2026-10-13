@@ -270,7 +270,11 @@ The key alone decrypts nothing; it matters together with a COPY of the database.
 - [ ] **Know the Neon restore window** of each project (S5) — it decides how fast you must act.
 - [ ] **1Password** holds the current `infrastructure/secrets/` files (re-upload after every change).
 - [ ] **Drill**: `rotate.ps1 staging` once, and after any change to the script or the secrets
-      registry. A runbook nobody has run is a hope. **Last drill:** — *(not yet run)*.
+      registry, and once on production right after it is built (before it has users — the names and
+      hosts differ per environment). A runbook nobody has run is a hope.
+      **Drills:** staging 2026-10-13 (`-Only sessions,api_key,database`): every role check PASS,
+      the open database connection cut, 5 secret versions replaced, revision rolled
+      (`secrets-generation` 10 → 14), final health check 200. Production: — *(after it is built)*.
 
 ---
 

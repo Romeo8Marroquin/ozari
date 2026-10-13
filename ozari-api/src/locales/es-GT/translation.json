@@ -133,6 +133,13 @@
         "welcomeEmailFailed": "No se pudo enviar el correo de bienvenida a <{{-email}}>: {{-error}}."
       }
     },
+    "registration": {
+      "statusFetched": "Estado del registro obtenido exitosamente.",
+      "closed": "El registro de cuentas nuevas está cerrado.",
+      "logs": {
+        "rejectedClosed": "Registro rechazado: el registro está cerrado en este entorno (IP {{-ip}})."
+      }
+    },
     "signInUser": {
       "userAuthenticated": "Usuario autenticado exitosamente.",
       "mfaRequired": "Se requiere verificación en dos pasos.",

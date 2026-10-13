@@ -105,6 +105,18 @@ variable "log_level" {
   default     = "info"
 }
 
+variable "registration_open" {
+  description = <<-EOT
+    REGISTRATION_OPEN: whether POST /auth/user accepts new accounts. Each environment's value is
+    COMMITTED in envs/<env>/environment.json (both start open) and changed only by
+    `infrastructure/scripts/registration.ps1 <env> open|close`, so no apply can flip it by omission.
+    The default here (false) only matters if a root forgets to pass it — and the API fails closed on
+    anything but "true" too.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "r2_endpoint" {
   description = "Cloudflare R2 S3 API endpoint (R2_ENDPOINT), https://<account-id>.r2.cloudflarestorage.com."
   type        = string

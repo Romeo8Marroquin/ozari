@@ -36,6 +36,10 @@ export interface ResetPasswordRequestModel {
   confirmPassword: string;
 }
 
+export interface RegistrationStatusResponseModel {
+  open: boolean;
+}
+
 export interface GetAllUsersResponseModel {
   createdAt: Date;
   email: string | undefined;

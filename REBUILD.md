@@ -233,7 +233,14 @@ column of §1. The prod-only differences are called out inline.
          ./infrastructure/scripts/pages-build.ps1 staging
            From now on every push to `dev` that touches ozari-app/ builds.
 
-12.    §6 verification.
+12.    The first admins — a new environment starts with registration OPEN
+         ("registration_open": true in envs/<env>/environment.json, applied in step 8):
+         each admin registers at the app → promote them in pgAdmin (DEPLOYMENT.md §3,
+            UPDATE users SET role_id = 2 …) → they sign out and back in
+         Once there are enough users:
+         ./infrastructure/scripts/registration.ps1 staging close     # then COMMIT environment.json
+
+13.    §6 verification.
 ```
 
 ---
@@ -273,13 +280,16 @@ anything belonging to `qa-ulew`.
       DML-only, member of nothing, owns nothing; default privileges in place)
 [ ] tf.ps1 <env> cloudflare plan  and  tf.ps1 <env> gcp plan  show NO CHANGES right after apply
       (and still none after the first Cloud Build deploy: the deploy must not fight Terraform)
-[ ] rotate.ps1 staging has been drilled once and ended with the green health check (INCIDENTS.md §4)
+[ ] rotate.ps1 <env> -Only sessions,api_key,database drilled once, BEFORE the environment has users,
+      and ended with the green health check (INCIDENTS.md §4)
 [ ] Nothing belonging to qa-ulew appeared in any plan or deletion
 [ ] GET https://api-<env>.partyrentalsgt.com/api/health/check answers from OUR API
       200 with x-api-key, or 403 without (Express received it and refused a direct hit — correct).
       A Google-styled 404 = the Worker route/target is wrong.
 [ ] /api/docs served on staging, ABSENT on production (the NODE_ENV gate)
 [ ] register → login → forgot-password (email arrives) → reset → login
+[ ] registration.ps1 <env> status: live == committed, and the app matches it — open: "regístrate
+      aquí" on the login page; closed: no link, and /sesion/registro shows "registro cerrado"
 [ ] a product photo upload succeeds and displays     (R2 credentials, CORS and the custom domain)
 [ ] an order can be created, advanced, paid, and its PDF opens
 [ ] iPhone: log in, wait > 15 min, still logged in   (first-party cookies)

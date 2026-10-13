@@ -4,6 +4,7 @@ import {
   getNodeEnv,
   isDeployedEnvironment,
   isProductionEnvironment,
+  isRegistrationOpen,
   isStagingEnvironment,
 } from "./environment.js";
 
@@ -42,5 +43,28 @@ describe("environment helpers", () => {
     delete process.env["APP_HOST"];
     expect(getAppHost()).toBe("");
     if (original !== undefined) process.env["APP_HOST"] = original;
+  });
+
+  it("isRegistrationOpen fails CLOSED in deployed environments: only the exact string opens it", () => {
+    for (const env of ["staging", "production"]) {
+      vi.stubEnv("NODE_ENV", env);
+      vi.stubEnv("REGISTRATION_OPEN", "true");
+      expect(isRegistrationOpen()).toBe(true);
+      // A typo, a different casing or an absent variable must never let strangers register.
+      for (const value of ["false", "TRUE", "1", "yes", ""]) {
+        vi.stubEnv("REGISTRATION_OPEN", value);
+        expect(isRegistrationOpen()).toBe(false);
+      }
+      vi.stubEnv("REGISTRATION_OPEN", undefined);
+      expect(isRegistrationOpen()).toBe(false);
+    }
+  });
+
+  it("isRegistrationOpen stays OPEN locally unless explicitly switched off", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("REGISTRATION_OPEN", undefined);
+    expect(isRegistrationOpen()).toBe(true);
+    vi.stubEnv("REGISTRATION_OPEN", "false");
+    expect(isRegistrationOpen()).toBe(false);
   });
 });
