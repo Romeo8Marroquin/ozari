@@ -30,6 +30,7 @@ infrastructure/
     db-seed.ps1               pnpm db:seed against an environment, as the migrator
     cf-inventory.ps1          read-only Cloudflare inventory: OURS / CONFLICT / not ours
     rotate.ps1                EMERGENCY: rotate an environment's credentials in one guided run (INCIDENTS.md)
+    registration.ps1          open / close / status of new-account registration (committed in environment.json)
     retire.ps1                delete an environment everywhere (dry run by default; GCP project last)
     r2-empty.mjs              (called by retire.ps1) count / empty one R2 bucket
     pages-build.ps1           start a Pages production build now (after a VITE_API_URL change)
@@ -123,7 +124,7 @@ they bill API quota to their own project (`user_project_override`).
 
 | File | Holds | Filled by |
 |---|---|---|
-| `terraform/envs/<env>/environment.json` | project id, region, state bucket, Neon project/region/version/CU | committed; edit by hand |
+| `terraform/envs/<env>/environment.json` | project id, region, state bucket, Neon project/region/version/CU, `registration_open` | committed; edit by hand |
 | `secrets/account.json` | `billing_account`, `github_app_installation_id`, `cloudflare_account_id`, `cloudflare_zone_id`, `cloudflare_api_token`, `neon_org_id`, `neon_api_key` | `account.ps1` (all at once, verified); `secret.ps1 account <key>` to replace one |
 | `secrets/<env>.json` → `secrets` | the 12 secret values the environment runs on | `neon.ps1`, `new-secrets.ps1`, `secret.ps1 <env> <key>` |
 | `secrets/<env>.json` → `rotation` | one counter per secret key (absent = 1) | bumped automatically when a script replaces a value |
@@ -144,7 +145,7 @@ reach Secret Manager through `secret_data_wo` (write-only): sent once, never sto
 saved plan.
 
 > **For Claude sessions:** the project's `.claude/settings` deny reading `**/secrets/**`. Commands
-> that LOAD secrets — `account.ps1`, `retire.ps1`, `rotate.ps1`, `tf.ps1 plan|apply|output`, `neon.ps1`, `db-seed.ps1`, `cf-inventory.ps1`,
+> that LOAD secrets — `account.ps1`, `retire.ps1`, `rotate.ps1`, `registration.ps1 open|close`, `tf.ps1 plan|apply|output`, `neon.ps1`, `db-seed.ps1`, `cf-inventory.ps1`,
 > `pages-build.ps1` — are run by the owner, in a terminal or with the `!` prefix. Plans print no
 > secret values (they are ephemeral/sensitive), so pasting a plan back is safe. `tf.ps1 … validate`
 > needs no credentials.

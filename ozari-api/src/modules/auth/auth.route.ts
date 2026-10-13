@@ -29,6 +29,10 @@ import {
   resetPassword,
 } from "./auth.password.controller.js";
 import {
+  getRegistrationStatus,
+  requireRegistrationOpen,
+} from "./auth.registration.controller.js";
+import {
   validateChangePassword,
   validateCreateUser,
   validateForgotPassword,
@@ -117,7 +121,17 @@ const passwordResetLimiter = rateLimit({
 });
 
 // Public Routes
-router.post("/user", credentialLimiter, validateCreateUser, createUser);
+// Registration is a per-environment switch (REGISTRATION_OPEN, Terraform-owned). The status is
+// public so the app can hide the form; the guard runs before validation so a closed environment
+// says nothing about the body it was sent.
+router.get("/registration", getRegistrationStatus);
+router.post(
+  "/user",
+  credentialLimiter,
+  requireRegistrationOpen,
+  validateCreateUser,
+  createUser,
+);
 router.post(
   "/signin",
   credentialLimiter,

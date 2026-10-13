@@ -26,6 +26,11 @@ vi.mock('./useTerms', async (importOriginal) => ({
   useTerms,
 }));
 
+// The environment's registration switch — mocked at the hook so each test decides whether this
+// environment is open, closed, or still answering.
+const { useRegistrationStatus } = vi.hoisted(() => ({ useRegistrationStatus: vi.fn() }));
+vi.mock('../hooks/useRegistrationStatus', () => ({ useRegistrationStatus }));
+
 import RegisterPage from './RegisterPage';
 
 const VALID_NAME = 'Juan Perez';
@@ -66,6 +71,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.isPending = false;
   useTerms.mockReturnValue({ data: 'Primera condición.\nSegunda condición.' });
+  useRegistrationStatus.mockReturnValue({ data: true, isPending: false });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -229,5 +235,37 @@ describe('RegisterPage', () => {
     render(<RegisterPage />);
     await user.click(screen.getByRole('button', { name: /loginLink/ }));
     expect(leaveTo).toHaveBeenCalledWith('/sesion/inicio');
+  });
+
+  describe('when the environment is CLOSED to registration', () => {
+    const CLOSED_KEY = 'modules.sesion.register.closed';
+
+    it('shows no form at all — only why, and the way back', async () => {
+      useRegistrationStatus.mockReturnValue({ data: false, isPending: false });
+      const user = userEvent.setup();
+      render(<RegisterPage />);
+
+      // A form the server is about to refuse is a dead end, not an invitation.
+      expect(screen.queryByTestId('fullName-input')).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent(`${CLOSED_KEY}.message`);
+
+      await user.click(screen.getByRole('button', { name: `${CLOSED_KEY}.backToLogin` }));
+      expect(leaveTo).toHaveBeenCalledWith('/sesion/inicio');
+    });
+
+    it('treats a FAILED status read as closed — the form needs a confirmed yes', () => {
+      useRegistrationStatus.mockReturnValue({ data: undefined, isPending: false });
+      render(<RegisterPage />);
+      expect(screen.queryByTestId('fullName-input')).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent(`${CLOSED_KEY}.message`);
+    });
+
+    it('shows neither the form nor the closed message while the answer is in flight', () => {
+      useRegistrationStatus.mockReturnValue({ data: undefined, isPending: true });
+      render(<RegisterPage />);
+      expect(screen.queryByTestId('fullName-input')).not.toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      expect(screen.getByText('modules.sesion.register.title')).toBeInTheDocument();
+    });
   });
 });

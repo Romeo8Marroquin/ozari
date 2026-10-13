@@ -137,8 +137,13 @@ export const paths: OpenAPIV3.PathsObject = {
       summary: "Register a new user",
       operationId: "registerUser",
       description:
-        "**Public.** Creates a normal `Client` account (pending admin enablement). Never grants " +
-        "admin. No session is issued — the user signs in afterwards. PII is encrypted at rest.",
+        "**Public, when the environment is open.** Creates a normal `Client` account, active " +
+        "immediately. Never grants admin (promote in the database). No session is issued — the user " +
+        "signs in afterwards. PII is encrypted at rest.\n\n" +
+        "Registration is a per-environment switch (`REGISTRATION_OPEN`, committed per environment " +
+        "and applied by Terraform; see `GET /auth/registration`). When closed the request is refused " +
+        "with `403` BEFORE validation, so a closed environment reveals nothing about the body it was " +
+        "sent.",
       security: [{ ApiKeyAuth: [] }],
       requestBody: bodyRef("RegisterRequest", {
         fullName: "Ana García López",
@@ -154,7 +159,36 @@ export const paths: OpenAPIV3.PathsObject = {
           400,
           "The password does not meet the security requirements",
         ),
+        "403": errorResponse(
+          "Registration is closed in this environment.",
+          403,
+          "El registro de cuentas nuevas está cerrado.",
+        ),
         "409": errorResponse("An account with this email already exists.", 409, "Could not create the user"),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/auth/registration": {
+    get: {
+      tags: ["Authentication"],
+      summary: "Whether this environment accepts new accounts",
+      operationId: "getRegistrationStatus",
+      description:
+        "**Public** — the visitor asking has no session by definition. The app reads it to decide " +
+        "whether to offer the sign-up link and the register form at all, instead of guessing; " +
+        "`POST /auth/user` enforces the same answer.\n\n" +
+        "Deployed environments fail CLOSED: only `REGISTRATION_OPEN=true` opens it (committed per " +
+        "environment, changed with `infrastructure/scripts/registration.ps1`). Local development " +
+        "is open unless the variable is `false`. `Cache-Control: no-store`, like every `/auth` " +
+        "response.",
+      security: [{ ApiKeyAuth: [] }],
+      responses: {
+        "200": dataResponse("The current registration policy.", "RegistrationStatusResponse", {
+          open: false,
+        }),
         "429": rateLimited,
         "500": serverError,
       },

@@ -19,6 +19,7 @@ import FormError from '@components/FormError';
 import { toFormError } from '@utils/apiError';
 import useRegister from '../hooks/useRegister';
 import useAuthCard from '../hooks/useAuthCard';
+import { useRegistrationStatus } from '../hooks/useRegistrationStatus';
 import useDesktopAutoFocus from '@hooks/useDesktopAutoFocus';
 import { notify } from '@components/notifications/notify';
 import TermsModal from './TermsModal';
@@ -45,6 +46,11 @@ const RegisterPage: React.FC = () => {
   // business that has published none simply offers nothing rather than an empty dialog.
   const { data: terms } = useTerms();
   const [readingTerms, setReadingTerms] = useState(false);
+  // The environment's registration switch, as the API reports it. The form renders ONLY on a
+  // confirmed `true` — never a form the server is about to refuse. A confirmed `false` (or a failed
+  // read) says registration is closed; while the answer is in flight the column holds just its title,
+  // which is a moment, not a state: the login page's link only appears once `true` is cached.
+  const { data: registrationOpen, isPending: statusPending } = useRegistrationStatus();
 
   const onSubmit = (data: RegisterType) => {
     if (isPending || submitLockRef.current) return;
@@ -96,6 +102,19 @@ const RegisterPage: React.FC = () => {
           <h2 className="form-element text-2xl sm:text-3xl font-bold text-black select-none">
             {t('modules.sesion.register.title')}
           </h2>
+          {!registrationOpen && !statusPending && (
+            <>
+              <p role="status" className="form-element text-sm text-charcoal/60 text-center max-w-xs">
+                {t('modules.sesion.register.closed.message')}
+              </p>
+              <div className="form-element w-full">
+                <Button type="button" fullWidth onClick={handleLogin}>
+                  {t('modules.sesion.register.closed.backToLogin')}
+                </Button>
+              </div>
+            </>
+          )}
+          {registrationOpen && (
           <RequiredPatternsContext.Provider value={requiredPatternsContextValue}>
             <FormProvider {...methods}>
               <form
@@ -218,6 +237,7 @@ const RegisterPage: React.FC = () => {
               </form>
             </FormProvider>
           </RequiredPatternsContext.Provider>
+          )}
         </div>
         <div className="order-1 md:order-2 flex z-10">
           <div className="flex flex-col items-center justify-center gap-5 md:gap-7">

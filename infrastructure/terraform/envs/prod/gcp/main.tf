@@ -61,6 +61,7 @@ module "gcp" {
   api_public_url         = var.api_public_url
   node_env               = var.node_env
   log_level              = var.log_level
+  registration_open      = var.registration_open
 
   # The R2 endpoint is account-scoped, so it is derived from the account id rather than typed.
   r2_endpoint    = "https://${var.cloudflare_account_id}.r2.cloudflarestorage.com"

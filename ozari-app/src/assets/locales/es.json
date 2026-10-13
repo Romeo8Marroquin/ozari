@@ -204,10 +204,13 @@
           "loginLink": "inicia sesión",
           "here": "aquí"
         },
+        "closed": {
+          "message": "Por ahora el registro de cuentas nuevas está cerrado. Si necesitas acceso, comunícate con el administrador.",
+          "backToLogin": "Volver a iniciar sesión"
+        },
         "api": {
-          "registerSuccess": "Cuenta creada. Queda pendiente de habilitación por un administrador.",
           "registerSuccessTitle": "Cuenta creada",
-          "registerSuccessToast": "Queda pendiente de habilitación por un administrador.",
+          "registerSuccessToast": "Ya puedes iniciar sesión.",
           "registerError": "No se pudo crear la cuenta. Verifica tus datos e inténtalo de nuevo.",
           "emailAlreadyExists": "Este correo ya está registrado.",
           "tooManyAttempts": "Demasiados intentos. Espera unos minutos e inténtalo de nuevo.",

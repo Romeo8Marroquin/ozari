@@ -11,4 +11,5 @@ export enum QueryKeys {
   DASHBOARD = 'dashboard',
   CALENDAR = 'calendar',
   TERMS = 'terms',
+  REGISTRATION = 'registration',
 }

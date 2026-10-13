@@ -4,6 +4,7 @@
   "project_name": "Ozari Staging",
   "region": "us-east4",
   "state_bucket": "ozari-staging-gt-tfstate",
+  "registration_open": true,
   "neon": {
     "project_name": "ozari-staging",
     "region_id": "aws-us-east-1",

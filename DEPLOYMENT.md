@@ -96,8 +96,21 @@ The account-level values (shared by both environments) are in `infrastructure/se
 `infrastructure/templates/account.example.json`.
 
 Plain (non-secret) runtime env vars, all set from `envs/<env>/gcp/variables.tf`: `NODE_ENV`,
-`LOG_LEVEL`, `APP_HOST`, `API_PUBLIC_URL`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL`, and `R2_ENDPOINT`
-(derived from the Cloudflare account id). `PORT` is injected by Cloud Run (8080).
+`LOG_LEVEL`, `APP_HOST`, `API_PUBLIC_URL`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL`, `R2_ENDPOINT`
+(derived from the Cloudflare account id) and `REGISTRATION_OPEN`. `PORT` is injected by Cloud Run
+(8080).
+
+> **`REGISTRATION_OPEN` — the per-environment sign-up switch.** Each environment's value is
+> **committed** as `"registration_open"` in `envs/<env>/environment.json` (both start **open**;
+> close it once there are enough users). `tf.ps1` passes it to every gcp plan and the roots have no
+> default, so no apply can flip it by omission. Change it ONLY with
+> `infrastructure/scripts/registration.ps1 <env> open|close` (it edits the file, plans, applies,
+> puts the file back if the apply does not complete, and tells you to **commit** it);
+> `… status` compares the live service with the committed value. Existing accounts are never
+> affected. The API **fails closed**: in a deployed environment only the exact string `true` opens
+> `POST /auth/user` (anything else → `403` before validation); locally it stays open unless set to
+> `false`. The app asks `GET /auth/registration` and shows the sign-up link and form only on a
+> confirmed `true`.
 
 > **`APP_HOST` and `API_PUBLIC_URL` are not the same host.** `APP_HOST` is the **frontend** origin
 > (CORS, the API-key origin check, email links). `API_PUBLIC_URL` is the **API's own** origin, and it

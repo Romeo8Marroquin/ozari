@@ -28,6 +28,8 @@ locals {
     R2_ENDPOINT    = var.r2_endpoint
     R2_BUCKET_NAME = var.r2_bucket_name
     R2_PUBLIC_URL  = var.r2_public_url
+    # "true"/"false". The API opens registration ONLY on the exact string "true".
+    REGISTRATION_OPEN = tostring(var.registration_open)
   }
 
   set_env_vars_arg = join(",", [for name, value in local.runtime_env_vars : "${name}=${value}"])

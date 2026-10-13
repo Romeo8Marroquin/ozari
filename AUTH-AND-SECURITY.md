@@ -50,7 +50,12 @@ own 20/min limiter: the **Google OAuth callback** and the **ICS calendar feed** 
 - **Token issuance is centralized** in `auth.service.ts` (`issueAuthenticatedSession`), shared by
   login and the MFA login challenge.
 - **Registration** (`POST /auth/user`) always creates a normal user (`roleId = RolesEnum.Client`); the
-  API never grants admin — promote admins directly in the DB. Lookup tables (`user_roles`,
+  API never grants admin — promote admins directly in the DB. It is also a **per-environment switch**
+  (`REGISTRATION_OPEN`, committed per environment in `envs/<env>/environment.json`):
+  `requireRegistrationOpen` answers `403` BEFORE validation
+  when closed, so a closed environment confirms nothing about emails or password rules; deployed
+  environments fail closed on anything but `"true"`. `GET /auth/registration` (public) reports it
+  and the app offers the link/form only on a confirmed `true` (`auth.registration.controller.ts`). Lookup tables (`user_roles`,
   `token_types`) must be **seeded** or register/login fail on FK constraints.
 - **Login is constant-time** vs account enumeration: the "user not found" path runs a throwaway bcrypt
   compare against a fixed hash so it costs the same as "wrong password" (lookup is by `email_sha`, so
