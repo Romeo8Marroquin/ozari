@@ -25,6 +25,12 @@ resource "google_cloud_run_v2_service" "api" {
   template {
     service_account = google_service_account.run.email
 
+    # Rolls a new revision whenever a runtime secret is rotated (secrets.tf explains why). Cloud
+    # Build's `gcloud run deploy` passes no label flags, so it keeps this one.
+    labels = {
+      secrets-generation = local.runtime_secrets_generation
+    }
+
     scaling {
       min_instance_count = var.min_instances
       max_instance_count = var.max_instances
@@ -34,8 +40,11 @@ resource "google_cloud_run_v2_service" "api" {
     timeout                          = "${var.timeout_seconds}s"
 
     containers {
-      # Placeholder only — the live tag belongs to Cloud Build (see lifecycle below).
-      image = "${local.image_url}:latest"
+      # Placeholder only — the live tag belongs to Cloud Build (see lifecycle below). It is Google's
+      # public sample, NOT our `:latest`: on a fresh environment the registry is still empty, and
+      # Cloud Run refuses to create a service whose image does not exist (the apply fails and leaves
+      # a tainted service behind deletion protection). The first deploy replaces it.
+      image = local.bootstrap_image
 
       ports {
         container_port = 8080

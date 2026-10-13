@@ -75,6 +75,8 @@ resource "google_cloud_run_v2_job" "cleanup_sessions" {
 
   lifecycle {
     # Same division as the service: the job runs whatever image the last deploy published.
+    # ⚠️ Unlike the service it starts on OUR `:latest`, so enable it only after the first deploy has
+    # pushed one — on an empty registry the create fails.
     ignore_changes = [template[0].template[0].containers[0].image, client, client_version]
   }
 

@@ -30,7 +30,7 @@ Supporting directories:
 |------------|------------|
 | Frontend   | React 19, Vite, TanStack Router + React Query 5, react-hook-form 7 + Zod 4, Tailwind 4, GSAP, i18next |
 | Backend    | Node.js 22 (ESM), Express 5, Zod 4, jsonwebtoken 9, helmet 8, winston 3, i18next |
-| Database   | PostgreSQL 17 (Neon) via Prisma 7 (pooled URL at runtime, direct URL for migrations) |
+| Database   | PostgreSQL 18 (Neon, `aws-us-east-1`) via Prisma 7 (pooled URL at runtime, direct URL for migrations) |
 | Storage    | Cloudflare R2 (public product images; browser uploads via presigned PUT URLs) |
 | Email      | Resend (verified domain `partyrentalsgt.com`, branded templates) |
 | Tooling    | pnpm 11, TypeScript 6, ESLint 10, Vitest 4 (both packages enforce 100% test coverage) |
@@ -47,25 +47,32 @@ transactional email goes through **Resend**.
   Secret Manager containers **and versions**) and `modules/cloudflare-env` (DNS, the edge Worker that
   rewrites `Host` in front of Cloud Run, Pages including `VITE_API_URL`, R2 with its CORS policy,
   zone SSL). GCP and Cloudflare are separate roots with separate states.
-- **Staging shape**: project `ozari-500103`, region `northamerica-south1`, service `ozari-api`
-  (port 8080, min 0 / max 3 instances, concurrency 40, 1 CPU / 512 Mi). Cloud Build owns the image
-  tag; Terraform owns everything structural. Console edits are emergency-only — `plan` detects drift.
+- **Environments**: staging (project `ozari-staging-gt`, from `dev`) and production (project
+  `ozari-prod-gt`, from `main`), both in region `us-east4` beside Neon `aws-us-east-1`; service
+  `ozari-api` (port 8080, min 0 / max 2 staging · 3 prod, concurrency 40, 1 CPU / 512 Mi). Each
+  project bootstraps itself and holds its own Terraform state. Cloud Build owns the image tag;
+  Terraform owns everything structural. Console edits are emergency-only — `plan` detects drift.
 - **Secrets** live in Secret Manager and are applied by Terraform through **write-only arguments**,
-  so values never enter state or a saved plan. Real values sit in gitignored `secrets.auto.tfvars`
-  files with committed `.example` templates. Rotation is a value plus a counter bump, and the
-  superseded version is destroyed in the same apply.
+  so values never enter state or a saved plan. Real values sit in ONE gitignored directory,
+  `infrastructure/secrets/` (`account.json`, `staging.json`, `prod.json`, templates in
+  `infrastructure/templates/`), filled by hidden-prompt and generator scripts and handed to Terraform
+  by `infrastructure/scripts/tf.ps1`. Rotation is a value plus a counter bump (the scripts do both),
+  and the superseded version is destroyed in the same apply.
 - **CI/CD**: the Cloud Build trigger (`ozari-api/cloudbuild.yaml`) verifies (install, build,
   type-check), builds and pushes the Docker image, runs `prisma migrate deploy` against the direct
   URL, then deploys to Cloud Run — with the env and secret lists **computed by Terraform**, so the
-  pipeline and the declared service cannot disagree. Cloudflare Pages builds the frontend on `dev`.
-- **The database role is a script, not Terraform** (`infrastructure/scripts/db-bootstrap.*`): the
-  application connects as a DML-only role that cannot alter the schema, and `db-verify.sql` proves it.
+  pipeline and the declared service cannot disagree. Cloudflare Pages builds the frontend from the
+  same branch, only when `ozari-app/` changes.
+- **The database is a script, not Terraform** (`infrastructure/scripts/neon.ps1`): it creates the
+  Neon project, then with SQL a schema-owning **migrator** role for the pipeline and a DML-only
+  **app** role for the API, and **proves** each holds only what its job needs before saving their
+  connection strings. The owner (DBA) login is never stored.
 
 **[INFRASTRUCTURE-PLAN.md](./INFRASTRUCTURE-PLAN.md)** is the automation map — what is code, what is
 a click and why, plus the per-environment configuration matrix and the cost model.
-**[DEPLOYMENT.md](./DEPLOYMENT.md)** is the ordered from-zero runbook, and
-**[REBUILD.md](./REBUILD.md)** is the teardown-and-recreate procedure with the complete list of
-manual steps.
+**[REBUILD.md](./REBUILD.md)** is the ordered from-zero build (and teardown) with the complete list of
+manual steps, and **[DEPLOYMENT.md](./DEPLOYMENT.md)** is the operational runbook — releases,
+rotation, rollback, troubleshooting.
 
 ## Backend (`ozari-api`)
 

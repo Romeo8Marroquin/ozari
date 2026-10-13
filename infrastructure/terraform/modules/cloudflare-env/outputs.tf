@@ -24,6 +24,11 @@ output "r2_bucket_name" {
 }
 
 output "r2_public_url" {
-  description = "Public read base URL for assets — the custom domain when one is configured, otherwise empty (fall back to the bucket's r2.dev URL, which Cloudflare only exposes in the dashboard)."
-  value       = var.r2_custom_domain == "" ? "" : "https://${var.r2_custom_domain}"
+  description = "Public read base URL for assets. Must equal the gcp root's r2_public_url."
+  value       = "https://${var.r2_custom_domain}"
+}
+
+output "pages_subdomain" {
+  description = "The project's real *.pages.dev host (may carry a random suffix)."
+  value       = cloudflare_pages_project.app.subdomain
 }

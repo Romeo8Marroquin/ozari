@@ -1,39 +1,53 @@
+# --- Supplied by tf.ps1 -------------------------------------------------------
+
+variable "state_bucket" {
+  description = "From ../environment.json — where the bootstrap state (project number, region) is read from."
+  type        = string
+}
+
 variable "cloudflare_account_id" {
-  description = "Cloudflare account ID."
+  description = "From secrets/account.json."
   type        = string
 }
 
 variable "cloudflare_zone_id" {
-  description = "Zone ID for partyrentalsgt.com (the same zone staging uses — one domain, two environments)."
+  description = "From secrets/account.json. The zone for partyrentalsgt.com — the same zone staging uses."
   type        = string
 }
 
-variable "app_hostname" {
-  description = "Production frontend hostname. The apex; Cloudflare's CNAME flattening is what allows a CNAME here at all."
+# --- Shape (committed) --------------------------------------------------------
+
+variable "cloud_run_service_name" {
+  description = "Must equal the gcp root's service_name — it is part of the deterministic hostname."
   type        = string
-  default     = "partyrentalsgt.com"
+  default     = "ozari-api"
 }
 
-variable "pages_project_name" {
-  description = "Cloudflare Pages project for production. A SEPARATE project from staging's — one project cannot serve two branches with two different VITE_API_URL values baked in."
-  type        = string
-  default     = "ozari-prod"
+variable "github_owner" {
+  type    = string
+  default = "Romeo8Marroquin"
 }
 
-variable "r2_bucket_name" {
-  description = "Production R2 bucket. Must equal the gcp root's r2_bucket_name."
-  type        = string
-  default     = "ozari-assets-prod"
+variable "github_repo_name" {
+  type    = string
+  default = "ozari"
 }
 
-variable "r2_custom_domain" {
-  description = "Hostname serving public asset reads. Worth having in production: the URL is embedded in stored image references and printed documents."
-  type        = string
-  default     = "assets.partyrentalsgt.com"
+variable "pages_build_env" {
+  description = "Build-image variables for Pages (no secrets — everything in a Vite build is public)."
+  type        = map(string)
+  default = {
+    NODE_VERSION = "22"
+  }
 }
 
 variable "extra_dns_records" {
-  description = "Records this environment owns (Resend DKIM/SPF/MX, verification TXTs). Only ever list what production is responsible for."
+  description = <<-EOT
+    Records production owns beyond its own hostnames. Empty on purpose: Resend's DKIM/SPF/MX records
+    already exist on the zone and work, and adopting them would mean importing live records into a
+    root whose rule is "create, never adopt". Declare them here only when they next have to change
+    — deleting the hand-made copies first.
+  EOT
   type = map(object({
     name     = string
     type     = string

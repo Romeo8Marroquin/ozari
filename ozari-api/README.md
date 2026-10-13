@@ -203,21 +203,21 @@ code and redeploy, not via env vars.
 
 ### Google Cloud Run
 
-**Status**: ✅ Staging deployment configured through Cloud Build
+**Status**: ✅ Deployed through Cloud Build, one project per environment (Terraform: `infrastructure/`)
 
 The backend is deployed as a normal container on Google Cloud Run. The Cloud Build trigger uses `ozari-api/cloudbuild.yaml`; because this repository is a monorepo, API build steps use `dir: ozari-api` and Docker builds with `ozari-api` as the context.
 
-**Staging Configuration**:
-- **Google Cloud project**: `ozari-500103`
-- **Region**: `northamerica-south1`
-- **Cloud Run service**: `ozari-api` (this is the staging service; not renamed)
+**Configuration** (identical in both environments except where noted):
+- **Google Cloud project**: `ozari-staging-gt` (staging, from `dev`) · `ozari-prod-gt` (production, from `main`)
+- **Region**: `us-east4` (beside the Neon database in `aws-us-east-1`)
+- **Cloud Run service**: `ozari-api` in each project (part of the deterministic hostname the Cloudflare Worker targets — do not rename)
 - **Artifact Registry repository**: `ozari-images`
-- **Runtime service account**: `ozari-run-sa@ozari-500103.iam.gserviceaccount.com`
+- **Runtime service account**: `ozari-run-sa@<project>.iam.gserviceaccount.com`
 - **Cloud Build config**: `ozari-api/cloudbuild.yaml`
 - **Docker context**: `ozari-api`
 - **Runtime command**: `pnpm start`
 - **Container port**: `8080`
-- **Scaling**: `--min-instances=0`, `--max-instances=3`
+- **Scaling**: `--min-instances=0`, `--max-instances=2` (staging) / `3` (production)
 
 **Pipeline Flow**:
 1. `verify-api`: install dependencies, run `pnpm build`, run `pnpm type-check`.

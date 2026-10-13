@@ -239,6 +239,9 @@ as the default landing.
      asia-east1/northeast1/southeast1, europe-north1/west1/west4, us-central1/east1/east4/west1), so
      the choice is a Cloudflare-proxied CNAME + an Origin Rule rewriting the `Host` header (free —
      recommended) or a global external HTTPS LB (~$18–25/mo). **Full runbook: `DEPLOYMENT.md` §3c.**
+     *(Superseded detail: what shipped is a free Cloudflare **Worker** — Origin Rules' Host rewrite
+     turned out to be Pro-only — and since the 2026-10 rebuild the API runs in `us-east4`, where
+     mappings exist but are still documented as not production-ready, so the Worker stays.)*
   3. Config sweep, all in the same change: `APP_HOST` (Terraform `_APP_HOST` substitution +
      `cloud-run.tf`, no trailing slash — CORS + API-key origin check compare it to `Origin`),
      Cloudflare Pages `VITE_API_URL`, **the frontend CSP `connect-src` in `index.html`** (it names

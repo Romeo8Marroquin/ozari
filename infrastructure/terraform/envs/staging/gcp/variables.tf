@@ -1,38 +1,53 @@
-# Defaults are staging's source of truth for NON-SECRET configuration, so a plan works without a
-# terraform.tfvars. They are all public identifiers (project id, hostnames, sizes) and are committed
-# deliberately: the repo carries the SHAPE of an environment. Anything genuinely secret is in
-# secrets.auto.tfvars, which is gitignored.
+# Staging's NON-SECRET shape lives here as committed defaults: hostnames, names, sizes. The repo
+# carries the shape of an environment; values that identify an account or are secret arrive from
+# tf.ps1 (see main.tf).
+
+# --- Supplied by tf.ps1 -------------------------------------------------------
 
 variable "project_id" {
-  type    = string
-  default = "ozari-500103"
-}
-
-variable "project_number" {
-  type    = string
-  default = "694756660984"
+  description = "From ../environment.json."
+  type        = string
 }
 
 variable "region" {
-  type    = string
-  default = "northamerica-south1"
+  description = "From ../environment.json."
+  type        = string
 }
 
-variable "environment" {
-  type    = string
-  default = "staging"
+variable "cloudflare_account_id" {
+  description = "From secrets/account.json. Used only to derive the R2 S3 endpoint."
+  type        = string
 }
+
+variable "github_app_installation_id" {
+  description = "From secrets/account.json."
+  type        = string
+}
+
+variable "secret_values" {
+  description = "From secrets/staging.json. Ephemeral: never written to state or to a saved plan."
+  type        = map(string)
+  ephemeral   = true
+  sensitive   = true
+}
+
+variable "secret_version_triggers" {
+  description = "Rotation counters from secrets/staging.json (`rotation`). Absent key = version 1."
+  type        = map(number)
+  default     = {}
+}
+
+# --- Runtime ------------------------------------------------------------------
 
 variable "node_env" {
-  description = "NODE_ENV. Staging runs 'staging', which is what gates /api/docs on and audit logging on."
+  description = "NODE_ENV. 'staging' keeps /api/docs on and turns audit logging on."
   type        = string
   default     = "staging"
 }
 
 variable "service_name" {
-  description = "Staging's Cloud Run service is named ozari-api. Do NOT rename it to ozari-api-staging — the name is referenced by the trigger, the docs and every runbook."
-  type        = string
-  default     = "ozari-api"
+  type    = string
+  default = "ozari-api"
 }
 
 variable "artifact_repository_id" {
@@ -43,12 +58,6 @@ variable "artifact_repository_id" {
 variable "image_name" {
   type    = string
   default = "ozari-api"
-}
-
-variable "min_instances" {
-  description = "Keep at 0. Scale-to-zero is the reason an idle environment costs nothing."
-  type        = number
-  default     = 0
 }
 
 variable "app_host" {
@@ -66,26 +75,30 @@ variable "log_level" {
   default = "info"
 }
 
-# R2 identifiers name your account and bucket, so they stay out of the public repo and live in the
-# gitignored terraform.tfvars. Empty is harmless until an upload is attempted.
-variable "r2_endpoint" {
-  type    = string
-  default = ""
-}
-
+# Must equal the cloudflare root's bucket and custom domain — the API signs uploads for the bucket it
+# is told about, and builds public image URLs from the domain.
 variable "r2_bucket_name" {
   type    = string
-  default = ""
+  default = "ozari-staging-assets"
 }
 
 variable "r2_public_url" {
   type    = string
-  default = ""
+  default = "https://assets-stg.partyrentalsgt.com"
+}
+
+# --- Cloud Run shape (spend controls) -----------------------------------------
+
+variable "min_instances" {
+  description = "Keep at 0. Scale-to-zero is the reason an idle environment costs nothing."
+  type        = number
+  default     = 0
 }
 
 variable "max_instances" {
-  type    = number
-  default = 3
+  description = "The spend cap. Staging never needs more than a couple."
+  type        = number
+  default     = 2
 }
 
 variable "concurrency" {
@@ -108,42 +121,16 @@ variable "memory" {
   default = "512Mi"
 }
 
-# --- Secrets ----------------------------------------------------------------
-
-variable "secret_values" {
-  description = "Secret payloads, from the gitignored secrets.auto.tfvars. Ephemeral: never written to state or to a saved plan."
-  type        = map(string)
-  ephemeral   = true
-  sensitive   = true
-}
-
-variable "secret_version_triggers" {
-  description = "Rotation counters. Bump a key here (and supply the new value) to push a new Secret Manager version; the superseded version is destroyed with it."
-  type        = map(number)
-  default     = {}
-}
-
-# --- Cloud Build ------------------------------------------------------------
+# --- Cloud Build ----------------------------------------------------------------
 
 variable "build_trigger_name" {
   type    = string
-  default = "ozari-api-dev"
+  default = "ozari-api-staging"
 }
 
 variable "build_trigger_branch_regex" {
   type    = string
   default = "^dev$"
-}
-
-variable "manage_github_connection" {
-  description = "false until the staging rebuild — see the note in main.tf."
-  type        = bool
-  default     = false
-}
-
-variable "github_repository_resource" {
-  type    = string
-  default = "projects/ozari-500103/locations/northamerica-south1/connections/ozari-github/repositories/Romeo8Marroquin-ozari"
 }
 
 variable "github_owner" {
@@ -156,21 +143,20 @@ variable "github_repo_name" {
   default = "ozari"
 }
 
-variable "github_app_installation_id" {
-  description = "Only needed when manage_github_connection = true. Not a secret (it is an installation number), but it is per-account, so it lives in terraform.tfvars."
-  type        = string
-  default     = ""
+variable "artifact_keep_count" {
+  type    = number
+  default = 2
 }
 
-# --- Optional ---------------------------------------------------------------
+variable "artifact_stale_tagged_seconds" {
+  type    = string
+  default = "1209600s" # 14 days
+}
+
+# --- Optional -------------------------------------------------------------------
 
 variable "enable_cleanup_job" {
-  type    = bool
-  default = false
-}
-
-variable "revoke_default_compute_sa_editor" {
-  description = "⚠️ Authoritative IAM. Read the warning in modules/gcp-env/iam.tf before setting true."
+  description = "Nightly cleanup:sessions. Housekeeping, not correctness — off on staging."
   type        = bool
   default     = false
 }

@@ -14,6 +14,9 @@ locals {
       "artifactregistry.googleapis.com",
       "secretmanager.googleapis.com",
       "iam.googleapis.com",
+      # The Google Calendar integration calls this API with an OAuth client that lives in THIS
+      # project, so it must be enabled here. The client itself stays manual (DEPLOYMENT.md §3d).
+      "calendar-json.googleapis.com",
     ],
     var.enable_cleanup_job ? ["cloudscheduler.googleapis.com"] : [],
   )

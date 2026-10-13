@@ -209,9 +209,9 @@ Cloud Run writes container stdout/stderr to Cloud Logging. Here's how to find an
 ### **Access Cloud Run Logs**
 
 1. Open Google Cloud Console.
-2. Select project `ozari-500103`.
-3. Go to **Cloud Run**.
-4. Select service `ozari-api-staging`.
+2. Select the environment's project: `ozari-staging-gt` (staging) or `ozari-prod-gt` (production).
+3. Go to **Cloud Run** (region `us-east4`).
+4. Select service `ozari-api`.
 5. Open the **Logs** tab, or use **Logs Explorer** for advanced filters.
 
 ### **Search Examples**

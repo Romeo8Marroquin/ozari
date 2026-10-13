@@ -3,17 +3,16 @@ output "cloud_run_uri" {
   value       = module.gcp.cloud_run_uri
 }
 
-output "cloud_run_hostname" {
-  description = "Hostname the Cloudflare Worker rewrites Host to. The cloudflare root reads this from remote state — do not remove it."
-  value       = module.gcp.cloud_run_hostname
-}
-
 output "run_service_account_email" {
   value = module.gcp.run_service_account_email
 }
 
 output "build_service_account_email" {
   value = module.gcp.build_service_account_email
+}
+
+output "build_trigger_name" {
+  value = var.build_trigger_name
 }
 
 output "image_url" {

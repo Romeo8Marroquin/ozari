@@ -24,7 +24,9 @@ resource "cloudflare_dns_record" "app" {
   zone_id = var.zone_id
   name    = var.app_hostname
   type    = "CNAME"
-  content = "${var.pages_project_name}.pages.dev"
+  # The project's REAL pages.dev host. It is not always "<name>.pages.dev": when that name is taken
+  # anywhere on Cloudflare, Pages appends a random suffix (the pre-rebuild project was `ozari-c28`).
+  content = cloudflare_pages_project.app.subdomain
   ttl     = 1
   proxied = true
   comment = "Ozari ${var.environment} frontend — Cloudflare Pages custom domain. Terraform-managed."

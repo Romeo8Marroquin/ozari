@@ -1,10 +1,9 @@
 # ---------------------------------------------------------------------------
 # IAM.
 #
-# Everything here is *_iam_member (ADDITIVE) except where explicitly marked authoritative. Additive
-# members are idempotent — re-applying one that already exists re-asserts it and touches no other
-# member of the policy — which is what lets this config be adopted onto a live project without
-# stripping access somebody granted by hand in an emergency.
+# Everything here is *_iam_member (ADDITIVE) — or its surgical inverse, *_iam_member_remove. Nothing
+# is authoritative: re-applying a member re-asserts it and touches no other member of the policy, so
+# an emergency grant made by hand is never silently stripped by the next apply.
 # ---------------------------------------------------------------------------
 
 locals {
@@ -13,7 +12,9 @@ locals {
 
   # Cloud Build's Google-managed service agent. It is the identity that reads the GitHub PAT when a
   # 2nd-gen connection is created, which is why it appears here at all.
-  cloudbuild_service_agent = "serviceAccount:service-${var.project_number}@gcp-sa-cloudbuild.iam.gserviceaccount.com"
+  cloudbuild_service_agent = "serviceAccount:service-${local.project_number}@gcp-sa-cloudbuild.iam.gserviceaccount.com"
+
+  default_compute_sa = "serviceAccount:${local.project_number}-compute@developer.gserviceaccount.com"
 }
 
 # --- Secret access, derived from the registry in secrets.tf ------------------
@@ -61,43 +62,49 @@ resource "google_service_account_iam_member" "build_sa_acts_as_run_sa" {
 }
 
 # --- The GitHub connection's credential --------------------------------------
-# Only relevant when Terraform declares the connection. The Cloud Build SERVICE AGENT (a
-# Google-managed identity, not one of ours) reads the PAT, and the connection fails to create
-# without this binding.
+# The Cloud Build SERVICE AGENT (a Google-managed identity, not one of ours) reads the PAT, and the
+# connection fails to create without this binding.
 #
-# ⚠️ The agent is created lazily, the first time the Cloud Build API is used in a project. On a
-# brand-new project this binding can therefore fail with "service account does not exist" even
-# though the API is enabled. If that happens, materialise it once and re-apply:
-#
-#   gcloud beta services identity create --service=cloudbuild.googleapis.com --project=<project>
+# The agent is created lazily, the first time the Cloud Build API is used in a project, so on a
+# brand-new project the binding could race it and fail with "service account does not exist".
+# `google_project_service_identity` materialises it explicitly — the old runbook step
+# ("run `gcloud beta services identity create` and re-apply") is an edge in the graph now.
+
+resource "google_project_service_identity" "cloudbuild" {
+  provider = google-beta
+
+  project = var.project_id
+  service = "cloudbuild.googleapis.com"
+
+  depends_on = [google_project_service.required]
+}
 
 resource "google_secret_manager_secret_iam_member" "cloudbuild_agent_reads_github_token" {
-  count = var.manage_github_connection ? 1 : 0
-
   project   = var.project_id
   secret_id = google_secret_manager_secret.this["github_oauth_token"].secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = local.cloudbuild_service_agent
 
-  depends_on = [google_project_service.required]
+  depends_on = [google_project_service_identity.cloudbuild]
 }
 
-# --- Optional hardening ------------------------------------------------------
-#
-# ⚠️ AUTHORITATIVE resource. google_project_iam_binding owns the entire member list for the role, so
-# this does not "remove the default compute SA" — it declares that NOBODY holds roles/editor. That
-# is the intended end state (the runtime is ozari-run-sa, builds are ozari-build-sa, and the human
-# owner holds roles/owner, which is a different role), but read the live policy before enabling it:
-#
-#   gcloud projects get-iam-policy <project> --flatten="bindings[].members" \
-#     --filter="bindings.role=roles/editor" --format="value(bindings.members)"
-#
-# Anything that appears there and is still needed must be moved to a narrower role FIRST.
+# --- Hardening ---------------------------------------------------------------
+# On some projects Google grants the default compute service account roles/editor the moment the
+# Compute API comes up (enabling Cloud Run can bring it). Nothing here runs as that account. This
+# removes exactly that one member from exactly that one role — unlike an iam_binding, it cannot
+# strip anything else, and it is a no-op when the grant was never made.
 
-resource "google_project_iam_binding" "no_project_editors" {
+resource "google_project_iam_member_remove" "default_compute_sa_editor" {
   count = var.revoke_default_compute_sa_editor ? 1 : 0
 
   project = var.project_id
   role    = "roles/editor"
-  members = []
+  member  = local.default_compute_sa
+
+  # After the project-level grants, never beside them: both read-modify-write the SAME project policy,
+  # and run in parallel they collide ("Error 409: There were concurrent policy changes").
+  depends_on = [
+    google_project_service.required,
+    google_project_iam_member.build_sa_roles,
+  ]
 }

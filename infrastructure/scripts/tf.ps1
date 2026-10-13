@@ -1,120 +1,191 @@
 ﻿# =============================================================================
-# Ozari — Terraform wrapper. One script for every environment and stack.
+# Ozari — the ONE way to run Terraform here, for every environment and stack.
 #
-#   ./tf.ps1 staging gcp plan
-#   ./tf.ps1 staging gcp apply
-#   ./tf.ps1 staging cloudflare plan
-#   ./tf.ps1 prod    gcp apply
-#   ./tf.ps1 bootstrap - apply           # the one-time project/state-bucket root
+#   ./infrastructure/scripts/tf.ps1 staging bootstrap plan
+#   ./infrastructure/scripts/tf.ps1 staging bootstrap apply
+#   ./infrastructure/scripts/tf.ps1 staging cloudflare plan | apply
+#   ./infrastructure/scripts/tf.ps1 staging gcp        plan | apply
+#   ./infrastructure/scripts/tf.ps1 prod    gcp        output
+#   ./infrastructure/scripts/tf.ps1 staging gcp        validate     # no credentials needed
 #
-# There is no `destroy` verb, on purpose. Destroying an environment is a deliberate, documented
-# procedure (INFRASTRUCTURE-PLAN.md §6), not a flag on a convenience script.
+# PLAN, THEN APPLY THE PLAN. `plan` saves the plan to a file; `apply` applies exactly that file and
+# nothing else — what you reviewed is byte-for-byte what happens. A plan made stale by any change in
+# between is rejected by Terraform itself. There is no `destroy` verb: retiring an environment is a
+# documented procedure (REBUILD.md), not a flag on a convenience script.
 #
-# What it does beyond running terraform:
-#   · checks the Terraform version, because `secret_data_wo` needs >= 1.11 and the failure without
-#     it is an unhelpful parse error;
-#   · checks the environment's secrets file exists before a gcp apply, so you find out now rather
-#     than after Terraform has already created half the resources;
-#   · refuses to run a cloudflare stack without CLOUDFLARE_API_TOKEN set;
-#   · requires you to type the environment name before an apply.
+# What it supplies, so no root needs a hand-written tfvars file:
+#   · backend bucket, project_id, project_name, region, state_bucket  ← envs/<env>/environment.json
+#   · account values (TF_VAR_*), CLOUDFLARE_API_TOKEN                   ← secrets/account.json
+#   · TF_VAR_secret_values / _secret_version_triggers (gcp only)        ← secrets/<env>.json
+# All as variables of THIS process only, removed again on exit.
+#
+# BOOTSTRAP'S FIRST RUN has no state bucket yet (it is what the run creates). The wrapper then plans
+# and applies with a temporary local backend and, once the bucket exists, migrates the state into
+# it and deletes the local copy. Every later run uses the bucket.
 # =============================================================================
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet("staging", "prod", "bootstrap")]
+    [Parameter(Mandatory = $true, Position = 0)][ValidateSet("staging", "prod")]
     [string]$Environment,
 
-    [Parameter(Mandatory = $true)][ValidateSet("gcp", "cloudflare", "-")]
+    [Parameter(Mandatory = $true, Position = 1)][ValidateSet("bootstrap", "gcp", "cloudflare")]
     [string]$Stack,
 
-    [Parameter(Mandatory = $true)][ValidateSet("init", "validate", "plan", "apply", "output")]
+    [Parameter(Mandatory = $true, Position = 2)][ValidateSet("init", "validate", "plan", "apply", "output")]
     [string]$Action,
 
-    # Extra arguments passed straight through, e.g. -Extra "-target=module.gcp.google_secret_manager_secret.this"
+    # Skip the typed confirmation before applying a SAVED plan you have already reviewed.
+    [switch]$Yes,
+
+    # Passed straight to `terraform plan`, e.g. -Extra "-target=module.cloudflare.cloudflare_r2_bucket.assets"
     [string[]]$Extra = @()
 )
 
 $ErrorActionPreference = "Stop"
+Import-Module (Join-Path $PSScriptRoot "lib\Ozari.Infra.psm1") -Force
 
-$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-if ($Environment -eq "bootstrap") {
-    $Dir = Join-Path $RepoRoot "infrastructure\terraform\bootstrap"
-} else {
-    if ($Stack -eq "-") { throw "A stack (gcp | cloudflare) is required for the '$Environment' environment." }
-    $Dir = Join-Path $RepoRoot "infrastructure\terraform\envs\$Environment\$Stack"
-}
-
+$InfraRoot = Get-OzInfraRoot
+$Dir = Join-Path $InfraRoot "terraform\envs\$Environment\$Stack"
 if (-not (Test-Path $Dir)) { throw "No such Terraform root: $Dir" }
 
+$envConfig = Get-OzEnvironment $Environment
+$PlanFile = Join-Path $Dir ".terraform\ozari.tfplan"
+$LocalState = Join-Path $Dir "terraform.tfstate"
+$LocalOverride = Join-Path $Dir "local_backend_override.tf"   # gitignored (*_override.tf)
+
 # --- Terraform version -------------------------------------------------------
-$tf = Get-Command terraform -ErrorAction SilentlyContinue
-if (-not $tf) { throw "terraform is not on PATH." }
-
-$versionJson = terraform -version -json | ConvertFrom-Json
-$version = [version]($versionJson.terraform_version)
-if ($version -lt [version]"1.11.0") {
-    throw "Terraform $version found; >= 1.11.0 is required. Write-only secret arguments (secret_data_wo) do not exist before 1.11, and the error without them points at the argument rather than at the version."
+if (-not (Get-Command terraform -ErrorAction SilentlyContinue)) { throw "terraform is not on PATH (winget install Hashicorp.Terraform)." }
+$tfVersion = [version]((terraform version -json | ConvertFrom-Json).terraform_version)
+if ($tfVersion -lt [version]"1.11.0") {
+    throw "Terraform $tfVersion found; >= 1.11 is required for write-only secret arguments (secret_data_wo)."
 }
 
-# --- Preflight ---------------------------------------------------------------
-if ($Stack -eq "cloudflare" -and -not $env:CLOUDFLARE_API_TOKEN) {
-    throw @"
-CLOUDFLARE_API_TOKEN is not set.
-
-  `$env:CLOUDFLARE_API_TOKEN = "<token>"
-
-It is an environment variable and never a tfvars value: a token passed as a provider argument is
-written into Terraform state. Required scopes are listed in the stack's terraform.tfvars.example.
-"@
+function Invoke-Tf {
+    param([string[]]$Arguments)
+    & terraform @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "terraform $($Arguments[0]) failed (exit $LASTEXITCODE)." }
 }
 
-if ($Stack -eq "gcp" -and $Action -eq "apply") {
-    $secretsFile = Join-Path $Dir "secrets.auto.tfvars"
-    if (-not (Test-Path $secretsFile)) {
-        throw @"
-$secretsFile is missing.
-
-Copy secrets.auto.tfvars.example next to it and fill in every key. Terraform owns the Secret Manager
-VERSIONS now, so an apply without this file fails partway through naming a missing map key.
-"@
+function Test-StateBucket {
+    # Windows PowerShell turns a native command's redirected stderr into error records, which
+    # $ErrorActionPreference = Stop would throw on — so this one probe runs with Continue.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & gcloud storage buckets describe "gs://$($envConfig.state_bucket)" --format="value(name)" 2>$null | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        $ErrorActionPreference = $previous
     }
 }
 
 Push-Location $Dir
 try {
-    Write-Host "→ $Environment/$Stack  ($Dir)"
-    Write-Host ""
+    Write-Host "→ $Environment / $Stack   ($Dir)" -ForegroundColor Cyan
 
-    if ($Action -ne "output") {
-        terraform init -input=false
-        if ($LASTEXITCODE -ne 0) { throw "terraform init failed." }
+    # --- validate: syntax + schema only; no backend, no credentials ------------------
+    if ($Action -eq "validate") {
+        Invoke-Tf @("init", "-backend=false", "-input=false")
+        Invoke-Tf @("validate")
+        return
+    }
+
+    # --- Inputs ---------------------------------------------------------------------
+    $env:TF_VAR_project_id = $envConfig.project_id
+    $env:TF_VAR_project_name = $envConfig.project_name
+    $env:TF_VAR_region = $envConfig.region
+    $env:TF_VAR_state_bucket = $envConfig.state_bucket
+
+    $require = switch ($Stack) {
+        "bootstrap" { @("billing_account") }
+        "gcp" { @("github_app_installation_id", "cloudflare_account_id") }
+        "cloudflare" { @("cloudflare_account_id", "cloudflare_zone_id", "cloudflare_api_token") }
+    }
+    Import-OzAccount -Require $require | Out-Null
+
+    if ($Stack -eq "gcp" -and $Action -ne "output") {
+        $secrets = Read-OzSecrets $Environment
+        $missing = @(Get-OzMissing $secrets $Environment)
+        if ($missing.Count -gt 0) {
+            throw @"
+secrets/$Environment.json still has EMPTY values: $($missing -join ', ')
+An empty Secret Manager version is a container that dies at startup with an error that points at
+nothing, so the plan stops here instead. Fill them (REBUILD.md §3 says where each comes from):
+  ./infrastructure/scripts/secret.ps1 $Environment <key>
+"@
+        }
+        $env:TF_VAR_secret_values = $secrets.secrets | ConvertTo-Json -Compress -Depth 3
+        $env:TF_VAR_secret_version_triggers = $secrets.rotation | ConvertTo-Json -Compress -Depth 3
+    }
+
+    # --- Backend --------------------------------------------------------------------
+    # Bootstrap runs locally until its bucket exists (or while a local state is still waiting to be
+    # migrated after an interrupted first run).
+    $localMode = $false
+    if ($Stack -eq "bootstrap") {
+        $localMode = (Test-Path $LocalState) -or -not (Test-StateBucket)
+    } elseif (-not (Test-StateBucket)) {
+        throw "State bucket gs://$($envConfig.state_bucket) does not exist (or you cannot read it). Run: tf.ps1 $Environment bootstrap apply"
+    }
+
+    if ($localMode) {
+        Write-Host "First bootstrap run: state is LOCAL until the bucket exists, then it is migrated into it." -ForegroundColor Yellow
+        Set-Content -Path $LocalOverride -Encoding ascii -Value 'terraform {
+  backend "local" {
+    path = "terraform.tfstate"
+  }
+}'
+        Invoke-Tf @("init", "-input=false", "-reconfigure")
+    } else {
+        Invoke-Tf @("init", "-input=false", "-reconfigure", "-backend-config=bucket=$($envConfig.state_bucket)")
     }
 
     switch ($Action) {
         "init" { }
-        "validate" {
-            terraform validate
-        }
+
+        "output" { Invoke-Tf @("output") }
+
         "plan" {
-            terraform validate
-            if ($LASTEXITCODE -ne 0) { throw "terraform validate failed." }
-            terraform plan -input=false @Extra
-        }
-        "apply" {
+            Invoke-Tf @("validate")
+            Invoke-Tf (@("plan", "-input=false", "-out=$PlanFile") + $Extra)
             Write-Host ""
-            Write-Host "About to APPLY to '$Environment/$Stack'." -ForegroundColor Yellow
-            if ($Environment -eq "prod") {
-                Write-Host "This is PRODUCTION." -ForegroundColor Red
-            }
-            $confirm = Read-Host "Type the environment name to continue"
-            if ($confirm -ne $Environment) { throw "Confirmation did not match. Nothing was applied." }
-            terraform apply -input=false @Extra
+            Write-Host "Plan saved. Review it above, then:  ./infrastructure/scripts/tf.ps1 $Environment $Stack apply" -ForegroundColor Cyan
         }
-        "output" {
-            terraform output
+
+        "apply" {
+            if (-not (Test-Path $PlanFile)) {
+                throw "No saved plan. Run 'tf.ps1 $Environment $Stack plan' first, review it, then apply."
+            }
+            if (-not $Yes) {
+                Write-Host ""
+                Write-Host "About to APPLY the saved plan to $Environment / $Stack." -ForegroundColor Yellow
+                if ($Environment -eq "prod") { Write-Host "This is PRODUCTION." -ForegroundColor Red }
+                $confirm = Read-Host "Type the environment name ($Environment) to continue"
+                if ($confirm -ne $Environment) { throw "Confirmation did not match. Nothing was applied." }
+            }
+            try {
+                Invoke-Tf @("apply", "-input=false", $PlanFile)
+            } finally {
+                # A saved plan is single-use either way: applied, or stale after a partial apply.
+                Remove-Item $PlanFile -ErrorAction SilentlyContinue
+            }
+
+            if ($localMode -and (Test-StateBucket)) {
+                Write-Host ""
+                Write-Host "Migrating bootstrap state into gs://$($envConfig.state_bucket) ..." -ForegroundColor Cyan
+                Remove-Item $LocalOverride -ErrorAction SilentlyContinue
+                Invoke-Tf @("init", "-input=false", "-migrate-state", "-force-copy", "-backend-config=bucket=$($envConfig.state_bucket)")
+                Remove-Item $LocalState, "$LocalState.backup" -ErrorAction SilentlyContinue
+                $localMode = $false
+                Write-Host "Bootstrap state now lives in the bucket; the local copy is gone." -ForegroundColor Green
+            }
         }
     }
-
-    if ($LASTEXITCODE -ne 0) { throw "terraform $Action failed (exit $LASTEXITCODE)." }
 } finally {
+    if ($localMode) { Remove-Item $LocalOverride -ErrorAction SilentlyContinue }
     Pop-Location
+    Clear-OzProcessSecrets
+    foreach ($n in @("TF_VAR_project_id", "TF_VAR_project_name", "TF_VAR_region", "TF_VAR_state_bucket")) {
+        Remove-Item "Env:$n" -ErrorAction SilentlyContinue
+    }
 }

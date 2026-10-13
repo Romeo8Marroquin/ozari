@@ -12,35 +12,30 @@
 # ---------------------------------------------------------------------------
 
 locals {
-  # The GitHub personal access token the Cloud Build 2nd-gen connection authenticates with. Present
-  # only when Terraform declares that connection.
-  #
-  # It is in this registry rather than created by hand because the connection resource references
-  # `versions/latest` of it: if the secret does not exist with a value at the moment the connection
-  # is created, the apply fails — which is exactly the kind of ordering that should be an edge in
-  # the graph, not a step in a runbook. It is read by Cloud Build's Google-managed SERVICE AGENT,
-  # not by our own service accounts, so it grants nothing to the app.
-  github_token_secret = var.manage_github_connection ? {
+  secrets = {
+    # The GitHub token the Cloud Build 2nd-gen connection authenticates with.
+    #
+    # It is in this registry rather than created by hand because the connection resource references
+    # `versions/latest` of it: if the secret does not exist with a value at the moment the connection
+    # is created, the apply fails — which is exactly the kind of ordering that should be an edge in
+    # the graph, not a step in a runbook. It is read by Cloud Build's Google-managed SERVICE AGENT,
+    # not by our own service accounts, so it grants nothing to the app.
     github_oauth_token = {
       secret_id    = var.github_oauth_token_secret_id
       env_var      = null
       run_access   = false
       build_access = false
     }
-  } : {}
 
-  secrets = merge(local.app_secrets, local.github_token_secret)
-
-  app_secrets = {
     database_url = {
       secret_id    = "ozari-database-url"
       env_var      = "DATABASE_URL"
       run_access   = true
-      build_access = true
+      build_access = false # the pipeline migrates with the MIGRATOR url; it never needs the app's
     }
     direct_database_url = {
       secret_id    = "ozari-direct-database-url"
-      env_var      = null # pipeline-only: `prisma migrate deploy` runs as the OWNER role.
+      env_var      = null # pipeline-only: `prisma migrate deploy` runs as ozari_migrator (owns the schema).
       run_access   = false
       build_access = true
     }
@@ -113,6 +108,17 @@ locals {
   }
   run_accessible_secrets   = { for key, cfg in local.secrets : key => cfg if cfg.run_access }
   build_accessible_secrets = { for key, cfg in local.secrets : key => cfg if cfg.build_access }
+
+  # Cloud Run resolves a `:latest` secret only when an instance STARTS. A rotated value therefore
+  # reaches the API only through a new revision — without one, warm instances keep serving with the
+  # old (possibly compromised) value until they happen to recycle. This number is the sum of the
+  # rotation counters of every secret the service binds; counters only ever grow, so any rotation of
+  # a runtime secret changes it, and cloud-run.tf carries it as a template label: the SAME apply that
+  # pushes the new versions rolls a fresh revision (after them — the service depends_on the versions).
+  # Pipeline-only secrets (GitHub token, migrator URL) are left out: rotating those needs no restart.
+  runtime_secrets_generation = tostring(sum(concat([0], [
+    for key in keys(local.runtime_secret_bindings) : lookup(var.secret_version_triggers, key, 1)
+  ])))
 }
 
 resource "google_secret_manager_secret" "this" {
@@ -157,23 +163,11 @@ resource "google_secret_manager_secret_version" "this" {
   # quietly creating an empty version that fails at container start with a much worse error.
   secret_data_wo = var.secret_values[each.key]
 
-  # ⚠️ DEFAULTS TO null, AND THAT IS WHAT MAKES ADOPTION SAFE.
-  #
-  # On a fresh environment the trigger is irrelevant: the resource is being created, so the value is
-  # sent regardless. On an EXISTING environment the version is imported instead, and an imported
-  # version has no trigger in state — so a null default means config and state agree and the plan is
-  # empty. Defaulting to `1` would show null → 1 on every imported secret and push a brand-new
-  # version of all eleven.
-  #
-  # That is not merely wasteful (Secret Manager bills every enabled version, forever). It is the one
-  # way this module could BREAK a working environment: if a value in secrets.auto.tfvars does not
-  # match what is live — mistyped, or reconstructed from memory because nobody kept it — the apply
-  # would silently rotate the secret to the wrong value, and staging would fail at the next cold
-  # start with a credential error nothing points at. With a null trigger, a wrong value in the file
-  # does nothing at all.
-  #
-  # To rotate: set the key to 1 (or bump it) in secret_version_triggers with the new value in place.
-  secret_data_wo_version = lookup(var.secret_version_triggers, each.key, null)
+  # Provider v8 makes this a REQUIRED string whenever `secret_data_wo` is set. An absent counter means
+  # "1", the first version. A value that changes in the secrets file WITHOUT a counter bump is inert
+  # — Terraform cannot see it — so a typo in the file can never silently rotate a live credential.
+  # To rotate: new value + bumped counter (the scripts do both), then apply.
+  secret_data_wo_version = tostring(lookup(var.secret_version_triggers, each.key, 1))
 
   deletion_policy = "DELETE"
 }

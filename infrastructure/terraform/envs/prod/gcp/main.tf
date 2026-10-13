@@ -1,48 +1,58 @@
 # ---------------------------------------------------------------------------
 # PRODUCTION — Google Cloud.
 #
-# Same module as staging, different inputs. That is the whole design: if production ever needs a
-# resource staging does not have, it goes in the module behind a variable — never as a file that
-# exists only here, because a file that exists only here is a file nobody tests until the day it
-# matters.
+# Same module as production, different inputs. Everything that differs between the two is in this
+# file, in variables.tf defaults, or in ../environment.json — never in a resource that exists only
+# here, because a file that exists only in one environment is a file nobody tests.
 #
-# Production lives in its own GCP PROJECT. Free tiers are per BILLING ACCOUNT, so the isolation is
-# free: it buys a hard blast-radius boundary (a wrong `-target` in staging cannot reach prod), lets
-# both environments use identical secret names, and keeps IAM separate.
-#
-# The project itself is created by `infrastructure/terraform/bootstrap` — run that first.
+# Run it through `infrastructure/scripts/tf.ps1 prod gcp plan|apply`, which supplies:
+#   · the backend bucket and project_id / region          ← ../environment.json (committed)
+#   · github_app_installation_id, cloudflare_account_id   ← secrets/account.json (gitignored)
+#   · secret_values, secret_version_triggers              ← secrets/prod.json (gitignored)
 # ---------------------------------------------------------------------------
 
 terraform {
   required_version = ">= 1.11.0"
 
   backend "gcs" {
-    # The prod state bucket, created by the bootstrap root. Deliberately NOT the staging bucket:
-    # state is as sensitive as the environment it describes.
-    bucket = "ozari-prod-tfstate"
-    prefix = "ozari/prod"
+    prefix = "ozari/gcp"
   }
 
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = ">= 6.20.0, < 7.0.0"
+      version = "~> 8.6"
+    }
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 8.6"
     }
   }
 }
 
+# `user_project_override` + `billing_project` charge API quota to THIS project instead of whatever
+# quota project your gcloud Application Default Credentials happen to carry — which, after an old
+# project is deleted, is a project that no longer exists, and every call fails naming it.
 provider "google" {
-  project = var.project_id
-  region  = var.region
+  project               = var.project_id
+  region                = var.region
+  billing_project       = var.project_id
+  user_project_override = true
+}
+
+provider "google-beta" {
+  project               = var.project_id
+  region                = var.region
+  billing_project       = var.project_id
+  user_project_override = true
 }
 
 module "gcp" {
   source = "../../../modules/gcp-env"
 
-  project_id     = var.project_id
-  project_number = var.project_number
-  region         = var.region
-  environment    = var.environment
+  project_id  = var.project_id
+  region      = var.region
+  environment = "production"
 
   service_name           = var.service_name
   artifact_repository_id = var.artifact_repository_id
@@ -52,7 +62,8 @@ module "gcp" {
   node_env               = var.node_env
   log_level              = var.log_level
 
-  r2_endpoint    = var.r2_endpoint
+  # The R2 endpoint is account-scoped, so it is derived from the account id rather than typed.
+  r2_endpoint    = "https://${var.cloudflare_account_id}.r2.cloudflarestorage.com"
   r2_bucket_name = var.r2_bucket_name
   r2_public_url  = var.r2_public_url
 
@@ -66,26 +77,15 @@ module "gcp" {
   secret_values           = var.secret_values
   secret_version_triggers = var.secret_version_triggers
 
-  # A NEW project has no console-created connection to inherit, so Terraform declares it. The two
-  # manual prerequisites are unavoidable and one-time: install the Cloud Build GitHub App on the
-  # repository, and put a GitHub PAT (REPO_ADMIN scope) in the secret named below.
-  manage_github_connection     = true
-  github_connection_name       = var.github_connection_name
-  github_owner                 = var.github_owner
-  github_repo_name             = var.github_repo_name
-  github_app_installation_id   = var.github_app_installation_id
-  github_oauth_token_secret_id = var.github_oauth_token_secret_id
+  github_owner               = var.github_owner
+  github_repo_name           = var.github_repo_name
+  github_app_installation_id = var.github_app_installation_id
 
   build_trigger_name         = var.build_trigger_name
   build_trigger_branch_regex = var.build_trigger_branch_regex
 
-  # Production keeps a tighter registry: two rollback targets and a two-week window for stale tags.
   artifact_keep_count           = var.artifact_keep_count
   artifact_stale_tagged_seconds = var.artifact_stale_tagged_seconds
 
   enable_cleanup_job = var.enable_cleanup_job
-
-  # A brand-new project has nothing legitimate holding roles/editor, so this is safe to declare from
-  # the start here — unlike on staging, where it would strip bindings that predate Terraform.
-  revoke_default_compute_sa_editor = var.revoke_default_compute_sa_editor
 }

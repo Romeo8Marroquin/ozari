@@ -15,10 +15,11 @@
 # describe staging. A real deploy always overrides them.
 # =============================================================================
 substitutions:
-  _REGION: northamerica-south1
-  # Staging's Cloud Run service is named ozari-api (NOT ozari-api-staging). Do not rename.
+  _REGION: us-east4
+  # The service is `ozari-api` in EVERY project (each environment has its own). Do not rename it:
+  # the name is part of Cloud Run's deterministic hostname, which the Cloudflare Worker targets.
   _SERVICE_NAME: ozari-api
-  _IMAGE_URL: northamerica-south1-docker.pkg.dev/$PROJECT_ID/ozari-images/ozari-api
+  _IMAGE_URL: us-east4-docker.pkg.dev/$PROJECT_ID/ozari-images/ozari-api
   _RUN_SA: ozari-run-sa@$PROJECT_ID.iam.gserviceaccount.com
 
   # The runtime contract. Terraform overrides both; see the warning above.
@@ -30,14 +31,15 @@ substitutions:
   # Cloud Run shape. Terraform sets these from the same variables it uses for the service, so an
   # apply and a deploy cannot disagree about the spend cap or the timeout.
   _MIN_INSTANCES: '0'
-  _MAX_INSTANCES: '3'
+  _MAX_INSTANCES: '2'
   _CONCURRENCY: '40'
   # A backstop above the app's own 30s request/response timeout.
   _TIMEOUT: '60'
   _CPU: '1'
   _MEMORY: 512Mi
 
-  # Migrations run as the OWNER role. This secret is never bound to the running service.
+  # Migrations run as ozari_migrator: it owns the schema (CREATE/ALTER/DROP) but cannot create roles or
+  # databases. This secret is never bound to the running service.
   _DIRECT_DATABASE_URL_SECRET: ozari-direct-database-url
 
 steps:
