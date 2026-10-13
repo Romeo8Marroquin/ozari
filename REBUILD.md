@@ -311,8 +311,13 @@ retire. Counts below are what the plans should show — anything else: stop and 
            plan, apply). Then a second plan must show NO CHANGES.
        Prove the spend cap without firing it (Claude can run this — no secrets): a dry-run message
        at 100 % must log "WOULD unlink billing (permission OK)":
-         gcloud pubsub topics publish ozari-spend-cap --project=ozari-prod-gt --attribute=dryRun=true --message='{"costAmount":5,"budgetAmount":5,"currencyCode":"USD"}'
+         gcloud pubsub topics publish ozari-spend-cap --project=ozari-prod-gt "--attribute=dryRun=true,costAmount=5,budgetAmount=5" --message=test
          gcloud functions logs read ozari-spend-cap --gen2 --region=us-east4 --project=ozari-prod-gt --limit=5
+       (Values go in attributes, and the argument stays QUOTED: Windows PowerShell strips the quotes
+       out of a JSON --message and splits an unquoted comma list — "unusable notification, ignored"
+       in the log means exactly that. Verified on staging 2026-10-13: permission OK. Right
+       after the apply, "The request was not authenticated" for a minute or two is the invoker grant
+       propagating; Pub/Sub retries and the next delivery gets through.)
 
  8. ☁️ First deploy (Claude can run it — it loads no secrets)
          gcloud builds triggers run ozari-api-prod --branch=main --region=us-east4 --project=ozari-prod-gt

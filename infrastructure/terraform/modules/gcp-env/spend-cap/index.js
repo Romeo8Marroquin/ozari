@@ -13,7 +13,9 @@
 // only. It never touches the billing account, other projects, or any data.
 //
 // Testing without consequences: a message carrying the attribute `dryRun=true` runs the whole
-// decision and the permission check, and logs WOULD instead of acting. Budgets never set it.
+// decision and the permission check, and logs WOULD instead of acting. Budgets never set it. A dry
+// run takes `costAmount` / `budgetAmount` from ATTRIBUTES (REBUILD.md §4b step 7), because Windows
+// PowerShell strips the quotes out of a JSON body passed to gcloud.
 
 import * as functions from '@google-cloud/functions-framework';
 
@@ -32,17 +34,23 @@ async function accessToken() {
   return (await res.json()).access_token;
 }
 
+// Never throws: a message that cannot be read would otherwise be retried by Pub/Sub for days.
+function readNotification(message) {
+  try {
+    return JSON.parse(Buffer.from(message?.data ?? '', 'base64').toString('utf8'));
+  } catch {
+    return {};
+  }
+}
+
 functions.cloudEvent('capSpend', async (cloudEvent) => {
   const message = cloudEvent.data?.message;
-  if (!message?.data) {
-    log('WARNING', 'Spend cap: message without data, ignored');
-    return;
-  }
+  const attributes = message?.attributes ?? {};
+  const dryRun = attributes.dryRun === 'true';
+  const notification = dryRun ? { ...readNotification(message), ...attributes } : readNotification(message);
 
-  const notification = JSON.parse(Buffer.from(message.data, 'base64').toString('utf8'));
   const cost = Number(notification.costAmount);
   const budget = Number(notification.budgetAmount);
-  const dryRun = message.attributes?.dryRun === 'true';
   const fields = { cost, budget, currency: notification.currencyCode, dryRun };
 
   // A budget of 0 (or garbage) is a misconfiguration, never a reason to switch production off.
