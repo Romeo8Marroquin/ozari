@@ -100,14 +100,15 @@ Plain (non-secret) runtime env vars, all set from `envs/<env>/gcp/variables.tf`:
 (derived from the Cloudflare account id) and `REGISTRATION_OPEN`. `PORT` is injected by Cloud Run
 (8080).
 
-> **`REGISTRATION_OPEN` — the per-environment sign-up switch.** Each environment's value is
-> **committed** as `"registration_open"` in `envs/<env>/environment.json` (both start **open**;
-> close it once there are enough users). `tf.ps1` passes it to every gcp plan and the roots have no
-> default, so no apply can flip it by omission. Change it ONLY with
-> `infrastructure/scripts/registration.ps1 <env> open|close` (it edits the file, plans, applies,
-> puts the file back if the apply does not complete, and tells you to **commit** it);
-> `… status` compares the live service with the committed value. Existing accounts are never
-> affected. The API **fails closed**: in a deployed environment only the exact string `true` opens
+> **`REGISTRATION_OPEN` — the per-environment sign-up switch.** Opening or closing sign-up is a
+> business decision per environment, not a code change, so it lives in **no file and needs no
+> commit: the live Cloud Run service is the record.** A new environment starts **open**; close it
+> once there are enough users. Change it ONLY with
+> `infrastructure/scripts/registration.ps1 <env> open|close` (a reviewed plan + apply touching just
+> the service and the build trigger); `… status` reads the live value. Every other
+> `tf.ps1 <env> gcp plan` reads the live value and passes it back unchanged, and the Terraform roots
+> have no default for it, so no apply, deploy or rebuild flips it by accident. Existing accounts are
+> never affected. The API **fails closed**: in a deployed environment only the exact string `true` opens
 > `POST /auth/user` (anything else → `403` before validation); locally it stays open unless set to
 > `false`. The app asks `GET /auth/registration` and shows the sign-up link and form only on a
 > confirmed `true`.

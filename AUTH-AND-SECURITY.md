@@ -51,7 +51,7 @@ own 20/min limiter: the **Google OAuth callback** and the **ICS calendar feed** 
   login and the MFA login challenge.
 - **Registration** (`POST /auth/user`) always creates a normal user (`roleId = RolesEnum.Client`); the
   API never grants admin — promote admins directly in the DB. It is also a **per-environment switch**
-  (`REGISTRATION_OPEN`, committed per environment in `envs/<env>/environment.json`):
+  (`REGISTRATION_OPEN`; the live service is the record, `registration.ps1` changes it):
   `requireRegistrationOpen` answers `403` BEFORE validation
   when closed, so a closed environment confirms nothing about emails or password rules; deployed
   environments fail closed on anything but `"true"`. `GET /auth/registration` (public) reports it

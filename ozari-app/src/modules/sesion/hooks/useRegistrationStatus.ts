@@ -9,9 +9,8 @@ interface RegistrationStatusResponse {
 
 /**
  * Whether this environment accepts new accounts (`GET /auth/registration`) — a per-environment
- * switch the SERVER owns (`registration_open`, committed per environment and closed once there are
- * enough users). The UI never guesses it: it reports what the API says, and `POST /auth/user`
- * enforces the same answer.
+ * switch the SERVER owns (open on a new environment, closed once there are enough users). The UI
+ * never guesses it: it reports what the API says, and `POST /auth/user` enforces the same answer.
  *
  * `undefined` while loading or after a failure, and every consumer treats that as "do not offer
  * registration": the sign-up link appears only on a confirmed `true`. Showing it on a guess would

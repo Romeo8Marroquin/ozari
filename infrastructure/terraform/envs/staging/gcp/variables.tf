@@ -161,9 +161,9 @@ variable "enable_cleanup_job" {
   default     = false
 }
 
-# From envs/staging/environment.json ("registration_open"), supplied by tf.ps1 — deliberately no
-# default, so an apply can never flip sign-up by omission. Change it with
-# `infrastructure/scripts/registration.ps1 staging open|close` and commit the file.
+# Supplied by tf.ps1 from the LIVE service (a new environment starts open) — deliberately no default,
+# so an apply can never flip sign-up by omission. Change it only with
+# `infrastructure/scripts/registration.ps1 staging open|close`.
 variable "registration_open" {
   type = bool
 }
