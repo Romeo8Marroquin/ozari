@@ -38,15 +38,14 @@ resource "cloudflare_r2_bucket_cors" "assets" {
   }]
 }
 
-# Optional: serve public reads from a brand hostname instead of the bucket's r2.dev URL. Worth it in
-# production (the URL ends up embedded in every product image reference and in printed documents);
-# unnecessary in staging.
+# Public reads come from a brand hostname, in every environment. It is cached at the edge, it is
+# what the API writes into stored image URLs and printed documents, and Cloudflare creates its DNS
+# record itself — so dns.tf must NOT declare one for it.
 resource "cloudflare_r2_custom_domain" "assets" {
-  count = var.r2_custom_domain == "" ? 0 : 1
-
   account_id  = var.account_id
   bucket_name = cloudflare_r2_bucket.assets.name
   domain      = var.r2_custom_domain
   zone_id     = var.zone_id
   enabled     = true
+  min_tls     = "1.2"
 }

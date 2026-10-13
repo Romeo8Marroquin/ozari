@@ -11,11 +11,6 @@ variable "project_id" {
   type        = string
 }
 
-variable "project_number" {
-  description = "GCP project number. Needed for the Cloud Build service-agent member string."
-  type        = string
-}
-
 variable "region" {
   description = "Region for every regional resource (Cloud Run, Artifact Registry, the build trigger)."
   type        = string
@@ -177,8 +172,9 @@ variable "secret_values" {
     Terraform, which is what makes it safe for Terraform to own the values at all (before Terraform
     1.11 it was not, and the old rule — "values never enter Terraform" — was correct for its time).
 
-    Supplied from `secrets.auto.tfvars` in the environment directory, which is gitignored. Every key
-    in `local.secrets` must be present or the apply fails naming the missing key.
+    Supplied by tf.ps1 as TF_VAR_secret_values, read from the gitignored
+    infrastructure/secrets/<env>.json. Every key in `local.secrets` must be present or the plan
+    fails naming the missing key.
   EOT
   type        = map(string)
   ephemeral   = true
@@ -188,15 +184,12 @@ variable "secret_values" {
 variable "secret_version_triggers" {
   description = <<-EOT
     Rotation counters, keyed like `secret_values`. A write-only argument leaves no trace in state, so
-    Terraform cannot tell that a value changed — this number is how you tell it. Bump the entry to
-    push a new version; leave it absent and an apply touches nothing.
-
-    ABSENT means null, not zero, and that is deliberate: an IMPORTED version has no trigger in state,
-    so an absent key makes config and state agree and the plan stays empty. It is what allows a
-    working environment to be adopted without rotating all of its secrets on the first apply.
+    Terraform cannot tell that a value changed — this number is how you tell it. An absent key means
+    1 (the first version). Bump it to push a new version; leave it alone and an apply touches
+    nothing. `new-secrets.ps1 -Rotate` and `neon.ps1 -RotateAppPassword` bump it for you.
 
     Bumping REPLACES the version resource, and the superseded version is DESTROYED (deletion_policy
-    defaults to DELETE). That is deliberate: Secret Manager bills every enabled version forever, and
+    DELETE). That is deliberate: Secret Manager bills every enabled version forever, and
     hand-destroying old versions was previously a standing chore nobody remembers.
   EOT
   type        = map(number)
@@ -221,29 +214,8 @@ variable "build_config_path" {
   default     = "ozari-api/cloudbuild.yaml"
 }
 
-variable "manage_github_connection" {
-  description = <<-EOT
-    Whether Terraform declares the Cloud Build 2nd-gen GitHub connection and repository link.
-
-    false → reuse an existing connection by resource string (`github_repository_resource`). This is
-            the right setting for an environment whose connection was created in the console and is
-            working: importing a live connection is known to perma-diff on `app_installation_id`.
-    true  → Terraform creates them. Requires `github_app_installation_id` and a Secret Manager secret
-            holding a GitHub PAT (see `github_oauth_token_secret_id`). Installing the GitHub App and
-            minting that PAT stay manual — there is no API for either.
-  EOT
-  type        = bool
-  default     = false
-}
-
-variable "github_repository_resource" {
-  description = "Existing Cloud Build 2nd-gen repository resource string. Used only when manage_github_connection = false."
-  type        = string
-  default     = ""
-}
-
 variable "github_connection_name" {
-  description = "Name for the Cloud Build GitHub connection Terraform creates (manage_github_connection = true)."
+  description = "Name of the Cloud Build 2nd-gen GitHub connection."
   type        = string
   default     = "ozari-github"
 }
@@ -251,29 +223,37 @@ variable "github_connection_name" {
 variable "github_owner" {
   description = "GitHub account or organisation that owns the repository."
   type        = string
-  default     = ""
 }
 
 variable "github_repo_name" {
   description = "GitHub repository name."
   type        = string
-  default     = ""
 }
 
 variable "github_app_installation_id" {
-  description = "Installation ID of the Cloud Build GitHub App on the repository. Read it from the GitHub App's settings URL after installing it."
+  description = <<-EOT
+    Installation ID of the Cloud Build GitHub App on the repository — the number at the end of
+    github.com → Settings → Applications → Google Cloud Build → Configure. One installation serves
+    every environment; it lives in the gitignored account.json and reaches Terraform as
+    TF_VAR_github_app_installation_id.
+  EOT
   type        = string
-  default     = ""
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_app_installation_id))
+    error_message = "github_app_installation_id must be the numeric installation id. Fill it with: ./infrastructure/scripts/secret.ps1 account github_app_installation_id"
+  }
 }
 
 variable "github_oauth_token_secret_id" {
   description = <<-EOT
-    Secret Manager secret ID holding a GitHub personal access token with REPO_ADMIN scope, used by
-    the connection as its authorizer credential. Terraform binds `:latest`. The token itself is a
-    manual step — GitHub has no API that mints one for you.
+    Secret Manager secret holding the GitHub token the connection authenticates with. Cloud Build
+    does NOT accept fine-grained tokens: it must be a CLASSIC personal access token with the `repo`
+    and `read:user` scopes. Its value is the `github_oauth_token` key of the environment's secrets
+    file, like every other secret.
   EOT
   type        = string
-  default     = ""
+  default     = "ozari-github-oauth-token"
 }
 
 # --- Optional extras --------------------------------------------------------
@@ -306,14 +286,13 @@ variable "cleanup_job_timezone" {
 
 variable "revoke_default_compute_sa_editor" {
   description = <<-EOT
-    Remove `roles/editor` from the project's default compute service account.
+    Remove `roles/editor` from the project's default compute service account, if Google granted it.
 
-    ⚠️ AUTHORITATIVE. This uses google_project_iam_binding, which owns the FULL member list for
-    roles/editor — applying it removes every other editor on the project too. That is the intent
-    (nothing here should be a project editor; Cloud Run runs as ozari-run-sa and builds run as
-    ozari-build-sa), but verify with `gcloud projects get-iam-policy` before flipping it on, and
-    never flip it on and apply in the same run as anything else.
+    Surgical, not authoritative: google_project_iam_member_remove deletes exactly that one member
+    from exactly that one role and touches nothing else (Google's own service agents keep whatever
+    they hold). Nothing in Ozari runs as the default compute SA — Cloud Run runs as ozari-run-sa and
+    builds as ozari-build-sa — so an Editor grant there is pure attack surface.
   EOT
   type        = bool
-  default     = false
+  default     = true
 }

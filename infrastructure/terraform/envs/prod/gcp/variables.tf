@@ -1,30 +1,46 @@
-# Production has NO defaults for identity. An empty-defaulted project id is how an apply meant for
-# production lands somewhere else; making it required means the mistake is a plan-time error rather
-# than a deployed surprise.
+# Production's NON-SECRET shape lives here as committed defaults: hostnames, names, sizes. The repo
+# carries the shape of an environment; values that identify an account or are secret arrive from
+# tf.ps1 (see main.tf).
+
+# --- Supplied by tf.ps1 -------------------------------------------------------
 
 variable "project_id" {
-  description = "Production GCP project ID (created by infrastructure/terraform/bootstrap)."
-  type        = string
-}
-
-variable "project_number" {
-  description = "Production GCP project number. Output by the bootstrap root; needed for the Cloud Build service-agent member string."
+  description = "From ../environment.json."
   type        = string
 }
 
 variable "region" {
-  description = "Region. Keep it identical to staging unless you have measured a reason: changing it changes Cloud Run's URL, the Worker target and the latency to Neon."
+  description = "From ../environment.json."
   type        = string
-  default     = "northamerica-south1"
 }
 
-variable "environment" {
-  type    = string
-  default = "production"
+variable "cloudflare_account_id" {
+  description = "From secrets/account.json. Used only to derive the R2 S3 endpoint."
+  type        = string
 }
+
+variable "github_app_installation_id" {
+  description = "From secrets/account.json."
+  type        = string
+}
+
+variable "secret_values" {
+  description = "From secrets/prod.json. Ephemeral: never written to state or to a saved plan."
+  type        = map(string)
+  ephemeral   = true
+  sensitive   = true
+}
+
+variable "secret_version_triggers" {
+  description = "Rotation counters from secrets/prod.json (`rotation`). Absent key = version 1."
+  type        = map(number)
+  default     = {}
+}
+
+# --- Runtime ------------------------------------------------------------------
 
 variable "node_env" {
-  description = "NODE_ENV. 'production' is what turns /api/docs OFF and stack traces off — it is a security switch, not a label."
+  description = "NODE_ENV. 'production' turns /api/docs OFF and stack traces off — a security switch, not a label."
   type        = string
   default     = "production"
 }
@@ -44,14 +60,8 @@ variable "image_name" {
   default = "ozari-api"
 }
 
-variable "min_instances" {
-  description = "Keep at 0 unless cold starts become a real complaint — a warm instance bills around the clock."
-  type        = number
-  default     = 0
-}
-
 variable "app_host" {
-  description = "Production frontend origin. No trailing slash."
+  description = "Production frontend origin (the apex). No trailing slash."
   type        = string
   default     = "https://partyrentalsgt.com"
 }
@@ -67,25 +77,30 @@ variable "log_level" {
   default = "info"
 }
 
-variable "r2_endpoint" {
-  type    = string
-  default = ""
-}
-
+# Must equal the cloudflare root's bucket and custom domain. The public URL is embedded in stored
+# image references and printed documents, which is why production gets a brand hostname.
 variable "r2_bucket_name" {
   type    = string
-  default = ""
+  default = "ozari-prod-assets"
 }
 
 variable "r2_public_url" {
   type    = string
-  default = ""
+  default = "https://assets.partyrentalsgt.com"
+}
+
+# --- Cloud Run shape (spend controls) -----------------------------------------
+
+variable "min_instances" {
+  description = "Keep at 0 unless cold starts become a real complaint — a warm instance bills around the clock."
+  type        = number
+  default     = 0
 }
 
 variable "max_instances" {
-  description = "The spend cap. Raise it deliberately: this is the one number that decides how expensive a traffic spike can get."
+  description = "The spend cap: the one number that decides how expensive a traffic spike can get. Raise it deliberately."
   type        = number
-  default     = 5
+  default     = 3
 }
 
 variable "concurrency" {
@@ -108,21 +123,7 @@ variable "memory" {
   default = "512Mi"
 }
 
-# --- Secrets ----------------------------------------------------------------
-
-variable "secret_values" {
-  description = "Production secret payloads, from the gitignored secrets.auto.tfvars. Ephemeral: never written to state."
-  type        = map(string)
-  ephemeral   = true
-  sensitive   = true
-}
-
-variable "secret_version_triggers" {
-  type    = map(number)
-  default = {}
-}
-
-# --- Cloud Build ------------------------------------------------------------
+# --- Cloud Build ----------------------------------------------------------------
 
 variable "build_trigger_name" {
   type    = string
@@ -130,14 +131,9 @@ variable "build_trigger_name" {
 }
 
 variable "build_trigger_branch_regex" {
-  description = "Production deploys from main. Staging deploys from dev. The two triggers live in different projects and cannot fire each other."
+  description = "Production deploys from main; staging from dev. The triggers live in different projects and cannot fire each other."
   type        = string
   default     = "^main$"
-}
-
-variable "github_connection_name" {
-  type    = string
-  default = "ozari-github"
 }
 
 variable "github_owner" {
@@ -150,39 +146,21 @@ variable "github_repo_name" {
   default = "ozari"
 }
 
-variable "github_app_installation_id" {
-  description = "Cloud Build GitHub App installation id. From github.com → Settings → Applications → Google Cloud Build → Configure (it is the number in the URL)."
-  type        = string
-}
-
-variable "github_oauth_token_secret_id" {
-  description = "Secret Manager secret holding a GitHub PAT with REPO_ADMIN scope. Create the container and load the value the same way as any other secret."
-  type        = string
-  default     = "ozari-github-oauth-token"
-}
-
-# --- Registry ---------------------------------------------------------------
-
 variable "artifact_keep_count" {
-  type    = number
-  default = 2
+  description = "Rollback targets kept regardless of age."
+  type        = number
+  default     = 3
 }
 
 variable "artifact_stale_tagged_seconds" {
   type    = string
-  default = "1209600s" # 14 days
+  default = "2592000s" # 30 days
 }
 
-# --- Optional ---------------------------------------------------------------
+# --- Optional -------------------------------------------------------------------
 
 variable "enable_cleanup_job" {
-  description = "Worth turning on in production once there is real traffic — expired sessions and spent reset tokens accumulate with users, not with time."
+  description = "Nightly cleanup:sessions (Cloud Run Job + Scheduler; 3 scheduler jobs are free per billing account). Worth turning on once there are real users — expired sessions and spent reset tokens accumulate with users, not with time."
   type        = bool
   default     = false
-}
-
-variable "revoke_default_compute_sa_editor" {
-  description = "Safe to leave true on a project Terraform created: nothing there legitimately holds roles/editor."
-  type        = bool
-  default     = true
 }

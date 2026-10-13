@@ -1,8 +1,9 @@
 // Ozari API edge proxy — generated from Terraform (modules/cloudflare-env/worker/api-proxy.js.tftpl).
 //
-// WHY THIS EXISTS. Cloud Run domain mappings are unavailable in northamerica-south1 and Google
-// documents them as not production-ready anywhere, so the brand hostname cannot be attached to the
-// service directly. DNS resolves, it does not redirect: the browser still sends
+// WHY THIS EXISTS. Google documents Cloud Run domain mappings as preview and "not production-ready"
+// in every region, and the supported alternative (a global load balancer) costs ~$18/month — more
+// than everything else here combined. A Worker on the free plan (100k requests/day) does the job for
+// $0. DNS resolves, it does not redirect: the browser still sends
 // `Host: ${api_hostname}`, one IP fronts every Cloud Run service, and that header is the only thing
 // identifying ours. Unknown host means a Google 404.
 //
@@ -11,11 +12,28 @@
 // that kills sessions on Safari/iOS, which is the entire reason for the custom domain.
 //
 // Rewriting the URL's hostname on the subrequest carries both the Host header and the TLS SNI,
-// which is what Cloud Run needs to route to the right service.
+// which is what Cloud Run needs to route to the right service. The target is Cloud Run's
+// DETERMINISTIC hostname (<service>-<project_number>.<region>.run.app), which is known before the
+// service is first deployed — so this Worker can exist first and simply start answering once it is.
+//
+// THE VISITOR'S ADDRESS. A Worker subrequest does not carry the visitor in X-Forwarded-For: without
+// the line below Google's front end sees only Cloudflare's egress address, so `req.ip` in the API was
+// the SAME for every visitor and each per-IP rate limit was one global bucket (found on the
+// 2026-10-13 rebuild: 30 public requests a minute for the whole app). CF-Connecting-IP is set by
+// Cloudflare at the edge and cannot be supplied by the client; it REPLACES any X-Forwarded-For the
+// client sent, never appends to it. Google then appends Cloudflare's address, so the API trusts two
+// hops (`trust proxy` in ozari-api/src/app.ts).
 export default {
   async fetch(request) {
     const url = new URL(request.url);
     url.hostname = '${cloud_run_hostname}';
-    return fetch(new Request(url, request));
+    const proxied = new Request(url, request);
+    const visitor = request.headers.get('cf-connecting-ip');
+    if (visitor) {
+      proxied.headers.set('x-forwarded-for', visitor);
+    } else {
+      proxied.headers.delete('x-forwarded-for');
+    }
+    return fetch(proxied);
   },
 };

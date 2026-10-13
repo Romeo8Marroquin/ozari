@@ -1,43 +1,68 @@
 ﻿# =============================================================================
-# Ozari — generate the secret material an environment needs.
+# Ozari — generate an environment's random secret material, straight into its secrets file.
 #
-#   ./new-secrets.ps1
+#   ./infrastructure/scripts/new-secrets.ps1 staging                         # fill whatever is empty
+#   ./infrastructure/scripts/new-secrets.ps1 staging -Rotate jwt_secret,api_key
 #
-# Prints values to paste into an environment's `secrets.auto.tfvars` (gitignored). Nothing is
-# written to disk and nothing leaves this machine: these are locally-generated random bytes.
+# Generates jwt_secret, jwt_refresh_secret, encryption_key and api_key — locally-generated random
+# bytes, nothing fetched, nothing uploaded, NOTHING PRINTED. Only key names are shown.
 #
-# It deliberately does NOT generate:
-#   · database URLs   → scripts/db-bootstrap.* (they carry a role and a host, not just entropy)
-#   · email_key       → Resend dashboard
-#   · r2_*            → Cloudflare dashboard (a Terraform-created R2 token would land in state)
-#   · google_client_* → Google Auth Platform (no API can create an OAuth client)
+# It never overwrites a value unless told to with -Rotate, and a rotation bumps the counter so the
+# next gcp apply pushes it. encryption_key additionally needs -IUnderstandEncryptionKeyLoss.
+#
+# Not generated here, because they are not just entropy:
+#   database URLs   → neon.ps1           (they carry a role and a host)
+#   email_key, r2_*, google_client_*, github_oauth_token → secret.ps1 (minted in a dashboard)
 # =============================================================================
-$ErrorActionPreference = "Stop"
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true, Position = 0)][ValidateSet("staging", "prod")]
+    [string]$Environment,
 
-function New-HexSecret {
-    param([int]$Bytes = 32)
-    $buffer = New-Object byte[] $Bytes
-    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($buffer)
-    return (-join ($buffer | ForEach-Object { $_.ToString("x2") }))
+    [ValidateSet("jwt_secret", "jwt_refresh_secret", "api_key", "encryption_key")]
+    [string[]]$Rotate = @(),
+
+    [switch]$IUnderstandEncryptionKeyLoss
+)
+
+$ErrorActionPreference = "Stop"
+Import-Module (Join-Path $PSScriptRoot "lib\Ozari.Infra.psm1") -Force
+
+if ($Rotate -contains "encryption_key" -and -not $IUnderstandEncryptionKeyLoss) {
+    throw "Rotating encryption_key makes every *_kms column in the '$Environment' database permanently unreadable. Re-run with -IUnderstandEncryptionKeyLoss only if the database is being discarded too."
 }
 
-$jwt        = New-HexSecret 48
-$jwtRefresh = New-HexSecret 48
-$encryption = New-HexSecret 32   # MUST be exactly 32 bytes → 64 hex characters. AES-256-GCM.
-$apiKey     = New-HexSecret 32
+# Sizes: JWT HMAC keys get 48 bytes (above SHA-256's block-size guidance for HS256); the encryption
+# key is EXACTLY 32 bytes because AES-256-GCM requires it (64 hex characters); the API key, 32.
+$sizes = [ordered]@{
+    jwt_secret         = 48
+    jwt_refresh_secret = 48
+    encryption_key     = 32
+    api_key            = 32
+}
+
+$data = Read-OzSecrets $Environment
+$generated = @()
+$rotated = @()
+
+foreach ($key in $sizes.Keys) {
+    $current = Get-OzValue $data $Environment $key
+    if ($current -eq "" -or $Rotate -contains $key) {
+        $bumped = Set-OzValue -Data $data -Scope $Environment -Key $key -Value (New-OzHexSecret $sizes[$key])
+        if ($bumped) { $rotated += $key } else { $generated += $key }
+    }
+}
+
+Save-OzSecrets -Scope $Environment -Data $data
 
 Write-Host ""
-Write-Host "Paste into secrets.auto.tfvars (GITIGNORED):"
-Write-Host ""
-Write-Host "  jwt_secret         = `"$jwt`""
-Write-Host "  jwt_refresh_secret = `"$jwtRefresh`""
-Write-Host "  encryption_key     = `"$encryption`""
-Write-Host "  api_key            = `"$apiKey`""
-Write-Host ""
-Write-Host "⚠️  encryption_key is $($encryption.Length) hex characters = 32 bytes, which is what AES-256-GCM"
-Write-Host "    requires. NEVER rotate it once an environment holds data: every *_kms column becomes"
-Write-Host "    permanently unreadable, and there is no recovery path. Regenerating it is the same"
-Write-Host "    decision as throwing the database away."
-Write-Host ""
-Write-Host "⚠️  These are the only copies. Paste them, then clear this terminal's scrollback."
+if ($generated.Count -gt 0) { Write-Host "Generated: $($generated -join ', ')" -ForegroundColor Green }
+if ($rotated.Count -gt 0) { Write-Host "Rotated (counter bumped): $($rotated -join ', ')" -ForegroundColor Green }
+if ($generated.Count -eq 0 -and $rotated.Count -eq 0) { Write-Host "Nothing to do: every generated secret for '$Environment' is already set." }
+Write-Host "File: $(Get-OzSecretsPath $Environment)"
+if ($generated -contains "encryption_key") {
+    Write-Host ""
+    Write-Host "encryption_key is new. Back this file up OFF this machine now: if it is lost while the" -ForegroundColor Yellow
+    Write-Host "database holds data, every encrypted column is unrecoverable." -ForegroundColor Yellow
+}
 Write-Host ""

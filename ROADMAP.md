@@ -155,3 +155,20 @@ DEPLOYMENT.md R2 section.)*
   and orders are live.
 - **Employee/role management UI** — deferred until the business grows past a single admin; promotion
   stays a manual DB op for now.
+- **Close the `run.app` side door** — Cloud Run's own address is public, so traffic aimed at it skips
+  Cloudflare (WAF, rate limits, DDoS absorption; `INCIDENTS.md` S4) — and can write any address
+  into `X-Forwarded-For`, which `trust proxy = 2` then believes, so per-IP limits are evadable there
+  (per-account limits in the database are not). Fix: the Worker adds a secret
+  header and the API refuses requests without it (one more registry secret, rotated by
+  `rotate.ps1`). Ingress restrictions cannot do it — a Worker is not a Google load balancer.
+- **`sslmode=verify-full` in the stored database URLs** — `pg` warns that `sslmode=require` is
+  today treated as `verify-full` (certificate checked) but will mean libpq's weaker `require` (no
+  check) in its next major. Harmless now; before upgrading `pg`, make `neon.ps1` write
+  `verify-full` and prove `prisma migrate deploy` (the schema engine, not `pg`) accepts it on
+  staging — `neon.ps1` already strips `channel_binding` for the same engine.
+- **Rotatable `ENCRYPTION_KEY` (key ring)** — today the API knows exactly one AES key, so the one
+  credential `rotate.ps1` cannot replace is the one protecting client PII (`INCIDENTS.md` §3).
+  Shape: each `*_kms` value carries a key id; the API decrypts with any key in a ring
+  (`ENCRYPTION_KEYS`) and encrypts with the newest; a LOCAL-ONLY dry-run/`--fix` script re-encrypts
+  old rows, after which the old key leaves the ring. Touches every `*_kms` read/write and needs a
+  migration-free format change, so it is its own slice — do it before production holds much data.

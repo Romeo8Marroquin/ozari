@@ -1,0 +1,32 @@
+{
+  "_readme": [
+    "TEMPLATE. The real file is infrastructure/secrets/account.json (gitignored) and is created from",
+    "this one the first time any script needs it. Fill it with ./infrastructure/scripts/secret.ps1 account <key>",
+    "(hidden prompt) rather than by editing, so values never pass through a clipboard history or an editor's",
+    "undo buffer. Everything here is shared by staging AND production: it describes the ACCOUNTS, not an",
+    "environment.",
+    "",
+    "billing_account            gcloud billing accounts list  (XXXXXX-XXXXXX-XXXXXX)",
+    "github_app_installation_id github.com -> Settings -> Applications -> Google Cloud Build -> Configure;",
+    "                           the number at the end of the URL",
+    "cloudflare_account_id      Cloudflare dashboard -> partyrentalsgt.com -> Overview -> API (right column)",
+    "cloudflare_zone_id         same place",
+    "cloudflare_api_token       Cloudflare -> My Profile -> API Tokens -> Create Token -> Custom token,",
+    "                           named ozari-terraform-local (REBUILD.md credential register):",
+    "                             Account  Workers Scripts:Edit, Cloudflare Pages:Edit, Workers R2 Storage:Edit",
+    "                             Zone     DNS:Edit, Zone Settings:Edit, Workers Routes:Edit,",
+    "                                      Transform Rules:Edit, Zone:Read",
+    "                             Zone Resources: Include -> Specific zone -> partyrentalsgt.com",
+    "                             Account Resources: Include -> your account",
+    "neon_org_id                Neon console -> Organization settings -> General -> Organization ID (org-...)",
+    "neon_api_key               Neon console -> Organization settings -> API keys -> Create new API key",
+    "                           (an ORGANIZATION key: scoped to that org only, not to your whole login)"
+  ],
+  "billing_account": "",
+  "github_app_installation_id": "",
+  "cloudflare_account_id": "",
+  "cloudflare_zone_id": "",
+  "cloudflare_api_token": "",
+  "neon_org_id": "",
+  "neon_api_key": ""
+}

@@ -17,6 +17,9 @@
 locals {
   image_url = "${var.region}-docker.pkg.dev/${var.project_id}/${var.artifact_repository_id}/${var.image_name}"
 
+  # What a brand-new Cloud Run service starts on, until the first Cloud Build deploy (cloud-run.tf).
+  bootstrap_image = "us-docker.pkg.dev/cloudrun/container/hello"
+
   runtime_env_vars = {
     NODE_ENV       = var.node_env
     LOG_LEVEL      = var.log_level

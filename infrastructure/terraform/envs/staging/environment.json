@@ -1,0 +1,13 @@
+{
+  "environment": "staging",
+  "project_id": "ozari-staging-gt",
+  "project_name": "Ozari Staging",
+  "region": "us-east4",
+  "state_bucket": "ozari-staging-gt-tfstate",
+  "neon": {
+    "project_name": "ozari-staging",
+    "region_id": "aws-us-east-1",
+    "pg_version": 18,
+    "compute_units": "0.25-1"
+  }
+}

@@ -11,12 +11,11 @@
 # remove, transfer, disable or fail to renew the domain, because it was never given the domain to
 # hold. That is the guarantee, and it comes from the absence of a resource rather than from care.
 #
-# ⚠️ ADOPT, DO NOT COLLIDE. The zone is live. Pointing Terraform at it without importing first makes
-# every existing object look like something to CREATE, and the apply fails with "already exists".
-# Run `infrastructure/scripts/cf-import.ps1 -Environment <env>` first: it inventories the account,
-# writes import blocks for the objects THIS environment owns, and lists everything else as not ours
-# (the `qa-ulew` landing page) without ever claiming it. After the import, a plan shows the real
-# differences — and if the live config already matches, it shows nothing at all.
+# ⚠️ THE ZONE IS LIVE AND SHARED. Every object here is CREATED, never adopted, so a hostname that is
+# still held by something else (a leftover DNS record, an old Pages custom domain, an old Worker
+# route) fails the apply with "already exists". `infrastructure/scripts/cf-inventory.ps1` lists
+# everything on the account as OURS / LEGACY (delete before the apply) / NOT OURS (the `qa-ulew`
+# landing page — never touched).
 # ---------------------------------------------------------------------------
 
 variable "account_id" {
@@ -59,8 +58,17 @@ variable "app_hostname" {
 }
 
 variable "cloud_run_hostname" {
-  description = "The run.app hostname the Worker rewrites Host to. Comes from the gcp-env module's output; never typed by hand."
+  description = <<-EOT
+    The run.app hostname the Worker rewrites Host to: Cloud Run's DETERMINISTIC form,
+    <service>-<project_number>.<region>.run.app, computed by the environment root from the bootstrap
+    state. Because it is known before the service exists, the edge can be applied first.
+  EOT
   type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9-]+\\.[a-z0-9-]+\\.run\\.app$", var.cloud_run_hostname))
+    error_message = "cloud_run_hostname must look like <service>-<project_number>.<region>.run.app (no scheme)."
+  }
 }
 
 # --- Worker -----------------------------------------------------------------
@@ -118,29 +126,29 @@ variable "pages_root_dir" {
   default     = "ozari-app"
 }
 
-variable "manage_pages_source" {
+variable "pages_build_env" {
   description = <<-EOT
-    Whether Terraform declares the Pages project's GitHub source connection.
-
-    Default false, on purpose. Connecting Cloudflare to GitHub is an OAuth authorization performed
-    once in the dashboard — Terraform can reference it but cannot create it, and declaring `source`
-    before that authorization exists fails the apply. Leave false for an existing project; set true
-    only after the account is authorized and you have read a plan.
+    Extra plain-text build variables for the Pages build image (e.g. NODE_VERSION). VITE_API_URL is
+    set by the module and cannot be overridden here. Never put a secret in this map: everything in a
+    Vite build ends up in the public bundle anyway.
   EOT
-  type        = bool
-  default     = false
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition     = !contains(keys(var.pages_build_env), "VITE_API_URL")
+    error_message = "Set VITE_API_URL through vite_api_url, not pages_build_env."
+  }
 }
 
 variable "pages_github_owner" {
-  description = "GitHub owner for the Pages source (used only when manage_pages_source = true)."
+  description = "GitHub owner of the repository Pages builds from."
   type        = string
-  default     = ""
 }
 
 variable "pages_github_repo" {
-  description = "GitHub repository for the Pages source (used only when manage_pages_source = true)."
+  description = "GitHub repository Pages builds from."
   type        = string
-  default     = ""
 }
 
 # --- R2 ---------------------------------------------------------------------
@@ -151,9 +159,9 @@ variable "r2_bucket_name" {
 }
 
 variable "r2_location_hint" {
-  description = "R2 location hint (wnam, enam, weur, eeur, apac). Leave null to let Cloudflare choose."
+  description = "R2 location hint (wnam, enam, weur, eeur, apac). `enam` = eastern North America, beside the API in us-east4. A hint, not a guarantee, and it cannot be changed after creation."
   type        = string
-  default     = null
+  default     = "enam"
 }
 
 variable "r2_cors_allowed_origins" {
@@ -169,9 +177,18 @@ variable "r2_cors_allowed_origins" {
 }
 
 variable "r2_custom_domain" {
-  description = "Optional custom domain for public reads (e.g. assets.partyrentalsgt.com). Empty = use the bucket's r2.dev URL."
+  description = <<-EOT
+    Hostname serving public reads (assets-stg. / assets.). Required, in every environment: the
+    alternative, the bucket's r2.dev URL, is rate-limited, uncached, documented by Cloudflare as
+    not-for-production, and can only be switched on in the dashboard. The frontend CSP allows
+    *.partyrentalsgt.com for images, so any hostname on the zone works without a CSP change.
+  EOT
   type        = string
-  default     = ""
+
+  validation {
+    condition     = length(split(".", var.r2_custom_domain)) == 3
+    error_message = "r2_custom_domain must be one label below the apex (Universal SSL covers no deeper)."
+  }
 }
 
 # --- Zone behaviour ---------------------------------------------------------
@@ -179,9 +196,9 @@ variable "r2_custom_domain" {
 variable "manage_zone_settings" {
   description = <<-EOT
     Whether this module sets zone-wide SSL settings. Zone settings are SHARED by every hostname on
-    the domain, so exactly ONE environment may own them. Set true on the environment that owns the
-    zone (production once it exists) and false on the other, or two applies will fight over one
-    setting that both believe they own.
+    the domain, so exactly ONE environment may own them: production (true), never staging (false),
+    or two applies fight over one setting that both believe they own. Until production exists the
+    zone simply keeps its current settings, which already serve staging today.
   EOT
   type        = bool
   default     = false

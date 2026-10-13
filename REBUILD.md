@@ -1,365 +1,366 @@
-# Ozari — Teardown & Rebuild Runbook
+# Ozari — Build, Rebuild & Retire an Environment
 
-**What this is:** the procedure for erasing a deployed environment and rebuilding it from this
-repository, plus **the complete, ordered list of everything a human must do by hand** — the steps no
-API can perform, with where each value goes.
+**What this is:** the ordered procedure for creating an environment from nothing (staging first, then
+production — the same list with different inputs), for retiring one, and **the complete list of
+everything a human must do by hand**, with exactly where each value goes.
 
-**When to run it:** after the current testing round finishes. **Not before.** Nothing in this file is
-urgent, and every step is reversible only in the sense that you can do it again from scratch.
+**Read first:** `INFRASTRUCTURE-PLAN.md` (what is automated and why) · `infrastructure/README.md`
+(how the scripts and Terraform work) · `DEPLOYMENT.md` (ongoing operations once it is up).
 
-> **Why the rebuild is the preferred path, not the fallback.** Staging holds no data anyone needs and
-> production does not exist yet, so this is the last moment where "delete it and do it properly" is
-> free. A rebuild starts with none of what adoption leaves behind: a database role nobody can prove
-> is least-privileged, secret versions Terraform did not create, a Cloud Build connection referenced
-> by a hand-copied resource string.
->
-> **Until then, staging is live and must be treated that way.** Any change made before the rebuild
-> window goes through the ADOPTION path — `INFRASTRUCTURE-PLAN.md` §7 — which imports what exists
-> before changing anything. Two scripts do the discovery (`gcp-import.ps1`, `cf-import.ps1`), and the
-> rule for reading the resulting plan is short: **no destroys, and no new secret versions.** Never
-> point this Terraform at the live environment without importing first; the failure mode is not a
-> refusal, it is a silent secret rotation to whatever your tfvars happens to contain.
+Legend: 🔒 **owner** — a console click or a credential, no API exists · ⚙️ **script** — run by the
+owner because it loads secrets (`infrastructure/secrets/`) · ☁️ changes real cloud resources, always
+shown as a plan first.
 
-**Read first:** `INFRASTRUCTURE-PLAN.md` (what is automated and why) · `DEPLOYMENT.md` (ongoing
-operations) · `infrastructure/README.md` (how to run Terraform).
+> **Why there is no "adopt the live environment" path any more.** Every environment is built fresh in
+> its own new GCP project and Neon project. The pre-rebuild staging (`ozari-500103`) is retired, not
+> imported (§5). Nothing carries the history of a hand-made environment: no database role nobody
+> can prove is least-privileged, no secret versions Terraform did not create, no console-made
+> connection.
 
 ---
 
 ## 1. The ownership register — what is ours, and what must never be touched
 
-Everything Ozari owns can be destroyed. Two categories are **not** destroyable, for different reasons.
+### ⚠️ Never managed by anything in this repo
 
-### ⚠️ Never destroyed, because Terraform was never given them
-
-| Asset | Why it is outside Terraform |
+| Asset | Why |
 |---|---|
-| **The domain `partyrentalsgt.com`** — its registration, renewal and transfer | A purchased, account-level asset. There is **no `cloudflare_zone` and no registrar resource anywhere in this repo**, and none may be added. The guarantee comes from the absence of a resource, not from being careful. |
-| **The Cloudflare zone itself** | Same. Terraform manages the **records inside** the zone and the services they point at — nothing above that line. |
-| **The GitHub repository** | Never referenced as a managed resource. |
-| **The Google account, the billing account, the Cloudflare account** | Same category as the domain. |
+| **The domain `partyrentalsgt.com`**: registration, renewal, transfer | A purchased, account-level asset. There is **no `cloudflare_zone` and no registrar resource** anywhere, and none may be added. The guarantee comes from the absence of a resource. |
+| **The Cloudflare zone itself** | Terraform manages the records *inside* it and the services they point at, nothing above that line. |
+| **The GitHub repository** · **the Google, billing, Cloudflare, Neon and Resend accounts** | Same category. |
+| **Resend's DNS records** (DKIM/SPF/MX on the zone) | Made by hand when the domain was verified, and they work. Left alone (`extra_dns_records` exists for the day they must change). |
 
-A `terraform destroy` on the Cloudflare root removes DNS *records*, a Worker, a Pages project and a
-bucket. It cannot remove, transfer, disable or fail to renew the domain, because the domain was never
-handed to it.
+### ⚠️ Never touched — it belongs to someone else
 
-### ⚠️ Never touched, because it belongs to someone else
-
-| ❌ NEVER TOUCH | Where it lives |
+| ❌ NEVER TOUCH | Where |
 |---|---|
-| **`qa-ulew`** — an unrelated landing page | Cloudflare: its own Pages project, its DNS records, any Worker or route it uses |
+| **`qa-ulew`**, an unrelated landing page | Cloudflare: its Pages project, its DNS records, any Worker or route it uses. `cf-inventory.ps1` always lists it as **not ours**. |
 
-| ✅ OURS — destroy freely | Where |
-|---|---|
-| Cloud Run service, jobs, revisions | GCP `ozari-500103` |
-| Artifact Registry `ozari-images` + every image | GCP |
-| Cloud Build trigger, connection, build history | GCP |
-| Secret Manager: every `ozari-*` secret and version | GCP |
-| Service accounts `ozari-run-sa`, `ozari-build-sa` | GCP |
-| Neon project (database, branches, roles) | Neon |
-| R2 bucket `ozari-assets-staging` + all objects | Cloudflare |
-| Pages project `ozari-c28` | Cloudflare |
-| Worker `api-staging-proxy` + its route | Cloudflare |
-| DNS: `api-staging.partyrentalsgt.com`, `staging.partyrentalsgt.com` | Cloudflare |
-| Google OAuth client + consent screen (Calendar) | Google Auth Platform |
-| Cloud Build GitHub App installation | GitHub |
-| Cloudflare Pages ↔ GitHub authorization | GitHub |
+### ✅ Ours
 
-**The repository itself is never touched.** And to be precise about "GitHub pipelines": **this repo
-has no GitHub Actions workflows** (verified — `.github/` contains none, and `CLAUDE.md` forbids
-adding deploy workflows). What exists on GitHub is two *app authorizations*, listed above. Removing
-them removes nothing from the codebase.
-
-### Verify the register — and adopt what already exists
-
-One command does both. It is read-only against Cloudflare and writes one local file:
-
-```powershell
-$env:CLOUDFLARE_API_TOKEN = "<token>"
-./infrastructure/scripts/cf-import.ps1 -Environment staging
-```
-
-It prints an inventory of every DNS record, Worker, route, Pages project, R2 bucket and ruleset on
-the account, each marked **OURS** or **not ours — leave alone**, and writes
-`imports.generated.tf` containing import blocks **for the OURS rows only**. Nothing belonging to
-`qa-ulew` is ever written into an import block. Use `-InventoryOnly` to look without writing.
-
-**Why importing matters even when you intend to destroy.** Pointing Terraform at a live zone without
-importing makes every existing object look like something to *create*, and the apply fails with
-"already exists" — the conflict, not a rebuild. After the import, `terraform plan` shows the genuine
-differences between what is live and what this repo declares; **if they already match, the plan is
-empty and the objects are simply now managed.** That is the "just connect this" case.
-
-⚠️ **Three things cannot or need not be imported, and the generated file explains each:**
-
-| | Why | What Terraform does instead |
+| | Staging | Production |
 |---|---|---|
-| `cloudflare_r2_bucket_cors` | The provider supports no import for it | **Creates** it. Safe — the CORS API is a full replace, so applying our policy over the existing one is the intended outcome. |
-| `cloudflare_worker_version` / `_workers_deployment` | Worker versions are immutable by design | Uploads the script from this repo as a **new version** and points traffic at it. Correct: afterwards the deployed Worker is the one in git. |
-| `cloudflare_zone_setting` | Settings always exist; there is nothing to discover | Imported by `<zone_id>/<setting_id>`, which the script emits, so the first apply is a diff rather than a blind write. |
+| GCP project (everything Google inside it) | `ozari-staging-gt` | `ozari-prod-gt` |
+| State bucket (inside that project) | `ozari-staging-gt-tfstate` | `ozari-prod-gt-tfstate` |
+| Neon project (`aws-us-east-1`) | `ozari-staging` | `ozari-prod` |
+| App / API hostnames | `staging.` / `api-staging.partyrentalsgt.com` | `partyrentalsgt.com` / `api.partyrentalsgt.com` |
+| R2 bucket / public hostname | `ozari-staging-assets` / `assets-stg.` | `ozari-prod-assets` / `assets.` |
+| Pages project / Worker | `ozari-staging` / `ozari-staging-api-proxy` | `ozari-prod` / `ozari-prod-api-proxy` |
+| Google OAuth client (Calendar) | in `ozari-staging-gt` | in `ozari-prod-gt` |
+| Resend API key | one for staging | one for production |
+| Cloud Build trigger branch | `dev` | `main` |
 
-⚠️ **One shared setting genuinely affects `qa-ulew`:** the zone's SSL mode and Always-Use-HTTPS are
-**zone-wide**, not per-hostname. `manage_zone_settings` is what declares them. Setting SSL to
-`strict` requires every origin on the zone — including the landing page's — to present a valid
-certificate. Pages origins do, so this is safe in practice; it is called out because it is the only
-line in the Cloudflare config whose blast radius is larger than the hostnames it names.
+**Pre-rebuild staging, retired at step 3 of §4** (`retire.ps1 legacy-staging`): GCP project
+`ozari-500103`, Neon project `ozari`, Worker `api-staging-proxy`, Pages project `ozari` (serving
+`ozari-c28.pages.dev`), R2 bucket `ozari-staging` (behind `assets-stg.`), and the A/AAAA/CNAME records
+on the three staging hostnames. Pages and R2 are also matched by the hostnames they hold, since a
+dashboard-made name is not its address. Owner decision
+2026-10-12: its data is disposable, so it goes **before** the new staging is built rather than after.
 
 ---
 
-## 2. What is irrecoverably lost
+## 2. What a teardown loses for good
 
 | Lost | Consequence |
 |---|---|
-| Database | All staging orders, products, clients. Intended. |
-| R2 objects | Every product photo and evidence image. ⚠️ The DB and the bucket must go **together**, or you get orphans in both directions (`pnpm reconcile:images` is the audit). |
-| `ENCRYPTION_KEY` | ⚠️ If the key is regenerated but a database is **kept**, every `*_kms` column is unreadable **forever**. Destroy both or neither — never one. |
-| Google Calendar connections | Every admin reconnects. Events already written to their calendars **stay** and become orphans; delete them by hand if they are noise. |
-| ICS feed URLs | Every subscribed device silently stops updating. Re-generate and re-subscribe per device. |
+| Database | Every order, product and client in it. |
+| R2 objects | Every product photo and evidence image. ⚠️ The database and the bucket go **together**, or each holds references to things the other has lost (`pnpm reconcile:images` audits it). |
+| `encryption_key` | ⚠️ A database kept while its key is regenerated is unreadable **forever** in every `*_kms` column. Destroy both or neither. |
+| Google Calendar connections | Every admin reconnects. Events already written stay in their calendars as orphans. |
+| ICS feed URLs | Every subscribed device silently stops updating; re-subscribe per device. |
 | Sessions | Everyone is logged out. |
-| Build history and logs | Cloud Build history goes with the trigger. Nothing depends on it. |
 
 ---
 
-## 3. The manual steps — the complete list, in dependency order
+## 3. The manual steps — the complete list
 
-These are the only things no API can do. Everything else in this repo is `terraform apply`.
+These are the only things no API can do. Each row says what it produces and **exactly where it
+goes**. 
 
-Each row says what it produces and **exactly where that value goes**. `secrets.auto.tfvars` and
-`terraform.tfvars` are per-environment and gitignored; `INFRASTRUCTURE-PLAN.md` §3 is the full
-file-by-file map.
+### Group A — once per ACCOUNT (shared by staging and production) → `secrets/account.json`
 
-### Group A — accounts and credentials (before any Terraform)
+**One command does all of Group A:** `./infrastructure/scripts/account.ps1`. It asks only for the two
+values you must create (A4, A5's key, through hidden prompts that print the exact steps). It detects
+the rest: the billing account from gcloud, the Cloudflare ids from the token, and the Neon org from
+the key. Pass A2's number as `-GitHubAppInstallationId`, or it prompts. Then it **proves** the
+result: the token is active and passes a GET probe for every permission Terraform uses, and the Neon
+key can list the org. It also warns if a Neon project already carries a name the build would create,
+because `neon.ps1` would reuse that project. The rows below are what it automates, kept here for
+reference and for replacing one value (`secret.ps1 account <key>`).
 
-| # | Step | Produces | Goes to |
-|---|---|---|---|
-| A1 | Google Cloud account + a **billing account** with a payment method | — | — |
-| A2 | *(new environment only)* run `infrastructure/bootstrap/create-tfstate-bucket.*` once per account | the first state bucket | already referenced by the backend blocks |
-| A3 | **Install the Cloud Build GitHub App** on the repository — github.com → Settings → Applications → Google Cloud Build → Configure | the **installation id** (the number in that page's URL) | `envs/<env>/gcp/terraform.tfvars` → `github_app_installation_id` |
-| A4 | **Create a GitHub PAT** with REPO_ADMIN scope (fine-grained, limited to this repo, with an expiry you will notice) | the token | `envs/<env>/gcp/secrets.auto.tfvars` → `github_oauth_token` |
-| A5 | **Authorize Cloudflare Pages against GitHub**, and **connect the project to the repo** — Cloudflare → Workers & Pages → the project → Settings → Builds & deployments → Connect to Git. ⚠️ Two different things: the account-level OAuth authorization, and the per-project repository link. Terraform can create a Pages project, but **a project with no Git source never builds** — it exists and serves nothing. For a NEW environment, do this immediately after the Cloudflare apply, or set `manage_pages_source = true` once the account authorization exists | a connected, buildable project | nothing to copy |
-| A6 | **Create a Cloudflare API token** (Custom Token) with: Zone → DNS:Edit, Zone Settings:Edit, Workers Routes:Edit; Account → Workers Scripts:Edit, Cloudflare Pages:Edit, Workers R2 Storage:Edit | the token | ⚠️ the **`CLOUDFLARE_API_TOKEN` environment variable**, never a file — as a provider argument it would be written into state |
-| A7 | Note the Cloudflare **account id** and **zone id** (dashboard → any zone → Overview → API) | two ids | `envs/<env>/cloudflare/terraform.tfvars` |
-
-### Group B — third-party resources
-
-| # | Step | Produces | Goes to |
-|---|---|---|---|
-| B1 | **Create the Neon project.** One per environment, not a branch — the free plan allows 100 projects and quotas (100 CU-hours, 0.5 GB) are *per project*, so staging cannot eat production's allowance | the **owner (direct)** connection string | `secrets.auto.tfvars` → `direct_database_url` |
-| B2 | **Create an R2 API token** scoped to this environment's bucket, Object Read & Write. (The bucket, its CORS and its custom domain are Terraform — only the token is manual, because a Terraform-created token writes its secret into state) | Access Key ID + Secret Access Key, and the **account id** inside the endpoint | `secrets.auto.tfvars` → `r2_access_key`, `r2_secret_key`; endpoint → `terraform.tfvars` → `r2_endpoint` |
-| B3 | **Create a Resend API key** — one per environment, so revoking a leaked staging key never stops customer email. The domain `partyrentalsgt.com` is already verified | the key | `secrets.auto.tfvars` → `email_key` |
-| B4 | **Create the Google OAuth client** — `DEPLOYMENT.md` §3d has the full procedure: enable the Calendar API, audience **External**, scopes `calendar.events` + `userinfo.email` ONLY, a Web-application client, and this environment's redirect URI | client id + client secret | `secrets.auto.tfvars` → `google_client_id`, `google_client_secret` |
-| B5 | *(later, production only)* **Publish the OAuth consent screen** and complete Google's verification | — | ⚠️ An app left in Testing expires refresh tokens after ~7 days, which presents as calendars silently going stale a week after launch |
-
-⚠️ **B4 is permanently manual and worth stating so nobody re-opens it.** The Terraform Google
-provider's OAuth resources (`google_iap_brand`, `google_iap_client`) are Identity-Aware Proxy only,
-are restricted to internal/organisation use, and cannot create a general Web-application client.
-
-### Group C — generated locally (scripts, not clicks — listed so nothing is missed)
-
-| # | Step | Produces | Goes to |
-|---|---|---|---|
-| C1 | `./infrastructure/scripts/new-secrets.ps1` | `jwt_secret`, `jwt_refresh_secret`, `encryption_key`, `api_key` | `secrets.auto.tfvars` |
-| C2 | `./infrastructure/scripts/db-bootstrap.ps1 -DirectUrl "<B1 owner url>"` | the pooled, least-privileged `database_url` — and it **proves** the role cannot do DDL before printing it | `secrets.auto.tfvars` → `database_url` |
-
-⚠️ **`encryption_key` is generated once and never rotated** while an environment holds data. Back it
-up somewhere outside the machine that generated it. Rotating it is the same decision as discarding
-the database.
-
-⚠️ **Every value must differ between staging and production.** A shared `jwt_secret` means a staging
-token authenticates against production; a shared `encryption_key` means a staging dump decrypts
-production PII.
-
----
-
-## 4. The database role — deferred on purpose, and the rebuild is when it gets fixed
-
-**Do not patch this on the live staging environment.** Rotating the application's database credential
-under a running service means the next cold start picks up a role whose grants have just changed —
-and if anything is missing (a sequence, a table created by a migration the default privileges did not
-cover), the failure surfaces as a permission error on a table that plainly exists, in production-like
-conditions, for no benefit.
-
-**The rebuild removes the problem instead of fixing it.** On a fresh Neon project, `db-bootstrap`
-runs *before* the app has ever connected: the owner creates the schema through `prisma migrate
-deploy`, the app role is created with DML-only grants plus default privileges for future migrations,
-and `db-verify.sql` gates the whole thing. There is no live traffic and no credential to swap.
-
-Until then, staging keeps whatever role it has. If you want to know what that is — read-only, safe to
-run right now, changes nothing:
-
-```powershell
-psql "$DIRECT_DATABASE_URL" -v app_role=ozari_api -f infrastructure/scripts/db-verify.sql
-```
-
-A `FAIL` on the group-membership check means the role is a member of `neon_superuser` and can do DDL
-— the specific failure mode that made this worth flagging, because such a role behaves perfectly
-normally right up until something injects a statement it should never have been able to run.
-
----
-
-## 5. Teardown
-
-Destroy in this order. The dependency runs Cloudflare → GCP because the Cloudflare root reads the
-GCP state.
-
-```powershell
-# 1. Edge first — its Worker targets a Cloud Run host that is about to stop existing.
-cd infrastructure/terraform/envs/staging/cloudflare
-terraform destroy          # REVIEW the plan against §1's register before confirming
-
-# 2. Then Google Cloud.
-cd ../gcp
-terraform destroy
-```
-
-⚠️ **There is no `destroy` verb in `tf.ps1`, deliberately.** Running it means typing the command
-yourself, in the right directory, having read the plan. That friction is the point.
-
-`terraform destroy` covers: the Cloud Run service and jobs, Artifact Registry and its images, the
-build trigger and connection, every secret container **and version**, the service accounts, IAM, and
-on the Cloudflare side the DNS records, Worker, route, Pages project, R2 bucket and zone rules.
-
-**Then, by hand:**
-
-| # | Action | Note |
+| # | Step | Command to store it |
 |---|---|---|
-| T1 | Delete the **Neon project** | Takes the database, its branches and every role with it |
-| T2 | Delete the orphan secrets `jwt-secret`, `neon-database-url`, `neon-direct-url` | Early-setup leftovers superseded by the `ozari-*` names. ⚠️ **Verify first** — `gcloud secrets versions access latest --secret=<name>` and grep the repo — then delete. They are ~$0.18/month of nothing. |
-| T3 | Delete the **Google OAuth client** and its consent screen | Or keep it and just add the new redirect URI later; it is the one item where reuse is genuinely simpler |
-| T4 | Uninstall the **Cloud Build GitHub App**, or leave it installed and reuse the installation id | Reusing is fine and saves step A3 |
-| T5 | Revoke the **GitHub PAT** and the **Cloudflare API token** if they are not being reused | |
-| T6 | Tell admins their **calendar events are orphans** | Events already written stay in their calendars; nothing will ever update or remove them |
+| A1 | **Billing account** with a payment method. `gcloud billing accounts list` → the OPEN one. | `secret.ps1 account billing_account` |
+| A2 | **Cloud Build GitHub App** installed on the repo: github.com → Settings → Applications → Google Cloud Build → Configure; the number at the end of the URL. One installation serves every project. | `secret.ps1 account github_app_installation_id` |
+| A3 | **Cloudflare account id + zone id**: dashboard → partyrentalsgt.com → Overview → right column. | `secret.ps1 account cloudflare_account_id` · `… cloudflare_zone_id` |
+| A4 | **Cloudflare API token** (Custom token): Account → Workers Scripts:Edit, Cloudflare Pages:Edit, Workers R2 Storage:Edit · Zone → DNS:Edit, Zone Settings:Edit, Workers Routes:Edit, Transform Rules:Edit, Zone:Read · Zone resources: only partyrentalsgt.com. Give it an expiry you will notice. | `secret.ps1 account cloudflare_api_token` |
+| A5 | **Neon organization id + API key**: Neon console → Organization settings → General → Organization ID (`org-…`); then Organization settings → API keys → Create, an **organization** key (scoped to that org, not to your whole login). `neon.ps1` passes the org id explicitly, so it can never list or create in another org. | `secret.ps1 account neon_org_id` · `… neon_api_key` |
+| A6 | **Cloudflare Pages ↔ GitHub authorisation**: already done on this account (the old `ozari-c28` was Git-connected). On a NEW account: connect any Pages project to GitHub once, then delete it. | — |
 
-**What is NOT destroyed and should not be:** the GCP project itself (staging reuses
-`ozari-500103`), the Terraform state bucket, the GitHub repository, **the domain and its Cloudflare
-zone**, the Resend domain verification, and anything belonging to `qa-ulew`.
+### Group B — once per ENVIRONMENT → `secrets/<env>.json`
 
-**Destroying the Cloudflare side is optional.** Its only real cost is DNS downtime while records are
-recreated, and its only real benefit is that Terraform creates rather than adopts. Skipping it is
-legitimate — run `cf-import.ps1` and let Terraform adopt what is there. Do not skip it *and* forget
-the import; that is the "already exists" collision.
+| # | Step | When | Command to store it |
+|---|---|---|---|
+| B1 | **GitHub token for Cloud Build**: github.com → Settings → Developer settings → **Tokens (classic)**, scopes `repo` + `read:user`, expiry ~1 year (put a reminder in your calendar: an expired token silently stops deploys). ⚠️ Cloud Build rejects fine-grained (`github_pat_…`) tokens. One per environment, so revoking staging's never stops a production deploy. | any time | `secret.ps1 <env> github_oauth_token` |
+| B2 | **Resend API key**, "Sending access", one per environment. The domain is already verified. *(First staging rebuild: `retire.ps1 legacy-staging` carries the old staging's key over, so this row is already filled.)* | any time | `secret.ps1 <env> email_key` |
+| B3 | **R2 API token**: Cloudflare → R2 → Manage API tokens → **Create Account API token**, name `ozari-<env>-assets` → **Object Read & Write**, *Apply to specific buckets only* → this environment's bucket, TTL Forever. Copy the **Access Key ID** and **Secret Access Key** only — the `cfat_…` "Token value" and the "jurisdiction-specific endpoint" are not used (the API speaks S3 with the key pair, and Terraform derives the endpoint from the account id). On that same page, delete any token that served a retired environment. | after the Cloudflare apply (the bucket must exist) | `secret.ps1 <env> r2_access_key` · `… r2_secret_key` |
+| B4 | **Google OAuth client** for Calendar, created in **this environment's project**: the full procedure is `DEPLOYMENT.md` §3d (audience External, scopes `calendar.events` + `userinfo.email` only, a Web client, this environment's redirect URI). | after bootstrap (the project must exist) | `secret.ps1 <env> google_client_id` · `… google_client_secret` |
+| B5 | *(production, after launch)* **Publish the consent screen and complete Google's verification.** ⚠️ An app left in Testing expires refresh tokens after ~7 days, so calendars silently go stale a week after launch. | later | — |
+
+**Generated, not clicked** (listed so nothing is missed): `neon.ps1` → `database_url`,
+`direct_database_url` · `new-secrets.ps1` → `jwt_secret`, `jwt_refresh_secret`, `encryption_key`,
+`api_key`.
+
+⚠️ **Every value differs between staging and production.** The scripts generate fresh ones per
+environment. For the clicked ones, mint a separate key per environment.
+
+⚠️ **Back up `infrastructure/secrets/` off this machine** as soon as `encryption_key` exists. That
+directory is the recovery set; Terraform state holds none of it. Back up **every file in it**
+(`account.json`, `staging.json`, later `prod.json`) into a password manager, again after any script
+changes one. Losing a value differs by kind:
+
+| Lost | Consequence | Recovery |
+|---|---|---|
+| `encryption_key` | Every `*_kms` column (client PII) is unreadable **forever** | Only a backup, or `gcloud secrets versions access latest --secret=ozari-encryption-key --project=<project>` while the project exists |
+| `jwt_secret`, `jwt_refresh_secret`, `api_key` | Nothing permanent | Regenerate (`new-secrets.ps1`) + gcp apply; everyone signs in again |
+| `database_url`, `direct_database_url` | Nothing permanent | `neon.ps1 <env> -RotateAppPassword -RotateMigratorPassword` + gcp apply |
+| Clicked keys (Cloudflare, Neon, GitHub, Resend, R2, Google) | Nothing permanent | Mint a new one (register below), `secret.ps1`, apply |
+
+The committed templates `infrastructure/templates/account.example.json` and `env.example.json` are
+what a new operator starts from: every script creates the real file from them on first use, and their
+`_readme` says where each value comes from. Never put a value in a template.
+
+### The credential register — every key that lives OUTSIDE this repo
+
+What each one is called where it was created, what it can do, and who uses it — so a list in a
+provider's dashboard can always be matched to a purpose before anything is deleted.
+
+| Name in the provider | Where | Can do | Used by | Expiry → replace with |
+|---|---|---|---|---|
+| `ozari-terraform-local` | Cloudflare → My Profile → API Tokens (a **User** token) | Edit Workers, Pages, R2 buckets, and DNS / zone settings / Worker routes / transform rules on `partyrentalsgt.com` only | `tf.ps1` (cloudflare stack), `retire.ps1`, `cf-inventory.ps1`, `account.ps1` — from the operator's machine only ("local"), never in a cloud or CI; shared by staging and production | ~1 year → new token with the A4 scopes, `secret.ps1 account cloudflare_api_token` |
+| `ozari-<env>-assets` | Cloudflare → R2 → Manage API tokens (an **Account** token) | Read/write objects in ONE bucket; cannot create, delete or configure anything | The API on Cloud Run (photos) | none → B3 |
+| Neon organization API key | Neon → Organization settings → API keys | Manage projects in the Ozari org only | `account.ps1`, `neon.ps1`, `retire.ps1` | none → A5 |
+| `ozari cloud-build <env>` | GitHub → Developer settings → Tokens (classic) | Read the repo for Cloud Build's connection | Cloud Build's service agent (Secret Manager) | ~1 year → B1 |
+| One Resend key per environment | Resend → API Keys | Send email from the verified domain | The API on Cloud Run | none → B2 |
+| `Ozari Google Calendar (<env>)` | Google Auth Platform → Clients, in the environment's project | Ask an admin's consent for `calendar.events` + `userinfo.email` | The API on Cloud Run | none → B4 |
+
+**Replacing them in an emergency** — all at once, in the right order — is `rotate.ps1 <env>`
+(`INCIDENTS.md`).
+
+The service accounts (`ozari-run-sa`, `ozari-build-sa`) have no keys at all: Google issues them
+short-lived credentials, and Terraform owns their permissions.
 
 ---
 
-## 6. Rebuild
+## 4. Build an environment — the ordered procedure
 
-Manual steps from §3 are marked 🔒; everything else is code.
+Written for staging. **Production is the same list** with `prod` in every command and the production
+column of §1. The prod-only differences are called out inline.
 
 ```
- 1. 🔒 A3, A4  GitHub App installation id + PAT
- 2. 🔒 A6, A7  Cloudflare API token (as an env var), account id, zone id
- 3. 🔒 B1      Create the Neon project → the owner direct URL
- 4.    C2      db-bootstrap → the pooled least-privileged URL, verified
-                 (the role now exists before a single migration has run)
- 5. 🔒 B2, B3, B4   R2 token · Resend key · Google OAuth client
- 6.    C1      new-secrets → jwt x2, encryption_key, api_key
- 7.            Write envs/staging/gcp/{terraform,secrets.auto}.tfvars from the examples,
-               and set manage_github_connection = true — from here on Terraform owns
-               the connection instead of referencing a console-made one
- 8.            ./scripts/tf.ps1 staging gcp plan   → expect CREATES ONLY, no imports
-               ./scripts/tf.ps1 staging gcp apply
-                 One pass: APIs, service accounts, IAM, registry + cleanup policies,
-                 secrets AND versions, the GitHub connection, the trigger, Cloud Run.
- 9.            Push to `dev` → verify → build → prisma migrate deploy → deploy
-                 (migrations run as the OWNER; the app role gets future tables through
-                  the default privileges db-bootstrap set)
-10.            pnpm db:seed  — once, against the fresh database
-                 ⚠️ Run it with DATABASE_URL set to the OWNER (direct) URL for this one
-                   command. The seed resets serial sequences with setval(), which needs
-                   UPDATE on the sequence — the app role has USAGE+SELECT only, by design.
-                   As the app role it fails partway, having already inserted rows.
-11.            Write envs/staging/cloudflare/terraform.tfvars, then:
+ 0.    PREREQUISITES (once per machine)
+         winget install Hashicorp.Terraform        (>= 1.11; 1.16.x current)
+         gcloud auth login
+         gcloud auth application-default login
+         cd ozari-api; pnpm install; cd ..         (neon.ps1 and db-seed.ps1 use its pg/Prisma)
 
-               a) ./scripts/cf-import.ps1 -Environment staging
-                    Inventory + import blocks for anything that SURVIVED the teardown.
-                    On a clean teardown it finds nothing and says so — delete the
-                    generated file and continue. If you chose NOT to destroy the
-                    Cloudflare side (a legitimate choice: DNS downtime is the only
-                    real cost of a rebuild), this is what makes the apply an adoption
-                    instead of an "already exists" collision.
+ 1. 🔒 Group A (once per account) → secrets/account.json
+         ./infrastructure/scripts/account.ps1 [-GitHubAppInstallationId <n>]
+           asks only for the two tokens, detects the rest, proves every permission; re-runnable
 
-               b) ./scripts/tf.ps1 staging cloudflare plan   → check against §1's register
-                  ./scripts/tf.ps1 staging cloudflare apply
-                    DNS, Worker + route, Pages + VITE_API_URL, R2 + CORS, zone SSL.
-                    The Worker's target comes from the gcp state — nothing is pasted.
-12. 🔒         Trigger a frontend rebuild.
-                 ⚠️ VITE_API_URL is INLINED AT BUILD TIME. Terraform setting it
-                   changes nothing until the next build.
-13. 🔒 B4      Add this environment's redirect URI to the OAuth client
-14.            §7 verification
+ 2. ☁️⚙️ Bootstrap: project + billing + state bucket
+         ./infrastructure/scripts/tf.ps1 staging bootstrap plan
+         ./infrastructure/scripts/tf.ps1 staging bootstrap apply
+           First run: local state → bucket created → state migrated into it (automatic).
+           "project id already exists" = taken globally: change project_id AND state_bucket in
+           envs/staging/environment.json and re-plan.
+         gcloud auth application-default set-quota-project ozari-staging-gt
+           (ADC's quota project must be a project that will keep existing — see infrastructure/README)
+
+ 3. ☁️⚙️ FIRST STAGING REBUILD ONLY — retire the pre-rebuild staging (it holds the same hostnames)
+         ./infrastructure/scripts/retire.ps1 legacy-staging            # dry run: lists every deletion
+         ./infrastructure/scripts/retire.ps1 legacy-staging -Execute   # type the name to confirm
+           Copies the old Resend key into secrets/staging.json, then deletes: Worker route + Worker,
+           the Pages project holding staging. (deployments first), the bucket holding assets-stg.
+           (custom domain, objects, bucket), the staging A/AAAA/CNAME records, Neon project `ozari`, and LAST project
+           ozari-500103 (recoverable 30 days). Switches gcloud's ADC quota project and default
+           project to ozari-staging-gt first. Re-runnable: finished steps are skipped.
+           ⚠️ The old staging site goes down here; the new one is up after step 11.
+           The dry run prints ozari-c28's build variables — tell Claude if anything besides
+           NODE_VERSION needs carrying into `pages_build_env`.
+         Any other environment: `cf-inventory.ps1 <env>` must show no CONFLICT before step 6.
+
+ 4. ☁️⚙️ Database
+         ./infrastructure/scripts/neon.ps1 staging
+           Creates Neon project `ozari-staging` (aws-us-east-1, Postgres 18, 0.25–1 CU), then with
+           SQL `ozari_migrator` (owns the schema) and `ozari_api` (DML only), PROVES each holds only
+           what its job needs, saves both URLs. Prints no secret. The DBA login is never stored.
+
+ 5.    ⚙️ Generated secrets
+         ./infrastructure/scripts/new-secrets.ps1 staging
+
+ 6. ☁️⚙️ Edge: R2 + CORS + custom domain, DNS, Worker + route, Pages (Git-connected)
+         ./infrastructure/scripts/tf.ps1 staging cloudflare plan
+         ./infrastructure/scripts/tf.ps1 staging cloudflare apply
+           The Worker targets ozari-api-<project_number>.us-east4.run.app, Cloud Run's deterministic
+           hostname. It answers 404 until step 9 deploys the service; that is expected.
+           PROD: this root also sets the zone-wide SSL settings (strict, Always Use HTTPS).
+
+ 7. 🔒 Group B → secrets/staging.json
+         B1 GitHub classic token · B2 Resend key · B3 R2 token (bucket now exists)
+         B4 OAuth client in ozari-staging-gt (redirect URI:
+            https://api-staging.partyrentalsgt.com/api/calendar/google/callback)
+         ./infrastructure/scripts/secret.ps1 staging          # must show no EMPTY rows
+
+ 8. ☁️⚙️ Google Cloud: APIs, SAs, IAM, registry, secrets WITH values, GitHub connection,
+         trigger, Cloud Run — one pass
+         ./infrastructure/scripts/tf.ps1 staging gcp plan     # expect CREATES only
+         ./infrastructure/scripts/tf.ps1 staging gcp apply
+           Cloud Run starts on Google's public sample image (the registry is still empty), so
+           api-staging shows Google's "It's running!" page until step 9 replaces it.
+
+ 9. ☁️ First deploy (Claude can run this one — it loads no secrets)
+         gcloud builds triggers run ozari-api-staging --branch=dev --region=us-east4 --project=ozari-staging-gt
+           verify → build → push → prisma migrate deploy (as ozari_migrator) → gcloud run deploy.
+           From now on every push to `dev` that touches ozari-api/ deploys.
+           PROD: trigger ozari-api-prod, branch main (create `main` from `dev` first).
+
+10.    ⚙️ Reference data, once
+         ./infrastructure/scripts/db-seed.ps1 staging          # as the migrator; idempotent
+           Also revokes the app role's access to _prisma_migrations, which step 9 just created.
+
+11. ☁️⚙️ First frontend build (a brand-new Pages project has never built)
+         ./infrastructure/scripts/pages-build.ps1 staging
+           From now on every push to `dev` that touches ozari-app/ builds.
+
+12.    §6 verification.
 ```
 
-**Delete the stale provider cache before step 8** if this working copy ever ran the old flat layout:
-`infrastructure/terraform/envs/staging/.terraform`.
+---
 
-**Production is the same list** with `envs/prod/`, preceded by `tf.ps1 bootstrap - apply` (which
-creates the project, links billing and makes its state bucket) and followed by B5.
+## 5. Retire an environment
+
+Retiring is deleting **projects**, not running `terraform destroy` resource by resource. Everything
+Google holds for an environment lives inside its own GCP project, including the Terraform state.
+Neon and Cloudflare objects are few and listed by name in ONE table (`Get-OzTarget`, shared with
+`cf-inventory.ps1`).
+
+```
+1. ☁️⚙️ ./infrastructure/scripts/retire.ps1 <staging|prod|legacy-staging>            # dry run
+   ☁️⚙️ ./infrastructure/scripts/retire.ps1 <staging|prod|legacy-staging> -Execute   # type the name
+      Cloudflare (routes, Worker, Pages + deployments, R2 domain + objects + bucket, then the
+      A/AAAA/CNAME records on its hostnames; MX/TXT/CAA are never touched) → Neon project →
+      GCP project LAST (it holds the R2 keys used to empty the bucket; skipped if anything
+      before it failed). Google keeps a deleted project recoverable for 30 days
+      (`gcloud projects undelete`). gcloud's ADC quota and default project are switched to the
+      other environment first; the script refuses if that one does not exist.
+2. 🔒 Revoke what was minted for it by hand: its GitHub classic token (github.com → Settings →
+      Developer settings), its Resend key, its R2 token (R2 → Manage API tokens). The OAuth client
+      went with the project.
+3.    Archive or delete infrastructure/secrets/<env>.json — its values are now dead.
+```
+
+**Never deleted:** the domain and its zone, the Resend domain verification, the Cloud Build GitHub
+App installation and the Pages GitHub authorisation (both reused by the next environment), and
+anything belonging to `qa-ulew`.
+
+---
+
+## 6. Verification
+
+```
+[ ] neon.ps1 <env> -VerifyOnly PASSES (migrator owns every object with no server powers; app is
+      DML-only, member of nothing, owns nothing; default privileges in place)
+[ ] tf.ps1 <env> cloudflare plan  and  tf.ps1 <env> gcp plan  show NO CHANGES right after apply
+      (and still none after the first Cloud Build deploy: the deploy must not fight Terraform)
+[ ] rotate.ps1 staging has been drilled once and ended with the green health check (INCIDENTS.md §4)
+[ ] Nothing belonging to qa-ulew appeared in any plan or deletion
+[ ] GET https://api-<env>.partyrentalsgt.com/api/health/check answers from OUR API
+      200 with x-api-key, or 403 without (Express received it and refused a direct hit — correct).
+      A Google-styled 404 = the Worker route/target is wrong.
+[ ] /api/docs served on staging, ABSENT on production (the NODE_ENV gate)
+[ ] register → login → forgot-password (email arrives) → reset → login
+[ ] a product photo upload succeeds and displays     (R2 credentials, CORS and the custom domain)
+[ ] an order can be created, advanced, paid, and its PDF opens
+[ ] iPhone: log in, wait > 15 min, still logged in   (first-party cookies)
+[ ] Calendar: connect Google; an order's events appear in the ASSIGNEE's calendar only
+[ ] pnpm reconcile:images reports CLEAN
+[ ] req.ip resolves to the real client, not a Cloudflare edge address (DEPLOYMENT.md §3c)
+[ ] after a few builds: Artifact Registry under 0.5 GB
+```
 
 ---
 
 ## 7. Local development after a rebuild
 
-Local is not deployed infrastructure, but it points AT the infrastructure, so it breaks when the
-infrastructure is replaced. Two files, both gitignored, both with committed `.example` templates:
-
-**`ozari-api/.env`** — the whole local runtime. After a rebuild, four values change:
+Local is not deployed infrastructure, but it points AT it, so it breaks when that is replaced.
+`ozari-api/.env` (gitignored, `.env.example` beside it) changes in four values:
 
 | Value | New source |
 |---|---|
-| `DATABASE_URL` | The new project's pooled URL from `db-bootstrap`. Point local at the **staging** database, or give local its own Neon project — both are fine; sharing with staging is simpler and its data is disposable. |
-| `DIRECT_DATABASE_URL` | The new owner URL (local `prisma migrate dev` needs it) |
-| `SHADOW_DATABASE_URL` | A throwaway Neon branch, if you use `migrate dev` |
-| `ENCRYPTION_KEY` | ⚠️ **Must be the key that database was written with.** Point local at staging's database and local needs staging's key — otherwise every encrypted column reads as corrupt, and the failure looks like a data bug rather than a configuration one. |
+| `DATABASE_URL` | Point local at **staging's** database (simplest; its data is disposable): the `database_url` in `secrets/staging.json`. Or give local its own Neon project. |
+| *(migrations)* | Local Prisma reads only `DATABASE_URL`. For a `prisma migrate`/`diff` command, set `DATABASE_URL` to staging's `direct_database_url` (the migrator) **for that one command**, never in `.env`. |
+| `SHADOW_DATABASE_URL` | a throwaway Neon branch, if you use `migrate dev` |
+| `ENCRYPTION_KEY` | ⚠️ **The key that database was written with**: staging's `encryption_key`. Any other key makes every encrypted column read as corrupt, which looks like a data bug. |
 
-The rest keep their local shapes: `APP_HOST=http://localhost:5173`, `API_PUBLIC_URL=` (empty — no
-proxy in front of a local server), and whichever R2/Resend/Google values you want local to exercise.
+The R2 values (`R2_BUCKET_NAME=ozari-staging-assets`, `R2_PUBLIC_URL=https://assets-stg.partyrentalsgt.com`),
+Resend and Google values follow the same idea. Keep `APP_HOST=http://localhost:5173` and
+`API_PUBLIC_URL=` empty. Local uploads go to the staging bucket, which is why its CORS lists
+`localhost:5173`. Add `http://localhost:3000/api/calendar/google/callback` to staging's OAuth client
+if you test Calendar locally.
 
-**`ozari-app/.env`** — `VITE_API_URL` is not read in development at all (Vite proxies `/api` to
-`localhost:3000`), so there is usually nothing to change.
-
-**The local database role.** If local points at the same database as staging, it uses the same
-least-privileged role — which is the point: `prisma migrate dev` locally will be refused, correctly,
-because the app role cannot do DDL. Use `DIRECT_DATABASE_URL` for migrations, as the pipeline does.
-
----
-
-## 8. Verification
-
-```
-[ ] db-verify.sql PASSES  (no superuser, no group memberships, no CREATE, owns no tables)
-[ ] terraform plan is CLEAN on both stacks immediately after apply
-[ ] Nothing belonging to qa-ulew appeared in either plan
-[ ] GET https://api-staging.partyrentalsgt.com/api/health/check answers from OUR API
-      200 with x-api-key, or 403 — a 403 means Express received it and refused a direct
-      browser hit, which is correct. A Google-styled 404 means the Host rewrite did not
-      happen: the Worker route or the record's proxy status is wrong.
-[ ] /api/docs served on staging, ABSENT on production (the NODE_ENV gate)
-[ ] register → login → forgot-password (email arrives) → reset → login
-[ ] a product photo upload succeeds        (proves R2 credentials AND the CORS origin)
-[ ] an order can be created, advanced, paid, and its PDF opens
-[ ] iPhone: log in, wait >15 min, still logged in   (proves first-party cookies)
-[ ] Calendar: connect Google; an order's events appear in the ASSIGNEE's calendar only
-[ ] pnpm reconcile:images reports CLEAN
-[ ] req.ip resolves to the real client, not a Cloudflare edge address (DEPLOYMENT.md §3c)
-[ ] Artifact Registry back under 0.5 GB after a few builds
-```
+Local uses the same DML-only role as staging, so `prisma migrate dev` against `DATABASE_URL` is
+refused, correctly. Migrations go through the migrator, as the pipeline does.
 
 ---
 
-## 9. If it goes wrong halfway
+## 8. If it goes wrong halfway
 
-The rebuild has no half-state worth preserving, which is what makes it low-risk: **the recovery for
-any failure is to destroy and start §6 again.** There is no data to protect and no user to
-inconvenience.
+A fresh environment has no state worth preserving. The recovery for any failure is to fix the cause
+and re-run the same step. Each step is idempotent: plans show only what is missing, and `neon.ps1`
+reuses the project it finds.
 
-Two specific failures with known causes, so they are not diagnosed from scratch:
+Known failures, so they are not diagnosed from scratch:
 
-- **"service account does not exist"** on the Cloud Build GitHub token binding — the Google-managed
-  service agent is created lazily on first use of the API. Materialise it once and re-apply:
-  `gcloud beta services identity create --service=cloudbuild.googleapis.com --project=<project>`
-- **A Cloudflare apply fails with "already exists"** — an object survived the destroy, or you chose
-  not to destroy the Cloudflare side. Either delete it in the dashboard (check §1 first), or run
-  `cf-import.ps1` and let Terraform adopt it. Both are correct; pick one per object rather than
-  alternating.
+- **Bootstrap: "project id already exists"**: the id is taken globally. Change `project_id` and
+  `state_bucket` in `environment.json`.
+- **Bootstrap: billing error**: you lack `roles/billing.user` on that billing account, or it has
+  reached its limit of linked projects (Google raises it on request).
+- **Any Google call names `ozari-500103` after it was deleted**: the ADC quota project. Run
+  `gcloud auth application-default set-quota-project ozari-staging-gt`.
+- **Cloudflare apply: "already exists"**: something still holds a hostname. `cf-inventory.ps1 <env>`
+  names it. If it is the pre-rebuild staging, re-run `retire.ps1 legacy-staging -Execute`.
+- **gcp apply stops at the GitHub connection / repository**: the classic token is wrong, expired or
+  fine-grained, or the installation id is wrong — or, on a first apply with a "permission denied" on
+  the token secret, Google had not finished propagating the grant made seconds earlier: wait a
+  minute, then plan and apply again (only what is missing is created). Otherwise replace it (`secret.ps1 <env> github_oauth_token`
+  bumps its counter), then plan and apply again.
+- **First gcp apply: Cloud Run "The service has encountered an internal error", or an IAM "409
+  concurrent policy changes"**: Google-side races on a project whose APIs were enabled seconds
+  earlier. The failed service is marked *tainted*, and replacing it is blocked by deletion
+  protection — so clear the mark instead of deleting anything:
+  `terraform -chdir=infrastructure/terraform/envs/<env>/gcp untaint module.gcp.google_cloud_run_v2_service.api`,
+  then plan + apply again for whatever else is missing. The service itself is repaired by step 9's
+  first deploy, which creates a fresh revision regardless.
+- **Right after an edge rebuild, a browser gets 403/503 from the API, and Cloud Run's logs show
+  NOTHING for those requests** (seen 2026-10-13): a browser that had the OLD site open keeps its
+  HTTP/2-3 connections to Cloudflare alive for hours (the app polls), and may send API requests over
+  a connection opened for the website under the previous configuration. Cloudflare refuses a
+  request whose hostname does not match the connection (an empty 403/503, a handful of headers; even
+  `/cdn-cgi/trace` fails on it) before any Worker runs. **Fix: fully quit the browser and reopen it.**
+  Fresh visitors never see it. Proof it is this: the same request works in an Incognito window, or
+  through a page on another site, and `curl` from the same machine always works.
+- **`POST /api/auth/refresh` → 403 "Token CSRF faltante / no coincide" right after a rebuild**: the
+  browser still holds a `refresh-token` cookie from the PREVIOUS environment (same hostname,
+  different keys). Expected and harmless — the app treats it as "not signed in" and shows the login;
+  the next sign-in replaces the cookie.
+- **First build fails at `apply-prisma-migrations`**: Secret Manager holds a migrator password the
+  database no longer accepts (a `neon.ps1` rotation without the gcp apply after it: run the apply), or
+  Neon is unreachable. `neon.ps1 <env> -VerifyOnly` proves the roles themselves are right.
+- **`neon.ps1`: "password authentication failed for user ozari_migrator"**: an earlier run set a
+  password and failed before saving it. Re-run with `-RotateMigratorPassword`.
+- **`retire.ps1`: a FAIL line**: fix what it names and re-run; finished steps are skipped, and the
+  GCP project is only deleted once everything before it succeeded.
 
-The one thing you cannot redo casually is `encryption_key`: if a database has already been written
-with it, that key and that database are a pair for life.
+The one thing you cannot redo casually is `encryption_key`: once a database has been written with
+it, that key and that database are a pair for life.

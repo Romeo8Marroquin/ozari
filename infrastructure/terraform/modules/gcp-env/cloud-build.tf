@@ -11,8 +11,6 @@
 # ---------------------------------------------------------------------------
 
 resource "google_cloudbuildv2_connection" "github" {
-  count = var.manage_github_connection ? 1 : 0
-
   project  = var.project_id
   location = var.region
   name     = var.github_connection_name
@@ -34,19 +32,29 @@ resource "google_cloudbuildv2_connection" "github" {
   ]
 }
 
-resource "google_cloudbuildv2_repository" "app" {
-  count = var.manage_github_connection ? 1 : 0
+# The repository link only works once the connection has finished its handshake with GitHub. If
+# the apply stops here with "connection is not ready / pending", the PAT or the installation id is
+# wrong — fix the value, bump its rotation counter, and re-apply.
 
+resource "google_cloudbuildv2_repository" "app" {
   project           = var.project_id
   location          = var.region
   name              = var.github_repo_name
-  parent_connection = google_cloudbuildv2_connection.github[0].name
+  parent_connection = google_cloudbuildv2_connection.github.name
   remote_uri        = "https://github.com/${var.github_owner}/${var.github_repo_name}.git"
 }
 
-locals {
-  # Either the repository Terraform manages, or the resource string of one created in the console.
-  build_repository = var.manage_github_connection ? google_cloudbuildv2_repository.app[0].id : var.github_repository_resource
+# A trigger that runs as OUR deploy SA (not Cloud Build's legacy default) needs that SA to read the
+# connection and fetch the repository's read-only token — Cloud Build checks it when the trigger is
+# CREATED ("Permission 'cloudbuild.connections.get' denied on …/connections/ozari-github"), and the
+# build uses it to clone. Read Token Accessor is exactly connections.get + repositories.get +
+# repositories.accessReadToken, granted on this ONE connection rather than the project.
+resource "google_cloudbuildv2_connection_iam_member" "build_sa_reads_repo" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloudbuildv2_connection.github.name
+  role     = "roles/cloudbuild.readTokenAccessor"
+  member   = local.build_sa_member
 }
 
 resource "google_cloudbuild_trigger" "deploy" {
@@ -58,7 +66,7 @@ resource "google_cloudbuild_trigger" "deploy" {
   service_account = "projects/${var.project_id}/serviceAccounts/${google_service_account.build.email}"
 
   repository_event_config {
-    repository = local.build_repository
+    repository = google_cloudbuildv2_repository.app.id
 
     push {
       branch = var.build_trigger_branch_regex
@@ -91,9 +99,13 @@ resource "google_cloudbuild_trigger" "deploy" {
     _CPU           = var.cpu
     _MEMORY        = var.memory
 
-    # The migration step reads the OWNER connection string; the app never sees it.
+    # The migration step reads the MIGRATOR's connection string (schema owner, no server powers);
+    # the app never sees it.
     _DIRECT_DATABASE_URL_SECRET = local.secrets.direct_database_url.secret_id
   }
 
-  depends_on = [google_project_service.required]
+  depends_on = [
+    google_project_service.required,
+    google_cloudbuildv2_connection_iam_member.build_sa_reads_repo,
+  ]
 }

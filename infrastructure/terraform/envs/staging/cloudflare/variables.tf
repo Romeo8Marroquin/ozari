@@ -1,43 +1,42 @@
-# Account/zone identifiers are not secrets, but they name your Cloudflare account, so they live in
-# the gitignored terraform.tfvars rather than in a public repo. There are no defaults on purpose:
-# an empty value here would make a plan target the wrong zone silently.
+# --- Supplied by tf.ps1 -------------------------------------------------------
+
+variable "state_bucket" {
+  description = "From ../environment.json — where the bootstrap state (project number, region) is read from."
+  type        = string
+}
 
 variable "cloudflare_account_id" {
-  description = "Cloudflare account ID. Dashboard → any zone → Overview → API section."
+  description = "From secrets/account.json."
   type        = string
 }
 
 variable "cloudflare_zone_id" {
-  description = "Zone ID for partyrentalsgt.com."
+  description = "From secrets/account.json. The zone for partyrentalsgt.com."
   type        = string
 }
 
-variable "pages_project_name" {
-  description = "Existing Cloudflare Pages project name (e.g. ozari-c28)."
+# --- Shape (committed) --------------------------------------------------------
+
+variable "cloud_run_service_name" {
+  description = "Must equal the gcp root's service_name — it is part of the deterministic hostname."
   type        = string
+  default     = "ozari-api"
 }
 
-variable "r2_bucket_name" {
-  description = "R2 bucket for staging assets. Must equal the gcp root's r2_bucket_name — the API signs uploads for the bucket it was told about."
-  type        = string
+variable "github_owner" {
+  type    = string
+  default = "Romeo8Marroquin"
 }
 
-variable "manage_zone_settings" {
-  description = "Whether THIS environment owns the zone-wide SSL settings. Exactly one environment may."
-  type        = bool
-  default     = true
+variable "github_repo_name" {
+  type    = string
+  default = "ozari"
 }
 
-variable "extra_dns_records" {
-  description = "Resend DKIM/SPF/MX and any other records this environment owns. See terraform.tfvars.example."
-  type = map(object({
-    name     = string
-    type     = string
-    content  = string
-    ttl      = optional(number, 1)
-    priority = optional(number)
-    proxied  = optional(bool, false)
-    comment  = optional(string)
-  }))
-  default = {}
+variable "pages_build_env" {
+  description = "Build-image variables for Pages (no secrets — everything in a Vite build is public)."
+  type        = map(string)
+  default = {
+    NODE_VERSION = "22"
+  }
 }

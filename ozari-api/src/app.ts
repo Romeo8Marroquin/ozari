@@ -63,15 +63,16 @@ function configureMiddlewares(app: Express): void {
   // Trust proxy for Cloud Run and other reverse-proxy deployments.
   //
   // The number is a HOP COUNT, and it decides what `req.ip` is — which is what every rate limiter
-  // keys on. Deployed traffic now arrives through Cloudflare (a Worker fronts the custom domain,
-  // DEPLOYMENT.md §3c), so `X-Forwarded-For` reads `<client>, <cloudflare-edge>` by the time Express
-  // sees it: Cloudflare forwards the client and Google's front end appends its immediate peer. One
-  // trusted hop therefore still resolves the real client.
+  // keys on. Deployed traffic arrives through Cloudflare (a Worker fronts the custom domain,
+  // DEPLOYMENT.md §3c). The Worker sets `X-Forwarded-For` to the visitor (Cloudflare's
+  // CF-Connecting-IP) and Google's front end appends the Cloudflare address it received the request
+  // from, so Express sees `<visitor>, <cloudflare-egress>`: TWO trusted hops resolve the visitor.
+  // With 1 (the value before the 2026-10-13 rebuild), `req.ip` was Cloudflare's address for EVERY
+  // visitor and each per-IP limit throttled the whole app at once.
   //
-  // If a future change puts another proxy in front, RAISE THIS — a too-low count makes `req.ip`
-  // collapse to the proxy's address, which silently turns per-IP limits into one global bucket that
-  // throttles every user at once. Verified by the two-device check in §3c.4.
-  app.set("trust proxy", 1);
+  // If a future change adds or removes a proxy, change this with it, then run the §3c.4 two-device
+  // check: a request log's `ips` must show the visitor's own address.
+  app.set("trust proxy", 2);
 
   app.use(
     helmet({

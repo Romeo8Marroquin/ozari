@@ -10,7 +10,9 @@ rate-limit tiers) — **read this file before touching anything under `ozari-api
 
 ## 1. The request chain (`app.ts`)
 
-1. `helmet` (CSP `default-src 'none'`, HSTS preload), `trust proxy = 1`.
+1. `helmet` (CSP `default-src 'none'`, HSTS preload), `trust proxy = 2` — the Cloudflare Worker
+   writes the visitor into `X-Forwarded-For` and Google appends Cloudflare (`DEPLOYMENT.md` §3c), so
+   `req.ip` is the visitor and every per-IP limiter below keys on a real person, not on Cloudflare.
 2. `express-rate-limit` tiers: public 30/min + authenticated 100/min (in `app.locals.rateLimiters`;
    `/auth` and `/products` both mount on the authenticated tier), plus a strict **credential limiter
    (10/min) applied PER-ROUTE in `auth.route.ts`** to the endpoints that verify a brute-forceable
