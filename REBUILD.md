@@ -243,6 +243,93 @@ column of §1. The prod-only differences are called out inline.
 13.    §6 verification.
 ```
 
+### 4b. Production — the exact run
+
+Everything staging tripped over on 2026-10-13 is fixed in code (Cloud Run's bootstrap image, the
+trigger SA's connection access, the IAM 409 race, the visitor IP behind the Worker), so this is §4
+with `prod` inputs and no surprises expected. Group A is shared and done; there is nothing to
+retire. Counts below are what the plans should show — anything else: stop and look.
+
+```
+ 0. ⚙️ main must exist (production deploys ONLY from it; neither trigger nor Pages can build without it)
+         git fetch origin; git push origin origin/dev:refs/heads/main
+           (or GitHub → Branches → New branch: main, from dev). From now on: feature → dev
+           (staging) → PR dev → main (production).
+    🔒 B1 + B2 now (no dependency): GitHub classic token "ozari cloud-build prod" (repo + read:user,
+           ~1 year) and a Resend key "ozari-prod" (Sending access, partyrentalsgt.com):
+         ./infrastructure/scripts/secret.ps1 prod github_oauth_token
+         ./infrastructure/scripts/secret.ps1 prod email_key
+
+ 1. ☁️⚙️ Bootstrap — the project, its billing link, its state bucket
+         ./infrastructure/scripts/tf.ps1 prod bootstrap plan     # expect 6 to add
+         ./infrastructure/scripts/tf.ps1 prod bootstrap apply
+           Note the project number in the output: the Worker targets ozari-api-<number>.us-east4.run.app.
+
+ 2.    Nothing in Cloudflare may hold a production hostname
+         ./infrastructure/scripts/cf-inventory.ps1 prod          # expect NO CONFLICT
+           Also read its "not ours" DNS rows: step 5 sets the ZONE-WIDE SSL mode to Full (strict),
+           which every proxied hostname on the zone must survive (a valid origin certificate).
+           Pages, Workers and R2 always do; anything else proxied — check it before step 5.
+
+ 3. ☁️⚙️ Database — Neon project ozari-prod + the migrator and app roles, every check PASS
+         ./infrastructure/scripts/neon.ps1 prod
+
+ 4.    Generated secrets — jwt_secret, jwt_refresh_secret, encryption_key, api_key
+         ./infrastructure/scripts/new-secrets.ps1 prod
+    🔒 BACK UP prod.json to 1Password NOW (encryption_key exists from this moment).
+
+ 5. ☁️⚙️ Cloudflare — apex Pages (branch main), api Worker, assets bucket, ZONE-WIDE SSL settings
+         ./infrastructure/scripts/tf.ps1 prod cloudflare plan    # expect 13 to add: staging's 12,
+                                                                 #   minus the noindex rule, plus 2
+                                                                 #   zone settings (ssl, always_use_https)
+         ./infrastructure/scripts/tf.ps1 prod cloudflare apply
+
+ 6. 🔒 B3 + B4 (both need what steps 1 and 5 created)
+         B3 R2 → Manage API tokens → Create Account API token "ozari-prod-assets", Object Read &
+            Write, ONLY bucket ozari-prod-assets, TTL Forever → Access Key ID + Secret Access Key:
+         ./infrastructure/scripts/secret.ps1 prod r2_access_key
+         ./infrastructure/scripts/secret.ps1 prod r2_secret_key
+         B4 console → project ozari-prod-gt → Google Auth Platform (DEPLOYMENT.md §3d): External,
+            scopes calendar.events + userinfo.email, test users, Web client
+            "Ozari Google Calendar (prod)" with ONLY this redirect URI (no localhost):
+              https://api.partyrentalsgt.com/api/calendar/google/callback
+         ./infrastructure/scripts/secret.ps1 prod google_client_id
+         ./infrastructure/scripts/secret.ps1 prod google_client_secret
+         ./infrastructure/scripts/secret.ps1 prod                # no EMPTY rows
+    🔒 BACK UP prod.json again.
+
+ 7. ☁️⚙️ Google Cloud — one pass
+         ./infrastructure/scripts/tf.ps1 prod gcp plan           # expect 59 to add (staging's 58 +
+                                                                 #   the trigger SA's connection grant);
+                                                                 #   "Registration: … new environment -> OPEN"
+         ./infrastructure/scripts/tf.ps1 prod gcp apply
+           A Google-side "internal error" on Cloud Run or a 409 on IAM: §8 troubleshooting (untaint,
+           plan, apply). Then a second plan must show NO CHANGES.
+
+ 8. ☁️ First deploy (Claude can run it — it loads no secrets)
+         gcloud builds triggers run ozari-api-prod --branch=main --region=us-east4 --project=ozari-prod-gt
+         ./infrastructure/scripts/db-seed.ps1 prod
+         ./infrastructure/scripts/pages-build.ps1 prod
+
+ 9.    The first admins (registration starts OPEN): each registers at https://partyrentalsgt.com →
+       promote in pgAdmin (Neon → ozari-prod → Connect, neondb_owner, pooling OFF; DEPLOYMENT.md §3)
+         ./infrastructure/scripts/registration.ps1 prod close
+
+10.    Before anyone else uses it
+         ./infrastructure/scripts/rotate.ps1 prod -Only sessions,api_key,database   # record it in INCIDENTS.md §4
+       §6 verification + DEPLOYMENT.md §11 launch gates (/api/docs ABSENT on api.partyrentalsgt.com).
+    🔒 prod.json to 1Password (the drill changed it). Billing → Budgets & alerts → US$5/month,
+       all projects, alerts at 50 / 90 / 100 %.
+
+Later, before real customers: publish production's OAuth consent screen and start Google's
+verification (B5 — in Testing, calendar sync dies after ~7 days); `enable_cleanup_job = true` in
+envs/prod/gcp once there are real users.
+```
+
+Cost after it: about **US$1.2/month for both environments** — production adds ~US$0.72 of Secret
+Manager versions (the 6 free versions are per billing account and staging already uses them) and a
+cent of registry storage (it keeps 3 rollback images instead of 2).
+
 ---
 
 ## 5. Retire an environment
