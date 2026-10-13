@@ -99,7 +99,7 @@ try {
 
     $require = switch ($Stack) {
         "bootstrap" { @("billing_account") }
-        "gcp" { @("github_app_installation_id", "cloudflare_account_id") }
+        "gcp" { @("github_app_installation_id", "cloudflare_account_id", "billing_account") }
         "cloudflare" { @("cloudflare_account_id", "cloudflare_zone_id", "cloudflare_api_token") }
     }
     Import-OzAccount -Require $require | Out-Null

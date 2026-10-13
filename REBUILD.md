@@ -299,12 +299,20 @@ retire. Counts below are what the plans should show — anything else: stop and 
     🔒 BACK UP prod.json again.
 
  7. ☁️⚙️ Google Cloud — one pass
-         ./infrastructure/scripts/tf.ps1 prod gcp plan           # expect 59 to add (staging's 58 +
-                                                                 #   the trigger SA's connection grant);
+         ./infrastructure/scripts/tf.ps1 prod gcp plan           # expect 76 to add: staging's original 58,
+                                                                 #   + the trigger SA's connection grant,
+                                                                 #   + 17 for the spend cap (6 APIs, topic +
+                                                                 #   its IAM, budget, SA + its role, source
+                                                                 #   bucket + object + 2 build reads,
+                                                                 #   function, invoker);
                                                                  #   "Registration: … new environment -> OPEN"
          ./infrastructure/scripts/tf.ps1 prod gcp apply
            A Google-side "internal error" on Cloud Run or a 409 on IAM: §8 troubleshooting (untaint,
            plan, apply). Then a second plan must show NO CHANGES.
+       Prove the spend cap without firing it (Claude can run this — no secrets): a dry-run message
+       at 100 % must log "WOULD unlink billing (permission OK)":
+         gcloud pubsub topics publish ozari-spend-cap --project=ozari-prod-gt --attribute=dryRun=true --message='{"costAmount":5,"budgetAmount":5,"currencyCode":"USD"}'
+         gcloud functions logs read ozari-spend-cap --gen2 --region=us-east4 --project=ozari-prod-gt --limit=5
 
  8. ☁️ First deploy (Claude can run it — it loads no secrets)
          gcloud builds triggers run ozari-api-prod --branch=main --region=us-east4 --project=ozari-prod-gt
@@ -318,14 +326,17 @@ retire. Counts below are what the plans should show — anything else: stop and 
 10.    Before anyone else uses it
          ./infrastructure/scripts/rotate.ps1 prod -Only sessions,api_key,database   # record it in INCIDENTS.md §4
        §6 verification + DEPLOYMENT.md §11 launch gates (/api/docs ABSENT on api.partyrentalsgt.com).
-    🔒 prod.json to 1Password (the drill changed it). Billing → Budgets & alerts → US$5/month,
-       all projects, alerts at 50 / 90 / 100 %.
+    🔒 prod.json to 1Password (the drill changed it). The US$5 hard spend cap is already live
+       (step 7); the Cloudflare budget alert is account-wide, so it is already set from staging
+       (DEPLOYMENT.md §12).
 
 Later, before real customers: publish production's OAuth consent screen and start Google's
 verification (B5 — in Testing, calendar sync dies after ~7 days); `enable_cleanup_job = true` in
 envs/prod/gcp once there are real users.
 ```
 
+Each environment is hard-capped at US$5/month on Google (`monthly_budget_usd`, INCIDENTS.md S12);
+every other provider's limit, and how to change any of them: `DEPLOYMENT.md` §12.
 Cost after it: about **US$1.2/month for both environments** — production adds ~US$0.72 of Secret
 Manager versions (the 6 free versions are per billing account and staging already uses them) and a
 cent of registry storage (it keeps 3 rollback images instead of 2).
@@ -384,6 +395,8 @@ anything belonging to `qa-ulew`.
 [ ] pnpm reconcile:images reports CLEAN
 [ ] req.ip resolves to the real client, not a Cloudflare edge address (DEPLOYMENT.md §3c)
 [ ] after a few builds: Artifact Registry under 0.5 GB
+[ ] spend cap: Billing → Budgets shows ozari-<env>-cap at US$5, and a dryRun=true message at 100 %
+      logs "WOULD unlink billing (permission OK)" (§4b step 7)
 ```
 
 ---

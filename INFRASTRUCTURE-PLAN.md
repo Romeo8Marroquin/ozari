@@ -238,8 +238,16 @@ a traffic spike can cost; scale-to-zero means idle costs $0; the registry cleanu
 the only resource that grew with every deploy; rotation destroys superseded secret versions; Neon
 autoscaling is capped at 1 CU.
 
-**Recommended once production exists:** a Cloud Billing **budget alert** at $5/month (console →
-Billing → Budgets & alerts). It is an email, not a cap, and it costs nothing.
+**A HARD cap per environment (owner, 2026-10-14):** `monthly_budget_usd` (US$5 each, so at most
+~US$10/month for both) in `envs/<env>/gcp/variables.tf`. A Cloud Billing budget scoped to the
+project emails at 50 / 90 / 100 % and publishes to Pub/Sub; at 100 % a small function
+(`modules/gcp-env/spend-cap.tf`) unlinks the project's billing, which stops every Google service in
+it — an outage instead of an open-ended bill. Its identity holds only Project Billing Manager on its
+own project (Google's sample grants Billing Account Administrator; that is not needed for the unlink
+and is not granted). Costs: nothing measurable (a few invocations a day, free tiers). Limits: cost
+data arrives hours late, so the cap can be overshot by that window's spend. Recovery: INCIDENTS.md
+S12. Every other provider's limit (Neon, Resend, Workers, Pages: hard stops on their free plans; R2:
+no stop exists, an account budget alert instead) and how to change each: `DEPLOYMENT.md` §12.
 
 **Do not chase further savings.** Packing all secrets into one blob saves ~$0.90/month and adds a
 boot-time parse and a new failure mode to the deploy path.
