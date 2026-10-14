@@ -211,6 +211,7 @@ Registry (images) and Secret Manager versions, both kept down by Terraform.
 | The first request after a quiet period is slow | Cloud Run and Neon scale to zero | normal (a few seconds) |
 | One browser gets 403/503 from the API, Cloud Run logs show nothing, other devices are fine | that browser reuses a stale connection from before an edge change | fully quit and reopen the browser (`REBUILD.md` troubleshooting) |
 | `/api/auth/refresh` → 403 "Token CSRF" after a rebuild | a session cookie from the previous environment | expected; sign in again |
+| Blank page after a deploy; Console: *"Failed to load module script … MIME type of text/html"*, survives reloads and redeploys | Cloudflare's EDGE cache holds index.html under a bundle URL (a pre-2026-10-13 deploy, when `/assets/*` was cached "immutable" and a missing asset answered 200 HTML). Browsers send `Origin` for module scripts and Cloudflare keys those separately — so `curl` can look healthy while every browser is broken. Confirm: request the failing `/assets/…js` WITH an `Origin:` header and look for `text/html` + `cf-cache-status: HIT` | Dashboard → partyrentalsgt.com → **Caching → Configuration → Purge Everything** (safe: the edge refetches), then hard-reload. Cannot recur: no long cache on `/assets/*` (`public/_headers`) and a missing asset is a real 404 (`public/assets/404.html`) |
 
 ---
 
