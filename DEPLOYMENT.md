@@ -249,6 +249,14 @@ so presigned URLs MUST be **path-style** (`…/<bucket>/<key>`) — the API's S3
 to staging and prod until 2026-10-13). Moving to another Cloudflare account therefore changes the
 CSP line in the same commit (the comment above it says so).
 
+**The second presign trap — checksums.** AWS SDK v3 ≥ 3.729 adds a CRC32 to every `PutObject` by
+default, and in a PRESIGNED URL it is computed over an empty body (`x-amz-checksum-crc32=AAAAAA==`
+in the query string), so R2 rejects the real file. The client sets
+`requestChecksumCalculation`/`responseChecksumValidation: "WHEN_REQUIRED"` (Cloudflare's documented
+R2 setting; also pinned by a test). Diagnostics: a presigned URL opened in a browser tab always
+answers `SignatureDoesNotMatch` — it is signed for PUT and the tab sends GET — so that XML proves
+nothing; read the URL's host and query parameters instead.
+
 ---
 
 ## 3c. Custom domains & first-party cookies (SESSION-CRITICAL)
