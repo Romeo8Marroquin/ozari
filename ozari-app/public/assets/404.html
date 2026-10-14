@@ -1,0 +1,25 @@
+<!doctype html>
+<!--
+  ⚠️ LOAD-BEARING — do not delete as "an unused page".
+
+  Cloudflare Pages answers a request for a file that does not exist with the NEAREST 404.html up the
+  directory tree. With NO top-level 404.html the project stays a single-page app (every unknown route
+  such as /panel/productos still gets index.html), but under /assets/ — where only real files live —
+  this page makes a missing file an honest 404 instead of the SPA fallback (index.html, status 200).
+  Verified with `wrangler pages dev dist` (2026-10-13): app routes 200 index.html, real assets 200,
+  missing /assets/* 404. NEVER add a top-level 404.html — that switches the whole site out of SPA mode.
+
+  That fallback is what bricked staging (2026-10-13): a module request for a bundle chunk landed
+  mid-rollout, received index.html with a 200, and Cloudflare's edge cached it under the .js URL, so
+  every visit after it failed with "Expected a JavaScript-or-Wasm module script but the server
+  responded with a MIME type of text/html". A 404 is never mistaken for the file and is not kept.
+  See public/_headers for the caching half of the same incident.
+-->
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="robots" content="noindex" />
+    <title>404</title>
+  </head>
+  <body>404</body>
+</html>

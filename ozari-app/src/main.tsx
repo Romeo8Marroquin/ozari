@@ -17,6 +17,26 @@ import { initializeTokenRefresh } from '@utils/tokenRefresh';
 // before `createRouter` — popstate listener order is the mechanism (see utils/historyDeparture).
 installHistoryDepartureInterceptor();
 
+// ── Stale-deploy recovery ─────────────────────────────────────────────────────────────────────
+// A tab opened before a deploy still holds the OLD index.html, so its lazy route chunks point at
+// hashed files the new deployment no longer has (Pages answers them 404 — public/assets/404.html).
+// Vite fires `vite:preloadError` when such a dynamic import fails; one full reload fetches the
+// current index.html and its current chunks. The timestamp guard (survives the reload) caps it at
+// one attempt per 10s, so a chunk that is genuinely broken surfaces the error screen instead of
+// looping. Storage can throw (private mode, blocked site data) — then we simply don't reload.
+window.addEventListener('vite:preloadError', (event) => {
+  const KEY = 'ozari:chunk-reload-at';
+  try {
+    const last = Number(sessionStorage.getItem(KEY) ?? 0);
+    if (Date.now() - last < 10_000) return;
+    sessionStorage.setItem(KEY, String(Date.now()));
+  } catch {
+    return;
+  }
+  event.preventDefault();
+  window.location.reload();
+});
+
 // ── Panel history-back view-transition opt-out ────────────────────────────────────────────────
 // In-app panel navigations pass `viewTransition: false` (the GSAP timelines own the motion), but
 // BROWSER/DEVICE back is handled by the router directly with the global default (true — the auth
