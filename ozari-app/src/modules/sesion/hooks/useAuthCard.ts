@@ -162,20 +162,38 @@ const useAuthCard = (variant: AuthVariant) => {
     { scope: containerRef },
   );
 
-  // Re-snap the settled geometry on any resize (the panel is derived from the card,
-  // which changes with the viewport — including mobile<->desktop breakpoint crosses).
+  // Re-settle the gradient whenever the CARD changes size — not only the window. The panel is derived
+  // from the card's real box, and the card also resizes on its own: register's form appears once the
+  // registration status resolves, an inline error or the MFA step adds lines. Listening to `resize`
+  // alone left the band where the OLD layout had its gap, so it bled across the first form fields —
+  // invisible with the old pastels, unreadable since the gradient carries the saturated main colours
+  // (dark field text on violet). A window resize changes the card too, so this covers that as well.
+  //
+  // Never fights the choreography: while the entrance/leave timelines own the panel (or the card's
+  // own height morph is running) the observer stands down; once they finish, the next observation —
+  // or the explicit check after the entrance — settles it. A short glide rather than a snap, so a
+  // late layout change reads as the card adapting, not as a jump.
   useEffect(() => {
-    const onResize = () => {
-      const container = containerRef.current;
-      if (!container) return;
-      const geo = gradientGeometry(container, variant, isMobileViewport());
+    const container = containerRef.current;
+    const card = container?.querySelector<HTMLElement>(CARD_SELECTOR);
+    if (!container || !card) return;
+    const resettle = () => {
+      if (departing.current) return;
       const gradient = container.querySelector(GRADIENT_SELECTOR);
-      if (!geo || !gradient) return;
-      gsap.killTweensOf(gradient);
-      gsap.set(gradient, geo.settled);
+      // `isTweening(gradient)` also covers the observer's FIRST callback, which lands mid-entrance.
+      if (!gradient || gsap.isTweening(card) || gsap.isTweening(gradient)) return;
+      const geo = gradientGeometry(container, variant, isMobileViewport());
+      if (!geo) return;
+      gsap.to(gradient, { ...geo.settled, duration: 0.3, ease: 'power2.out', overwrite: true });
     };
-    globalThis.addEventListener('resize', onResize);
-    return () => globalThis.removeEventListener('resize', onResize);
+    const observer = new ResizeObserver(resettle);
+    observer.observe(card);
+    // The entrance timeline (~0.9s) may have measured a layout that changed under it.
+    const settleAfterEntrance = window.setTimeout(resettle, 1000);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(settleAfterEntrance);
+    };
   }, [variant]);
 
   const leaveTo = (path: string) => {

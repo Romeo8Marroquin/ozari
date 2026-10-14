@@ -16,22 +16,29 @@
   --color-espresso: #451500;
   --color-midnight: #000061;
   --color-gray-disabled: #99a1af;
-  /* The brand palette is the aurora — teal → azure → violet (owner, 2026-10-13). The token NAMES
+  /* The brand palette is the aurora — teal → blue → violet (owner, 2026-10-13/14). The token NAMES
      predate it and are kept on purpose (they are class names all over the app), so read them as
-     SLOTS, not hues: `yellow`/`cream` = the azure end, `magenta`/`blossom` = the violet end,
-     `aqua`/`sky` = the teal. The brand gradient is still `from-cream to-blossom`.
-     Contrast contract: the light tones stay light enough that CHARCOAL text sits on them (and on the
-     gradient) at ≥7:1 (AAA) — nothing on them is ever white. `magenta` is the one accent used as TEXT, and
-     it clears 6:1 on white (AA for small text). */
+     SLOTS, not hues:
+       MAIN (the brand)   `aqua` = teal · `yellow` = blue · `magenta` = violet
+       LIGHT (tints only) `sky` · `cream` · `blossom` — their pastel companions
+     THE BRAND GRADIENT is the three MAIN colours, in that order:
+       `bg-gradient-to-<dir> from-aqua via-yellow to-magenta`
+     Every gradient surface uses it — never a two-stop pastel blend (owner: "the main colours, not the
+     light pastel ones"). The pastels are only for large quiet WASHES that text sits on (a document's
+     tinted panel), never for a gradient.
+     Contrast contract: the main colours were pulled just deep enough that WHITE text clears 4.5:1 (AA)
+     at EVERY point of the gradient (min 4.69, measured along Tailwind's oklab interpolation). So:
+     anything ON the gradient — text, the logo, an icon — is WHITE, never charcoal (charcoal on the
+     violet end is 2.4:1). `magenta` is also the one accent used as TEXT on white (6.4:1). */
   --color-slate: #7ca7ab;
   --color-olive: #496b88;
   --color-plum: #754988;
   --color-blossom: #e39af0;
   --color-cream: #7fd3ea;
   --color-sky: #afeaf4;
-  --color-magenta: #9331bc;
-  --color-yellow: #3a8fdf;
-  --color-aqua: #14a8b5;
+  --color-magenta: #8e2fbd;
+  --color-yellow: #5165dd;
+  --color-aqua: #1b7ca6;
   --color-customWhite: #f8f5f8;
 
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);

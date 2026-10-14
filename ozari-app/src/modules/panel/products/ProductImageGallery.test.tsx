@@ -279,7 +279,7 @@ describe('ProductImageGallery — upload progress & feedback', () => {
     const img = screen.getByAltText('a.png');
     expect(img.className).toContain('opacity-50');
 
-    const bars = document.querySelectorAll('span > span.bg-magenta');
+    const bars = document.querySelectorAll('span > span.upload-progress');
     expect((bars[0] as HTMLElement).style.width).toBe('50%');
     expect((bars[1] as HTMLElement).style.width).toBe('0%'); // no progress event yet
   });

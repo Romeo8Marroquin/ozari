@@ -16,7 +16,7 @@ export interface RadioProps extends Omit<React.InputHTMLAttributes<HTMLInputElem
  * keyboard focus grows a stronger ring. Only the ring + label are clickable (a `w-fit` `<label>`).
  */
 const Radio = forwardRef<HTMLInputElement, RadioProps>(
-  ({ label, color = '#9331bc', className, id, disabled, ...props }, ref) => {
+  ({ label, color = '#8e2fbd', className, id, disabled, ...props }, ref) => {
     const autoId = useId();
     const inputId = id ?? autoId;
 

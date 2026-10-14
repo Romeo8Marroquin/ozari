@@ -1,7 +1,8 @@
 /**
  * Branded HTML email shell, mirroring the app's visual language: the auth screens' soft radial
- * background (top-centred faint-lavender), a white "paper" card, the cream→blossom gradient header,
- * and the app's charcoal primary button (matching `components/Button`).
+ * background (top-centred faint-lavender), a white "paper" card, the brand-gradient header (teal →
+ * blue → violet, with WHITE heading and logo — the gradient's contrast contract), and the app's
+ * charcoal primary button (matching `components/Button`).
  *
  * Email HTML is NOT web HTML: clients (Outlook especially) strip external CSS and need table-based
  * layout with inline styles. So the structure is tables + inline styles, ~600px wide, web-safe fonts,
@@ -22,8 +23,12 @@ import { appConfig } from "@/config/app.js";
 /** Brand palette, mirrored from the frontend `--color-*` tokens (src/index.css). */
 const COLORS = {
   charcoal: "#262626", // body text
-  cream: "#7fd3ea", // sky-teal end of the brand gradient
-  blossom: "#e39af0", // orchid end
+  // The brand gradient's three MAIN stops (`--color-aqua` / `--color-yellow` / `--color-magenta`).
+  // White text clears 4.5:1 at every point of it; charcoal does not — so the header text is white.
+  brandTeal: "#1b7ca6",
+  brandBlue: "#5165dd", // also the solid fallback where a client drops gradients (Outlook)
+  brandViolet: "#8e2fbd",
+  onBrand: "#ffffff",
   paper: "#ffffff",
   pageSolid: "#efeaf0", // solid fallback under the radial page background
   muted: "#6f6f6f",
@@ -111,10 +116,10 @@ export function renderBrandedEmail(content: BrandedEmailContent): string {
   <tr>
     <td align="center" style="padding:40px 16px;">
       <table role="presentation" width="600" border="0" cellpadding="0" cellspacing="0" bgcolor="${COLORS.paper}" style="width:600px;max-width:100%;border-radius:16px;overflow:hidden;background-color:${COLORS.paper};box-shadow:0 8px 30px rgba(38,38,38,0.10);">
-        <!-- Header band: cream→blossom gradient (solid cream fallback for Outlook). -->
+        <!-- Header band: the brand gradient, white heading + white logo (solid blue fallback for Outlook — white still reads on it). -->
         <tr>
-          <td align="center" bgcolor="${COLORS.cream}" style="background-color:${COLORS.cream};background-image:linear-gradient(135deg,${COLORS.cream} 0%,${COLORS.blossom} 100%);padding:36px 32px;">
-            ${logo}<div style="font-family:${FONT_STACK};font-size:24px;line-height:1.3;font-weight:700;color:${COLORS.charcoal};margin:0;">${heading}</div>
+          <td align="center" bgcolor="${COLORS.brandBlue}" style="background-color:${COLORS.brandBlue};background-image:linear-gradient(135deg,${COLORS.brandTeal} 0%,${COLORS.brandBlue} 50%,${COLORS.brandViolet} 100%);padding:36px 32px;">
+            ${logo}<div style="font-family:${FONT_STACK};font-size:24px;line-height:1.3;font-weight:700;color:${COLORS.onBrand};margin:0;">${heading}</div>
           </td>
         </tr>
         <!-- Body -->
@@ -140,9 +145,9 @@ export function renderBrandedEmail(content: BrandedEmailContent): string {
             ${footer}
           </td>
         </tr>
-        <!-- Bottom accent band: the auth card's cream→blossom edge, evoked as a slim gradient bar. -->
+        <!-- Bottom accent band: the brand gradient, evoked as a slim bar. -->
         <tr>
-          <td bgcolor="${COLORS.cream}" style="height:5px;line-height:5px;font-size:0;background-color:${COLORS.cream};background-image:linear-gradient(90deg,${COLORS.cream} 0%,${COLORS.blossom} 100%);">&nbsp;</td>
+          <td bgcolor="${COLORS.brandBlue}" style="height:5px;line-height:5px;font-size:0;background-color:${COLORS.brandBlue};background-image:linear-gradient(90deg,${COLORS.brandTeal} 0%,${COLORS.brandBlue} 50%,${COLORS.brandViolet} 100%);">&nbsp;</td>
         </tr>
       </table>
       <div style="font-family:${FONT_STACK};font-size:11px;color:${COLORS.muted};padding:20px 0 0;">© Party Rentals</div>

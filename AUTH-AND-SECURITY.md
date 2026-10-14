@@ -257,7 +257,8 @@ locally); **else deployed → `NoopMailer`** (drops it, logs a warning **without
 - **Logo:** `appConfig.email.logoUrl` (or a per-call `logoUrl`) renders a header `<img>`; `""` ⇒ the
   text wordmark carries the brand. It MUST be a **publicly hosted PNG** — Gmail blocks `data:` URIs
   and strips SVG, and many clients block remote images by default (so the wordmark is the reliable
-  baseline). Currently a charcoal raster of `LogoMark` at **`ozari-app/public/email-logo.png`**,
+  baseline). Currently a WHITE raster of `LogoMark` (it sits on the brand-gradient header, where
+  only white reads — FRONTEND-DOCTRINE §12) at **`ozari-app/public/email-logo.png`**,
   served from the frontend origin — so it only renders once the **frontend is deployed** with that
   asset; update the URL if the frontend moves to the apex domain.
 - **i18n for templates = same as the app:** ONE template structure, strings per language via i18next
