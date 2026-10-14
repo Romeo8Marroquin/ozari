@@ -459,6 +459,12 @@ Platform**). The *shape* below is stable; where a label has moved, follow what t
 (APIs & Services → Library). No other API is required — the account-email lookup is a plain
 userinfo endpoint.
 
+**1b. Branding — the USER-facing name.** App name = the brand exactly as the site shows it
+(`Party Rentals Gt`, the `<title>` in `ozari-app/index.html`), never "Ozari" (the internal code
+name). It is what the consent screen says ("*Party Rentals Gt* wants to access your Google
+Account"), and Google's verification checks it against the homepage. The support email is shown too.
+The OAuth client's name and the project's name are internal and never shown.
+
 **2. Audience → `External`.** Google Auth Platform → *Audience* → User type **External**.
 
 > This application is **not** owned by a Google Workspace / Cloud Identity organisation, and an admin
@@ -592,9 +598,27 @@ rollout has requirements beyond our own infrastructure. Google's rules and conso
 list below as the shape of the work and **follow what Google Auth Platform / the Verification Center
 shows at the time you deploy**:
 
+**Prerequisites that are CODE (owner decision 2026-10-13: production is published and verified, no
+test users — admins and employees who are not developers connect calendars):** Google rejects a
+home page that is only a login screen, and `/` currently redirects to `/sesion/inicio`. So before
+Branding can be completed: a PUBLIC home page at `https://partyrentalsgt.com` saying what the app
+does, linking a PUBLIC privacy policy (`/privacidad`, including Google's *Limited Use* disclosure for
+Calendar data) and terms (`/terminos`). Plus domain ownership: Google Search Console → Domain
+property `partyrentalsgt.com` → its TXT record, verified by the same Google account that owns
+`ozari-prod-gt`. "Publish app" stays disabled until Branding is complete.
+
+**Interim (until those pages ship):** production goes live in **Testing**, with each admin's Google
+account under *Audience → Test users*. It works, with two costs: the "unverified app" screen
+(click *Continue*), and the ~7-day refresh-token expiry — every connected admin reconnects weekly
+(*Ajustes → Calendarios*). Once published, delete the test users; they no longer matter.
+
+Later scopes: adding one = add it under Data Access + resubmit; what is already verified keeps
+working during that review. Avoid RESTRICTED scopes (Gmail content, full Drive): they add a paid
+yearly security assessment.
+
 ```
-[ ] Google Auth Platform → Branding: app name, support email, logo, home page,
-    privacy policy URL and authorized domains all accurate for PRODUCTION
+[ ] Google Auth Platform → Branding: app name "Party Rentals Gt", support email, logo, home page,
+    privacy policy URL, terms URL and authorized domain partyrentalsgt.com — all for PRODUCTION
 [ ] Data Access lists ONLY calendar.events + userinfo.email, each with a justification
     that matches what the app does
 [ ] The production redirect URI is registered:

@@ -205,8 +205,8 @@ Registry (images) and Secret Manager versions, both kept down by Terraform.
 
 | Symptom | Usual cause | Fix |
 |---|---|---|
-| Pushes to `dev`/`main` no longer deploy | the GitHub token expired (~1 year) | `secret.ps1 <env> github_oauth_token` + gcp plan/apply |
-| `tf.ps1 … cloudflare` fails with 401/403 | the Cloudflare token expired (~1 year) | Roll it, `secret.ps1 account cloudflare_api_token` |
+| Pushes to `dev`/`main` no longer deploy | the GitHub token expired (~1 year) — `expiry.ps1` confirms | `REBUILD.md` §3 "Expiring keys — renewal" |
+| `tf.ps1 … cloudflare` fails with 401/403 | the Cloudflare token expired (~1 year) — `expiry.ps1` confirms | `REBUILD.md` §3 "Expiring keys — renewal" |
 | Calendars stop syncing ~7 days after connecting | the OAuth app is still in Testing | `DEPLOYMENT.md` §3d — publish it |
 | The first request after a quiet period is slow | Cloud Run and Neon scale to zero | normal (a few seconds) |
 | One browser gets 403/503 from the API, Cloud Run logs show nothing, other devices are fine | that browser reuses a stale connection from before an edge change | fully quit and reopen the browser (`REBUILD.md` troubleshooting) |

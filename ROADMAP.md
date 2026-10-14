@@ -153,6 +153,10 @@ DEPLOYMENT.md R2 section.)*
   storage (Cloudflare R2)"**.
 - **Admin-managed reference data** (categories/types) — a small later "settings" slice once inventory
   and orders are live.
+- **Publish + verify production's Google OAuth app** — prod launched in Testing with test users
+  (weekly reconnect). Needs a public home page at `/`, `/privacidad` (with Google's Limited Use
+  disclosure) and `/terminos`, then Search Console domain TXT → Branding → Publish → verification
+  (`DEPLOYMENT.md` §3d "Production publishing").
 - **Employee/role management UI** — deferred until the business grows past a single admin; promotion
   stays a manual DB op for now.
 - **Close the `run.app` side door** — Cloud Run's own address is public, so traffic aimed at it skips

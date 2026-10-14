@@ -132,20 +132,61 @@ what a new operator starts from: every script creates the real file from them on
 
 ### The credential register — every key that lives OUTSIDE this repo
 
-What each one is called where it was created, what it can do, and who uses it — so a list in a
-provider's dashboard can always be matched to a purpose before anything is deleted.
+Every key minted by hand, ONE ROW PER KEY, by the exact name its provider's list shows — so any
+dashboard list can be matched line for line before anything is renewed or deleted. A key in a
+dashboard that is not in this table is not ours, or the table is wrong: find out which before
+touching it. **Adding, renaming or deleting a key = edit this table in the same sitting.**
 
-| Name in the provider | Where | Can do | Used by | Expiry → replace with |
-|---|---|---|---|---|
-| `ozari-terraform-local` | Cloudflare → My Profile → API Tokens (a **User** token) | Edit Workers, Pages, R2 buckets, and DNS / zone settings / Worker routes / transform rules on `partyrentalsgt.com` only | `tf.ps1` (cloudflare stack), `retire.ps1`, `cf-inventory.ps1`, `account.ps1` — from the operator's machine only ("local"), never in a cloud or CI; shared by staging and production | ~1 year → new token with the A4 scopes, `secret.ps1 account cloudflare_api_token` |
-| `ozari-<env>-assets` | Cloudflare → R2 → Manage API tokens (an **Account** token) | Read/write objects in ONE bucket; cannot create, delete or configure anything | The API on Cloud Run (photos) | none → B3 |
-| Neon organization API key | Neon → Organization settings → API keys | Manage projects in the Ozari org only | `account.ps1`, `neon.ps1`, `retire.ps1` | none → A5 |
-| `ozari cloud-build <env>` | GitHub → Developer settings → Tokens (classic) | Read the repo for Cloud Build's connection | Cloud Build's service agent (Secret Manager) | ~1 year → B1 |
-| One Resend key per environment | Resend → API Keys | Send email from the verified domain | The API on Cloud Run | none → B2 |
-| `Ozari Google Calendar (<env>)` | Google Auth Platform → Clients, in the environment's project | Ask an admin's consent for `calendar.events` + `userinfo.email` | The API on Cloud Run | none → B4 |
+| Key (exact name) | Where it is listed | Env | Can do | Used by · stored in | Expires | On retiring its environment |
+|---|---|---|---|---|---|---|
+| `ozari-terraform-local` | Cloudflare → My Profile → API Tokens (also under R2 → *User API Tokens*) — a **User** token | both | Edit Workers, Pages, R2 buckets, and DNS / zone settings / Worker routes / transform rules on `partyrentalsgt.com` only | `tf.ps1` (cloudflare), `retire.ps1`, `cf-inventory.ps1`, `account.ps1`, `expiry.ps1` — operator's machine only, never a cloud · `account.json` | **~1 year** → renewal below | **Keep** (the other environment uses it). Delete only when Ozari ends entirely. |
+| `ozari-staging-assets` | Cloudflare → R2 → Manage API tokens → *Account API Tokens* | staging | Read/write objects in bucket `ozari-staging-assets` only | The staging API (photos) · `staging.json` → Secret Manager | never (TTL Forever) | **Delete** (step 2 of §5) |
+| `ozari-prod-assets` | same | prod | Read/write objects in bucket `ozari-prod-assets` only | The prod API (photos) · `prod.json` → Secret Manager | never (TTL Forever) | **Delete** |
+| `ozari cloud-build staging` | GitHub → Settings → Developer settings → Tokens (classic) | staging | Read the repo (Cloud Build's connection) | Cloud Build's service agent · `staging.json` → Secret Manager | **~1 year** → renewal below | **Delete** |
+| `ozari cloud-build prod` | same | prod | same | same · `prod.json` → Secret Manager | **~1 year** → renewal below | **Delete** |
+| Resend key of staging (carried over from the pre-rebuild staging) | Resend → API Keys | staging | Send email from `partyrentalsgt.com` | The staging API · `staging.json` → Secret Manager | never | **Delete** |
+| `ozari-prod` | Resend → API Keys | prod | same | The prod API · `prod.json` → Secret Manager | never | **Delete** — ⚠️ never the domain itself |
+| Neon organization API key | Neon → Organization settings → API keys | both | Manage projects in the Ozari org only | `account.ps1`, `neon.ps1`, `retire.ps1` · `account.json` | never | **Keep** (shared). Delete only when Ozari ends entirely. |
+| `Ozari Google Calendar (staging)` | Google Auth Platform → Clients, in `ozari-staging-gt` | staging | Ask an admin's consent for `calendar.events` + `userinfo.email` | The staging API · `staging.json` → Secret Manager | never — but Google **deletes a client unused for ~6 months** (email warning first): connect a calendar on staging now and then | Goes **with the project** — nothing to do |
+| `Ozari Google Calendar (prod)` | same, in `ozari-prod-gt` | prod | same | The prod API · `prod.json` → Secret Manager | same | Goes **with the project** |
+
+**Not keys, but account-level links (never deleted when one environment retires):** the Cloud Build
+GitHub App installation (A2) and the Pages ↔ GitHub authorisation (A6), the Resend domain
+verification, the Cloudflare zone, the billing account.
+
+**What `expiry.ps1` can and cannot see:** it reads the real dates of the three expiring keys. The
+two R2 Account tokens are invisible to it (reading Account tokens would need another permission on
+`ozari-terraform-local`, deliberately not granted) — they were created with TTL Forever; if a new
+one is ever minted, choose Forever again, because an expired R2 key silently breaks photo uploads.
+
+**When Ozari ends entirely** (both environments retired): delete `ozari-terraform-local`, the Neon
+organization key (and the org), uninstall the Cloud Build GitHub App and revoke the Pages GitHub
+authorisation; the domain, zone and Resend domain stay only if something else uses them.
 
 **Replacing them in an emergency** — all at once, in the right order — is `rotate.ps1 <env>`
 (`INCIDENTS.md`).
+
+### Expiring keys — renewal
+
+Exactly **three** keys expire, all ~1 year: the Cloudflare Terraform token (ONE, shared by staging
+and prod) and the GitHub token for Cloud Build (one PER environment). Everything else in the
+register has no expiry by design. Never trust a remembered date — ask the providers:
+
+```powershell
+./infrastructure/scripts/expiry.ps1        # each key's real expiry + days left (warns at 45)
+```
+
+Run it whenever the calendar reminder fires (set one ~1 month before each date it prints), and
+after renewing, to confirm.
+
+| Key | If it lapses | Renew (≈5 min, no downtime) |
+|---|---|---|
+| Cloudflare `ozari-terraform-local` | Nothing live breaks — the site, API and photos keep running. Only `tf.ps1 … cloudflare`, `cf-inventory.ps1`, `retire.ps1` and `account.ps1` fail with 401/403. | **Extend it (value unchanged, nothing to store):** Cloudflare → My Profile → API Tokens → `ozari-terraform-local` → ⋯ **Edit** → TTL → new end date ~1 year out → Continue to summary → **Update token**. Then `expiry.ps1`. *Or replace it* (if it lapsed or may have leaked): ⋯ **Roll** → copy the new value → `secret.ps1 account cloudflare_api_token` → `account.ps1` (proves every permission). No apply either way: the token never reaches a cloud. |
+| GitHub `ozari cloud-build staging` / `… prod` | **Deploys of that environment silently stop**: pushes to `dev`/`main` no longer build. The running API is unaffected. | GitHub → Settings → Developer settings → Tokens (classic) → the token → **Regenerate token** → expiration ~1 year (same scopes `repo` + `read:user`) → copy → `secret.ps1 <env> github_oauth_token` → `tf.ps1 <env> gcp plan` (expect only the `ozari-github-oauth-token` secret version replaced) → `tf.ps1 <env> gcp apply` → back up `<env>.json` to 1Password. Prove it: `gcloud builds triggers run ozari-api-<env> --branch=<dev\|main> --region=us-east4 --project=<project>` builds. Do staging and prod separately — they are separate tokens. |
+
+Rolling or regenerating (rather than creating a new token) keeps the name and the permissions, so
+the register above stays true. If you do create a new one instead, give it the same name and delete
+the old one in the same sitting.
 
 The service accounts (`ozari-run-sa`, `ozari-build-sa`) have no keys at all: Google issues them
 short-lived credentials, and Terraform owns their permissions.
@@ -289,8 +330,10 @@ retire. Counts below are what the plans should show — anything else: stop and 
             Write, ONLY bucket ozari-prod-assets, TTL Forever → Access Key ID + Secret Access Key:
          ./infrastructure/scripts/secret.ps1 prod r2_access_key
          ./infrastructure/scripts/secret.ps1 prod r2_secret_key
-         B4 console → project ozari-prod-gt → Google Auth Platform (DEPLOYMENT.md §3d): External,
-            scopes calendar.events + userinfo.email, test users, Web client
+         B4 console → project ozari-prod-gt → Google Auth Platform (DEPLOYMENT.md §3d): app name
+            "Party Rentals Gt" (users see it — never "Ozari"), External, scopes calendar.events +
+            userinfo.email, test users = the admins' own Google accounts (INTERIM: prod stays in
+            Testing until the public pages exist, then is published + verified — §3d), Web client
             "Ozari Google Calendar (prod)" with ONLY this redirect URI (no localhost):
               https://api.partyrentalsgt.com/api/calendar/google/callback
          ./infrastructure/scripts/secret.ps1 prod google_client_id
@@ -364,9 +407,11 @@ Neon and Cloudflare objects are few and listed by name in ONE table (`Get-OzTarg
       before it failed). Google keeps a deleted project recoverable for 30 days
       (`gcloud projects undelete`). gcloud's ADC quota and default project are switched to the
       other environment first; the script refuses if that one does not exist.
-2. 🔒 Revoke what was minted for it by hand: its GitHub classic token (github.com → Settings →
-      Developer settings), its Resend key, its R2 token (R2 → Manage API tokens). The OAuth client
-      went with the project.
+2. 🔒 Revoke what was minted for it by hand — every row of the credential register (§3) whose
+      "On retiring" column says Delete for this environment: its GitHub classic token
+      (`ozari cloud-build <env>`), its Resend key, its R2 token (`ozari-<env>-assets`). Then
+      delete those rows from the register. The OAuth client went with the project; the shared
+      `ozari-terraform-local` and Neon key STAY.
 3.    Archive or delete infrastructure/secrets/<env>.json — its values are now dead.
 ```
 
@@ -445,9 +490,10 @@ Known failures, so they are not diagnosed from scratch:
   `gcloud auth application-default set-quota-project ozari-staging-gt`.
 - **Cloudflare apply: "already exists"**: something still holds a hostname. `cf-inventory.ps1 <env>`
   names it. If it is the pre-rebuild staging, re-run `retire.ps1 legacy-staging -Execute`.
-- **gcp apply stops at the GitHub connection / repository**: the classic token is wrong, expired or
+- **gcp apply stops at the GitHub connection / repository / trigger**: the classic token is wrong, expired or
   fine-grained, or the installation id is wrong — or, on a first apply with a "permission denied" on
-  the token secret, Google had not finished propagating the grant made seconds earlier: wait a
+  the token secret, or on the trigger ("Permission 'cloudbuild.connections.get' denied", seen on
+  prod 2026-10-13), Google had not finished propagating the grant made seconds earlier: wait a
   minute, then plan and apply again (only what is missing is created). Otherwise replace it (`secret.ps1 <env> github_oauth_token`
   bumps its counter), then plan and apply again.
 - **First gcp apply: Cloud Run "The service has encountered an internal error", or an IAM "409

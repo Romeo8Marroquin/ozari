@@ -29,6 +29,7 @@ infrastructure/
     db-bootstrap.mjs          (called by neon.ps1) creates/rotates migrator + app roles, PROVES their limits
     db-seed.ps1               pnpm db:seed against an environment, as the migrator
     cf-inventory.ps1          read-only Cloudflare inventory: OURS / CONFLICT / not ours
+    expiry.ps1                read-only: the real expiry date of each expiring token (REBUILD.md §3)
     rotate.ps1                EMERGENCY: rotate an environment's credentials in one guided run (INCIDENTS.md)
     registration.ps1          open / close / status of new-account registration (the live service is the record)
     retire.ps1                delete an environment everywhere (dry run by default; GCP project last)
@@ -146,7 +147,7 @@ saved plan.
 
 > **For Claude sessions:** the project's `.claude/settings` deny reading `**/secrets/**`. Commands
 > that LOAD secrets — `account.ps1`, `retire.ps1`, `rotate.ps1`, `registration.ps1 open|close`, `tf.ps1 plan|apply|output`, `neon.ps1`, `db-seed.ps1`, `cf-inventory.ps1`,
-> `pages-build.ps1` — are run by the owner, in a terminal or with the `!` prefix. Plans print no
+> `expiry.ps1`, `pages-build.ps1` — are run by the owner, in a terminal or with the `!` prefix. Plans print no
 > secret values (they are ephemeral/sensitive), so pasting a plan back is safe. `tf.ps1 … validate`
 > needs no credentials.
 
