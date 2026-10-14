@@ -720,11 +720,19 @@ against this scale.
   the `BarChart`/`PageLoader` SVG stops, `index.html` `theme-color` + `manifest.json` theme/background
   (= `aqua`: status bar and the installed PWA's splash), `public/email-logo.png` (WHITE — it sits on
   the email's gradient header), and `public/assets/{favicon,media-image}.svg` (white mark). Every
-  `.png` in `public/assets` is a RASTER of those two SVGs and must be re-rendered after a change:
-  `favicon.png` (811, rounded, transparent corners),
-  `icon-192/512.png` (manifest `any`), `icon-maskable-512.png` (full-bleed, mark scaled to 60% so it
-  survives Android's circle crop), `apple-touch-icon.png` (180, full-bleed SQUARE — iOS paints
-  transparency black and rounds it itself) and `media-image.png` (465×750 share card).
+  `.png` in `public/assets` is a RASTER of those two SVGs and must be re-rendered after a change
+  (then bump every `?v=N` on their URLs in `index.html` + `manifest.json`):
+  | File | Size | Mark | Extra stroke (`#icon` units) |
+  |---|---|---|---|
+  | `favicon-16.png` · `favicon-32.png` (tab, `<link sizes>`) | 16 · 32 | 110% · 106% | **28 · 16** |
+  | `/favicon.ico` (16/32/48 PNG-in-ICO, root — requested by convention) | — | as above, 48 = 103% | 28/16/10 |
+  | `favicon.png` (og logo, structured data) · `icon-192/512.png` (manifest `any`) | 811 · 192 · 512 | 100% | 6 |
+  | `icon-maskable-512.png` (full-bleed; Android's circle crop) | 512 | 60% | 10 |
+  | `apple-touch-icon.png` (full-bleed SQUARE — iOS paints transparency black, rounds it itself) | 180 | 86% | 7 |
+  | `media-image.png` (share card) | 465×750 | — | 6 on the mark paths |
+  **6 is the app's own weight** (`LOGO_MARK_STROKE_WIDTH`, same coordinate space). ⚠️ The TINY sizes need
+  the heavier stroke: at 16–32px the 6-unit white line dissolves into the gradient and the favicon reads
+  as a blank coloured square (2026-10-14) — never re-render them from the large icon.
 - **Motion** — `--ease-settle` (`cubic-bezier(0.16,1,0.3,1)`) is the shared "ease into place" curve
   for reveals (the user menu, future popovers), used as `ease-[var(--ease-settle)]`.
 - ⚠️ **Tailwind v4 transition trap:** `translate-*`/`scale-*`/`rotate-*` utilities emit the

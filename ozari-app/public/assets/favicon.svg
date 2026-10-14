@@ -16,11 +16,19 @@
 
   <!-- background -->
   <rect width="810" height="810" rx="100" ry="100" fill="url(#bg)" />
+  <!-- The source paths are filled outlines that turn hairline-thin once shrunk, so — exactly like the
+       app's LogoMark (LOGO_MARK_STROKE_WIDTH = 6, same coordinate space) — a same-colour stroke
+       fattens them. The tiny favicons (16/32/48) are rendered from THIS group with a heavier stroke
+       and a slightly larger mark: at tab size the large-icon weight dissolves into the gradient. -->
   <g
     id="icon"
     transform="
       scale(1.5)
       translate(-142.5 -127)"
+    stroke="#ffffff"
+    stroke-width="6"
+    stroke-linejoin="round"
+    stroke-linecap="round"
   >
   <!-- hexagon border -->
   <path fill="#ffffff" fill-rule="nonzero"
