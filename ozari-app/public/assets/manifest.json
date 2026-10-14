@@ -4,13 +4,26 @@
   "description": "Alquiler de mobiliario para eventos: mesas, sillas, manteles, cubremanteles, decoración y artículos para fiestas. Calidad, puntualidad y precios accesibles en toda Guatemala.",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#a8fdf8",
-  "theme_color": "#a8fdf8",
+  "background_color": "#7fd3ea",
+  "theme_color": "#7fd3ea",
   "icons": [
     {
-      "src": "/assets/media-image.png",
-      "sizes": "465x750",
-      "type": "image/png"
+      "src": "/assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

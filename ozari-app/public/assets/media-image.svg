@@ -2,8 +2,8 @@
     zoomAndPan="magnify" viewBox="1 23.5 114.94 757" height="750" width="470">
     <defs>
         <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#a8fdf8" />
-            <stop offset="100%" stop-color="#fca7f0" />
+            <stop offset="0%" stop-color="#7fd3ea" />
+            <stop offset="100%" stop-color="#e39af0" />
         </linearGradient>
     </defs>
 

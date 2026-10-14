@@ -430,6 +430,7 @@ anything belonging to `qa-ulew`.
       (and still none after the first Cloud Build deploy: the deploy must not fight Terraform)
 [ ] rotate.ps1 <env> -Only sessions,api_key,database drilled once, BEFORE the environment has users,
       and ended with the green health check (INCIDENTS.md §4)
+      (2026-10-13: drilled on staging; the owner chose not to repeat it on prod.)
 [ ] Nothing belonging to qa-ulew appeared in any plan or deletion
 [ ] GET https://api-<env>.partyrentalsgt.com/api/health/check answers from OUR API
       200 with x-api-key, or 403 without (Express received it and refused a direct hit — correct).

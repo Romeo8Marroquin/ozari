@@ -134,8 +134,8 @@ export default function PageLoader() {
             {/* Runs top-left → bottom-right, the same direction as the tile's own gradient, so the
                 beam brightens into magenta exactly where the tile deepens into blossom. */}
             <linearGradient id="pageLoaderBeam" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="var(--color-blossom, #fca7f0)" />
-              <stop offset="100%" stopColor="var(--color-magenta, #ff01ed)" />
+              <stop offset="0%" stopColor="var(--color-blossom, #e39af0)" />
+              <stop offset="100%" stopColor="var(--color-magenta, #9331bc)" />
             </linearGradient>
           </defs>
           <path d={TILE_OUTLINE} stroke="currentColor" strokeWidth={0.85} />
