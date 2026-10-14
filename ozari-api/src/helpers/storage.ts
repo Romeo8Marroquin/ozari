@@ -81,6 +81,20 @@ export class R2Storage implements Storage {
       // R2 is region-agnostic; "auto" is Cloudflare's documented value.
       region: "auto",
       endpoint: config.endpoint,
+      // ⚠️ LOAD-BEARING: path-style (`https://<account>.r2.cloudflarestorage.com/<bucket>/<key>`).
+      // The SDK's default for a DNS-safe bucket is VIRTUAL-HOSTED (`https://<bucket>.<account>.r2…`),
+      // a host the app's CSP does not list — its `connect-src` pins the exact account endpoint
+      // (ozari-app/index.html). The browser then refuses the presigned PUT before it leaves (status
+      // "(blocked:csp)", 0 ms): every gallery photo and order-evidence upload dies while the product
+      // itself saves. Path-style keeps the upload on the one host the CSP names, with no policy change.
+      forcePathStyle: true,
+      // ⚠️ LOAD-BEARING: checksums only when an operation REQUIRES one (Cloudflare's documented R2
+      // setting). Since v3.729 the SDK defaults to WHEN_SUPPORTED and adds a CRC32 to every PutObject;
+      // in a PRESIGNED URL it is computed at signing time over an empty body
+      // (`x-amz-checksum-crc32=AAAAAA==`), so R2 rejects the browser's real file as a checksum
+      // mismatch. The upload's integrity is already pinned by the signed Content-Length + type.
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
       credentials: {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,

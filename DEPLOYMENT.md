@@ -240,6 +240,23 @@ context can't even preflight against prod assets.
 Public **reads** don't need CORS (plain `<img>` tags aren't CORS requests). If a feature ever needs
 to `fetch` an image from the app origin, add `"GET"` to the rule first.
 
+**The CSP is the OTHER browser gate, and it is checked first.** The app's `connect-src`
+(`ozari-app/index.html`) pins the exact write host `https://<account-id>.r2.cloudflarestorage.com`,
+so presigned URLs MUST be **path-style** (`…/<bucket>/<key>`) — the API's S3 client sets
+`forcePathStyle: true` (`helpers/storage.ts`, pinned by a test). The SDK default is virtual-hosted
+(`<bucket>.<account-id>.r2…`), which the CSP refuses: DevTools shows the PUT as **`(blocked:csp)` in
+0 ms**, the product saves without its photos, and nothing reaches R2 or its CORS rule (this shipped
+to staging and prod until 2026-10-13). Moving to another Cloudflare account therefore changes the
+CSP line in the same commit (the comment above it says so).
+
+**The second presign trap — checksums.** AWS SDK v3 ≥ 3.729 adds a CRC32 to every `PutObject` by
+default, and in a PRESIGNED URL it is computed over an empty body (`x-amz-checksum-crc32=AAAAAA==`
+in the query string), so R2 rejects the real file. The client sets
+`requestChecksumCalculation`/`responseChecksumValidation: "WHEN_REQUIRED"` (Cloudflare's documented
+R2 setting; also pinned by a test). Diagnostics: a presigned URL opened in a browser tab always
+answers `SignatureDoesNotMatch` — it is signed for PUT and the tab sends GET — so that XML proves
+nothing; read the URL's host and query parameters instead.
+
 ---
 
 ## 3c. Custom domains & first-party cookies (SESSION-CRITICAL)

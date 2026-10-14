@@ -84,6 +84,31 @@ describe("R2Storage", () => {
     );
   });
 
+  it("builds a PATH-STYLE client, so presigned URLs stay on the CSP-pinned account host", async () => {
+    const { R2Storage } = await import("./storage.js");
+    new R2Storage(CONFIG);
+
+    // A virtual-hosted URL (`<bucket>.<account>.r2…`) is refused by the app's connect-src — the
+    // staging/prod "(blocked:csp)" upload failure. This pins the client option that prevents it.
+    expect(s3ClientCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: CONFIG.endpoint, region: "auto", forcePathStyle: true }),
+    );
+  });
+
+  it("disables default checksums, so a presigned PUT is not bound to an empty-body CRC32", async () => {
+    const { R2Storage } = await import("./storage.js");
+    new R2Storage(CONFIG);
+
+    // The SDK's WHEN_SUPPORTED default signs `x-amz-checksum-crc32=AAAAAA==` (the CRC of nothing)
+    // into every presigned PutObject, and R2 then rejects the real file. Cloudflare's R2 setting.
+    expect(s3ClientCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestChecksumCalculation: "WHEN_REQUIRED",
+        responseChecksumValidation: "WHEN_REQUIRED",
+      }),
+    );
+  });
+
   it("rejects an unsupported content type", async () => {
     const { R2Storage, StorageValidationError } = await import("./storage.js");
     await expect(

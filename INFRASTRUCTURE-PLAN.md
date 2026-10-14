@@ -22,8 +22,8 @@ cannot be, and why.
 | 2 — Credentials (Group A of `REBUILD.md` §3) | ✅ **done 2026-10-12** (`account.ps1`: every check passed) |
 | 3 — Build the new staging (`REBUILD.md` §4) | ✅ **done 2026-10-13**: `ozari-staging-gt` #27754621719, Neon `ozari-staging`, all three stacks applied, first deploy + seed + Pages build, end-to-end verified. Fixed on the way (now in code): Cloud Run's bootstrap image, the trigger SA's connection access, an IAM 409 race, the visitor IP behind the Worker (`trust proxy 2`). Rotation drilled (INCIDENTS.md §4). Registration switch added; staging registration **closed** after its admins were promoted. |
 | 4 — Retire the pre-rebuild staging | ✅ **done 2026-10-12** as step 3 of phase 3 (`retire.ps1 legacy-staging`): Worker + route, Pages `ozari` (132 deployments), bucket `ozari-staging` (23 objects), 2 CNAMEs, Neon `ozari`, project `ozari-500103` (undeletable until ~2026-11-11). Resend key carried over. Email DNS verified intact. Left: the old R2 token, deleted at Group B. |
-| 5 — Production (same procedure, `prod` inputs) | ⏭️ next (planned 2026-10-14). Create `main` from `dev` first. |
-| 6 — Handover: off-machine backup of `infrastructure/secrets/`, first-month cost review | 🔄 backup ✅ (1Password: `account.json`, `staging.json`; add `prod.json`); cost review after the first month (staging measured ≈ US$0.40/month) |
+| 5 — Production (same procedure, `prod` inputs) | ✅ **live 2026-10-13** (`ozari-prod-gt`, Neon `ozari-prod`, `partyrentalsgt.com`): spend cap dry-run OK, first deploy `df8bab8`, seeded, admins registered. Owner decisions: the `rotate.ps1` drill was NOT repeated on prod (proven on staging); Google OAuth stays in Testing with test users until the public pages ship (`ROADMAP.md` §5). Left: `registration.ps1 prod close` once every admin has registered. |
+| 6 — Handover: off-machine backup of `infrastructure/secrets/`, first-month cost review | 🔄 backup ✅ (1Password: `account.json`, `staging.json`, `prod.json`); cost review after the first month (staging measured ≈ US$0.40/month) |
 
 ### 0.2 Decisions (owner, 2026-10-09)
 
