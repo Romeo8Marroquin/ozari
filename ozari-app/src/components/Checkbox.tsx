@@ -16,7 +16,7 @@ export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputE
  * are clickable (it's a `w-fit` `<label>`), not the rest of the row.
  */
 const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
-  ({ label, color = '#8e2fbd', className, id, disabled, ...props }, ref) => {
+  ({ label, color = '#ff01ed', className, id, disabled, ...props }, ref) => {
     const autoId = useId();
     const inputId = id ?? autoId;
 

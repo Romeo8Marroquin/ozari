@@ -26,12 +26,10 @@ import {
   BANK_MARK_WIDTH,
   BANK_ROW_GAP,
   BAR_HEIGHT,
-  BRAND_BLUE,
+  BLOSSOM,
   BRAND_MARK_HEIGHT,
-  BRAND_TEAL,
   BRAND_TILE,
   BRAND_TILE_RADIUS,
-  BRAND_VIOLET,
   CHARCOAL,
   COL_DAYS,
   COL_PRICE,
@@ -39,6 +37,7 @@ import {
   COL_TOTAL,
   CONTENT_WIDTH,
   cornerWedgePath,
+  CREAM,
   descriptionWidth,
   DIVIDER_GAP_SECTION,
   DIVIDER_GAP_TABLE,
@@ -51,7 +50,6 @@ import {
   INK,
   MARGIN,
   MUTED,
-  ON_BRAND,
   opticalCenterPad,
   PAGE_WIDTH,
   roundedTopPath,
@@ -380,8 +378,8 @@ const styles = StyleSheet.create({
     paddingBottom: opticalCenterPad(12),
     paddingHorizontal: 12,
   },
-  balanceLabel: { fontFamily: 'Helvetica-Bold', fontSize: 9.5, lineHeight: 1, color: ON_BRAND },
-  balanceValue: { fontFamily: 'Helvetica-Bold', fontSize: 12, lineHeight: 1, color: ON_BRAND },
+  balanceLabel: { fontFamily: 'Helvetica-Bold', fontSize: 9.5, lineHeight: 1, color: CHARCOAL },
+  balanceValue: { fontFamily: 'Helvetica-Bold', fontSize: 12, lineHeight: 1, color: CHARCOAL },
   // ── Deposit details (inside the summary's left column) + page furniture ─────────────────────
   banks: { gap: BANK_ROW_GAP },
   bank: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
@@ -500,7 +498,7 @@ interface OrderDocumentProps {
   money: (amount: number) => string;
   date: (value: Date) => string;
   dateTime: (value: Date) => string;}
-/** * The brand gradient (teal → blue → violet) as a fill. react-pdf has no CSS gradients, but its SVG primitives do — so the brand * is drawn for real rather than approximated with a flat colour or a PNG strip to keep in sync. * * Each instance needs a UNIQUE `id`: gradient definitions live in one document-wide namespace, so * two `<Defs>` sharing an id would silently resolve to whichever was parsed last. */
+/** * A cream→blossom fill. react-pdf has no CSS gradients, but its SVG primitives do — so the brand * is drawn for real rather than approximated with a flat colour or a PNG strip to keep in sync. * * Each instance needs a UNIQUE `id`: gradient definitions live in one document-wide namespace, so * two `<Defs>` sharing an id would silently resolve to whichever was parsed last. */
 const BrandFill: React.FC<{
   id: string;
   width: number;
@@ -513,9 +511,8 @@ const BrandFill: React.FC<{
   <Svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
     <Defs>
       <LinearGradient id={id} x1="0%" y1="0%" x2="100%" y2={diagonal ? '100%' : '0%'}>
-        <Stop offset="0%" stopColor={BRAND_TEAL} />
-        <Stop offset="50%" stopColor={BRAND_BLUE} />
-        <Stop offset="100%" stopColor={BRAND_VIOLET} />
+        <Stop offset="0%" stopColor={CREAM} />
+        <Stop offset="100%" stopColor={BLOSSOM} />
       </LinearGradient>
     </Defs>
     <Rect x={0} y={0} width={width} height={height} rx={radius} ry={radius} fill={`url(#${id})`} />
@@ -525,8 +522,8 @@ const BrandMark: React.FC<{ height: number }> = ({ height }) => (
   <Svg width={height * LOGO_MARK_ASPECT} height={height} viewBox={LOGO_MARK_VIEWBOX}>
     <G
       transform={LOGO_MARK_TRANSFORM}
-      fill={ON_BRAND}
-      stroke={ON_BRAND}
+      fill={CHARCOAL}
+      stroke={CHARCOAL}
       strokeWidth={LOGO_MARK_STROKE_WIDTH}
     >
       {LOGO_MARK_PATHS.map((d) => (

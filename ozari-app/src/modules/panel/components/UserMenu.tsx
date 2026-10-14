@@ -32,7 +32,7 @@ const ROLE_BY_ID: Record<number, MeData['role']> = { 1: 'Client', 2: 'Admin', 3:
 const NeutralAvatar: React.FC<{ sizeClass: string; iconClass: string }> = ({ sizeClass, iconClass }) => (
   <span
     aria-hidden
-    className={`grid shrink-0 place-items-center rounded-full bg-gradient-to-br from-aqua via-yellow to-magenta text-white/85 shadow-sm ${sizeClass}`}
+    className={`grid shrink-0 place-items-center rounded-full bg-gradient-to-br from-cream to-blossom text-charcoal/55 shadow-sm ${sizeClass}`}
   >
     <HiOutlineUser className={iconClass} />
   </span>
@@ -262,7 +262,7 @@ const UserMenu: React.FC = () => {
             <>
               <span
                 aria-hidden
-                className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-aqua via-yellow to-magenta text-base font-semibold text-white shadow-sm"
+                className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-cream to-blossom text-base font-semibold text-charcoal shadow-sm"
               >
                 {initials}
               </span>
@@ -330,7 +330,7 @@ const UserMenu: React.FC = () => {
                   <>
                     <span
                       aria-hidden
-                      className="grid size-[3.25rem] shrink-0 place-items-center rounded-full bg-gradient-to-br from-aqua via-yellow to-magenta text-lg font-semibold text-white shadow-sm"
+                      className="grid size-[3.25rem] shrink-0 place-items-center rounded-full bg-gradient-to-br from-cream to-blossom text-lg font-semibold text-charcoal shadow-sm"
                     >
                       {initials}
                     </span>

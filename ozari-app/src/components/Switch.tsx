@@ -23,7 +23,7 @@ export interface SwitchProps
  * than fading. Colours derive from a single `color`, injected as CSS variables like the Button.
  */
 const Switch = forwardRef<HTMLInputElement, SwitchProps>(
-  ({ checked, onChange, color = '#8e2fbd', disabled, className, id, label, ...props }, ref) => {
+  ({ checked, onChange, color = '#ff01ed', disabled, className, id, label, ...props }, ref) => {
     const autoId = useId();
     const inputId = id ?? autoId;
 

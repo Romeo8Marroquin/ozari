@@ -30,7 +30,7 @@ import { notify } from '@components/notifications/notify';
 notify.success(message, { title });           // default variant
 notify.error(message);
 notify.warning(message, { duration: 0 });      // 0 = sticky until dismissed
-notify.info(message, { color: '#754988' });    // override the principal color
+notify.info(message, { color: '#7d5076' });    // override the principal color
 notify.info(message, { maxWidth: 520 });       // raise the wrap cap (default 400px)
 notify.info(message, { width: 320 });          // fixed width (forces multi-line)
 const id = notify.push({ message, variant: 'success' });

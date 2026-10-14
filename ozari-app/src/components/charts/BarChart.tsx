@@ -171,13 +171,11 @@ const BarChart: React.FC<BarChartProps> = ({
           className={`w-full min-w-0 flex-1 ${CHART_HEIGHT}`}
         >
         <defs>
-          {/* The brand gradient (teal → blue → violet), top-down, so every bar carries the whole
-              palette exactly like the tile and the auth cards do. Per-bar (objectBoundingBox), so a
-              short bar shows all three colours too, not just a teal sliver. */}
+          {/* The brand gradient, top-down, so the bars deepen into blossom exactly like the tile and
+              the auth cards do. */}
           <linearGradient id="barChartFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-aqua, #1b7ca6)" />
-            <stop offset="50%" stopColor="var(--color-yellow, #5165dd)" />
-            <stop offset="100%" stopColor="var(--color-magenta, #8e2fbd)" />
+            <stop offset="0%" stopColor="var(--color-cream, #fceda7)" />
+            <stop offset="100%" stopColor="var(--color-blossom, #fca7f0)" />
           </linearGradient>
         </defs>
         {ticks.map((tick) => {

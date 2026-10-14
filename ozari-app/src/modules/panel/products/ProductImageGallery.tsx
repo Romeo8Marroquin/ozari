@@ -255,7 +255,7 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
                     className="absolute inset-x-0 bottom-0 h-1 bg-charcoal/10"
                   >
                     <span
-                      className="upload-progress block h-full bg-gradient-to-r from-aqua via-yellow to-magenta transition-[width] duration-200 ease-out"
+                      className="block h-full bg-magenta transition-[width] duration-200 ease-out"
                       style={{ width: `${Math.round(ratio * 100)}%` }}
                     />
                   </span>

@@ -82,16 +82,8 @@ export const BRAND_MARK_HEIGHT = BRAND_TILE * 0.88;
  * almost certainly does not.
  */
 export const CHARCOAL = '#262626';
-/**
- * The brand gradient's three stops — mirrors of the MAIN tokens in index.css (`--color-aqua`,
- * `--color-yellow`, `--color-magenta`): teal → blue → violet. Whatever sits ON it (the tile's mark,
- * the saldo chip's text) is `ON_BRAND` white: the stops are deep enough that white clears 4.5:1 along
- * the whole gradient, and charcoal does not (2.4:1 on the violet end).
- */
-export const BRAND_TEAL = '#1b7ca6';
-export const BRAND_BLUE = '#5165dd';
-export const BRAND_VIOLET = '#8e2fbd';
-export const ON_BRAND = '#ffffff';
+export const CREAM = '#fceda7';
+export const BLOSSOM = '#fca7f0';
 /** Body copy that is not a heading — readable, never as heavy as the figures beside it. */
 export const INK = '#3f3f3f';
 /** Labels and captions. Deliberately above the 4.5:1 line on white: this document gets PRINTED,
@@ -99,7 +91,7 @@ export const INK = '#3f3f3f';
 export const MUTED = '#6e6e6e';
 export const HAIRLINE = '#e8e4e6';
 /** The soft brand wash behind panels — blossom at a few percent, not a neutral grey. */
-export const TINT = '#fcf5fd';
+export const TINT = '#fdf6fb';
 /**
  * Table rows — TWO fills, and neither of them is paper (owner, 2026-08-26).
  *

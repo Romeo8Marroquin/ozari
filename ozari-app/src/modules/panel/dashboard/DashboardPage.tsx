@@ -395,7 +395,7 @@ const DashboardPage: React.FC = () => {
                         {/* Width is transitioned so a refresh ADAPTS the bar to its new share
                             instead of snapping — the same rule the charts follow. */}
                         <span
-                          className="block h-full rounded-full bg-gradient-to-r from-aqua via-yellow to-magenta transition-[width] duration-500 ease-[var(--ease-settle)] motion-reduce:transition-none"
+                          className="block h-full rounded-full bg-gradient-to-r from-cream to-blossom transition-[width] duration-500 ease-[var(--ease-settle)] motion-reduce:transition-none"
                           style={{ width: `${Math.round((product.quantity / topMax) * 100)}%` }}
                         />
                       </span>

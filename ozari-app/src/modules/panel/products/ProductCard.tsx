@@ -182,7 +182,7 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
           className="absolute inset-0 size-full object-cover transition-transform duration-500 ease-[var(--ease-settle)] group-hover:scale-[1.06] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
         />
       ) : (
-        <span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-aqua via-yellow to-magenta text-white/55">
+        <span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-cream to-blossom text-charcoal/25">
           <LogoMark className="size-14" />
         </span>
       )}
