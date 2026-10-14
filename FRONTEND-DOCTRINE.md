@@ -698,6 +698,20 @@ against this scale.
   `rounded-full` for pills/avatars. Prefer these semantic names over raw `rounded-2xl/xl/lg` in new
   UI. Existing components already align numerically (2xl↔card, xl↔control); the lone outlier is
   `CustomButton` (`rounded-md`) — reconcile if you touch it.
+- **Brand palette = the aurora (teal → azure → violet, owner 2026-10-13).** The `--color-*` token
+  NAMES predate it and were kept, so read them as slots: `yellow`/`cream` = azure/sky-teal (`#3a8fdf`/`#7fd3ea`),
+  `magenta`/`blossom` = violet/orchid (`#9331bc`/`#e39af0`), `aqua`/`sky` = teal (`#14a8b5`/`#afeaf4`). The
+  brand gradient is still `from-cream to-blossom`. **Contrast contract:** the light tones carry
+  CHARCOAL text (≥7:1, AAA) — never white; `magenta` is the only accent used as text, ≥6:1 on white.
+  Hand-kept copies that must move with the tokens: `documentTheme.ts` (`CREAM`/`BLOSSOM`/`TINT`),
+  the API's `emails/layout.ts` `COLORS`, the `Switch`/`Radio`/`Checkbox` default `color`, the
+  `rgba(147,49,188,…)` glows on `BrandMark`/`Sidebar`, `index.html` `theme-color` + `manifest.json`
+  theme/background (= `cream`: status bar and the installed PWA's splash), and
+  `public/assets/{favicon,media-image}.svg`. Every `.png` in `public/assets` is a RASTER of those two
+  SVGs and must be re-rendered after a change: `favicon.png` (811, rounded, transparent corners),
+  `icon-192/512.png` (manifest `any`), `icon-maskable-512.png` (full-bleed, mark scaled to 60% so it
+  survives Android's circle crop), `apple-touch-icon.png` (180, full-bleed SQUARE — iOS paints
+  transparency black and rounds it itself) and `media-image.png` (465×750 share card).
 - **Motion** — `--ease-settle` (`cubic-bezier(0.16,1,0.3,1)`) is the shared "ease into place" curve
   for reveals (the user menu, future popovers), used as `ease-[var(--ease-settle)]`.
 - ⚠️ **Tailwind v4 transition trap:** `translate-*`/`scale-*`/`rotate-*` utilities emit the

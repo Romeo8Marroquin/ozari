@@ -84,6 +84,17 @@ describe("R2Storage", () => {
     );
   });
 
+  it("builds a PATH-STYLE client, so presigned URLs stay on the CSP-pinned account host", async () => {
+    const { R2Storage } = await import("./storage.js");
+    new R2Storage(CONFIG);
+
+    // A virtual-hosted URL (`<bucket>.<account>.r2…`) is refused by the app's connect-src — the
+    // staging/prod "(blocked:csp)" upload failure. This pins the client option that prevents it.
+    expect(s3ClientCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: CONFIG.endpoint, region: "auto", forcePathStyle: true }),
+    );
+  });
+
   it("rejects an unsupported content type", async () => {
     const { R2Storage, StorageValidationError } = await import("./storage.js");
     await expect(

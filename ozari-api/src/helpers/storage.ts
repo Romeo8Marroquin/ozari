@@ -81,6 +81,13 @@ export class R2Storage implements Storage {
       // R2 is region-agnostic; "auto" is Cloudflare's documented value.
       region: "auto",
       endpoint: config.endpoint,
+      // ⚠️ LOAD-BEARING: path-style (`https://<account>.r2.cloudflarestorage.com/<bucket>/<key>`).
+      // The SDK's default for a DNS-safe bucket is VIRTUAL-HOSTED (`https://<bucket>.<account>.r2…`),
+      // a host the app's CSP does not list — its `connect-src` pins the exact account endpoint
+      // (ozari-app/index.html). The browser then refuses the presigned PUT before it leaves (status
+      // "(blocked:csp)", 0 ms): every gallery photo and order-evidence upload dies while the product
+      // itself saves. Path-style keeps the upload on the one host the CSP names, with no policy change.
+      forcePathStyle: true,
       credentials: {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,

@@ -22,8 +22,8 @@ import { appConfig } from "@/config/app.js";
 /** Brand palette, mirrored from the frontend `--color-*` tokens (src/index.css). */
 const COLORS = {
   charcoal: "#262626", // body text
-  cream: "#fceda7",
-  blossom: "#fca7f0",
+  cream: "#7fd3ea", // sky-teal end of the brand gradient
+  blossom: "#e39af0", // orchid end
   paper: "#ffffff",
   pageSolid: "#efeaf0", // solid fallback under the radial page background
   muted: "#6f6f6f",

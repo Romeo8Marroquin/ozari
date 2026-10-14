@@ -36,7 +36,7 @@ been received. Once paid it carries the PAGADO mark and reads as a receipt. If t
 
 | # | Decision |
 |---|---|
-| 1 | **Our palette, their format.** Keep the reference template's structure and information; restyle in the app's language (cream→blossom, charcoal, `LogoMark`) so a client's document looks like the app and the welcome email. The blue→purple of the current template is retired. |
+| 1 | **Our palette, their format.** Keep the reference template's structure and information; restyle in the app's language (cream→blossom, charcoal, `LogoMark`) so a client's document looks like the app and the welcome email. The blue→purple of the old reference template is retired. (The document reads `CREAM`/`BLOSSOM` from `documentTheme.ts`, mirrors of the `index.css` tokens, so it follows any palette change — since 2026-10-13 those slots hold the aurora palette, sky-teal→orchid, see `FRONTEND-DOCTRINE.md`.) |
 | 2 | **No document from an incomplete form.** Valid-form gate, above. |
 | 3 | **Billing is per started day**, already implemented by `computeBilledDays`. The document DISPLAYS the days; it never re-derives them. |
 | 4 | **Rental and sale are separate sections**, each with its own subtotal. |
