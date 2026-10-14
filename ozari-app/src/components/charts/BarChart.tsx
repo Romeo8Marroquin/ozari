@@ -174,8 +174,8 @@ const BarChart: React.FC<BarChartProps> = ({
           {/* The brand gradient, top-down, so the bars deepen into blossom exactly like the tile and
               the auth cards do. */}
           <linearGradient id="barChartFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-cream, #fceda7)" />
-            <stop offset="100%" stopColor="var(--color-blossom, #fca7f0)" />
+            <stop offset="0%" stopColor="var(--color-cream, #7fd3ea)" />
+            <stop offset="100%" stopColor="var(--color-blossom, #e39af0)" />
           </linearGradient>
         </defs>
         {ticks.map((tick) => {

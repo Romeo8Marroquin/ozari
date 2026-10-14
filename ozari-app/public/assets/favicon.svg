@@ -4,11 +4,12 @@
   height="1080"
   preserveAspectRatio="xMidYMid meet">
   <defs>
-    <radialGradient id="bg" cx="50%" cy="50%" r="75%">
-      <stop offset="0%"   stop-color="#ffffff"/>
-      <stop offset="50%"  stop-color="#fca7f0"/>
-      <stop offset="100%" stop-color="#a8fdf8"/>
-    </radialGradient>
+    <!-- The brand gradient, corner to corner — the same `from-cream to-blossom` diagonal as the
+         sidebar's BrandMark tile, so the browser tab, the home-screen icon and the app agree. -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="#7fd3ea"/>
+      <stop offset="100%" stop-color="#e39af0"/>
+    </linearGradient>
   </defs>
 
   <!-- background -->

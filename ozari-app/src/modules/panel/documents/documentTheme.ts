@@ -82,8 +82,9 @@ export const BRAND_MARK_HEIGHT = BRAND_TILE * 0.88;
  * almost certainly does not.
  */
 export const CHARCOAL = '#262626';
-export const CREAM = '#fceda7';
-export const BLOSSOM = '#fca7f0';
+/** Mirrors `--color-cream` / `--color-blossom` in index.css (the sky-teal → orchid brand gradient). */
+export const CREAM = '#7fd3ea';
+export const BLOSSOM = '#e39af0';
 /** Body copy that is not a heading — readable, never as heavy as the figures beside it. */
 export const INK = '#3f3f3f';
 /** Labels and captions. Deliberately above the 4.5:1 line on white: this document gets PRINTED,
@@ -91,7 +92,7 @@ export const INK = '#3f3f3f';
 export const MUTED = '#6e6e6e';
 export const HAIRLINE = '#e8e4e6';
 /** The soft brand wash behind panels — blossom at a few percent, not a neutral grey. */
-export const TINT = '#fdf6fb';
+export const TINT = '#fcf5fd';
 /**
  * Table rows — TWO fills, and neither of them is paper (owner, 2026-08-26).
  *

@@ -230,7 +230,7 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
           title={collapsed ? t('modules.panel.brand') : undefined}
           className={`group flex items-center gap-3 rounded-xl ${FOCUS_RING}`}
         >
-          <BrandMark className="transition duration-200 ease-out group-hover:scale-[1.06] group-hover:shadow-[0_1px_3px_rgba(38,38,38,0.12),0_0_12px_rgba(255,1,237,0.24)] motion-reduce:transition-none motion-reduce:group-hover:scale-100" />
+          <BrandMark className="transition duration-200 ease-out group-hover:scale-[1.06] group-hover:shadow-[0_1px_3px_rgba(38,38,38,0.12),0_0_12px_rgba(147,49,188,0.24)] motion-reduce:transition-none motion-reduce:group-hover:scale-100" />
           <span
             className={`${labelTransition} text-[17px] font-semibold tracking-tight text-charcoal ${
               collapsed ? 'ml-0 max-w-0 opacity-0' : 'max-w-[160px] opacity-100'
