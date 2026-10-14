@@ -12,7 +12,7 @@ type StatusTone = 'empty' | 'error' | 'config';
 const TONE: Record<StatusTone, { Icon: typeof HiOutlineSquares2X2; badge: string }> = {
   empty: {
     Icon: HiOutlineSquares2X2,
-    badge: 'bg-gradient-to-br from-aqua via-yellow to-magenta text-white shadow-sm',
+    badge: 'bg-gradient-to-br from-cream to-blossom text-charcoal/70 shadow-sm',
   },
   error: { Icon: HiOutlineExclamationTriangle, badge: 'bg-amber-50 text-amber-500' },
   config: { Icon: HiOutlineAdjustmentsHorizontal, badge: 'bg-sky-50 text-sky-500' },

@@ -165,9 +165,8 @@ const useAuthCard = (variant: AuthVariant) => {
   // Re-settle the gradient whenever the CARD changes size — not only the window. The panel is derived
   // from the card's real box, and the card also resizes on its own: register's form appears once the
   // registration status resolves, an inline error or the MFA step adds lines. Listening to `resize`
-  // alone left the band where the OLD layout had its gap, so it bled across the first form fields —
-  // invisible with the old pastels, unreadable since the gradient carries the saturated main colours
-  // (dark field text on violet). A window resize changes the card too, so this covers that as well.
+  // alone left the band where the OLD layout had its gap, so on phones it bled across the first form
+  // fields. A window resize changes the card too, so this covers that as well.
   //
   // Never fights the choreography: while the entrance/leave timelines own the panel (or the card's
   // own height morph is running) the observer stands down; once they finish, the next observation —

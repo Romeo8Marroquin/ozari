@@ -93,7 +93,7 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ token }) => {
   return (
     <div ref={containerRef} className="w-full flex justify-center items-center">
       <section className="principal-card relative w-[min(960px,94vw)] max-w-full md:min-h-[560px] p-8 sm:p-16 bg-white border-none shadow-2xl rounded-2xl gap-16 md:gap-28 flex flex-col md:flex-row items-center justify-center overflow-hidden">
-        <div className="rotational-asset absolute inset-0 m-auto blur-lg bg-gradient-to-l md:bg-gradient-to-b from-aqua via-yellow to-magenta"></div>
+        <div className="rotational-asset absolute inset-0 m-auto blur-lg bg-gradient-to-l md:bg-gradient-to-b from-cream to-blossom"></div>
         <div className="order-2 md:order-1 flex flex-col gap-7 justify-center items-center z-10 w-full max-w-md">
           <h2 className="form-element text-2xl sm:text-3xl font-bold text-black text-center select-none">
             {t(`${KEY}.title`)}
@@ -164,14 +164,14 @@ const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ token }) => {
         </div>
         <div className="order-1 md:order-2 flex z-10">
           <div className="flex flex-col items-center justify-center gap-5 md:gap-7">
-            <h2 className="article-element text-2xl sm:text-3xl font-bold text-white select-none">
+            <h2 className="article-element text-2xl sm:text-3xl font-bold text-black select-none">
               {t(`${KEY}.welcomeMessage`)}
             </h2>
-            <p className="article-element text-xl text-white select-none text-center max-w-64">
+            <p className="article-element text-xl text-black select-none text-center max-w-64">
               {t(`${KEY}.subtitle`)}
             </p>
             <div className="article-element w-28" role="img" aria-label={t('components.pageLoader.logo')}>
-              <LogoMark className="w-full select-none text-white" />
+              <LogoMark className="w-full select-none text-charcoal" />
             </div>
           </div>
         </div>

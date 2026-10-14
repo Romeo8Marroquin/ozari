@@ -698,41 +698,6 @@ against this scale.
   `rounded-full` for pills/avatars. Prefer these semantic names over raw `rounded-2xl/xl/lg` in new
   UI. Existing components already align numerically (2xl↔card, xl↔control); the lone outlier is
   `CustomButton` (`rounded-md`) — reconcile if you touch it.
-- **Brand palette = the aurora (teal → blue → violet, owner 2026-10-13/14).** The `--color-*` token
-  NAMES predate it and were kept, so read them as slots. **MAIN** (the brand): `aqua` = teal
-  `#1b7ca6`, `yellow` = blue `#5165dd`, `magenta` = violet `#8e2fbd`. **LIGHT** companions
-  (`sky`/`cream`/`blossom`) exist only for quiet washes that text sits on (the PDF's `TINT` panels).
-- **THE BRAND GRADIENT is the three MAIN colours:** `bg-gradient-to-<dir> from-aqua via-yellow
-  to-magenta` — every gradient surface (auth cards, outage band, loader tile + beam, `BrandMark`,
-  avatars, product placeholders, status badge, dashboard bars, chart bars, the "next up" rail, the
-  sidebar's active pill, upload progress, PDF rules/tile/saldo chip, email header/bar, every icon).
-  Never a two-stop pastel blend (owner: "the main colours, not the light pastel ones"). A NEW gradient
-  uses this exact class string; an SVG gradient uses the three stops at 0/50/100%.
-- ⚠️ **Contrast contract — everything ON the gradient is WHITE.** The main colours were pulled just deep
-  enough that white clears **4.5:1 at every point** of the gradient (min 4.69, in both oklab — Tailwind
-  — and sRGB — SVG/PDF/email — interpolation); the reference image's own teal (`#29a0c8`, 3.0:1) and
-  periwinkle (3.95:1) did not. Charcoal on the violet end is 2.4:1, so never put dark text, the dark
-  logo or a dark icon on it. `magenta` is also the one accent used as TEXT on white (6.4:1). Do not
-  lighten a main colour without re-running that check.
-- Hand-kept copies that must move with the tokens: `documentTheme.ts` (`BRAND_TEAL`/`BRAND_BLUE`/
-  `BRAND_VIOLET`/`ON_BRAND`, plus `TINT`), the API's `emails/layout.ts` `COLORS`, the
-  `Switch`/`Radio`/`Checkbox` default `color`, the `rgba(142,47,189,…)` glows on `BrandMark`/`Sidebar`,
-  the `BarChart`/`PageLoader` SVG stops, `index.html` `theme-color` + `manifest.json` theme/background
-  (= `aqua`: status bar and the installed PWA's splash), `public/email-logo.png` (WHITE — it sits on
-  the email's gradient header), and `public/assets/{favicon,media-image}.svg` (white mark). Every
-  `.png` in `public/assets` is a RASTER of those two SVGs and must be re-rendered after a change
-  (then bump every `?v=N` on their URLs in `index.html` + `manifest.json`):
-  | File | Size | Mark | Extra stroke (`#icon` units) |
-  |---|---|---|---|
-  | `favicon-16.png` · `favicon-32.png` (tab, `<link sizes>`) | 16 · 32 | 110% · 106% | **28 · 16** |
-  | `/favicon.ico` (16/32/48 PNG-in-ICO, root — requested by convention) | — | as above, 48 = 103% | 28/16/10 |
-  | `favicon.png` (og logo, structured data) · `icon-192/512.png` (manifest `any`) | 811 · 192 · 512 | 100% | 6 |
-  | `icon-maskable-512.png` (full-bleed; Android's circle crop) | 512 | 60% | 10 |
-  | `apple-touch-icon.png` (full-bleed SQUARE — iOS paints transparency black, rounds it itself) | 180 | 86% | 7 |
-  | `media-image.png` (share card) | 465×750 | — | 6 on the mark paths |
-  **6 is the app's own weight** (`LOGO_MARK_STROKE_WIDTH`, same coordinate space). ⚠️ The TINY sizes need
-  the heavier stroke: at 16–32px the 6-unit white line dissolves into the gradient and the favicon reads
-  as a blank coloured square (2026-10-14) — never re-render them from the large icon.
 - **Motion** — `--ease-settle` (`cubic-bezier(0.16,1,0.3,1)`) is the shared "ease into place" curve
   for reveals (the user menu, future popovers), used as `ease-[var(--ease-settle)]`.
 - ⚠️ **Tailwind v4 transition trap:** `translate-*`/`scale-*`/`rotate-*` utilities emit the

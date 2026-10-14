@@ -230,7 +230,7 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
           title={collapsed ? t('modules.panel.brand') : undefined}
           className={`group flex items-center gap-3 rounded-xl ${FOCUS_RING}`}
         >
-          <BrandMark className="transition duration-200 ease-out group-hover:scale-[1.06] group-hover:shadow-[0_1px_3px_rgba(38,38,38,0.12),0_0_12px_rgba(142,47,189,0.3)] motion-reduce:transition-none motion-reduce:group-hover:scale-100" />
+          <BrandMark className="transition duration-200 ease-out group-hover:scale-[1.06] group-hover:shadow-[0_1px_3px_rgba(38,38,38,0.12),0_0_12px_rgba(255,1,237,0.24)] motion-reduce:transition-none motion-reduce:group-hover:scale-100" />
           <span
             className={`${labelTransition} text-[17px] font-semibold tracking-tight text-charcoal ${
               collapsed ? 'ml-0 max-w-0 opacity-0' : 'max-w-[160px] opacity-100'
@@ -274,7 +274,7 @@ const SidebarContent: React.FC<SidebarContentProps> = ({ collapsed, variant, onC
           style={{ willChange: 'transform' }}
           // ease-in-out shape (smooth slow start → quicker middle → smooth settle) with a small
           // `>1` end control for a gentle overshoot — a little bounce, less than before. 250ms.
-          className="pointer-events-none absolute left-0 top-0 z-10 h-5 w-1 rounded-full bg-gradient-to-b from-aqua via-yellow to-magenta opacity-0 transition-[transform,opacity] duration-[250ms] ease-[cubic-bezier(0.42,0,0.5,1.17)] motion-reduce:transition-none"
+          className="pointer-events-none absolute left-0 top-0 z-10 h-5 w-1 rounded-full bg-magenta opacity-0 transition-[transform,opacity] duration-[250ms] ease-[cubic-bezier(0.42,0,0.5,1.17)] motion-reduce:transition-none"
         />
         {visibleNav.map((item) => (
           <NavItem

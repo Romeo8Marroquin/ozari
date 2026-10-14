@@ -206,7 +206,7 @@ const SettingsPage: React.FC = () => {
               >
                 <span
                   aria-hidden
-                  className="grid size-14 shrink-0 place-items-center rounded-full bg-gradient-to-br from-aqua via-yellow to-magenta text-lg font-semibold text-white shadow-sm"
+                  className="grid size-14 shrink-0 place-items-center rounded-full bg-gradient-to-br from-cream to-blossom text-lg font-semibold text-charcoal shadow-sm"
                 >
                   {getInitials(me?.fullName ?? '') || getInitials(t('modules.panel.user.fallbackName'))}
                 </span>

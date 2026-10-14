@@ -36,7 +36,7 @@ been received. Once paid it carries the PAGADO mark and reads as a receipt. If t
 
 | # | Decision |
 |---|---|
-| 1 | **Our palette, their format.** Keep the reference template's structure and information; restyle in the app's language (cream→blossom, charcoal, `LogoMark`) so a client's document looks like the app and the welcome email. The blue→purple of the old reference template is retired. (The document reads `BRAND_TEAL`/`BRAND_BLUE`/`BRAND_VIOLET` from `documentTheme.ts`, mirrors of the `index.css` MAIN tokens — since 2026-10-14 the gradient is the aurora palette, teal→blue→violet, with WHITE content on it (the mark, the saldo chip's text); see `FRONTEND-DOCTRINE.md` §12.) |
+| 1 | **Our palette, their format.** Keep the reference template's structure and information; restyle in the app's language (cream→blossom, charcoal, `LogoMark`) so a client's document looks like the app and the welcome email. The blue→purple of the current template is retired. |
 | 2 | **No document from an incomplete form.** Valid-form gate, above. |
 | 3 | **Billing is per started day**, already implemented by `computeBilledDays`. The document DISPLAYS the days; it never re-derives them. |
 | 4 | **Rental and sale are separate sections**, each with its own subtotal. |
@@ -115,8 +115,8 @@ footer, and it must survive becoming multi-page. That rules out imperative build
    brand mark from the app's own `logoMarkPaths.ts`, so the logo on a client's document is vector and
    cannot drift from the logo in the app.
 
-**Free wins:** reuse `public/email-logo.png` (the `LogoMark` raster already made for
-emails — white since 2026-10-14, for the gradient header; superseded here by the SVG paths above) instead of embedding SVG paths, and use react-pdf's built-in **Helvetica**, which embeds no
+**Free wins:** reuse `public/email-logo.png` (the charcoal `LogoMark` raster already made for
+emails) instead of embedding SVG paths, and use react-pdf's built-in **Helvetica**, which embeds no
 font file and covers á/é/í/ó/ú/ñ/ü. Ship a font only if the design demands one.
 
 ### 3a. ⚠️ It needs THREE CSP directives — verify them, never reason about them
