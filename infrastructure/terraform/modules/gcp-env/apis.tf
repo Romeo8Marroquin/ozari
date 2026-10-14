@@ -17,6 +17,13 @@ locals {
       # The Google Calendar integration calls this API with an OAuth client that lives in THIS
       # project, so it must be enabled here. The client itself stays manual (DEPLOYMENT.md §3d).
       "calendar-json.googleapis.com",
+      # The spend cap (spend-cap.tf): the budget, its Pub/Sub topic, the function and the API it calls.
+      "billingbudgets.googleapis.com",
+      "cloudbilling.googleapis.com",
+      "pubsub.googleapis.com",
+      "cloudfunctions.googleapis.com",
+      "eventarc.googleapis.com",
+      "storage.googleapis.com",
     ],
     var.enable_cleanup_job ? ["cloudscheduler.googleapis.com"] : [],
   )

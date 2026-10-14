@@ -317,7 +317,9 @@ function Get-OzLiveRegistration {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        $out = @(& gcloud run services describe ozari-api --region=$($e.region) --project=$($e.project_id) --format=json 2>&1)
+        # --quiet: on a new project the Run API is off, and gcloud would otherwise ASK (invisibly, its
+        # output is captured) whether to enable it — the plan hung there on prod's first run.
+        $out = @(& gcloud run services describe ozari-api --region=$($e.region) --project=$($e.project_id) --format=json --quiet 2>&1)
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previous

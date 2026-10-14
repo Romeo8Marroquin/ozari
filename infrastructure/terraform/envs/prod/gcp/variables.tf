@@ -171,3 +171,17 @@ variable "enable_cleanup_job" {
 variable "registration_open" {
   type = bool
 }
+
+# --- Spend cap ------------------------------------------------------------------
+
+variable "billing_account" {
+  description = "From secrets/account.json (tf.ps1). The spend-cap budget lives on it."
+  type        = string
+}
+
+# HARD ceiling: at 100 % billing is unlinked and the project's paid services stop (INCIDENTS.md S12).
+# Raise it here, deliberately, when the business needs more; then gcp plan + apply.
+variable "monthly_budget_usd" {
+  type    = number
+  default = 5
+}

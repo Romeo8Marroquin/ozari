@@ -17,5 +17,10 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 8.6"
     }
+    # Zips the spend-cap function's source (spend-cap.tf).
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.7"
+    }
   }
 }

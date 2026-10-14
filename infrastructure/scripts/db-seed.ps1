@@ -38,6 +38,23 @@ if ($Environment -eq "prod" -and $Force) {
     if ($confirm -ne "prod") { throw "Cancelled." }
 }
 
+# The tables come from the first deploy (its `prisma migrate deploy` step runs before `gcloud run
+# deploy`), so while Cloud Run still runs Terraform's placeholder image there is nothing to seed —
+# and Prisma would say so only as "table public.user_roles does not exist".
+$e = Get-OzEnvironment $Environment
+$previousEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$image = & gcloud run services describe ozari-api --region=$($e.region) --project=$($e.project_id) --format="value(spec.template.spec.containers[0].image)" --quiet 2>$null
+$ErrorActionPreference = $previousEap
+if ($image -and $image -notlike "*/ozari-images/*") {
+    $branch = if ($Environment -eq "prod") { "main" } else { "dev" }
+    throw @"
+The first deploy has not finished yet: Cloud Run still runs the placeholder image, so the tables do not
+exist. Wait for the build to go green (Cloud Build → History in $($e.project_id)), then run this again.
+Not started yet? gcloud builds triggers run ozari-api-$Environment --branch=$branch --region=$($e.region) --project=$($e.project_id)
+"@
+}
+
 $apiDir = Join-Path (Get-OzRepoRoot) "ozari-api"
 $previousNodeEnv = $env:NODE_ENV
 Push-Location $apiDir

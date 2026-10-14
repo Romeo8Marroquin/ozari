@@ -105,6 +105,30 @@ variable "log_level" {
   default     = "info"
 }
 
+variable "billing_account" {
+  description = "The billing account the spend-cap budget is created on (from secrets/account.json)."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9A-F]{6}-[0-9A-F]{6}-[0-9A-F]{6}$", var.billing_account))
+    error_message = "billing_account must look like XXXXXX-XXXXXX-XXXXXX."
+  }
+}
+
+variable "monthly_budget_usd" {
+  description = <<-EOT
+    HARD monthly ceiling for this environment's Google Cloud spend, in whole US dollars. At 100 % the
+    spend-cap function unlinks billing and every paid service in the project stops (spend-cap.tf).
+    Raise it deliberately when the business needs more — never as a reflex to an outage.
+  EOT
+  type        = number
+
+  validation {
+    condition     = var.monthly_budget_usd >= 1 && floor(var.monthly_budget_usd) == var.monthly_budget_usd
+    error_message = "monthly_budget_usd must be a whole number of dollars, at least 1."
+  }
+}
+
 variable "registration_open" {
   description = <<-EOT
     REGISTRATION_OPEN: whether POST /auth/user accepts new accounts. A business decision per

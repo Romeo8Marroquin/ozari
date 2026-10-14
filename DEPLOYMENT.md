@@ -459,6 +459,12 @@ Platform**). The *shape* below is stable; where a label has moved, follow what t
 (APIs & Services → Library). No other API is required — the account-email lookup is a plain
 userinfo endpoint.
 
+**1b. Branding — the USER-facing name.** App name = the brand exactly as the site shows it
+(`Party Rentals Gt`, the `<title>` in `ozari-app/index.html`), never "Ozari" (the internal code
+name). It is what the consent screen says ("*Party Rentals Gt* wants to access your Google
+Account"), and Google's verification checks it against the homepage. The support email is shown too.
+The OAuth client's name and the project's name are internal and never shown.
+
 **2. Audience → `External`.** Google Auth Platform → *Audience* → User type **External**.
 
 > This application is **not** owned by a Google Workspace / Cloud Identity organisation, and an admin
@@ -592,9 +598,27 @@ rollout has requirements beyond our own infrastructure. Google's rules and conso
 list below as the shape of the work and **follow what Google Auth Platform / the Verification Center
 shows at the time you deploy**:
 
+**Prerequisites that are CODE (owner decision 2026-10-13: production is published and verified, no
+test users — admins and employees who are not developers connect calendars):** Google rejects a
+home page that is only a login screen, and `/` currently redirects to `/sesion/inicio`. So before
+Branding can be completed: a PUBLIC home page at `https://partyrentalsgt.com` saying what the app
+does, linking a PUBLIC privacy policy (`/privacidad`, including Google's *Limited Use* disclosure for
+Calendar data) and terms (`/terminos`). Plus domain ownership: Google Search Console → Domain
+property `partyrentalsgt.com` → its TXT record, verified by the same Google account that owns
+`ozari-prod-gt`. "Publish app" stays disabled until Branding is complete.
+
+**Interim (until those pages ship):** production goes live in **Testing**, with each admin's Google
+account under *Audience → Test users*. It works, with two costs: the "unverified app" screen
+(click *Continue*), and the ~7-day refresh-token expiry — every connected admin reconnects weekly
+(*Ajustes → Calendarios*). Once published, delete the test users; they no longer matter.
+
+Later scopes: adding one = add it under Data Access + resubmit; what is already verified keeps
+working during that review. Avoid RESTRICTED scopes (Gmail content, full Drive): they add a paid
+yearly security assessment.
+
 ```
-[ ] Google Auth Platform → Branding: app name, support email, logo, home page,
-    privacy policy URL and authorized domains all accurate for PRODUCTION
+[ ] Google Auth Platform → Branding: app name "Party Rentals Gt", support email, logo, home page,
+    privacy policy URL, terms URL and authorized domain partyrentalsgt.com — all for PRODUCTION
 [ ] Data Access lists ONLY calendar.events + userinfo.email, each with a justification
     that matches what the app does
 [ ] The production redirect URI is registered:
@@ -864,6 +888,55 @@ The build itself is `REBUILD.md` §4 for `prod`. These are the things only produ
 [ ] infrastructure/secrets/ backed up OFF this machine, including prod.json's encryption_key
 [ ] (optional) enable_cleanup_job = true in envs/prod/gcp once there are real users
 ```
+
+---
+
+## 12. Spending limits — every provider (and how to change each)
+
+**Rule (owner, 2026-10-14):** nothing usage-based may bill past its limit. Where a provider can
+**stop** at the limit, it does. Where it cannot, we get an email. Only the **domains** (annual
+registrar fees, not usage) are expected on the Cloudflare bill.
+
+| Provider · scope | What could cost money | At the limit | Enforced by | Warning |
+|---|---|---|---|---|
+| **Google Cloud** · per environment | Cloud Run, Secret Manager, Artifact Registry, Cloud Build, the cap function | 🛑 **US$5/month**: billing is unlinked and every Google service in that project stops | our function (`modules/gcp-env/spend-cap.tf`) | emails at 50 / 90 / 100 % |
+| **Neon** Free · per project | nothing — the Free plan never bills | 🛑 100 CU-hours/month → compute suspended until the 1st; 1 GB storage → writes fail; 5 GB transfer → suspended | Neon itself | console → project → **Usage** |
+| **Resend** Free · ONE account for both environments | nothing — no overage on Free | 🛑 100 emails/day, 3,000/month → sends refused (password reset and similar fail until the UTC day / month rolls over) | Resend itself | dashboard → **Usage** |
+| **Cloudflare Workers** Free · whole account | nothing | 🛑 100,000 requests/day across BOTH API proxies → API calls fail until 00:00 UTC | Cloudflare itself | — |
+| **Cloudflare Pages** Free · whole account | nothing | 🛑 500 builds/month → builds wait for next month | Cloudflare itself | — |
+| **Cloudflare R2** · whole account | storage over 10 GB, writes over 1M, reads over 10M per month | ⚠️ **keeps billing — Cloudflare has no hard cap for R2** | nobody | the account **budget alert** (below) |
+| GitHub, Google Calendar API, Google sign-in | nothing (free, quota-limited) | requests refused | the provider | — |
+
+**Why R2 having no stop is a small risk:** writes need a signed-in admin or driver, one short-lived,
+size-capped presigned URL per file; reads are cached at the edge. To spend US$5 past the free tier
+takes ~333 GB stored, ~1.1M extra writes, or ~14M uncached reads (~5 per second for a whole month);
+US$10,000 would take billions of requests. An abnormal month shows up in the budget alert the next
+day, and `pnpm reconcile:images` / `pnpm purge:evidence` shrink storage.
+
+**Note on the stops:** each one is an outage *by design* — the trade the owner chose over an open
+bill. Google's and Neon's are per environment (staging cannot use up production's); Resend's,
+Workers' and Pages' are per ACCOUNT, so staging traffic spends production's quota too.
+
+### 🔒 One-time: the Cloudflare budget alert (1 minute, account-wide)
+
+Cloudflare → **Manage Account → Billing → Billable Usage → Create budget alert** — name
+`ozari-usage`, threshold **US$1**, your email → **Save**. It counts usage-based spend only (R2,
+Workers overage), not subscriptions or domain registrations, and fires the day after usage is
+processed. If Cloudflare already created its default US$10 alert, edit that one down to US$1
+instead. (Per-product "Usage Based Billing" notifications need a Pro zone; this replaces them.)
+
+### Changing a limit — ask Claude "change the <env> <provider> limit to X", then run the commands
+
+| Change | Steps |
+|---|---|
+| **Google cap** (e.g. prod to US$10) | Claude edits `monthly_budget_usd` in `envs/<env>/gcp/variables.tf` (whole dollars, ≥ 1) → you: `tf.ps1 <env> gcp plan` (expect ONLY `google_billing_budget.cap` changing in place) → `apply` → commit. Each environment is independent. |
+| **Google cap after it FIRED** | `INCIDENTS.md` S12 (find out why → raise it as above → `tf.ps1 <env> bootstrap plan` + `apply` re-links billing). |
+| **Cloudflare alert** | Billing → Billable Usage → the alert → edit the threshold. |
+| **Neon** (outgrowing Free) | No higher hard cap exists: Neon's paid plans bill overage and their spending limit only **emails** (automatic suspension is announced, not shipped). Upgrading = Neon → Billing → Launch, then set the organization's **spending limit** to the new ceiling. Decide it deliberately. |
+| **Resend** (outgrowing 100/day) | Resend → Settings → Billing → Pro (US$20/month, 50,000 emails). Keep **overages OFF** so it still stops at the quota. |
+| **Workers** (outgrowing 100k/day) | Workers Paid is US$5/month flat with overage billing and no cap — `INFRASTRUCTURE-PLAN.md` §8 lists the cheaper alternative first. |
+
+Disabling a stop is never a quiet change: whoever does it updates this table in the same commit.
 
 ---
 
