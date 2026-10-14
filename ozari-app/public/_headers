@@ -13,7 +13,8 @@
 #
 # Local dev does NOT read this file — Vite ignores it, Cloudflare Pages applies it on deploy. That
 # is acceptable precisely because nothing here changes app behaviour: it only forbids things the app
-# never does (being framed, MIME sniffing, camera/mic access).
+# never does (being framed, MIME sniffing, camera/mic access) — and, at the bottom, explains why there
+# is NO caching rule.
 
 /*
   # Clickjacking: this app must never be embedded. `frame-ancestors 'none'` is the modern control;
@@ -31,8 +32,18 @@
   # that toggle is ever changed. One year, subdomains included, preload-eligible.
   Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
 
-# The build's fingerprinted assets are immutable by construction (the hash changes when the bytes
-# do), so they can be cached hard. index.html is NOT in here on purpose: it must stay revalidated,
-# or a CSP change like the ones above would sit stale in caches for a year.
-/assets/*
-  Cache-Control: public, max-age=31536000, immutable
+# ⚠️ NO long-lived Cache-Control on /assets/* — DELIBERATELY (2026-10-13). Everything here, index.html
+# included, keeps Pages' default `max-age=0, must-revalidate` + ETag: the edge still caches it, and a
+# browser pays one cheap 304 per file instead of a download. Two production traps removed the old
+# `/assets/* … max-age=31536000, immutable` rule:
+#   1. A path under /assets/ that is NOT in the current deployment does not 404 — with no top-level
+#      404.html, Pages answers it with the SPA fallback (index.html, status 200). The rule stamped that
+#      HTML "immutable for a year" under the JS URL. One request landing mid-rollout (new index.html,
+#      an edge still serving the previous deployment) therefore bricked the app in that browser for a
+#      year: a blank page and "Expected a JavaScript-or-Wasm module script but the server responded
+#      with a MIME type of text/html", surviving every normal reload.
+#   2. /assets/ is shared with `public/assets` — favicon, manifest, PWA icons, the share image — which
+#      are NOT fingerprinted, so a brand change never reached anyone who had visited before.
+# A path rule cannot tell a real file from the fallback, so "immutable" here cannot be made safe; it
+# needs a status-aware edge rule (Cloudflare response-header Transform Rule on `http.response.code eq
+# 200`). Add that in Terraform first if the 304s ever matter — never by restoring the rule above.
