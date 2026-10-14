@@ -88,6 +88,13 @@ export class R2Storage implements Storage {
       // "(blocked:csp)", 0 ms): every gallery photo and order-evidence upload dies while the product
       // itself saves. Path-style keeps the upload on the one host the CSP names, with no policy change.
       forcePathStyle: true,
+      // ⚠️ LOAD-BEARING: checksums only when an operation REQUIRES one (Cloudflare's documented R2
+      // setting). Since v3.729 the SDK defaults to WHEN_SUPPORTED and adds a CRC32 to every PutObject;
+      // in a PRESIGNED URL it is computed at signing time over an empty body
+      // (`x-amz-checksum-crc32=AAAAAA==`), so R2 rejects the browser's real file as a checksum
+      // mismatch. The upload's integrity is already pinned by the signed Content-Length + type.
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
       credentials: {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,

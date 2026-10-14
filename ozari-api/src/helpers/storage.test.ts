@@ -95,6 +95,20 @@ describe("R2Storage", () => {
     );
   });
 
+  it("disables default checksums, so a presigned PUT is not bound to an empty-body CRC32", async () => {
+    const { R2Storage } = await import("./storage.js");
+    new R2Storage(CONFIG);
+
+    // The SDK's WHEN_SUPPORTED default signs `x-amz-checksum-crc32=AAAAAA==` (the CRC of nothing)
+    // into every presigned PutObject, and R2 then rejects the real file. Cloudflare's R2 setting.
+    expect(s3ClientCtor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestChecksumCalculation: "WHEN_REQUIRED",
+        responseChecksumValidation: "WHEN_REQUIRED",
+      }),
+    );
+  });
+
   it("rejects an unsupported content type", async () => {
     const { R2Storage, StorageValidationError } = await import("./storage.js");
     await expect(
