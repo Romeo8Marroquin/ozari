@@ -12,8 +12,8 @@ const PanelPlaceholder: React.FC<{ section: string }> = ({ section }) => {
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
       <div className="flex max-w-md flex-col items-center text-center">
-        <span className="grid size-16 place-items-center rounded-2xl bg-gradient-to-br from-cream to-blossom shadow-sm">
-          <HiOutlineSquares2X2 className="size-7 text-charcoal/70" />
+        <span className="grid size-16 place-items-center rounded-2xl bg-gradient-to-br from-aqua via-yellow to-magenta shadow-sm">
+          <HiOutlineSquares2X2 className="size-7 text-white" />
         </span>
         <span className="mt-5 inline-flex items-center rounded-full bg-charcoal/[0.06] px-3 py-1 text-xs font-medium text-charcoal/60">
           {t('modules.panel.placeholder.badge')}

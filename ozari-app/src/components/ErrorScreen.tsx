@@ -111,25 +111,25 @@ const ErrorScreen: React.FC<ErrorScreenProps> = ({
       style={{ background: 'radial-gradient(120% 120% at 50% 0%, #faf7fa 0%, #efeaf0 58%, #e7dced 100%)' }}
     >
       {/* Festive, out-of-focus colour blobs for depth — purely decorative. */}
-      <div aria-hidden className="error-blob-a pointer-events-none absolute -left-16 -top-10 size-72 rounded-full bg-blossom/40 blur-3xl" />
-      <div aria-hidden className="error-blob-b pointer-events-none absolute -bottom-16 -right-10 size-80 rounded-full bg-sky/40 blur-3xl" />
+      <div aria-hidden className="error-blob-a pointer-events-none absolute -left-16 -top-10 size-72 rounded-full bg-magenta/15 blur-3xl" />
+      <div aria-hidden className="error-blob-b pointer-events-none absolute -bottom-16 -right-10 size-80 rounded-full bg-aqua/15 blur-3xl" />
 
       <div
         role="alert"
         className="error-card relative z-10 w-full max-w-md overflow-hidden rounded-[28px] bg-white shadow-[0_16px_44px_-22px_rgba(38,38,38,0.32)] ring-1 ring-black/[0.04]"
       >
-        {/* The auth cards' gradient panel (cream → blossom, `blur-lg`), the same essence as
+        {/* The auth cards' gradient panel (the brand gradient, `blur-lg`), the same essence as
             login/register's `.rotational-asset` on mobile — but STATIC (no rotation). It **bleeds past
             the top and sides** so the card's `overflow-hidden` clips those blurred edges (no white
             gaps); only the bottom edge stays inside, fading softly into the white below. */}
         <div
           aria-hidden
-          className="error-gradient pointer-events-none absolute -left-10 -right-10 -top-10 h-60 bg-gradient-to-b from-cream to-blossom blur-lg"
+          className="error-gradient pointer-events-none absolute -left-10 -right-10 -top-10 h-60 bg-gradient-to-b from-aqua via-yellow to-magenta blur-lg"
         />
 
         <div className="relative flex flex-col items-center px-8 pb-10 pt-11 text-center sm:px-10">
           {/* Text-less isotype (no cropped wordmark), sized as a hero. Generous space below it. */}
-          <LogoMark className="error-logo mb-10 w-28 text-charcoal" />
+          <LogoMark className="error-logo mb-10 w-28 text-white" />
 
           <h1 className="error-line text-2xl font-bold text-charcoal sm:text-[28px]">
             {t(`errorScreen.${variant}.title`)}

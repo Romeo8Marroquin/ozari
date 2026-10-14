@@ -698,17 +698,30 @@ against this scale.
   `rounded-full` for pills/avatars. Prefer these semantic names over raw `rounded-2xl/xl/lg` in new
   UI. Existing components already align numerically (2xl↔card, xl↔control); the lone outlier is
   `CustomButton` (`rounded-md`) — reconcile if you touch it.
-- **Brand palette = the aurora (teal → azure → violet, owner 2026-10-13).** The `--color-*` token
-  NAMES predate it and were kept, so read them as slots: `yellow`/`cream` = azure/sky-teal (`#3a8fdf`/`#7fd3ea`),
-  `magenta`/`blossom` = violet/orchid (`#9331bc`/`#e39af0`), `aqua`/`sky` = teal (`#14a8b5`/`#afeaf4`). The
-  brand gradient is still `from-cream to-blossom`. **Contrast contract:** the light tones carry
-  CHARCOAL text (≥7:1, AAA) — never white; `magenta` is the only accent used as text, ≥6:1 on white.
-  Hand-kept copies that must move with the tokens: `documentTheme.ts` (`CREAM`/`BLOSSOM`/`TINT`),
-  the API's `emails/layout.ts` `COLORS`, the `Switch`/`Radio`/`Checkbox` default `color`, the
-  `rgba(147,49,188,…)` glows on `BrandMark`/`Sidebar`, `index.html` `theme-color` + `manifest.json`
-  theme/background (= `cream`: status bar and the installed PWA's splash), and
-  `public/assets/{favicon,media-image}.svg`. Every `.png` in `public/assets` is a RASTER of those two
-  SVGs and must be re-rendered after a change: `favicon.png` (811, rounded, transparent corners),
+- **Brand palette = the aurora (teal → blue → violet, owner 2026-10-13/14).** The `--color-*` token
+  NAMES predate it and were kept, so read them as slots. **MAIN** (the brand): `aqua` = teal
+  `#1b7ca6`, `yellow` = blue `#5165dd`, `magenta` = violet `#8e2fbd`. **LIGHT** companions
+  (`sky`/`cream`/`blossom`) exist only for quiet washes that text sits on (the PDF's `TINT` panels).
+- **THE BRAND GRADIENT is the three MAIN colours:** `bg-gradient-to-<dir> from-aqua via-yellow
+  to-magenta` — every gradient surface (auth cards, outage band, loader tile + beam, `BrandMark`,
+  avatars, product placeholders, status badge, dashboard bars, chart bars, the "next up" rail, the
+  sidebar's active pill, upload progress, PDF rules/tile/saldo chip, email header/bar, every icon).
+  Never a two-stop pastel blend (owner: "the main colours, not the light pastel ones"). A NEW gradient
+  uses this exact class string; an SVG gradient uses the three stops at 0/50/100%.
+- ⚠️ **Contrast contract — everything ON the gradient is WHITE.** The main colours were pulled just deep
+  enough that white clears **4.5:1 at every point** of the gradient (min 4.69, in both oklab — Tailwind
+  — and sRGB — SVG/PDF/email — interpolation); the reference image's own teal (`#29a0c8`, 3.0:1) and
+  periwinkle (3.95:1) did not. Charcoal on the violet end is 2.4:1, so never put dark text, the dark
+  logo or a dark icon on it. `magenta` is also the one accent used as TEXT on white (6.4:1). Do not
+  lighten a main colour without re-running that check.
+- Hand-kept copies that must move with the tokens: `documentTheme.ts` (`BRAND_TEAL`/`BRAND_BLUE`/
+  `BRAND_VIOLET`/`ON_BRAND`, plus `TINT`), the API's `emails/layout.ts` `COLORS`, the
+  `Switch`/`Radio`/`Checkbox` default `color`, the `rgba(142,47,189,…)` glows on `BrandMark`/`Sidebar`,
+  the `BarChart`/`PageLoader` SVG stops, `index.html` `theme-color` + `manifest.json` theme/background
+  (= `aqua`: status bar and the installed PWA's splash), `public/email-logo.png` (WHITE — it sits on
+  the email's gradient header), and `public/assets/{favicon,media-image}.svg` (white mark). Every
+  `.png` in `public/assets` is a RASTER of those two SVGs and must be re-rendered after a change:
+  `favicon.png` (811, rounded, transparent corners),
   `icon-192/512.png` (manifest `any`), `icon-maskable-512.png` (full-bleed, mark scaled to 60% so it
   survives Android's circle crop), `apple-touch-icon.png` (180, full-bleed SQUARE — iOS paints
   transparency black and rounds it itself) and `media-image.png` (465×750 share card).

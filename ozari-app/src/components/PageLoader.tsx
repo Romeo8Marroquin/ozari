@@ -99,7 +99,7 @@ export default function PageLoader() {
       // halo dims as the tile swells, so the pair reads as one object breathing rather than two
       // things pulsing in lockstep. Both start after the entrance has settled the same properties.
       gsap.to(tile.current, { scale: 1.02, duration: 2.6, ease: 'sine.inOut', repeat: -1, yoyo: true, delay: 1.1 });
-      gsap.to(halo.current, { opacity: 0.3, duration: 2.6, ease: 'sine.inOut', repeat: -1, yoyo: true, delay: 1.1 });
+      gsap.to(halo.current, { opacity: 0.25, duration: 2.6, ease: 'sine.inOut', repeat: -1, yoyo: true, delay: 1.1 });
     },
     { scope: section },
   );
@@ -118,7 +118,7 @@ export default function PageLoader() {
         <span
           ref={halo}
           aria-hidden
-          className="absolute size-[92%] rounded-[38%] bg-gradient-to-br from-cream to-blossom opacity-70 blur-2xl"
+          className="absolute size-[92%] rounded-[38%] bg-gradient-to-br from-aqua via-yellow to-magenta opacity-50 blur-2xl"
         />
 
         {/* The indicator: the tile's outline, concentric with it. A hairline track plus one gradient
@@ -131,11 +131,13 @@ export default function PageLoader() {
           className="absolute inset-0 size-full text-charcoal/[0.07]"
         >
           <defs>
-            {/* Runs top-left → bottom-right, the same direction as the tile's own gradient, so the
-                beam brightens into magenta exactly where the tile deepens into blossom. */}
+            {/* The brand gradient (teal → blue → violet), top-left → bottom-right — the same
+                direction as the tile's own, so the beam's colour always matches the tile corner it
+                is passing. */}
             <linearGradient id="pageLoaderBeam" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="var(--color-blossom, #e39af0)" />
-              <stop offset="100%" stopColor="var(--color-magenta, #9331bc)" />
+              <stop offset="0%" stopColor="var(--color-aqua, #1b7ca6)" />
+              <stop offset="50%" stopColor="var(--color-yellow, #5165dd)" />
+              <stop offset="100%" stopColor="var(--color-magenta, #8e2fbd)" />
             </linearGradient>
           </defs>
           <path d={TILE_OUTLINE} stroke="currentColor" strokeWidth={0.85} />
@@ -150,14 +152,14 @@ export default function PageLoader() {
         </svg>
 
         {/* The brand tile — `BrandMark` at hero scale (see the note above on why it is mirrored, not
-            imported). Same gradient, same charcoal mark, so this reads as the thing in the sidebar
+            imported). Same gradient, same WHITE mark, so this reads as the thing in the sidebar
             rather than as a lookalike. The ONE deliberate difference is the mark's share of the tile:
             `BrandMark` fills 88% because at 44px the tile is barely more than a backing plate, but the
             same ratio at 128px reads cramped — padding is optical, so a hero needs proportionally more
             of it. */}
         <span
           ref={tile}
-          className="relative grid size-26 place-items-center rounded-[26px] bg-gradient-to-br from-cream to-blossom text-charcoal shadow-[0_14px_34px_-18px_rgba(38,38,38,0.5)] md:size-32 md:rounded-[32px]"
+          className="relative grid size-26 place-items-center rounded-[26px] bg-gradient-to-br from-aqua via-yellow to-magenta text-white shadow-[0_14px_34px_-18px_rgba(38,38,38,0.5)] md:size-32 md:rounded-[32px]"
         >
           <span
             ref={logo}

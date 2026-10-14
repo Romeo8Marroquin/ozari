@@ -139,7 +139,7 @@ const UpNextCard: React.FC<{
           item.event.isOverdue
             ? 'bg-red-500'
             : lead
-              ? 'bg-gradient-to-b from-cream to-blossom'
+              ? 'bg-gradient-to-b from-aqua via-yellow to-magenta'
               : 'bg-charcoal/10'
         }`}
       />

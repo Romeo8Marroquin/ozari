@@ -402,7 +402,7 @@ const ProductDetailPage: React.FC = () => {
                       </button>
                     </>
                   ) : (
-                    <span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-cream to-blossom text-charcoal/25">
+                    <span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-aqua via-yellow to-magenta text-white/55">
                       <LogoMark className="size-20" />
                     </span>
                   )}
