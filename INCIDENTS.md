@@ -39,7 +39,7 @@ Commands use `<env>` = `staging` or `prod`, and `<project>` = `ozari-staging-gt`
 | Your Google account (the owner of the projects and billing) acted without you | **S9** |
 | Emails sent from the domain that nobody sent | **S10** |
 | Unknown files in the photo bucket | **S11** |
-| An unexpected bill | **S12** |
+| An unexpected bill, a budget email, or an environment switched off by the spend cap | **S12** |
 | Something simply stopped working, no sign of an attacker | **S13** |
 
 ---
@@ -174,18 +174,39 @@ It owns both projects and the billing, so it comes first.
 `rotate.ps1 <env> -Only r2`. Then, locally, `cd ozari-api; pnpm reconcile:images` (dry run) lists
 objects no product references; review, then `-- --fix` removes them.
 
-### S12 — An unexpected bill
+### S12 — Spend: an alert email, or the SPEND CAP switched an environment off
 
-Billing → Reports, grouped by service and project, shows what grew. Cloud Run is capped by its
-maximum instances; the usual surprises are Artifact Registry (images) and Secret Manager versions,
-both kept down by Terraform. Set the budget alert in §4 so the next one is an email, not a surprise.
+Each environment has a **hard monthly cap** (`monthly_budget_usd`, US$5 by default —
+`modules/gcp-env/spend-cap.tf`): emails at 50 / 90 / 100 %, and at 100 % a function **unlinks billing
+from that project**, which stops every Google service in it. Symptoms when it fires: the API answers
+5xx or nothing, a log line `SPEND CAP REACHED` (Logs Explorer, function `ozari-spend-cap`), and the
+project shows *Billing disabled* in the console. Database (Neon) and photos (R2) are outside Google
+and untouched.
+
+1. **Find out why before switching anything back on**: Billing → Reports, filtered to the project,
+   grouped by service and SKU. A flood or abuse → S4 first, or re-enabling just spends again.
+2. **Decide the cap**: legitimate growth → raise `monthly_budget_usd` in `envs/<env>/gcp/variables.tf`.
+3. **Re-link billing**: `tf.ps1 <env> bootstrap plan` must show ONLY the project's billing link
+   changing back; then `apply`. Then `tf.ps1 <env> gcp plan` + `apply` (applies a raised cap).
+4. **Verify**: `GET https://api-<env>…/api/health/check` → 200. Do it within days: Google may delete
+   resources of a project left without billing.
+
+The cap is not instantaneous — Google reports cost hours late, so it can be overshot by what the
+project spends in that window (Cloud Run's max instances keeps that to a few dollars a day).
+**Outside Google** (`DEPLOYMENT.md` §12): Neon, Resend, Workers and Pages are on free plans that
+STOP at their limits instead of billing — a suspended Neon compute, refused emails or failing API
+calls until the day/month rolls over are that stop, not an attack (check S4 anyway). R2 is the one
+thing that can bill with no stop; the Cloudflare budget alert (US$1) emails the day after.
+
+Routine bill review: Billing → Reports, grouped by service and project. The usual creep is Artifact
+Registry (images) and Secret Manager versions, both kept down by Terraform.
 
 ### S13 — It just stopped, no attacker
 
 | Symptom | Usual cause | Fix |
 |---|---|---|
-| Pushes to `dev`/`main` no longer deploy | the GitHub token expired (~1 year) | `secret.ps1 <env> github_oauth_token` + gcp plan/apply |
-| `tf.ps1 … cloudflare` fails with 401/403 | the Cloudflare token expired (~1 year) | Roll it, `secret.ps1 account cloudflare_api_token` |
+| Pushes to `dev`/`main` no longer deploy | the GitHub token expired (~1 year) — `expiry.ps1` confirms | `REBUILD.md` §3 "Expiring keys — renewal" |
+| `tf.ps1 … cloudflare` fails with 401/403 | the Cloudflare token expired (~1 year) — `expiry.ps1` confirms | `REBUILD.md` §3 "Expiring keys — renewal" |
 | Calendars stop syncing ~7 days after connecting | the OAuth app is still in Testing | `DEPLOYMENT.md` §3d — publish it |
 | The first request after a quiet period is slow | Cloud Run and Neon scale to zero | normal (a few seconds) |
 | One browser gets 403/503 from the API, Cloud Run logs show nothing, other devices are fine | that browser reuses a stale connection from before an edge change | fully quit and reopen the browser (`REBUILD.md` troubleshooting) |
@@ -266,7 +287,10 @@ The key alone decrypts nothing; it matters together with a COPY of the database.
 
 - [ ] **2-step verification with a passkey or security key** on Google, GitHub, Cloudflare, Neon,
       Resend and 1Password.
-- [ ] **Budget alert** at $5/month: Google Cloud console → Billing → Budgets & alerts (an email, free).
+- [x] **Spend cap** per environment (US$5/month, emails at 50/90/100 %, billing unlinked at 100 %) —
+      Terraform-managed, nothing to click (S12). Dry-run it after each environment's gcp apply.
+- [ ] **Cloudflare budget alert at US$1** (Billing → Billable Usage, `DEPLOYMENT.md` §12) — R2 is the
+      one spend nothing can stop.
 - [ ] **Know the Neon restore window** of each project (S5) — it decides how fast you must act.
 - [ ] **1Password** holds the current `infrastructure/secrets/` files (re-upload after every change).
 - [ ] **Drill**: `rotate.ps1 staging` once, and after any change to the script or the secrets

@@ -118,9 +118,18 @@ try {
     $entry = Get-CF "zones/$zoneId/rulesets/phases/$phase/entrypoint"
     if ($entry) {
         $ours = "ozari-$Environment-noindex"
-        $label = if ($entry.name -eq $ours) { "OURS" } else { "CONFLICT" }
-        Add-Row "ruleset" "$($entry.name) [$phase, $(@($entry.rules).Count) rule(s), id $($entry.id)]" $label "inspect the rules below. Only old-staging rules: retire.ps1 legacy-staging -Execute deletes the whole ruleset. Anything else: tell Claude, so Terraform can carry those rules."
-        $rulesetDetail = $entry
+        $desc = "$($entry.name) [$phase, $(@($entry.rules).Count) rule(s), id $($entry.id)]"
+        if ($entry.name -eq $ours) {
+            Add-Row "ruleset" $desc "OURS"
+        } elseif ($entry.name -match '^ozari-(staging|prod)-noindex$') {
+            # Another CURRENT environment's rule, owned by its own Terraform state. Only staging sets
+            # noindex_hostname, so production creates nothing in this phase and does not collide.
+            # Never delete it: the staging site would become indexable.
+            Add-Row "ruleset" $desc "not ours" "owned by the $($Matches[1]) cloudflare root — leave it"
+        } else {
+            Add-Row "ruleset" $desc "CONFLICT" "inspect the rules below. Only old-staging rules: retire.ps1 legacy-staging -Execute deletes the whole ruleset. Anything else: tell Claude, so Terraform can carry those rules."
+            $rulesetDetail = $entry
+        }
     }
 
     # --- Report ------------------------------------------------------------------

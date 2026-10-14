@@ -67,3 +67,6 @@ infrastructure/secrets/*
 # Service account / credential files
 *-credentials.json
 service-account*.json
+
+# Terraform-built zip of the spend-cap function (modules/gcp-env/spend-cap.tf)
+infrastructure/terraform/modules/gcp-env/.build/
