@@ -4,3 +4,11 @@ allowBuilds:
 onlyBuiltDependencies:
   - '@tailwindcss/oxide'
   - esbuild
+
+# Supply-chain quarantine: never resolve a version published less than 3 days ago.
+minimumReleaseAge: 4320
+
+# 2026-10-22: transitive fixes pnpm update would not pick up on its own.
+overrides:
+  'browserslist@^4': '^4.28.7'
+  'baseline-browser-mapping@^2': '^2.11.0'

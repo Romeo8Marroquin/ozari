@@ -38,6 +38,7 @@ variable "pages_build_env" {
   type        = map(string)
   default = {
     NODE_VERSION = "22"
+    PNPM_VERSION = "11.20.0"
   }
 }
 
