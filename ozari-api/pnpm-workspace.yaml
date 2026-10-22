@@ -5,6 +5,10 @@ allowBuilds:
   esbuild: true
   prisma: true
 overrides:
+  # 2026-10-22: transitive fixes pnpm update would not pick up on its own.
+  'postcss@^8': '^8.5.23'
+  'nanoid@^3': '^3.3.18'
+  'source-map-js@^1': '^1.2.2'
   '@hono/node-server@<1.19.13': '>=1.19.13'
   braces@<3.0.3: '>=3.0.3'
   hono@<4.11.7: '>=4.11.7'
@@ -13,3 +17,6 @@ overrides:
   tar@<7.5.7: '>=7.5.7'
   tar@<=7.5.2: '>=7.5.3'
   tar@<=7.5.3: '>=7.5.4'
+
+# Supply-chain quarantine: never resolve a version published less than 3 days ago.
+minimumReleaseAge: 4320

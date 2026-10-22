@@ -44,7 +44,7 @@ substitutions:
 
 steps:
   - id: verify-api
-    name: node:22-bookworm-slim
+    name: node:22.23.4-bookworm-slim
     dir: ozari-api
     entrypoint: bash
     args:

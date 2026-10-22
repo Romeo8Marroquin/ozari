@@ -9,36 +9,31 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SesionRouteImport } from './routes/sesion'
-import { Route as PanelRouteImport } from './routes/panel'
-import { Route as SplatRouteImport } from './routes/$'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SplatRouteImport } from './routes/$'
+import { Route as PanelRouteImport } from './routes/panel'
+import { Route as SesionRouteImport } from './routes/sesion'
 import { Route as PanelIndexRouteImport } from './routes/panel/index'
-import { Route as SesionRestablecerRouteImport } from './routes/sesion/restablecer'
-import { Route as SesionRegistroRouteImport } from './routes/sesion/registro'
-import { Route as SesionInicioRouteImport } from './routes/sesion/inicio'
-import { Route as SesionSplatRouteImport } from './routes/sesion/$'
-import { Route as PanelProductosRouteImport } from './routes/panel/productos'
-import { Route as PanelPreferenciasRouteImport } from './routes/panel/preferencias'
-import { Route as PanelPedidosRouteImport } from './routes/panel/pedidos'
-import { Route as PanelInicioRouteImport } from './routes/panel/inicio'
-import { Route as PanelAjustesRouteImport } from './routes/panel/ajustes'
 import { Route as PanelSplatRouteImport } from './routes/panel/$'
-import { Route as PanelProductosNuevoRouteImport } from './routes/panel/productos_.nuevo'
-import { Route as PanelProductosProductIdRouteImport } from './routes/panel/productos_.$productId'
-import { Route as PanelPedidosNuevoRouteImport } from './routes/panel/pedidos_.nuevo'
+import { Route as PanelAjustesRouteImport } from './routes/panel/ajustes'
+import { Route as PanelInicioRouteImport } from './routes/panel/inicio'
+import { Route as PanelPedidosRouteImport } from './routes/panel/pedidos'
+import { Route as PanelPreferenciasRouteImport } from './routes/panel/preferencias'
+import { Route as PanelProductosRouteImport } from './routes/panel/productos'
+import { Route as SesionSplatRouteImport } from './routes/sesion/$'
+import { Route as SesionInicioRouteImport } from './routes/sesion/inicio'
+import { Route as SesionRegistroRouteImport } from './routes/sesion/registro'
+import { Route as SesionRestablecerRouteImport } from './routes/sesion/restablecer'
 import { Route as PanelPedidosOrderIdRouteImport } from './routes/panel/pedidos_.$orderId'
-import { Route as PanelProductosProductIdEditarRouteImport } from './routes/panel/productos_.$productId_.editar'
+import { Route as PanelPedidosNuevoRouteImport } from './routes/panel/pedidos_.nuevo'
+import { Route as PanelProductosProductIdRouteImport } from './routes/panel/productos_.$productId'
+import { Route as PanelProductosNuevoRouteImport } from './routes/panel/productos_.nuevo'
 import { Route as PanelPedidosOrderIdEditarRouteImport } from './routes/panel/pedidos_.$orderId_.editar'
+import { Route as PanelProductosProductIdEditarRouteImport } from './routes/panel/productos_.$productId_.editar'
 
-const SesionRoute = SesionRouteImport.update({
-  id: '/sesion',
-  path: '/sesion',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PanelRoute = PanelRouteImport.update({
-  id: '/panel',
-  path: '/panel',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SplatRoute = SplatRouteImport.update({
@@ -46,9 +41,14 @@ const SplatRoute = SplatRouteImport.update({
   path: '/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const PanelRoute = PanelRouteImport.update({
+  id: '/panel',
+  path: '/panel',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SesionRoute = SesionRouteImport.update({
+  id: '/sesion',
+  path: '/sesion',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PanelIndexRoute = PanelIndexRouteImport.update({
@@ -56,44 +56,9 @@ const PanelIndexRoute = PanelIndexRouteImport.update({
   path: '/',
   getParentRoute: () => PanelRoute,
 } as any)
-const SesionRestablecerRoute = SesionRestablecerRouteImport.update({
-  id: '/restablecer',
-  path: '/restablecer',
-  getParentRoute: () => SesionRoute,
-} as any)
-const SesionRegistroRoute = SesionRegistroRouteImport.update({
-  id: '/registro',
-  path: '/registro',
-  getParentRoute: () => SesionRoute,
-} as any)
-const SesionInicioRoute = SesionInicioRouteImport.update({
-  id: '/inicio',
-  path: '/inicio',
-  getParentRoute: () => SesionRoute,
-} as any)
-const SesionSplatRoute = SesionSplatRouteImport.update({
+const PanelSplatRoute = PanelSplatRouteImport.update({
   id: '/$',
   path: '/$',
-  getParentRoute: () => SesionRoute,
-} as any)
-const PanelProductosRoute = PanelProductosRouteImport.update({
-  id: '/productos',
-  path: '/productos',
-  getParentRoute: () => PanelRoute,
-} as any)
-const PanelPreferenciasRoute = PanelPreferenciasRouteImport.update({
-  id: '/preferencias',
-  path: '/preferencias',
-  getParentRoute: () => PanelRoute,
-} as any)
-const PanelPedidosRoute = PanelPedidosRouteImport.update({
-  id: '/pedidos',
-  path: '/pedidos',
-  getParentRoute: () => PanelRoute,
-} as any)
-const PanelInicioRoute = PanelInicioRouteImport.update({
-  id: '/inicio',
-  path: '/inicio',
   getParentRoute: () => PanelRoute,
 } as any)
 const PanelAjustesRoute = PanelAjustesRouteImport.update({
@@ -101,19 +66,49 @@ const PanelAjustesRoute = PanelAjustesRouteImport.update({
   path: '/ajustes',
   getParentRoute: () => PanelRoute,
 } as any)
-const PanelSplatRoute = PanelSplatRouteImport.update({
+const PanelInicioRoute = PanelInicioRouteImport.update({
+  id: '/inicio',
+  path: '/inicio',
+  getParentRoute: () => PanelRoute,
+} as any)
+const PanelPedidosRoute = PanelPedidosRouteImport.update({
+  id: '/pedidos',
+  path: '/pedidos',
+  getParentRoute: () => PanelRoute,
+} as any)
+const PanelPreferenciasRoute = PanelPreferenciasRouteImport.update({
+  id: '/preferencias',
+  path: '/preferencias',
+  getParentRoute: () => PanelRoute,
+} as any)
+const PanelProductosRoute = PanelProductosRouteImport.update({
+  id: '/productos',
+  path: '/productos',
+  getParentRoute: () => PanelRoute,
+} as any)
+const SesionSplatRoute = SesionSplatRouteImport.update({
   id: '/$',
   path: '/$',
-  getParentRoute: () => PanelRoute,
+  getParentRoute: () => SesionRoute,
 } as any)
-const PanelProductosNuevoRoute = PanelProductosNuevoRouteImport.update({
-  id: '/productos_/nuevo',
-  path: '/productos/nuevo',
-  getParentRoute: () => PanelRoute,
+const SesionInicioRoute = SesionInicioRouteImport.update({
+  id: '/inicio',
+  path: '/inicio',
+  getParentRoute: () => SesionRoute,
 } as any)
-const PanelProductosProductIdRoute = PanelProductosProductIdRouteImport.update({
-  id: '/productos_/$productId',
-  path: '/productos/$productId',
+const SesionRegistroRoute = SesionRegistroRouteImport.update({
+  id: '/registro',
+  path: '/registro',
+  getParentRoute: () => SesionRoute,
+} as any)
+const SesionRestablecerRoute = SesionRestablecerRouteImport.update({
+  id: '/restablecer',
+  path: '/restablecer',
+  getParentRoute: () => SesionRoute,
+} as any)
+const PanelPedidosOrderIdRoute = PanelPedidosOrderIdRouteImport.update({
+  id: '/pedidos_/$orderId',
+  path: '/pedidos/$orderId',
   getParentRoute: () => PanelRoute,
 } as any)
 const PanelPedidosNuevoRoute = PanelPedidosNuevoRouteImport.update({
@@ -121,21 +116,26 @@ const PanelPedidosNuevoRoute = PanelPedidosNuevoRouteImport.update({
   path: '/pedidos/nuevo',
   getParentRoute: () => PanelRoute,
 } as any)
-const PanelPedidosOrderIdRoute = PanelPedidosOrderIdRouteImport.update({
-  id: '/pedidos_/$orderId',
-  path: '/pedidos/$orderId',
+const PanelProductosProductIdRoute = PanelProductosProductIdRouteImport.update({
+  id: '/productos_/$productId',
+  path: '/productos/$productId',
   getParentRoute: () => PanelRoute,
 } as any)
-const PanelProductosProductIdEditarRoute =
-  PanelProductosProductIdEditarRouteImport.update({
-    id: '/productos_/$productId_/editar',
-    path: '/productos/$productId/editar',
-    getParentRoute: () => PanelRoute,
-  } as any)
+const PanelProductosNuevoRoute = PanelProductosNuevoRouteImport.update({
+  id: '/productos_/nuevo',
+  path: '/productos/nuevo',
+  getParentRoute: () => PanelRoute,
+} as any)
 const PanelPedidosOrderIdEditarRoute =
   PanelPedidosOrderIdEditarRouteImport.update({
     id: '/pedidos_/$orderId_/editar',
     path: '/pedidos/$orderId/editar',
+    getParentRoute: () => PanelRoute,
+  } as any)
+const PanelProductosProductIdEditarRoute =
+  PanelProductosProductIdEditarRouteImport.update({
+    id: '/productos_/$productId_/editar',
+    path: '/productos/$productId/editar',
     getParentRoute: () => PanelRoute,
   } as any)
 
@@ -288,18 +288,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/sesion': {
-      id: '/sesion'
-      path: '/sesion'
-      fullPath: '/sesion'
-      preLoaderRoute: typeof SesionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/panel': {
-      id: '/panel'
-      path: '/panel'
-      fullPath: '/panel'
-      preLoaderRoute: typeof PanelRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/$': {
@@ -309,11 +302,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/panel': {
+      id: '/panel'
+      path: '/panel'
+      fullPath: '/panel'
+      preLoaderRoute: typeof PanelRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sesion': {
+      id: '/sesion'
+      path: '/sesion'
+      fullPath: '/sesion'
+      preLoaderRoute: typeof SesionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/panel/': {
@@ -323,60 +323,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PanelIndexRouteImport
       parentRoute: typeof PanelRoute
     }
-    '/sesion/restablecer': {
-      id: '/sesion/restablecer'
-      path: '/restablecer'
-      fullPath: '/sesion/restablecer'
-      preLoaderRoute: typeof SesionRestablecerRouteImport
-      parentRoute: typeof SesionRoute
-    }
-    '/sesion/registro': {
-      id: '/sesion/registro'
-      path: '/registro'
-      fullPath: '/sesion/registro'
-      preLoaderRoute: typeof SesionRegistroRouteImport
-      parentRoute: typeof SesionRoute
-    }
-    '/sesion/inicio': {
-      id: '/sesion/inicio'
-      path: '/inicio'
-      fullPath: '/sesion/inicio'
-      preLoaderRoute: typeof SesionInicioRouteImport
-      parentRoute: typeof SesionRoute
-    }
-    '/sesion/$': {
-      id: '/sesion/$'
+    '/panel/$': {
+      id: '/panel/$'
       path: '/$'
-      fullPath: '/sesion/$'
-      preLoaderRoute: typeof SesionSplatRouteImport
-      parentRoute: typeof SesionRoute
-    }
-    '/panel/productos': {
-      id: '/panel/productos'
-      path: '/productos'
-      fullPath: '/panel/productos'
-      preLoaderRoute: typeof PanelProductosRouteImport
-      parentRoute: typeof PanelRoute
-    }
-    '/panel/preferencias': {
-      id: '/panel/preferencias'
-      path: '/preferencias'
-      fullPath: '/panel/preferencias'
-      preLoaderRoute: typeof PanelPreferenciasRouteImport
-      parentRoute: typeof PanelRoute
-    }
-    '/panel/pedidos': {
-      id: '/panel/pedidos'
-      path: '/pedidos'
-      fullPath: '/panel/pedidos'
-      preLoaderRoute: typeof PanelPedidosRouteImport
-      parentRoute: typeof PanelRoute
-    }
-    '/panel/inicio': {
-      id: '/panel/inicio'
-      path: '/inicio'
-      fullPath: '/panel/inicio'
-      preLoaderRoute: typeof PanelInicioRouteImport
+      fullPath: '/panel/$'
+      preLoaderRoute: typeof PanelSplatRouteImport
       parentRoute: typeof PanelRoute
     }
     '/panel/ajustes': {
@@ -386,25 +337,67 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PanelAjustesRouteImport
       parentRoute: typeof PanelRoute
     }
-    '/panel/$': {
-      id: '/panel/$'
+    '/panel/inicio': {
+      id: '/panel/inicio'
+      path: '/inicio'
+      fullPath: '/panel/inicio'
+      preLoaderRoute: typeof PanelInicioRouteImport
+      parentRoute: typeof PanelRoute
+    }
+    '/panel/pedidos': {
+      id: '/panel/pedidos'
+      path: '/pedidos'
+      fullPath: '/panel/pedidos'
+      preLoaderRoute: typeof PanelPedidosRouteImport
+      parentRoute: typeof PanelRoute
+    }
+    '/panel/preferencias': {
+      id: '/panel/preferencias'
+      path: '/preferencias'
+      fullPath: '/panel/preferencias'
+      preLoaderRoute: typeof PanelPreferenciasRouteImport
+      parentRoute: typeof PanelRoute
+    }
+    '/panel/productos': {
+      id: '/panel/productos'
+      path: '/productos'
+      fullPath: '/panel/productos'
+      preLoaderRoute: typeof PanelProductosRouteImport
+      parentRoute: typeof PanelRoute
+    }
+    '/sesion/$': {
+      id: '/sesion/$'
       path: '/$'
-      fullPath: '/panel/$'
-      preLoaderRoute: typeof PanelSplatRouteImport
-      parentRoute: typeof PanelRoute
+      fullPath: '/sesion/$'
+      preLoaderRoute: typeof SesionSplatRouteImport
+      parentRoute: typeof SesionRoute
     }
-    '/panel/productos_/nuevo': {
-      id: '/panel/productos_/nuevo'
-      path: '/productos/nuevo'
-      fullPath: '/panel/productos/nuevo'
-      preLoaderRoute: typeof PanelProductosNuevoRouteImport
-      parentRoute: typeof PanelRoute
+    '/sesion/inicio': {
+      id: '/sesion/inicio'
+      path: '/inicio'
+      fullPath: '/sesion/inicio'
+      preLoaderRoute: typeof SesionInicioRouteImport
+      parentRoute: typeof SesionRoute
     }
-    '/panel/productos_/$productId': {
-      id: '/panel/productos_/$productId'
-      path: '/productos/$productId'
-      fullPath: '/panel/productos/$productId'
-      preLoaderRoute: typeof PanelProductosProductIdRouteImport
+    '/sesion/registro': {
+      id: '/sesion/registro'
+      path: '/registro'
+      fullPath: '/sesion/registro'
+      preLoaderRoute: typeof SesionRegistroRouteImport
+      parentRoute: typeof SesionRoute
+    }
+    '/sesion/restablecer': {
+      id: '/sesion/restablecer'
+      path: '/restablecer'
+      fullPath: '/sesion/restablecer'
+      preLoaderRoute: typeof SesionRestablecerRouteImport
+      parentRoute: typeof SesionRoute
+    }
+    '/panel/pedidos_/$orderId': {
+      id: '/panel/pedidos_/$orderId'
+      path: '/pedidos/$orderId'
+      fullPath: '/panel/pedidos/$orderId'
+      preLoaderRoute: typeof PanelPedidosOrderIdRouteImport
       parentRoute: typeof PanelRoute
     }
     '/panel/pedidos_/nuevo': {
@@ -414,18 +407,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PanelPedidosNuevoRouteImport
       parentRoute: typeof PanelRoute
     }
-    '/panel/pedidos_/$orderId': {
-      id: '/panel/pedidos_/$orderId'
-      path: '/pedidos/$orderId'
-      fullPath: '/panel/pedidos/$orderId'
-      preLoaderRoute: typeof PanelPedidosOrderIdRouteImport
+    '/panel/productos_/$productId': {
+      id: '/panel/productos_/$productId'
+      path: '/productos/$productId'
+      fullPath: '/panel/productos/$productId'
+      preLoaderRoute: typeof PanelProductosProductIdRouteImport
       parentRoute: typeof PanelRoute
     }
-    '/panel/productos_/$productId_/editar': {
-      id: '/panel/productos_/$productId_/editar'
-      path: '/productos/$productId/editar'
-      fullPath: '/panel/productos/$productId/editar'
-      preLoaderRoute: typeof PanelProductosProductIdEditarRouteImport
+    '/panel/productos_/nuevo': {
+      id: '/panel/productos_/nuevo'
+      path: '/productos/nuevo'
+      fullPath: '/panel/productos/nuevo'
+      preLoaderRoute: typeof PanelProductosNuevoRouteImport
       parentRoute: typeof PanelRoute
     }
     '/panel/pedidos_/$orderId_/editar': {
@@ -433,6 +426,13 @@ declare module '@tanstack/react-router' {
       path: '/pedidos/$orderId/editar'
       fullPath: '/panel/pedidos/$orderId/editar'
       preLoaderRoute: typeof PanelPedidosOrderIdEditarRouteImport
+      parentRoute: typeof PanelRoute
+    }
+    '/panel/productos_/$productId_/editar': {
+      id: '/panel/productos_/$productId_/editar'
+      path: '/productos/$productId/editar'
+      fullPath: '/panel/productos/$productId/editar'
+      preLoaderRoute: typeof PanelProductosProductIdEditarRouteImport
       parentRoute: typeof PanelRoute
     }
   }
