@@ -317,7 +317,7 @@ the API host simply answers 404/503.
 > `ips: ["104.23.x.x"]` — one bucket for the whole app (30 public requests/minute, 10 sign-ins/minute,
 > for everyone together). **Verify after every rebuild** (§3c.4 step 6): a Cloud Run request log's
 > `jsonPayload.ips` must show your own public IP. Residual gap: a caller that skips Cloudflare and
-> hits the `run.app` address can put any address there — the same side door `ROADMAP.md` closes.
+> hits the `run.app` address can put any address there (open; `AUTH-AND-SECURITY.md` §12).
 
 ### 3c.1 — What the cloudflare stack builds
 
