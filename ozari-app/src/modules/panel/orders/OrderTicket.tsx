@@ -137,6 +137,15 @@ const OrderTicket: React.FC<{
     </span>
   );
 
+  // The deposit is waiting to be settled (delivered, settleable, not recorded — the API's flag). A
+  // quiet amber chip under the status: it is a to-do the admin should see while scanning, not an
+  // action — settling happens on the order's own page.
+  const depositChip = order.depositSettlementPending && (
+    <span className="inline-block shrink-0 whitespace-nowrap rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-600">
+      {t(`${KEY}.depositPending`)}
+    </span>
+  );
+
   const amount = (
     <span className="shrink-0 text-sm font-bold tabular-nums text-charcoal">
       {order.currency.symbol} {MONEY.format(order.totalAmount)}
@@ -276,7 +285,10 @@ const OrderTicket: React.FC<{
           {/* Header: who + what beside the status. */}
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">{who}</div>
-            {statusChip}
+            <div className="flex shrink-0 flex-col items-end gap-1">
+              {statusChip}
+              {depositChip}
+            </div>
           </div>
           {/* Logistics footer: the two LABELLED events wrap on a narrow phone; the total stays right. */}
           <div className="flex items-end justify-between gap-4 border-t border-black/[0.06] pt-3">
@@ -309,6 +321,7 @@ const OrderTicket: React.FC<{
           <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">{who}</div>
           <div className="flex shrink-0 flex-col items-end justify-center gap-2">
             {statusChip}
+            {depositChip}
             {amount}
             <ActionRow items={actionItems} className="flex items-center gap-2" />
           </div>

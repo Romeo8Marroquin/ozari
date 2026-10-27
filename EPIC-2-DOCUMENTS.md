@@ -65,6 +65,32 @@ is settled; the reasoning matters more than the individual strings, because it g
 | 19 | **The rule under a table is a SECTION divider, not the table's bottom border** (2026-08-26). What makes the difference is DETACHMENT, not weight: drawn tight under the last row it reads as a border the table's other three sides do not have, while 9pt of air above it reads as the rule between one block and the next. Thinning it to 0.5pt was tried at the same time and reverted — once the rule is no longer touching the table it has to carry the separation alone, and a hairline is too quiet for that. **Detached and full weight** is the pair that works. The space BELOW it is deliberately unequal: another group's table is one step away (`groupTitle.marginTop` 16), the summary is a section away (`summary.marginTop` 26). At equal spacing the summary read as a third table in the same list. |
 | 20 | **The one-page target (#15) is the ORDINARY order, and #18–19 spend part of the budget.** With the letterhead this business has — two accounts — a five-line order with a discount and a deposit ends on page one with ~35pt to spare (`pnpm doc:preview:free`; measure it by scanning the raster for the last non-white row rather than eyeballing). A THIRD bank account costs ~44pt and pushes that same order to two pages, which is correct rather than broken: the closing block is `wrap={false}`, so conditions, deposit details and totals travel together and page two is a coherent page, never a stray line. **Do not buy that edge case back by tightening the fact cards or the table rhythm** — tried on 2026-08-26, cost readability everywhere, still missed by ~17pt, reverted. When the budget genuinely needs a few points, take them from slack that is not spacing at all: `page.paddingBottom` only has to clear the two pieces of `fixed` furniture. |
 
+### 2b. The security deposit ("depósito en garantía") on the document (owner, 2026-10-27)
+
+A rental product may carry a refundable deposit per unit; an order snapshots it per rental line and
+`OrderDetail.securityDeposit` carries the total plus, after the pickup, the admin's **settlement**
+(a retention for partial damage and/or lost/broken units billed at the line's replacement value).
+Owner's words: *"once not refunded, we have to take it as cost in the document perfectly. But if it
+follows the normal happy path it should still be considered as deposit."*
+
+| # | Decision |
+|---|---|
+| 21 | **The deposit is NEVER a cost unless the settlement retained money or billed a replacement.** It is collected on top of the order and refunded at pickup, so it never enters `totals` (TOTAL, saldo) on either document. `documentModel` decides which of three states applies (`DocumentSecurityDeposit.status`) and the template only lays it out — the rule is tested, not drawn. |
+| 22 | **`held`** (cotización, or a comprobante not settled yet) and **`refunded`** (settled, nothing claimed) print ONE line under the saldo chip, inside the totals panel: `Depósito en garantía (reembolsable)` + amount + *"Aparte del total; se devuelve al recoger, previa revisión."* — or `(devuelto)` + the refund + *"Revisión sin cargos: se devolvió completo."* Nothing at all when the deposit is 0 and nothing was claimed. |
+| 23 | **`settled`** (anything claimed) is its own panel under the totals, **`LIQUIDACIÓN DE GARANTÍA`**: the charges as COSTS (`Retención por daños` + reason; `Reposición: <producto>` + `cant. × valor unitario` + note), then `Total por daños`, `Cubierto con la garantía (-)`, **`Saldo pendiente por daños`** (bold, only when > 0) and `Garantía devuelta` with *"De un depósito de Q…"* — printed even at Q0.00 once something was claimed, because the client handed money over and "nothing came back" is an answer owed in writing. With no deposit at all (replacement values only) the two deposit lines are omitted, and so is `Total por daños` when it equals the saldo. |
+| 24 | **Every figure is the API's** (`claimsTotal`, `appliedFromDeposit`, `refundAmount`, `balanceDue` …), copied verbatim — the document selects and formats, it never adds or subtracts. The one estimate is the cotización's deposit, Σ rental line `product.securityDeposit × quantity`, which mirrors the server's own rule exactly like the prices beside it. |
+| 25 | **No "total a pagar (pedido + garantía)" line.** It would be a sum the document invents, and it assumes WHEN the deposit is collected; the caption says it is apart from the total, which is the fact the client needs. **The damages balance never joins the gradient SALDO chip** (#17): a paid order with damages shows `PAGADO`, a saldo of Q0.00 and a bold `Saldo pendiente por daños` — two different debts, two different lines. Damaged units are not marked in the lines table; the liquidación names them. |
+
+**Why the deposit line sits INSIDE the totals panel (measured, not preferred).** The first build gave
+it its own panel; that made the summary ~47pt taller, and the ordinary two-bank order
+(`doc:preview:free`) has ~19pt to spare, so every order with a deposit went to two pages (#15). As a
+line under the chip the free fixture with a deposit still ends on page one — with about 7pt left. ⚠️
+**That budget is now nearly spent**: re-run `pnpm doc:preview:free -- --deposit=held` after any change
+to the summary. The settlement panel is tall and an order carrying one usually takes a second page;
+that is correct, not broken — it lives inside the summary's `wrap={false}`, so the totals, the
+conditions, the banks and the liquidación always travel together (§8a, verified with
+`--rows=1…24 --deposit=damages`).
+
 **Addendum to #19 — how the divider is actually implemented** (supersedes the "`groupTitle.marginTop`
 / `summary.marginTop`" mechanism described above, which was the first attempt):
 
@@ -204,7 +230,8 @@ details qualify the very figures beside them, so a page break must not come betw
 - *Right* — `Subtotal Alquiler` · `Subtotal Venta` · `Subtotal Extras` · `Servicio a domicilio`
   (with `Incluye entrega y recolección`, or "Gratis" when 0) · `Descuento (−)` · **`TOTAL`** ·
   `Anticipo (−)` · **`SALDO PENDIENTE`**. The **PAGADO** mark rides in the header when `paidAt` is
-  set, and the saldo is then zero.
+  set, and the saldo is then zero. Under the chip, the security deposit line when there is one;
+  under the panel, the `LIQUIDACIÓN DE GARANTÍA` panel when a settlement claimed anything (§2b).
 
 **Page furniture, `fixed` on every page:** the acceptance line (and, on a quote, the "sujeta a
 cambios" notice) sit in the bottom padding above the **page number**. They are absolutely positioned
@@ -542,6 +569,11 @@ test:
 **Phase 2 — The cotización. ✅ BUILT 2026-08-26.** `fromOrderForm` + `QuoteDocumentButton` in the
 order form's footer: the "sujeta a cambios" notice, a validity date and no order number. Same
 template, same vocabulary, unsaved figures. `pnpm doc:preview:quote` renders it.
+
+**Security deposit (§2b) — ✅ BUILT 2026-10-27.** Previews: `pnpm doc:preview:deposit` (held),
+`:refunded` (happy path), `:damages` (retention + two replacements, more than the deposit covers, on
+a paid order). The flag behind them, `--deposit=held|refunded|damages|uncovered`, composes with
+`--free`, `--quote`, `--long` and `--rows=N`; `uncovered` = replacements on lines with no deposit.
 
 What it settled:
 

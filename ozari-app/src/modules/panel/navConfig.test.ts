@@ -93,6 +93,8 @@ describe('panelSectionFor', () => {
 
   it('resolves the other tabs and returns null for unknown paths', () => {
     expect(panelSectionFor('/panel/pedidos')).toBe('/panel/pedidos');
+    // The deposit settlement page keeps the Orders tab (and the header title) perfectly still.
+    expect(panelSectionFor('/panel/pedidos/12/garantia')).toBe('/panel/pedidos');
     expect(panelSectionFor('/panel/preferencias')).toBe('/panel/preferencias');
     expect(panelSectionFor('/panel/ajustes')).toBe('/panel/ajustes');
     expect(panelSectionFor('/panel')).toBeNull();

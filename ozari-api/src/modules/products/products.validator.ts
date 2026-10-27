@@ -16,6 +16,7 @@ import {
   type CreateProductRequestModel,
   type ProductImageUploadFileModel,
   type UpdateProductDetailRequestModel,
+  type UpdateProductDisplayOrderRequestModel,
   type UpdateProductImageRequestModel,
   type UpdateProductRequestModel,
 } from "./products.models.js";
@@ -57,6 +58,29 @@ const sanitizeOptionalMoney = (
   return { ok: true, value: Math.trunc(value * 100) / 100 };
 };
 
+/**
+ * The security-deposit rule both doors share (owner 2026-10-27): the deposit is ALQUILER-only (a
+ * sold item leaves for good — there is nothing to give back a guarantee on), and it never exceeds
+ * the replacement price when both are set — it covers partial damage, and a total loss is billed at
+ * the replacement value, so a bigger deposit would make "broken" cheaper than "scratched".
+ * Returns the rejection key, or `undefined` when the pair is coherent.
+ */
+const securityDepositViolation = (
+  isRent: boolean,
+  securityDeposit: number | undefined,
+  replacementPrice: number | undefined,
+): string | undefined => {
+  if (securityDeposit === undefined) {
+    return undefined;
+  }
+  if (!isRent) {
+    return "securityDepositForbidden";
+  }
+  return replacementPrice !== undefined && securityDeposit > replacementPrice
+    ? "securityDepositAboveReplacement"
+    : undefined;
+};
+
 /** Log the create-validator warning for `key` and send its standard 400 (both share the key name). */
 const rejectCreate = (
   res: Response,
@@ -91,6 +115,7 @@ export const validateCreateProduct = async (
       rentPrice,
       rentTimeUnitId,
       replacementPrice,
+      securityDeposit,
       sellPrice,
     } = req.body as CreateProductRequestModel;
 
@@ -237,6 +262,12 @@ export const validateCreateProduct = async (
       return;
     }
 
+    const depositMoney = sanitizeOptionalMoney(securityDeposit);
+    if (!depositMoney.ok) {
+      rejectCreate(res, "invalidSecurityDeposit", { securityDeposit });
+      return;
+    }
+
     // The CONDITIONAL price rule — a product is exactly ONE business type:
     // Alquiler → rentPrice + a valid rent time unit, sellPrice forbidden; Venta → sellPrice only,
     // rent fields forbidden. `replacementPrice` is Alquiler-only too (what a client pays for a
@@ -277,6 +308,11 @@ export const validateCreateProduct = async (
         return;
       }
     }
+    const depositViolation = securityDepositViolation(isRent, depositMoney.value, replacementMoney.value);
+    if (depositViolation) {
+      rejectCreate(res, depositViolation, { securityDeposit, replacementPrice });
+      return;
+    }
 
     const validatedBody: CreateProductRequestModel = {
       businessTypeId,
@@ -290,6 +326,7 @@ export const validateCreateProduct = async (
       rentPrice: isRent ? rentMoney.value : undefined,
       rentTimeUnitId: isRent ? rentTimeUnitId : undefined,
       replacementPrice: isRent ? replacementMoney.value : undefined,
+      securityDeposit: depositMoney.value,
       sellPrice: isRent ? undefined : sellMoney.value,
     };
     req.body = validatedBody;
@@ -357,6 +394,7 @@ export const validateUpdateProduct = async (
       rentPrice,
       rentTimeUnitId,
       replacementPrice,
+      securityDeposit,
       sellPrice,
     } = req.body as UpdateProductRequestModel;
 
@@ -569,6 +607,12 @@ export const validateUpdateProduct = async (
       return;
     }
 
+    const depositMoney = sanitizeOptionalMoney(securityDeposit);
+    if (!depositMoney.ok) {
+      rejectCreate(res, "invalidSecurityDeposit", { securityDeposit });
+      return;
+    }
+
     // The CONDITIONAL price rule — identical to create (a product is exactly ONE business type),
     // and it applies to the product's NEW type: switching Alquiler → Venta must arrive with the
     // Venta shape (the reconcile then nulls the now-irrelevant columns).
@@ -608,6 +652,11 @@ export const validateUpdateProduct = async (
         return;
       }
     }
+    const depositViolation = securityDepositViolation(isRent, depositMoney.value, replacementMoney.value);
+    if (depositViolation) {
+      rejectCreate(res, depositViolation, { securityDeposit, replacementPrice });
+      return;
+    }
 
     const validatedBody: UpdateProductRequestModel = {
       businessTypeId,
@@ -621,6 +670,7 @@ export const validateUpdateProduct = async (
       rentPrice: isRent ? rentMoney.value : undefined,
       rentTimeUnitId: isRent ? rentTimeUnitId : undefined,
       replacementPrice: isRent ? replacementMoney.value : undefined,
+      securityDeposit: depositMoney.value,
       sellPrice: isRent ? undefined : sellMoney.value,
     };
     req.body = validatedBody;
@@ -723,6 +773,41 @@ export const validateCreateProductImageUploads = (
       i18next.t("products.imageUploads.validators.validationError"),
     );
   }
+};
+
+/**
+ * `PUT /products/display-order` body: `{ productIds }` — a non-empty array of DISTINCT positive
+ * integers, at most `maxArrangedProducts`. Shape only, no DB read: whether the list is exactly the
+ * active catalog is checked INSIDE the transaction (a 409 there), where it cannot go stale.
+ */
+export const validateUpdateProductDisplayOrder = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void => {
+  const { productIds } = (req.body ?? {}) as Partial<UpdateProductDisplayOrderRequestModel>;
+  const wellFormed =
+    Array.isArray(productIds) &&
+    productIds.length > 0 &&
+    productIds.length <= appConfig.maxArrangedProducts &&
+    productIds.every((id) => Number.isInteger(id) && id >= 1) &&
+    new Set(productIds).size === productIds.length;
+  if (!wellFormed) {
+    logger.warn(
+      i18next.t("products.displayOrder.validators.logs.invalidProductIds", {
+        count: Array.isArray(productIds) ? productIds.length : undefined,
+      }),
+    );
+    sendOzariError(
+      res,
+      HttpEnum.BAD_REQUEST,
+      i18next.t("products.displayOrder.validators.invalidProductIds"),
+    );
+    return;
+  }
+  const validatedBody: UpdateProductDisplayOrderRequestModel = { productIds };
+  req.body = validatedBody;
+  next();
 };
 
 /**

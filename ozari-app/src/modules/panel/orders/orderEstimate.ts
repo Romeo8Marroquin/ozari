@@ -67,6 +67,22 @@ export function estimateOrderTotal(
   return Math.round((linesTotal + deliveryAmount) * 100) / 100;
 }
 
+/**
+ * The order's refundable SECURITY DEPOSIT from the current lines — Σ (rental product's deposit per
+ * unit × quantity), exactly what the API snapshots on save (`computeDepositTotal`). It is collected
+ * ON TOP of the order and given back at pickup, so it never joins {@link estimateOrderTotal}. A sale
+ * line, a rental without a deposit and a blank/invalid quantity contribute 0.
+ */
+export function estimateDepositTotal(lines: EstimateLine[], productsById: Map<number, Product>): number {
+  const total = lines.reduce((sum, line) => {
+    const product = productsById.get(line.productId);
+    const quantity = parseLineQuantity(line.quantity);
+    if (!product || quantity === null || !isRentalProduct(product)) return sum;
+    return sum + (product.securityDeposit ?? 0) * quantity;
+  }, 0);
+  return Math.round(total * 100) / 100;
+}
+
 /** Billed days from the raw datetime-local strings (a thin adapter over {@link computeBilledDays}). */
 export function billedDaysFromStrings(deliveryAt: string, pickupAt: string): number {
   return computeBilledDays(parseDateTime(deliveryAt), parseDateTime(pickupAt));

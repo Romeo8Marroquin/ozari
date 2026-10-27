@@ -161,6 +161,25 @@ describe('OrderDocumentButton', () => {
     // The global `t` mock returns the key, so what this pins is that the PLURAL leaf is asked for.
     expect(input.copy.billedDaysValue(1)).toBe(`${KEY}.fields.billedDaysValue`);
     expect(input.copy.billedDaysValue(3)).toBe(`${KEY}.fields.billedDaysValue`);
+    // The settlement lines that carry a value are interpolated by i18next too — the contract mock
+    // throws if a placeholder (`{{product}}`, `{{quantity}}`, `{{unitAmount}}`, `{{amount}}`) is
+    // left unfilled, which would otherwise reach a client as literal braces.
+    expect(input.copy.settlementReplacement('Silla')).toBe(`${KEY}.securityDeposit.replacement`);
+    expect(input.copy.settlementReplacementDetail(2, '$ 45.00')).toBe(
+      `${KEY}.securityDeposit.replacementDetail`,
+    );
+    expect(input.copy.settlementRefundNote('$ 500.00')).toBe(`${KEY}.securityDeposit.refundNote`);
+  });
+
+  it('carries the security deposit through to the document', async () => {
+    render(
+      <OrderDocumentButton
+        order={order({ securityDeposit: { total: 500, canSettle: false } })}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.download` }));
+    await waitFor(() => expect(downloadDocument).toHaveBeenCalled());
+    expect(lastInput().model.securityDeposit).toEqual({ status: 'held', amount: 500 });
   });
 
   it('still produces a document when the preferences have not loaded', async () => {

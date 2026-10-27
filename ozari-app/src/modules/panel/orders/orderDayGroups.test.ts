@@ -31,6 +31,7 @@ const order = (id: number, deliveryAt: string, over: Partial<OrderListItem> = {}
   itemCount: 1,
   totalAmount: 100,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
+  depositSettlementPending: false,
   ...over,
 });
 

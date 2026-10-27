@@ -29,8 +29,7 @@ const EXAMPLE_LINE_PRODUCT_NAME = "Silla plegable";
 const EXAMPLE_ADMIN_NAME = "Romeo Marroquín";
 const EXAMPLE_DELIVERY_AT = "2026-08-01T14:00:00.000Z";
 const EXAMPLE_PICKUP_AT = "2026-08-02T10:00:00.000Z";
-const EXAMPLE_ORDER_CREATED_AT = "2026-07-16T12:00:00.000Z";
-const EXAMPLE_FEED_URL =
+const EXAMPLE_ORDER_CREATED_AT = "2026-07-16T12:00:00.000Z";const EXAMPLE_FEED_URL =
   "https://api.partyrentalsgt.com/api/calendar/feed/9f2c8a1b…d41.ics";
 
 // The two path params every catalog route shares.
@@ -629,15 +628,18 @@ export const paths: OpenAPIV3.PathsObject = {
           in: "query",
           required: false,
           description:
-            "Presentation order, any role. `recent` (default) = newest first; `nameAsc`/`nameDesc` " +
+            "Presentation order, any role. `catalog` (default) = the admin's arrangement " +
+            "(`PUT /products/display-order`), never-arranged products first, newest first within " +
+            "ties; `recent` = newest first; `nameAsc`/`nameDesc` " +
             "= Spanish collation; `priceAsc`/`priceDesc` = THE product's price (rent or sell, " +
             "whichever it has — the conditional rule guarantees exactly one), priceless rows " +
-            "sinking to the end either way. An unknown value clamps to `recent`. There is " +
+            "sinking to the end either way. An unknown value clamps to `catalog`. There is " +
             "deliberately no availability filter — a rented-out Alquiler isn't gone, and an admin " +
             "NEEDS to see unavailable rows.",
           schema: {
             type: "string",
-            enum: ["recent", "nameAsc", "nameDesc", "priceAsc", "priceDesc"],
+            enum: ["catalog", "recent", "nameAsc", "nameDesc", "priceAsc", "priceDesc"],
+            default: "catalog",
           },
         },
         {
@@ -763,7 +765,7 @@ export const paths: OpenAPIV3.PathsObject = {
         "(Admin sees the availability + internal fields incl. the Alquiler fleet `total`, a Client " +
         "sees only the shared catalog fields). A malformed id and an unknown/soft-deleted product " +
         "are both a plain `404`. **Admin + Client only** (any other role gets a `403`). " +
-        "Authenticated limiter (100/min).",
+        "Authenticated limiter (100/min) — the same one as the list.",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         {
@@ -969,6 +971,81 @@ export const paths: OpenAPIV3.PathsObject = {
     },
   },
 
+  "/products/display-order": {
+    get: {
+      tags: ["Products"],
+      summary: "The catalog arrangement (admin only)",
+      operationId: "getProductDisplayOrder",
+      description:
+        "Every **active** product in the grid's default order, a card's worth each — the feed of " +
+        "the arrangement screen. Unpaginated on purpose (arranging needs the whole catalog on one " +
+        "surface). Requires the `Admin` role. Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      responses: {
+        "200": dataResponse(
+          "The active catalog in display order.",
+          "ProductArrangement",
+          {
+            products: [
+              {
+                id: 7,
+                name: EXAMPLE_PRODUCT_NAME,
+                category: "Mesas",
+                businessType: "Alquiler",
+                imageUrl: "https://cdn.example.com/products/7/hero.webp",
+                placed: true,
+              },
+            ],
+          },
+          "Orden del catálogo obtenido exitosamente.",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    put: {
+      tags: ["Products"],
+      summary: "Save the catalog arrangement (admin only)",
+      operationId: "updateProductDisplayOrder",
+      description:
+        "**Declarative**: the body is the FULL ordered list of active product ids, and the " +
+        "catalog is renumbered 1..N in one transaction (only rows whose position changed are " +
+        "written). A list that is not exactly the active catalog — a product was added or " +
+        "removed meanwhile — is a `409` and nothing is applied. Requires the `Admin` role; " +
+        "authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      requestBody: bodyRef("UpdateProductDisplayOrderRequest", { productIds: [7, 3, 12] }),
+      responses: {
+        "200": dataResponse(
+          "The committed order (re-read inside the transaction).",
+          "ProductArrangement",
+          {
+            products: [
+              { id: 7, name: EXAMPLE_PRODUCT_NAME, category: "Mesas", businessType: "Alquiler", placed: true },
+            ],
+          },
+          "Orden del catálogo guardado exitosamente.",
+        ),
+        "400": errorResponse(
+          "Missing/empty list, duplicates, a non-positive or non-integer id, or more than 1000 ids.",
+          400,
+          "La lista de productos a ordenar no es válida.",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "409": errorResponse(
+          "The list no longer matches the active catalog.",
+          409,
+          "El catálogo cambió mientras lo ordenabas. Recarga y vuelve a ordenarlo.",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
   "/products/catalog": {
     get: {
       tags: ["Products"],
@@ -977,8 +1054,8 @@ export const paths: OpenAPIV3.PathsObject = {
       description:
         "The seeded reference lists the product create/edit form renders as selects — business types, " +
         "categories, currencies, rent time units, and detail types (active rows, id order). " +
-        "**Admin + Client only**, like every products read (any other role gets a `403`). " +
-        "Authenticated limiter (100/min).",
+        "**Admin + Client only**, like every products read (any other role gets a `403`); " +
+        "authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       responses: {
         "200": dataResponse("The five reference lists.", "ProductCatalog", {
@@ -1100,7 +1177,7 @@ export const paths: OpenAPIV3.PathsObject = {
         "**The payment METHOD is not part of this body.** `services.paymentMethodId` records how the " +
         "order was actually paid, which has not happened at create time — accepting it here stored a " +
         "prediction as a fact. `POST /orders/{id}/payment` is the only door that writes it. " +
-        "Authenticated limiter (100/min).",
+        "Authenticated limiter (100/min), like every order read.",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       requestBody: bodyRef("CreateOrderRequest", {
         clientRegistryId: 3,
@@ -1467,7 +1544,10 @@ export const paths: OpenAPIV3.PathsObject = {
             "`driverConflict` or `selfOverlap`, exactly the same three shapes as create. An order " +
             "that reserves nothing (cancelled, or finished) and whose events have already happened " +
             "can never reach this: its edit competes for no goods and occupies no driver, so it is " +
-            "pure paperwork.",
+            "pure paperwork. Also `409` (no `data`) when the edit would contradict a recorded " +
+            "deposit settlement — a damaged line dropped, reduced below its damaged units or left " +
+            "without a replacement value, or the deposit shrunk below what was retained; the admin " +
+            "undoes the settlement first.",
           409,
           "Some products are not available for the requested dates.",
         ),
@@ -1486,7 +1566,7 @@ export const paths: OpenAPIV3.PathsObject = {
         "then the order — and **returns the sale stock** those lines consumed at creation (rental " +
         "holds need nothing: they are derived from the status and vanish with the row). The " +
         "evidence's R2 objects are deleted after the commit, best-effort. There is no undo. " +
-        "Authenticated limiter (100/min).",
+        "Authenticated limiter (100/min) applies.",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         {
@@ -1719,7 +1799,7 @@ export const paths: OpenAPIV3.PathsObject = {
         "(optional seeded zone; exactly one favorite, same defaulting). All PII encrypted at " +
         "rest. When this person later registers a platform account, the admin deletes the " +
         "registry (soft only while orders reference it) — orders keep their snapshots. " +
-        "Authenticated limiter (100/min).",
+        "Authenticated limiter (100/min) on every registry write.",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       requestBody: bodyRef("CreateClientRegistryRequest", {
         name: EXAMPLE_CLIENT_NAME,
@@ -1989,6 +2069,91 @@ export const paths: OpenAPIV3.PathsObject = {
           "The order has no payment to undo.",
           409,
           "This order has no payment recorded",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/orders/{id}/settlement": {
+    put: {
+      tags: ["Orders"],
+      summary: "Record or correct the security-deposit settlement (admin)",
+      operationId: "settleOrder",
+      description:
+        "**STRICTLY Admin.** Records what happens to the order's refundable SECURITY DEPOSIT once " +
+        "the goods are back: refund it whole (`retainedAmount: 0`), retain part of it for partial " +
+        "damage (with a REQUIRED reason), and bill units returned broken or never returned at the " +
+        "line's replacement-value snapshot. The response's `securityDeposit.settlement` carries the " +
+        "derived refund and the balance still owed.\n\n" +
+        "**Its own door like payment, never a pipeline step** — a money judgement made at the " +
+        "pickup or days later, which must not block the lifecycle.\n\n" +
+        "**Declarative:** the body is the settlement's FINAL state; re-sending corrects it without " +
+        "re-stamping `settledAt`. Allowed once the order was delivered, while it is not cancelled, " +
+        "and only when a rental line carries a deposit or a replacement value (`409` otherwise). " +
+        "Stock is never touched.",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 }, example: 12 },
+      ],
+      requestBody: bodyRef("SettleOrderRequest", {
+        retainedAmount: 50,
+        retainedReason: "Manchas de vino en 3 manteles",
+        damages: [{ lineId: 31, quantity: 2, note: "Patas rotas" }],
+      }),
+      responses: {
+        "200": dataResponse(
+          "The updated order, in the detail shape.",
+          "OrderDetailResponse",
+          { order: { id: 12, securityDeposit: { total: 200, canSettle: true } } },
+          "Settlement recorded",
+        ),
+        "400": errorResponse(
+          "Malformed body, a damage on a line that cannot carry one (unknown, a sale, no replacement " +
+            "value, more units than the line), or a retention above the deposit.",
+          400,
+          "The retained amount cannot exceed the deposit",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse("No order with that id.", 404, "The order does not exist"),
+        "409": errorResponse(
+          "Not delivered yet, cancelled, or nothing on the order can carry a deposit or a damage.",
+          409,
+          "This order cannot settle a deposit",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    delete: {
+      tags: ["Orders"],
+      summary: "Delete the security-deposit settlement (admin)",
+      operationId: "undoOrderSettlement",
+      description:
+        "**STRICTLY Admin.** Clears the retention, its reason and every line's damage — the deposit " +
+        "reads as not settled again. A hard delete (nothing references a settlement), allowed in any " +
+        "order state, and it moves no money. An order without a settlement answers `409`.",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 }, example: 12 },
+      ],
+      responses: {
+        "200": dataResponse(
+          "The updated order, in the detail shape.",
+          "OrderDetailResponse",
+          { order: { id: 12, securityDeposit: { total: 200, canSettle: true } } },
+          "Settlement undone",
+        ),
+        "400": errorResponse("The id is malformed.", 400, "The order id is not valid"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse("No order with that id.", 404, "The order does not exist"),
+        "409": errorResponse(
+          "The order has no settlement to undo.",
+          409,
+          "This order has no settlement recorded",
         ),
         "429": rateLimited,
         "500": serverError,

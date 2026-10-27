@@ -9,10 +9,16 @@ import {
 } from "@/tests/fixtures/lifecycleCatalog.js";
 import {
   ORDER_LIST_VIEWS,
+  OrderSettlementConflictError,
+  assertSettlementSurvivesEdit,
   buildOrderListWhere,
   buildRentedInWindowWhere,
+  canRecordSettlement,
   computeBilledDays,
+  computeDepositTotal,
   computeNextActionAt,
+  computeSettlementMoney,
+  isSettleableLine,
   orderListOrderBy,
   parseOrderListQuery,
   loadOrderTimingPreferences,
@@ -24,6 +30,7 @@ import {
   sortAgendaRows,
   type OrderListRow,
   type OrderPricingProductModel,
+  type PricedOrderLineModel,
   type RichOrder,
 } from "./orders.service.js";
 
@@ -63,6 +70,9 @@ const makeListRow = (overrides: Partial<OrderListRow> = {}): OrderListRow => ({
   paidAt: null,
   cancelledAt: null,
   cancelReason: null,
+  depositSettledAt: null,
+  depositRetainedAmount: null,
+  depositRetainedReason: null,
   currencyId: 1,
   serviceStatusId: 1,
   paymentStatusId: 1,
@@ -77,9 +87,27 @@ const makeListRow = (overrides: Partial<OrderListRow> = {}): OrderListRow => ({
   currency: { id: 1, iso4217Code: "GTQ", name: "Quetzal", symbol: "Q" },
   assignedUser: null,
   serviceDetails: [
-    { quantity: 2, isRental: true },
-    { quantity: 3, isRental: false },
+    { quantity: 2, isRental: true, securityDeposit: null, replacementPrice: null },
+    { quantity: 3, isRental: false, securityDeposit: null, replacementPrice: null },
   ],
+  ...overrides,
+});
+
+/** A rich line with no deposit/damage, overridable — the settlement tests' building block. */
+const makeRichLine = (
+  overrides: Partial<RichOrder["serviceDetails"][number]> = {},
+): RichOrder["serviceDetails"][number] => ({
+  id: 11,
+  productId: 3,
+  quantity: 5,
+  isRental: true,
+  unitaryPrice: new Prisma.Decimal("30.00"),
+  parcialPrice: new Prisma.Decimal("150.00"),
+  securityDeposit: null,
+  replacementPrice: null,
+  damagedQuantity: 0,
+  damageNote: null,
+  product: { name: "Silla plegable" },
   ...overrides,
 });
 
@@ -88,17 +116,7 @@ const makeRichOrder = (overrides: Partial<RichOrder> = {}): RichOrder => ({
   ...makeListRow(),
   assignedUser: null,
   paymentMethod: null,
-  serviceDetails: [
-    {
-      id: 11,
-      productId: 3,
-      quantity: 5,
-      isRental: true,
-      unitaryPrice: new Prisma.Decimal("30.00"),
-      parcialPrice: new Prisma.Decimal("150.00"),
-      product: { name: "Silla plegable" },
-    },
-  ],
+  serviceDetails: [makeRichLine()],
   serviceExtras: [],
   statusHistory: [],
   evidences: [],
@@ -560,6 +578,8 @@ describe("priceOrderLine", () => {
     rentTimeUnitId: 2, // Día
     rentPrice: new Prisma.Decimal("6.00"),
     sellPrice: null,
+    securityDeposit: null,
+    replacementPrice: null,
     ...overrides,
   });
 
@@ -570,7 +590,24 @@ describe("priceOrderLine", () => {
       isRental: true,
       unitaryPrice: 6,
       parcialPrice: 300,
+      securityDeposit: null,
+      replacementPrice: null,
     });
+  });
+
+  it("snapshots the per-unit deposit and replacement value on a RENTAL line only", () => {
+    const guarded = product({
+      securityDeposit: new Prisma.Decimal("40.00"),
+      replacementPrice: new Prisma.Decimal("120.00"),
+    });
+    expect(priceOrderLine(2, guarded, 1)).toMatchObject({
+      securityDeposit: 40,
+      replacementPrice: 120,
+    });
+    // A product switched to Venta since keeps no guarantee on the line (a sale never comes back).
+    expect(
+      priceOrderLine(2, { ...guarded, productBusinessTypeId: 2, sellPrice: new Prisma.Decimal("9.00") }, 1),
+    ).toMatchObject({ isRental: false, securityDeposit: null, replacementPrice: null });
   });
 
   it("an Evento rental bills flat, duration-agnostic", () => {
@@ -587,7 +624,15 @@ describe("priceOrderLine", () => {
         product({ productBusinessTypeId: 2, rentPrice: null, sellPrice: new Prisma.Decimal("3.50") }),
         4,
       ),
-    ).toEqual({ productId: 3, quantity: 10, isRental: false, unitaryPrice: 3.5, parcialPrice: 35 });
+    ).toEqual({
+      productId: 3,
+      quantity: 10,
+      isRental: false,
+      unitaryPrice: 3.5,
+      parcialPrice: 35,
+      securityDeposit: null,
+      replacementPrice: null,
+    });
   });
 
   it("rounds the final multiplication to cents", () => {
@@ -773,5 +818,207 @@ describe("projectOrderDetail", () => {
         at,
       },
     ]);
+  });
+});
+
+describe("security deposit & damage settlement", () => {
+  const dec = (value: string) => new Prisma.Decimal(value);
+  const DELIVERED = new Date("2026-08-01T15:00:00Z");
+
+  it("only a RENTAL line with a deposit or a replacement value is settleable", () => {
+    const line = { isRental: true, quantity: 1, securityDeposit: null, replacementPrice: null };
+    expect(isSettleableLine(line)).toBe(false);
+    expect(isSettleableLine({ ...line, securityDeposit: dec("0") })).toBe(false);
+    expect(isSettleableLine({ ...line, securityDeposit: dec("10") })).toBe(true);
+    expect(isSettleableLine({ ...line, replacementPrice: dec("90") })).toBe(true);
+    expect(isSettleableLine({ ...line, isRental: false, securityDeposit: dec("10") })).toBe(false);
+  });
+
+  it("totals the deposit over rental lines only (snapshot × quantity)", () => {
+    expect(
+      computeDepositTotal([
+        { isRental: true, quantity: 3, securityDeposit: dec("12.50"), replacementPrice: null },
+        { isRental: true, quantity: 2, securityDeposit: null, replacementPrice: dec("80") },
+        { isRental: false, quantity: 9, securityDeposit: dec("99"), replacementPrice: null },
+      ]),
+    ).toBe(37.5);
+  });
+
+  it.each([
+    // [deposit, retained, damages, refund, applied, balance]
+    ["the happy path: everything goes back", 500, 0, 0, 500, 0, 0],
+    ["partial damage: part is retained", 500, 150, 0, 350, 150, 0],
+    ["a total loss beyond the deposit: the difference is owed", 500, 0, 1200, 0, 500, 700],
+    ["retained + a replacement still inside the deposit", 500, 100, 300, 100, 400, 0],
+    ["no deposit at all, only a replacement", 0, 0, 90, 0, 0, 90],
+  ])("money: %s", (_label, deposit, retained, damages, refund, applied, balance) => {
+    expect(computeSettlementMoney(deposit, retained, damages)).toEqual({
+      claimsTotal: retained + damages,
+      appliedFromDeposit: applied,
+      refundAmount: refund,
+      balanceDue: balance,
+    });
+  });
+
+  it("flags the list item while a delivered, settleable order has no settlement", () => {
+    const guarded = [
+      { quantity: 2, isRental: true, securityDeposit: dec("50"), replacementPrice: null },
+    ];
+    const context = makeProjectionContext();
+    expect(projectOrderListItem(makeListRow(), context).depositSettlementPending).toBe(false);
+    expect(
+      projectOrderListItem(makeListRow({ serviceDetails: guarded }), context).depositSettlementPending,
+    ).toBe(false); // not delivered yet — nothing to judge
+    expect(
+      projectOrderListItem(makeListRow({ serviceDetails: guarded, deliveredAt: DELIVERED }), context)
+        .depositSettlementPending,
+    ).toBe(true);
+    expect(
+      projectOrderListItem(
+        makeListRow({ serviceDetails: guarded, deliveredAt: DELIVERED, depositSettledAt: DELIVERED }),
+        context,
+      ).depositSettlementPending,
+    ).toBe(false);
+    expect(
+      projectOrderListItem(
+        makeListRow({ serviceDetails: guarded, deliveredAt: DELIVERED, cancelledAt: DELIVERED }),
+        context,
+      ).depositSettlementPending,
+    ).toBe(false);
+    expect(canRecordSettlement({ deliveredAt: DELIVERED, cancelledAt: null, depositSettledAt: null })).toBe(true);
+  });
+
+  it("projects no deposit block when no line can carry one, and the snapshots on every line", () => {
+    const detail = projectOrderDetail(makeRichOrder(), makeProjectionContext());
+    expect(detail.securityDeposit).toBeUndefined();
+    expect(detail.lines[0]).toMatchObject({
+      securityDeposit: undefined,
+      replacementPrice: undefined,
+      damagedQuantity: 0,
+      damageNote: undefined,
+    });
+  });
+
+  it("projects an unsettled deposit with whether it can be settled yet", () => {
+    const order = makeRichOrder({
+      serviceDetails: [makeRichLine({ securityDeposit: dec("40"), replacementPrice: dec("120") })],
+    });
+    expect(projectOrderDetail(order, makeProjectionContext()).securityDeposit).toEqual({
+      total: 200,
+      canSettle: false,
+      settlement: undefined,
+    });
+    expect(
+      projectOrderDetail({ ...order, deliveredAt: DELIVERED }, makeProjectionContext()).securityDeposit
+        ?.canSettle,
+    ).toBe(true);
+  });
+
+  it("projects a settlement: retained + priced damages, applied from the deposit, the rest owed", () => {
+    const detail = projectOrderDetail(
+      makeRichOrder({
+        deliveredAt: DELIVERED,
+        depositSettledAt: DELIVERED,
+        depositRetainedAmount: dec("60"),
+        depositRetainedReason: "Manchas de vino",
+        serviceDetails: [
+          makeRichLine({
+            securityDeposit: dec("40"),
+            replacementPrice: dec("120"),
+            damagedQuantity: 2,
+            damageNote: "Patas rotas",
+          }),
+          makeRichLine({ id: 12, productId: 4, quantity: 1, replacementPrice: dec("75") }),
+        ],
+      }),
+      makeProjectionContext(),
+    );
+    expect(detail.lines[0]).toMatchObject({ damagedQuantity: 2, damageNote: "Patas rotas" });
+    expect(detail.securityDeposit).toEqual({
+      total: 200,
+      canSettle: true,
+      settlement: {
+        settledAt: DELIVERED,
+        retainedAmount: 60,
+        retainedReason: "Manchas de vino",
+        damages: [
+          {
+            lineId: 11,
+            productName: "Silla plegable",
+            quantity: 2,
+            unitAmount: 120,
+            amount: 240,
+            note: "Patas rotas",
+          },
+        ],
+        damagesTotal: 240,
+        claimsTotal: 300,
+        appliedFromDeposit: 200,
+        refundAmount: 0,
+        balanceDue: 100,
+      },
+    });
+  });
+
+  it("reads absent settlement columns as zero (a refund-in-full with no damage)", () => {
+    const settlement = projectOrderDetail(
+      makeRichOrder({
+        deliveredAt: DELIVERED,
+        depositSettledAt: DELIVERED,
+        serviceDetails: [
+          // A damaged line whose replacement value vanished reads as Q0 rather than NaN.
+          makeRichLine({ securityDeposit: dec("40"), damagedQuantity: 1 }),
+        ],
+      }),
+      makeProjectionContext(),
+    ).securityDeposit?.settlement;
+    expect(settlement).toMatchObject({
+      retainedAmount: 0,
+      retainedReason: undefined,
+      damagesTotal: 0,
+      refundAmount: 200,
+      balanceDue: 0,
+    });
+    expect(settlement?.damages[0]?.note).toBeUndefined();
+  });
+
+  describe("assertSettlementSurvivesEdit", () => {
+    const priced = (overrides: Partial<PricedOrderLineModel> = {}): PricedOrderLineModel => ({
+      productId: 3,
+      quantity: 5,
+      isRental: true,
+      unitaryPrice: 30,
+      parcialPrice: 150,
+      securityDeposit: 40,
+      replacementPrice: 120,
+      ...overrides,
+    });
+    const settled = (damagedQuantity: number, retained: string | null = null) => ({
+      depositSettledAt: DELIVERED,
+      depositRetainedAmount: retained === null ? null : dec(retained),
+      serviceDetails: [{ productId: 3, damagedQuantity }],
+    });
+
+    it("passes an unsettled order, and a settled one the edit keeps coherent", () => {
+      expect(() =>
+        assertSettlementSurvivesEdit(
+          { depositSettledAt: null, depositRetainedAmount: null, serviceDetails: [] },
+          [],
+        ),
+      ).not.toThrow();
+      expect(() => assertSettlementSurvivesEdit(settled(2, "200"), [priced()])).not.toThrow();
+      expect(() => assertSettlementSurvivesEdit(settled(0), [priced({ securityDeposit: null })])).not.toThrow();
+    });
+
+    it.each([
+      ["the damaged line is dropped", settled(2), [] as PricedOrderLineModel[]],
+      ["it is reduced below its damaged units", settled(2), [priced({ quantity: 1 })]],
+      ["it lost its replacement value", settled(2), [priced({ replacementPrice: null })]],
+      ["it became a sale", settled(2), [priced({ isRental: false })]],
+      // 5 × Q40 = Q200 of deposit can no longer back the Q250 that was retained.
+      ["the deposit shrank below what was retained", settled(0, "250"), [priced()]],
+    ])("refuses when %s", (_label, order, next) => {
+      expect(() => assertSettlementSurvivesEdit(order, next)).toThrow(OrderSettlementConflictError);
+    });
   });
 });

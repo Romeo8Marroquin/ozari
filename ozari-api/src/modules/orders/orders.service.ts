@@ -20,8 +20,10 @@ import type {
   StatusDefinitionModel,
 } from "./lifecycle/lifecycle.models.js";
 import {
+  type OrderDepositSettlementResponseModel,
   type OrderDetailResponseModel,
   type OrderListItemResponseModel,
+  type OrderSecurityDepositResponseModel,
   type OrderListQueryModel,
   type OrderListViewModel,
   type OrderStockConflictItemModel,
@@ -44,9 +46,11 @@ export const orderListInclude = {
   assignedUser: { select: { id: true, fullNameKms: true } },
   // `isRental` rides along with the quantities: it is the order's MODE (any rental line ⇒ a rental
   // order), which decides which pipeline steps apply — the lifecycle projection needs it per row.
+  // The deposit snapshots ride along for `depositSettlementPending` — the agenda's "garantía por
+  // liquidar" flag (two small columns, no extra query).
   serviceDetails: {
     where: { isActive: true },
-    select: { quantity: true, isRental: true },
+    select: { quantity: true, isRental: true, securityDeposit: true, replacementPrice: true },
   },
 } satisfies Prisma.ServiceInclude;
 
@@ -79,6 +83,10 @@ export const richOrderInclude = {
       isRental: true,
       unitaryPrice: true,
       parcialPrice: true,
+      securityDeposit: true,
+      replacementPrice: true,
+      damagedQuantity: true,
+      damageNote: true,
       product: { select: { name: true } },
     },
   },
@@ -120,6 +128,167 @@ export type RichOrder = Prisma.ServiceGetPayload<{
 /** A Prisma `Decimal | null` money column → a plain `number` (or `undefined` when absent). */
 const toMoney = (value: Prisma.Decimal | null): number | undefined =>
   value !== null ? Number(value) : undefined;
+
+/** Round money HALF-UP to cents once, at the final multiplication. */
+const roundMoney = (value: number): number => Math.round(value * 100) / 100;
+
+// ── Security deposit & damage settlement (EPIC-2-ORDERS §12) ─────────────────────────────────────
+
+/** A line as the deposit rules read it — both the lean list row and the rich row satisfy it. */
+export interface DepositLineModel {
+  isRental: boolean;
+  quantity: number;
+  securityDeposit: Prisma.Decimal | null;
+  replacementPrice: Prisma.Decimal | null;
+}
+
+/**
+ * Can this line take part in a settlement? Only RENTAL lines (a sold item never comes back to be
+ * judged), and only when it carries a deposit or a replacement value — a rental line with neither
+ * has nothing to retain and nothing to bill (owner 2026-10-27: the option does not even appear).
+ */
+export const isSettleableLine = (line: DepositLineModel): boolean =>
+  line.isRental &&
+  ((line.securityDeposit !== null && Number(line.securityDeposit) > 0) ||
+    line.replacementPrice !== null);
+
+/** The order's refundable deposit: Σ rental line snapshot × quantity. Never part of `totalAmount`. */
+export const computeDepositTotal = (lines: readonly DepositLineModel[]): number =>
+  roundMoney(
+    lines
+      .filter((line) => line.isRental)
+      .reduce((sum, line) => sum + Number(line.securityDeposit ?? 0) * line.quantity, 0),
+  );
+
+/**
+ * The settlement's derived money, in ONE place: everything claimed (retained for partial damage +
+ * lost/broken units at their replacement value) is first taken from the deposit; what the deposit
+ * does not need goes back to the client, and what it cannot cover is owed on top. The deposit is
+ * expected to be lower than a replacement (that is the product rule), so a total loss typically
+ * yields "nothing refunded, balance due".
+ */
+export function computeSettlementMoney(
+  depositTotal: number,
+  retainedAmount: number,
+  damagesTotal: number,
+): Pick<
+  OrderDepositSettlementResponseModel,
+  "claimsTotal" | "appliedFromDeposit" | "refundAmount" | "balanceDue"
+> {
+  const claimsTotal = roundMoney(retainedAmount + damagesTotal);
+  const appliedFromDeposit = Math.min(depositTotal, claimsTotal);
+  return {
+    claimsTotal,
+    appliedFromDeposit,
+    refundAmount: roundMoney(depositTotal - appliedFromDeposit),
+    balanceDue: roundMoney(Math.max(0, claimsTotal - depositTotal)),
+  };
+}
+
+/** The order facts that decide whether a settlement is due/allowed. */
+interface DepositOrderStateModel {
+  deliveredAt: Date | null;
+  cancelledAt: Date | null;
+  depositSettledAt: Date | null;
+}
+
+/** A settlement can be RECORDED once the goods were delivered (only then can anything come back
+ *  damaged) and while the order is not cancelled. Whether it is due at all is `isSettleableLine`. */
+export const canRecordSettlement = (order: DepositOrderStateModel): boolean =>
+  order.deliveredAt !== null && order.cancelledAt === null;
+
+/** The list flag: settleable, recordable, and not recorded yet. */
+export const isDepositSettlementPending = (
+  order: DepositOrderStateModel & { serviceDetails: readonly DepositLineModel[] },
+): boolean =>
+  order.depositSettledAt === null &&
+  canRecordSettlement(order) &&
+  order.serviceDetails.some(isSettleableLine);
+
+/**
+ * Projects the detail's `securityDeposit` block, or `undefined` when no line can carry a deposit or
+ * a damage (the section simply does not exist for that order).
+ */
+export function projectSecurityDeposit(order: RichOrder): OrderSecurityDepositResponseModel | undefined {
+  if (!order.serviceDetails.some(isSettleableLine)) {
+    return undefined;
+  }
+  const total = computeDepositTotal(order.serviceDetails);
+  let settlement: OrderDepositSettlementResponseModel | undefined;
+  if (order.depositSettledAt !== null) {
+    const damages = order.serviceDetails
+      .filter((line) => line.damagedQuantity > 0)
+      .map((line) => {
+        const unitAmount = Number(line.replacementPrice ?? 0);
+        return {
+          lineId: line.id,
+          productName: line.product.name,
+          quantity: line.damagedQuantity,
+          unitAmount,
+          amount: roundMoney(unitAmount * line.damagedQuantity),
+          note: line.damageNote ?? undefined,
+        };
+      });
+    const damagesTotal = roundMoney(damages.reduce((sum, damage) => sum + damage.amount, 0));
+    const retainedAmount = Number(order.depositRetainedAmount ?? 0);
+    settlement = {
+      settledAt: order.depositSettledAt,
+      retainedAmount,
+      retainedReason: order.depositRetainedReason ?? undefined,
+      damages,
+      damagesTotal,
+      ...computeSettlementMoney(total, retainedAmount, damagesTotal),
+    };
+  }
+  return { total, canSettle: canRecordSettlement(order), settlement };
+}
+
+/**
+ * An order edit would break its recorded settlement — a damaged line dropped, reduced below its
+ * damaged units or left without a replacement value, or the deposit shrunk below what was retained.
+ * Thrown inside the edit transaction (rolls it back) → `409`: the admin undoes the settlement first.
+ */
+export class OrderSettlementConflictError extends Error {
+  constructor() {
+    super("order settlement conflict");
+    this.name = "OrderSettlementConflictError";
+  }
+}
+
+/**
+ * Re-checks a recorded settlement against the order's NEW lines (an edit re-derives the deposit and
+ * replacement snapshots from the products, exactly like the prices). `current` are the lines as they
+ * stand (with their damage); `next` the re-priced final lines keyed by product.
+ */
+export function assertSettlementSurvivesEdit(
+  order: {
+    depositSettledAt: Date | null;
+    depositRetainedAmount: Prisma.Decimal | null;
+    serviceDetails: ReadonlyArray<{ productId: number; damagedQuantity: number }>;
+  },
+  next: readonly PricedOrderLineModel[],
+): void {
+  const nextByProduct = new Map(next.map((line) => [line.productId, line]));
+  for (const line of order.serviceDetails.filter((detail) => detail.damagedQuantity > 0)) {
+    const kept = nextByProduct.get(line.productId);
+    if (
+      !kept?.isRental ||
+      kept.replacementPrice === null ||
+      kept.quantity < line.damagedQuantity
+    ) {
+      throw new OrderSettlementConflictError();
+    }
+  }
+  if (order.depositSettledAt === null) {
+    return;
+  }
+  const nextDeposit = roundMoney(
+    next.reduce((sum, line) => sum + (line.securityDeposit ?? 0) * line.quantity, 0),
+  );
+  if (Number(order.depositRetainedAmount ?? 0) > nextDeposit) {
+    throw new OrderSettlementConflictError();
+  }
+}
 
 /**
  * The roles an order can be ASSIGNED to — the "deliverable" staff (the Admin also drives). This is
@@ -377,6 +546,7 @@ export function projectOrderListItem(
       name: order.currency.name,
       symbol: order.currency.symbol,
     },
+    depositSettlementPending: isDepositSettlementPending(order),
   };
 }
 
@@ -426,6 +596,10 @@ export function projectOrderDetail(
       quantity: line.quantity,
       unitaryPrice: Number(line.unitaryPrice),
       parcialPrice: Number(line.parcialPrice),
+      securityDeposit: toMoney(line.securityDeposit),
+      replacementPrice: toMoney(line.replacementPrice),
+      damagedQuantity: line.damagedQuantity,
+      damageNote: line.damageNote ?? undefined,
     })),
     extras: order.serviceExtras.map((extra) => ({
       id: extra.id,
@@ -435,6 +609,7 @@ export function projectOrderDetail(
       unitaryPrice: toMoney(extra.unitaryPrice),
       parcialPrice: toMoney(extra.parcialPrice),
     })),
+    securityDeposit: projectSecurityDeposit(order),
     statusHistory: order.statusHistory.map((entry) => ({
       id: entry.id,
       from: entry.fromStatus ?? undefined,
@@ -772,6 +947,8 @@ export interface OrderPricingProductModel {
   rentTimeUnitId: number | null;
   rentPrice: Prisma.Decimal | null;
   sellPrice: Prisma.Decimal | null;
+  securityDeposit: Prisma.Decimal | null;
+  replacementPrice: Prisma.Decimal | null;
 }
 
 /** One priced line, ready for the nested `service_details` create. */
@@ -781,10 +958,35 @@ export interface PricedOrderLineModel {
   isRental: boolean;
   unitaryPrice: number;
   parcialPrice: number;
+  /** Per-unit snapshots (rental lines only; `null` otherwise) — see `ServiceDetail` in the schema. */
+  securityDeposit: number | null;
+  replacementPrice: number | null;
 }
 
-/** Round money HALF-UP to cents once, at the final multiplication. */
-const roundMoney = (value: number): number => Math.round(value * 100) / 100;
+/** The `product` select every pricing caller locks and reads — one shape, so a new snapshot column
+ *  can never be priced on create and forgotten on edit. */
+export const orderPricingProductSelect = {
+  id: true,
+  name: true,
+  quantity: true,
+  currencyId: true,
+  productBusinessTypeId: true,
+  rentTimeUnitId: true,
+  rentPrice: true,
+  sellPrice: true,
+  securityDeposit: true,
+  replacementPrice: true,
+} satisfies Prisma.ProductSelect;
+
+/** The snapshot columns a priced line writes on `service_details` (create and edit alike). */
+export const pricedLineData = (line: PricedOrderLineModel) => ({
+  quantity: line.quantity,
+  isRental: line.isRental,
+  unitaryPrice: line.unitaryPrice,
+  parcialPrice: line.parcialPrice,
+  securityDeposit: line.securityDeposit,
+  replacementPrice: line.replacementPrice,
+});
 
 /**
  * Prices one requested line from ITS PRODUCT ROW — the single place order money is derived; a
@@ -808,12 +1010,19 @@ export function priceOrderLine(
   const unitaryPrice = Number(unitPrice);
   const multiplier =
     isRental && product.rentTimeUnitId === RentTimeUnitEnum.Dia ? billedDays : 1;
+  // The deposit and the replacement value only mean something for goods that come BACK — a sale
+  // line never carries them, even if the product's type changed since (the product rule forbids
+  // them on Venta anyway).
+  const rentalSnapshot = (value: Prisma.Decimal | null): number | null =>
+    isRental && value !== null ? Number(value) : null;
   return {
     productId: product.id,
     quantity,
     isRental,
     unitaryPrice,
     parcialPrice: roundMoney(unitaryPrice * quantity * multiplier),
+    securityDeposit: rentalSnapshot(product.securityDeposit),
+    replacementPrice: rentalSnapshot(product.replacementPrice),
   };
 }
 

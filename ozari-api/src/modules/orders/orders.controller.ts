@@ -47,7 +47,9 @@ import {
 import {
   ASSIGNABLE_ROLES,
   OrderNotFoundError,
+  OrderSettlementConflictError,
   OrderStockConflictError,
+  assertSettlementSurvivesEdit,
   buildOrderListWhere,
   buildRentedInWindowWhere,
   computeBilledDays,
@@ -56,8 +58,10 @@ import {
   loadOrderTimingPreferences,
   orderListInclude,
   orderListOrderBy,
+  orderPricingProductSelect,
   parseOrderListQuery,
   priceOrderLine,
+  pricedLineData,
   projectOrderDetail,
   projectOrderListItem,
   releaseSaleStock,
@@ -338,16 +342,7 @@ export const createOrder = async (
 
       const products = await tx.product.findMany({
         where: { id: { in: productIds }, isActive: true },
-        select: {
-          id: true,
-          name: true,
-          quantity: true,
-          currencyId: true,
-          productBusinessTypeId: true,
-          rentTimeUnitId: true,
-          rentPrice: true,
-          sellPrice: true,
-        },
+        select: orderPricingProductSelect,
       });
       const productById = new Map(products.map((product) => [product.id, product]));
 
@@ -481,10 +476,7 @@ export const createOrder = async (
           serviceDetails: {
             create: pricedLines.map((line) => ({
               productId: line.productId,
-              quantity: line.quantity,
-              isRental: line.isRental,
-              unitaryPrice: line.unitaryPrice,
-              parcialPrice: line.parcialPrice,
+              ...pricedLineData(line),
               currencyId,
             })),
           },
@@ -633,16 +625,7 @@ export const updateOrder = async (
       await tx.$queryRaw`SELECT id FROM products WHERE id IN (${Prisma.join(productIds)}) FOR UPDATE`;
       const products = await tx.product.findMany({
         where: { id: { in: productIds }, isActive: true },
-        select: {
-          id: true,
-          name: true,
-          quantity: true,
-          currencyId: true,
-          productBusinessTypeId: true,
-          rentTimeUnitId: true,
-          rentPrice: true,
-          sellPrice: true,
-        },
+        select: orderPricingProductSelect,
       });
       const productById = new Map(products.map((product) => [product.id, product]));
 
@@ -665,6 +648,10 @@ export const updateOrder = async (
         }
         pricedLines.push(priced);
       }
+
+      // A recorded deposit settlement must still make sense on the NEW lines (a damaged line kept,
+      // the deposit still covering what was retained) — otherwise the admin undoes it first.
+      assertSettlementSurvivesEdit(order, pricedLines);
 
       // What the order reserves TODAY decides what has to be re-checked. Both flags are derived —
       // an order on a NONE step (finished) or a cancelled one holds nothing, so its edit is pure
@@ -797,13 +784,9 @@ export const updateOrder = async (
       await Promise.all(
         pricedLines.map((line) => {
           const existing = currentByProduct.get(line.productId);
-          const data = {
-            quantity: line.quantity,
-            isRental: line.isRental,
-            unitaryPrice: line.unitaryPrice,
-            parcialPrice: line.parcialPrice,
-            currencyId,
-          };
+          // The damage columns are deliberately NOT here: they belong to the settlement's door, and
+          // the guard above already proved the new line can still carry them.
+          const data = { ...pricedLineData(line), currencyId };
           return existing
             ? tx.serviceDetail.update({ where: { id: existing.id }, data })
             : tx.serviceDetail.create({
@@ -894,6 +877,11 @@ export const updateOrder = async (
         undefined,
         { conflicts: error.conflicts },
       );
+      return;
+    }
+    if (error instanceof OrderSettlementConflictError) {
+      logger.warn(i18next.t("orders.updateOrder.logs.settlementConflict", { id: req.params["id"] }));
+      sendOzariError(res, HttpEnum.CONFLICT, i18next.t("orders.updateOrder.settlementConflict"));
       return;
     }
     if (sendLogisticsConflict(res, "updateOrder", error)) {

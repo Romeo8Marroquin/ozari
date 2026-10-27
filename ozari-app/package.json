@@ -17,7 +17,10 @@
     "doc:preview": "vite build --ssr scripts/preview-document.tsx --outDir scripts/.out --emptyOutDir --logLevel warn && node scripts/.out/preview-document.js",
     "doc:preview:long": "pnpm doc:preview -- --long",
     "doc:preview:free": "pnpm doc:preview -- --free",
-    "doc:preview:quote": "pnpm doc:preview -- --quote"
+    "doc:preview:quote": "pnpm doc:preview -- --quote",
+    "doc:preview:deposit": "pnpm doc:preview -- --deposit=held",
+    "doc:preview:refunded": "pnpm doc:preview -- --deposit=refunded",
+    "doc:preview:damages": "pnpm doc:preview -- --deposit=damages"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",

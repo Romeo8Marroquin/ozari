@@ -29,6 +29,14 @@ import {
   validatePayOrder,
   validateUndoOrderPayment,
 } from "./payment/payment.validator.js";
+import {
+  settleOrder,
+  undoOrderSettlement,
+} from "./settlement/settlement.controller.js";
+import {
+  validateSettleOrder,
+  validateUndoSettlement,
+} from "./settlement/settlement.validator.js";
 
 const router: RouterType = Router();
 
@@ -129,6 +137,24 @@ router.delete(
   isGrantedRoles([RolesEnum.Admin]),
   validateUndoOrderPayment,
   undoOrderPayment,
+);
+
+// Region: the SECURITY-DEPOSIT SETTLEMENT — **STRICTLY Admin**, its own door like payment (a money
+// judgement made after the pickup, on no fixed step of the pipeline — EPIC-2-ORDERS §12). PUT is
+// declarative (the settlement's final state, correctable); DELETE clears the record, moving no money.
+router.put(
+  "/:id/settlement",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  validateSettleOrder,
+  settleOrder,
+);
+router.delete(
+  "/:id/settlement",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  validateUndoSettlement,
+  undoOrderSettlement,
 );
 
 export default router;

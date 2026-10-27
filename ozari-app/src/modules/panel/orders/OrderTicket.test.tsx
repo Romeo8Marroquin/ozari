@@ -49,6 +49,7 @@ const base = (overrides: Partial<OrderListItem> = {}): OrderListItem => ({
   itemCount: 25,
   totalAmount: 450,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
+  depositSettlementPending: false,
   ...overrides,
 });
 
@@ -437,5 +438,20 @@ describe('OrderTicket', () => {
     expect(screen.getByText('Pendiente')).toBeInTheDocument();
     expect(screen.getByText(/Q\s*450\.00/)).toBeInTheDocument();
     expect(screen.getByRole('button')).toHaveTextContent('En ruta');
+  });
+
+  it('flags a deposit waiting to be settled — in both layouts, and only when the API says so', () => {
+    const PENDING = 'modules.panel.orders.ticket.depositPending';
+    const { unmount } = render(<OrderTicket order={base({ depositSettlementPending: true })} />);
+    expect(screen.getByText(PENDING)).toBeInTheDocument();
+    unmount();
+
+    mockBreakpoint.mockReturnValue({ isMobile: false, breakpoint: 'lg' });
+    const rail = render(<OrderTicket order={base({ depositSettlementPending: true })} />);
+    expect(screen.getByText(PENDING)).toBeInTheDocument();
+    rail.unmount();
+
+    render(<OrderTicket order={base()} />);
+    expect(screen.queryByText(PENDING)).not.toBeInTheDocument();
   });
 });

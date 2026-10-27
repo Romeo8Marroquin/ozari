@@ -296,7 +296,9 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
       // Replacement price is a RENTAL concept (billed for a lost/damaged rental) — a sale is
       // consumed, so the field hides for Venta and any typed value is cleared here.
       setValue('replacementPrice', '');
-      clearErrors(['rentPrice', 'rentTimeUnitId', 'replacementPrice']);
+      // The deposit is a rental guarantee too (nothing comes back from a sale) — same treatment.
+      setValue('securityDeposit', '');
+      clearErrors(['rentPrice', 'rentTimeUnitId', 'replacementPrice', 'securityDeposit']);
     }
   }, [businessTypeId, setValue, clearErrors]);
 
@@ -611,6 +613,25 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
                           placeholder={t(`${KEY}.fields.pricePlaceholder`)}
                           aria-label={t(`${KEY}.fields.replacementPriceLabel`)}
                           instructions={t(`${KEY}.fields.replacementPriceHint`)}
+                          // The deposit's ceiling IS this value — re-check it as this one moves.
+                          deps={['securityDeposit']}
+                        />
+                      </div>
+                    )}
+                    {/* Alquiler only: the refundable guarantee per unit, collected apart from the
+                        order and given back at pickup — never added to any price. Hidden + cleared
+                        for Venta like the replacement price; capped by it (schema + backend). */}
+                    {isRent && (
+                      <div className="reveal-item min-w-0">
+                        <CustomInputForm<CreateProductFormType>
+                          id="product-security-deposit"
+                          name="securityDeposit"
+                          {...decimalInput}
+                          optionalLabel
+                          label={t(`${KEY}.fields.securityDepositLabel`)}
+                          placeholder={t(`${KEY}.fields.pricePlaceholder`)}
+                          aria-label={t(`${KEY}.fields.securityDepositLabel`)}
+                          instructions={t(`${KEY}.fields.securityDepositHint`)}
                         />
                       </div>
                     )}

@@ -422,6 +422,21 @@
           "deposit": "Anticipo",
           "balance": "Saldo pendiente"
         },
+        "securityDeposit": {
+          "held": "Depósito en garantía (reembolsable)",
+          "heldNote": "Aparte del total; se devuelve al recoger, previa revisión.",
+          "refunded": "Depósito en garantía (devuelto)",
+          "refundedNote": "Revisión sin cargos: se devolvió completo.",
+          "settlementTitle": "Liquidación de garantía",
+          "retention": "Retención por daños",
+          "replacement": "Reposición: {{product}}",
+          "replacementDetail": "{{quantity}} × {{unitAmount}}",
+          "claimsTotal": "Total por daños",
+          "applied": "Cubierto con la garantía",
+          "balanceDue": "Saldo pendiente por daños",
+          "refund": "Garantía devuelta",
+          "refundNote": "De un depósito de {{amount}}"
+        },
         "notices": {
           "quote": "Cotización sujeta a cambios y a la disponibilidad de los artículos en las fechas indicadas.",
           "terms": "La aceptación de este documento implica la conformidad con los términos y condiciones del servicio."
@@ -671,7 +686,8 @@
           "nextStepAria": "Avanzar: {{step}}",
           "nextStep": "Marcar “{{status}}”",
           "pay": "Registrar pago",
-          "payAria": "Registrar el pago del pedido de {{client}}"
+          "payAria": "Registrar el pago del pedido de {{client}}",
+          "depositPending": "Garantía por liquidar"
         },
         "detail": {
           "back": "Volver a pedidos",
@@ -731,7 +747,30 @@
             "title": "Productos",
             "detail": "{{quantity}} × {{price}}",
             "rental": "Alquiler",
-            "sale": "Venta"
+            "sale": "Venta",
+            "damaged_one": "{{count}} perdida o rota",
+            "damaged_other": "{{count}} perdidas o rotas"
+          },
+          "deposit": {
+            "title": "Garantía",
+            "total": "Depósito en garantía",
+            "totalNote": "Se cobra aparte del total del pedido y se devuelve al recoger.",
+            "chipPending": "Por liquidar",
+            "chipSettled": "Liquidada",
+            "notYet": "La garantía se liquida después de la entrega.",
+            "due": "Cuando el pedido vuelva, registra si la garantía se devuelve completa o si se retiene una parte.",
+            "settle": "Liquidar garantía",
+            "edit": "Editar liquidación",
+            "undo": "Deshacer liquidación",
+            "noClaims": "Sin daños: el depósito se devuelve completo.",
+            "retained": "Retenido por daños",
+            "reason": "Motivo: {{reason}}",
+            "damage": "{{product}}: {{quantity}} × {{unit}}",
+            "note": "Nota: {{note}}",
+            "refund": "Se devuelve al cliente",
+            "balanceDue": "Saldo por cobrar",
+            "balanceDueNote": "Los daños superan el depósito: esta diferencia se cobra aparte.",
+            "settledAt": "Liquidada el"
           },
           "money": {
             "title": "Cobro",
@@ -968,7 +1007,9 @@
             "productsSubtotal": "Subtotal productos",
             "deliveryFee": "Envío",
             "label": "Total estimado",
-            "note": "Estimado según los precios y las fechas. El total definitivo se confirma al crear el pedido."
+            "note": "Estimado según los precios y las fechas. El total definitivo se confirma al crear el pedido.",
+            "securityDeposit": "Depósito en garantía",
+            "securityDepositNote": "Se cobra aparte y se devuelve al recoger; no está incluido en el total."
           },
           "availability": {
             "count": "{{count}} disponibles",
@@ -1046,6 +1087,84 @@
           "successToast": "El pedido de {{client}} volvió a quedar pendiente de pago.",
           "errors": {
             "fallback": "No se pudo deshacer el pago. Intenta de nuevo."
+          }
+        },
+        "settlement": {
+          "title": "Liquidar garantía",
+          "editTitle": "Editar liquidación",
+          "lead": "Registra cómo vuelve la garantía: completa, con una parte retenida por daños o con piezas perdidas o rotas.",
+          "back": "Volver al pedido",
+          "loading": "Cargando el pedido",
+          "client": "Pedido de {{client}}",
+          "inventoryNote": "El inventario no cambia; si una pieza no se repondrá, ajusta la cantidad del producto.",
+          "unavailable": {
+            "title": "Esta garantía no se puede liquidar ahora",
+            "description": "La garantía se liquida cuando el pedido ya se entregó y no está cancelado.",
+            "action": "Volver al pedido"
+          },
+          "sections": {
+            "retention": {
+              "title": "Retención",
+              "description": "Si algo volvió con un daño parcial, retén una parte del depósito y explica por qué."
+            },
+            "damages": {
+              "title": "Piezas perdidas o rotas",
+              "description": "Las unidades que no volvieron o ya no sirven se cobran a su precio de reposición."
+            },
+            "outcome": {
+              "title": "Resultado",
+              "description": "Cómo quedaría la garantía con lo que llevas registrado."
+            }
+          },
+          "fields": {
+            "retainedLabel": "Monto retenido",
+            "retainedHint": "Déjalo vacío para devolver el depósito completo ({{deposit}}).",
+            "reasonLabel": "Motivo",
+            "reasonPlaceholder": "Ej. mantel con una mancha de vino",
+            "reasonHint": "Requerido cuando se retiene algo.",
+            "damagedLabel": "Unidades perdidas o rotas",
+            "damagedHint": "De 0 a {{max}} · {{unit}} c/u",
+            "damagedAria": "Unidades perdidas o rotas de {{product}}",
+            "noteLabel": "Nota",
+            "noteAria": "Nota sobre {{product}}",
+            "notePlaceholder": "Qué pasó con la pieza",
+            "moneyPlaceholder": "0.00",
+            "quantityPlaceholder": "0"
+          },
+          "preview": {
+            "deposit": "Depósito en garantía",
+            "retained": "Retenido",
+            "damages": "Piezas perdidas o rotas",
+            "refund": "Se devuelve",
+            "balanceDue": "Saldo por cobrar",
+            "note": "Estimado. Al guardar, el sistema calcula el resultado definitivo."
+          },
+          "actions": {
+            "cancel": "Cancelar",
+            "submit": "Guardar liquidación"
+          },
+          "successTitle": "Garantía liquidada",
+          "successToast": "Se registró la liquidación de la garantía del pedido de {{client}}.",
+          "errors": {
+            "invalidRetained": "Ingresa un monto válido.",
+            "retainedAboveDeposit": "No puedes retener más que el depósito ({{deposit}}).",
+            "reasonRequired": "Explica por qué se retiene.",
+            "textTooLong": "Usa como máximo 500 caracteres.",
+            "invalidDamaged": "Ingresa un número entero entre 0 y {{max}}.",
+            "submitFallback": "No pudimos guardar la liquidación. Revisa los datos e intenta de nuevo."
+          }
+        },
+        "settlementUndo": {
+          "title": "Deshacer la liquidación",
+          "description": "¿Quieres borrar la liquidación de la garantía del pedido de {{client}}?",
+          "note": "Se borrará lo registrado: el monto retenido y su motivo, y las piezas marcadas como perdidas o rotas. Esto solo cambia tus registros: no mueve dinero ni devuelve nada al cliente.",
+          "hint": "La garantía volverá a quedar por liquidar.",
+          "confirm": "Deshacer liquidación",
+          "cancel": "Cancelar",
+          "successTitle": "Liquidación deshecha",
+          "successToast": "La garantía del pedido de {{client}} volvió a quedar por liquidar.",
+          "errors": {
+            "fallback": "No se pudo deshacer la liquidación. Intenta de nuevo."
           }
         },
         "registry": {
@@ -1141,6 +1260,40 @@
       "products": {
         "lead": "Explora el catálogo de productos.",
         "add": "Agregar producto",
+        "arrangeEntry": "Organizar",
+        "arrange": {
+          "title": "Ordenar catálogo",
+          "lead": "Arrastra los productos al orden en que quieres que aparezcan en el catálogo.",
+          "back": "Volver a productos",
+          "loading": "Cargando el orden del catálogo",
+          "hint": "Así se verá el catálogo: de izquierda a derecha y de arriba abajo. Arrastra una tarjeta, usa sus flechas o, con el teclado, las flechas, Inicio y Fin.",
+          "unplacedNote_one": "{{count}} producto nuevo aún no tiene lugar: aparece primero hasta que guardes.",
+          "unplacedNote_other": "{{count}} productos nuevos aún no tienen lugar: aparecen primero hasta que guardes.",
+          "newBadge": "Nuevo",
+          "tileLabel": "{{name}}, posición {{position}} de {{total}}",
+          "announce": "{{name}} ahora está en la posición {{position}} de {{total}}.",
+          "successTitle": "Orden guardado",
+          "successToast": "El catálogo ya se muestra en el nuevo orden.",
+          "actions": {
+            "earlier": "Mover {{name}} antes",
+            "later": "Mover {{name}} después",
+            "discard": "Descartar cambios",
+            "reload": "Recargar catálogo",
+            "submit": "Guardar orden"
+          },
+          "errors": {
+            "submitFallback": "No pudimos guardar el orden. Intenta de nuevo."
+          },
+          "empty": {
+            "title": "No hay productos que ordenar",
+            "description": "Cuando agregues productos al catálogo podrás elegir aquí el orden en que se muestran."
+          },
+          "error": {
+            "title": "No pudimos cargar el catálogo",
+            "description": "Revisa tu conexión e intenta de nuevo.",
+            "retry": "Reintentar"
+          }
+        },
         "loading": "Cargando productos",
         "imageAlt": "Foto de {{name}}",
         "stock": {
@@ -1167,6 +1320,7 @@
           "businessType": "Tipo",
           "sort": "Ordenar por",
           "sortOptions": {
+            "destacados": "Destacados",
             "recientes": "Más recientes",
             "nombre-az": "Nombre: A → Z",
             "nombre-za": "Nombre: Z → A",
@@ -1200,6 +1354,8 @@
           "descriptionTitle": "Descripción",
           "detailsTitle": "Detalles",
           "replacementPrice": "Precio de reposición",
+          "securityDeposit": "Depósito en garantía",
+          "securityDepositNote": "por unidad, reembolsable",
           "lightbox": {
             "open": "Ver fotos en tamaño completo"
           },
@@ -1289,6 +1445,8 @@
             "sellPriceLabel": "Precio de venta",
             "replacementPriceLabel": "Precio de reposición",
             "replacementPriceHint": "Lo que se cobra si el producto se pierde o daña.",
+            "securityDepositLabel": "Depósito en garantía",
+            "securityDepositHint": "Por unidad. Se cobra aparte y se devuelve al recoger; no se suma al precio.",
             "pricePlaceholder": "0.00",
             "quantityLabel": "Cantidad",
             "quantityPlaceholder": "0",
@@ -1338,6 +1496,9 @@
             "invalidRentPrice": "Ingresa un precio válido entre 0 y 1,000,000.",
             "invalidSellPrice": "Ingresa un precio válido entre 0 y 1,000,000.",
             "invalidReplacementPrice": "Ingresa un precio válido entre 0 y 1,000,000.",
+            "invalidSecurityDeposit": "Ingresa un monto válido entre 0 y 1,000,000.",
+            "forbiddenSecurityDeposit": "Un producto de venta no lleva depósito en garantía.",
+            "securityDepositAboveReplacement": "El depósito no puede ser mayor que el precio de reposición.",
             "requiredRentPrice": "Un producto de alquiler requiere precio de renta.",
             "requiredRentTimeUnit": "Selecciona la unidad de tiempo de la renta.",
             "forbiddenSellPrice": "Un producto de alquiler no lleva precio de venta.",

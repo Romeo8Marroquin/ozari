@@ -55,6 +55,10 @@ export interface CreateProductRequestModel {
   /** "As-new" value billed for a lost/damaged RENTAL — Alquiler only (a sale is consumed, nothing
    *  to replace); optional there, forbidden for Venta. */
   replacementPrice: number | undefined;
+  /** Refundable security deposit PER UNIT ("garantía", owner 2026-10-27) — Alquiler only, optional,
+   *  never above `replacementPrice` when both are set (it covers partial damage; a total loss is
+   *  billed at the replacement price). Not part of any price: orders snapshot it per line. */
+  securityDeposit: number | undefined;
   /** Required when `businessTypeId` = Venta; forbidden for Alquiler. */
   sellPrice: number | undefined;
 }
@@ -129,6 +133,9 @@ export interface ProductListItemResponseModel {
   rentTimeUnit: string | undefined;
   /** Its lookup id (Alquiler only) — the edit form's select value; absent alongside `rentTimeUnit`. */
   rentTimeUnitId: number | undefined;
+  /** Refundable security deposit per unit (Alquiler only; absent when the product asks none). A
+   *  public commercial condition like the price — every role sees it, unlike `replacementPrice`. */
+  securityDeposit: number | undefined;
   images: ProductImageResponseModel[];
   details: BaseProductDetailsResponseModel[];
   /** Availability signal (Admin only) — derived: `available > 0`. */
@@ -150,7 +157,8 @@ export interface ProductListItemResponseModel {
 }
 
 /**
- * The catalog's presentation orders. `recent` (newest first) is the default; `name*` uses the
+ * The catalog's presentation orders. `catalog` (the admin's arrangement — `display_order`, then
+ * newest first) is the default; `recent` is newest first; `name*` uses the
  * Spanish collation; `price*` orders by THE product's price — rent or sell, whichever it has (the
  * conditional rule guarantees exactly one) — with priceless rows sinking to the end either way.
  * There is deliberately NO availability filter/sort: "available" means different things per role
@@ -158,6 +166,7 @@ export interface ProductListItemResponseModel {
  * (owner decision, 2026-07-15). A "popular" order awaits real order data (see EPIC-1 §5).
  */
 export type ProductListSortModel =
+  | "catalog"
   | "recent"
   | "nameAsc"
   | "nameDesc"
@@ -198,6 +207,33 @@ export interface ProductListResponseModel {
 /** `GET /products/:id` — the same role-projected shape as a list item, single row. */
 export interface ProductDetailResponseModel {
   product: ProductListItemResponseModel;
+}
+
+/**
+ * One tile of the arrangement screen (`GET|PUT /products/display-order`, Admin only): just what a
+ * small card needs. `imageUrl` is the primary photo (else the first, else absent); `placed` is false
+ * while the product still has `display_order` 0 — never arranged, so it currently LEADS the grid.
+ */
+export interface ProductArrangementItemModel {
+  id: number;
+  name: string;
+  category: string;
+  businessType: string;
+  imageUrl?: string;
+  placed: boolean;
+}
+
+export interface ProductArrangementResponseModel {
+  products: ProductArrangementItemModel[];
+}
+
+/**
+ * `PUT /products/display-order` — the FULL ordered list of ACTIVE product ids (declarative, like
+ * every other write here: the list IS the order). A list that is not exactly the active catalog is
+ * a 409, never a partial apply — someone added or removed a product while the screen was open.
+ */
+export interface UpdateProductDisplayOrderRequestModel {
+  productIds: number[];
 }
 
 /** A seeded lookup row as the create/edit form consumes it — just enough to render a select. */

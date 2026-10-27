@@ -20,12 +20,14 @@ export type PanelPath =
   | '/panel/inicio'
   | '/panel/productos'
   | '/panel/productos/nuevo'
+  | '/panel/productos/ordenar'
   | `/panel/productos/${number}`
   | `/panel/productos/${number}/editar`
   | '/panel/pedidos'
   | '/panel/pedidos/nuevo'
   | `/panel/pedidos/${number}`
   | `/panel/pedidos/${number}/editar`
+  | `/panel/pedidos/${number}/garantia`
   | '/panel/preferencias'
   | '/panel/ajustes';
 

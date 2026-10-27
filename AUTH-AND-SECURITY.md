@@ -13,6 +13,7 @@ rate-limit tiers) — **read this file before touching anything under `ozari-api
 1. `helmet` (CSP `default-src 'none'`, HSTS preload), `trust proxy = 2` — the Cloudflare Worker
    writes the visitor into `X-Forwarded-For` and Google appends Cloudflare (`DEPLOYMENT.md` §3c), so
    `req.ip` is the visitor and every per-IP limiter below keys on a real person, not on Cloudflare.
+   ⚠️ Only for traffic that actually comes through Cloudflare: the `run.app` address is still open (§12).
 2. `express-rate-limit` tiers: public 30/min + authenticated 100/min (in `app.locals.rateLimiters`;
    `/auth` and `/products` both mount on the authenticated tier), plus a strict **credential limiter
    (10/min) applied PER-ROUTE in `auth.route.ts`** to the endpoints that verify a brute-forceable
@@ -25,7 +26,8 @@ rate-limit tiers) — **read this file before touching anything under `ozari-api
 3. CORS: strict allowlist of `APP_HOST` only, `credentials: true`.
 4. Body size capped at `10kb`; 30s request/response timeout.
 5. `validateApiKey` — requires `x-api-key` for non-browser callers; browser requests are trusted by
-   `Origin === APP_HOST` (+ `sec-fetch-*` checks in deployed envs). Constant-time compare.
+   `Origin === APP_HOST` (+ `sec-fetch-*` checks in deployed envs). Constant-time compare. Those are
+   plain headers a script can send, so this filters honest callers; it is not a boundary (§12).
 6. Per-request `X-Request-ID` validation + AsyncLocalStorage context; sensitive fields scrubbed via
    `sanitizeSensitiveData` (`appConfig.sensitiveKeys`).
 7. Global error handler: stack traces only in `NODE_ENV=development`; 500s return a generic message.
@@ -400,3 +402,145 @@ it in both mirror modules in the same commit.**
 publishing the validators/regex as a workspace package both import. That is a real refactor
 (lockfiles, Docker context, Cloudflare build, path aliases all change) — propose it explicitly; don't
 do it as a drive-by.
+
+---
+
+## 12. ⚠️ OPEN GAP — the `run.app` side door (found 2026-10-13, re-confirmed 2026-10-22)
+
+**Status: open. Severity: medium. No sign it has been used.** This is the one full record of the gap
+and of the agreed fix; `ROADMAP.md` §5, `INCIDENTS.md` S4 and `DEPLOYMENT.md` §3c point here.
+
+### What is wrong
+
+Everything in §1 and §4 that reads `req.ip` assumes the request came through Cloudflare. Nothing
+enforces that:
+
+- Cloud Run runs with `ingress = "INGRESS_TRAFFIC_ALL"` and an `allUsers` `run.invoker` binding
+  (`modules/gcp-env/cloud-run.tf`), so its own `ozari-api-<project_number>.us-east4.run.app` address
+  answers anyone. That hostname is not a secret: it is deterministic, the pattern is in
+  `DEPLOYMENT.md` §3c, and the rendered Worker carries it.
+- `trust proxy = 2` (`app.ts`) resolves `req.ip` to the second `X-Forwarded-For` entry from the right.
+  Through the Worker that entry is the visitor, because the Worker REPLACES the header with
+  `CF-Connecting-IP`. Sent straight to `run.app`, the header reaches Google exactly as the caller wrote
+  it, Google appends the caller's real address, and the entry Express believes is **whatever the caller
+  wrote**. It can be a different address on every request.
+- `validateApiKey` does not stop this. A request counts as a "trusted browser" when
+  `Origin === APP_HOST` and the `sec-fetch-*` headers look like a browser fetch. All three are plain
+  headers that any script can send. The API key filters honest server-to-server callers; it is not a
+  boundary. A browser cannot keep a secret anyway, so the real boundary is JWT + CSRF.
+
+### What an attacker gets, and what still holds
+
+| Control | Through Cloudflare | Direct to `run.app` |
+|---|---|---|
+| Per-IP tiers (§1: public 30, authenticated 100, credential 10, refresh 5, forgot/reset 5 per minute) | ✅ one bucket per visitor | ❌ unlimited: a new forged IP on every request |
+| Cloudflare WAF custom rules, the rate-limiting rule, DDoS absorption (`INCIDENTS.md` S3/S4) | ✅ | ❌ never sees the traffic |
+| `req.ip` in request logs and the audit trail | ✅ real | ❌ attacker-chosen; forensics can be poisoned |
+| Per-ACCOUNT brute-force counters (§4: 5 / 15 min per email, per MFA user) | ✅ | ✅ unaffected: DB-backed, not keyed on IP |
+| Password-reset per-email cooldown (§3) | ✅ | ✅ unaffected |
+| bcrypt(12) + 12-character policy, MFA, JWT + CSRF, CORS for real browsers | ✅ | ✅ unaffected |
+| Spend | capped | capped by `max-instances` (2 staging / 3 prod) and the spend cap (`DEPLOYMENT.md` §12) |
+
+**No account takeover on its own.** What it does enable:
+
+- (a) **Credential stuffing across many accounts**, a few guesses each, which only the per-IP tier was
+  there to slow down.
+- (b) **More forgot-password requests than the per-IP limit allows.** Each account still gets at most
+  one email per cooldown.
+- (c) **A flood Cloudflare cannot see or block**, costing availability up to the instance cap.
+- (d) **False addresses in the audit trail.**
+
+### The fix: an edge secret the Worker adds and the API requires
+
+Ingress settings cannot do this, because `internal-and-cloud-load-balancing` admits a Google load
+balancer, not a Cloudflare Worker. A Google load balancer with Cloud Armor would work, but it costs
+about US$18/month, more than the rest of the stack combined, which is why the Worker exists at all
+(see its header comment). So:
+
+1. **The value.** A random secret of 32+ bytes, one per environment. It lives in
+   `infrastructure/secrets/<env>.json` like every other secret and is created by `new-secrets.ps1` /
+   `secret.ps1`.
+2. **The API side** (`ozari-api`):
+   - **Registry entry.** Add one entry to `modules/gcp-env/secrets.tf`, e.g. `edge_secret` → env var
+     `EDGE_SECRET`, `run_access = true`. That single entry provides the container, version, IAM, Cloud
+     Run binding and Cloud Build `--set-secrets` line.
+   - **New middleware, `src/middlewares/edgeOrigin.middleware.ts`.** When `isDeployedEnvironment()`,
+     it refuses any request whose `x-ozari-edge` header does not match `EDGE_SECRET`.
+     - Compare in constant time: move `secureCompare` out of `apiKey.middleware.ts` into `src/helpers/`
+       and share it.
+     - Read the env var on every request, as `API_KEY` does, so rotation needs no restart.
+     - If `EDGE_SECRET` is missing in a deployed environment, fail CLOSED and log the error, like
+       `API_KEY`.
+     - Local dev is unaffected.
+   - **Mount it FIRST in `createApp`**, before `mountApiDocs` and `mountCalendarPublicRoutes`. Those
+     two are deliberately mounted ahead of the security chain, and the docs are live on staging.
+   - **Refuse with a bare `403`/`404`**, giving no hint of what was missing, and before any limiter,
+     body parsing or database work. Refused traffic has to be cheap.
+   - **Accept two values during a rotation**: `EDGE_SECRET` plus an optional `EDGE_SECRET_PREVIOUS`.
+     That way the Worker and the API never have to change in the same second.
+   - **Never log the header.** Confirm the request logger does not dump raw headers, and add `edge` to
+     `appConfig.sensitiveKeys` as a backstop.
+3. **The Worker side** (`modules/cloudflare-env/worker/api-proxy.js.tftpl`):
+   - Change the handler to `async fetch(request, env)`.
+   - Add `proxied.headers.set('x-ozari-edge', env.EDGE_SECRET)` beside the existing
+     `x-forwarded-for` line. `set` also overwrites any value a client sent.
+   - The value reaches the Worker as a `secret_text` binding on `cloudflare_worker_version`.
+   - ⚠️ **Decide this before coding.** That binding puts the value in the cloudflare stack's Terraform
+     state, which is the environment project's private bucket. The gcp secrets never enter state,
+     because they go through write-only `secret_data_wo`. Check whether the Cloudflare provider (v5.x)
+     has a write-only form for Worker bindings. If it doesn't, either:
+     - accept the value in state (that bucket is as private as Secret Manager here), or
+     - set it out of band with `wrangler secret put`, after first proving that a new Worker version
+       created by Terraform does not drop it.
+   - **`tf.ps1` sends `TF_VAR_secret_values` to the gcp stack only.** The cloudflare stack needs this
+     one value too.
+4. **Rotation.** Add an `edge` group to `rotate.ps1`:
+   1. Write the new value and keep the old one as `EDGE_SECRET_PREVIOUS`.
+   2. Apply gcp; the API now accepts both values.
+   3. Apply cloudflare; the Worker now sends the new value.
+   4. Clear the previous value on the next apply.
+
+   It is a generated value, not a hand-minted key, so it does not go in the expiring-keys register.
+
+### Rollout: staging first, no outage
+
+The order matters. An API that enforces the header before the Worker sends it takes the whole app
+down.
+
+1. Generate the value for staging.
+2. Run `tf.ps1 staging cloudflare plan` / `apply`. The Worker starts sending the header, which is
+   harmless because today's API ignores unknown headers.
+3. Run `tf.ps1 staging gcp plan` / `apply`. The secret now exists and is bound to the service.
+4. Merge the API change to `dev`; Cloud Build deploys the enforcing revision.
+5. Verify (below), then repeat steps 1–4 for prod (`main`).
+
+### Verification (move into `DEPLOYMENT.md` §3c.4 when it ships)
+
+- **Through the custom domain the app still works:** sign in, open the panel, upload a photo.
+- **Directly at `run.app` it is refused:** `/api/health/check` returns 403/404, whether or not forged
+  `Origin` / `sec-fetch-*` headers are sent.
+- **The visitor's IP is still right:** a Cloud Run request log's `jsonPayload.ips` shows your own
+  public IP (the existing step 6).
+- **`rotate.ps1` still verifies.** Its check goes to `https://<host>/api/health/check` using
+  `$target.hosts[0]`; confirm that is the custom domain, not `run.app`.
+- **Update `INCIDENTS.md`'s health-check row** that says to call `run.app` directly. Once this ships, a
+  refusal from `run.app` means the container is UP and the problem is in front of it.
+
+### Tests (100 % coverage is enforced)
+
+- `edgeOrigin.middleware.test.ts`:
+  - no header → refused
+  - wrong value → refused
+  - current value → `next()`
+  - previous value → `next()`
+  - not deployed → `next()` without the header
+  - deployed with no `EDGE_SECRET` → refused, error logged
+- An `app.ts` test that a request without the header never reaches the docs, the calendar public
+  routes or `/api/health`.
+- No endpoint changes, so the OpenAPI spec doesn't change.
+
+### What remains after the fix (accepted)
+
+`run.app` stays publicly reachable, so it can still be flooded. Each request is refused before any
+database or bcrypt work, though, and instances and spend stay capped. Closing the address completely
+requires the Google load balancer rejected above on cost.

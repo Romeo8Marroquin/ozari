@@ -249,6 +249,50 @@ describe('ProductForm — conditional pricing UI', () => {
     expect(rentPrice).toHaveValue(''); // empty — a money field is a text input (`@utils/numericInput`)
     expect(screen.getByLabelText(new RegExp(`${KEY}.fields.rentTimeUnitLabel`))).toHaveValue('2');
   });
+
+  it('the security deposit is Alquiler-only: hidden and CLEARED by a switch to Venta', async () => {
+    renderForm();
+    const deposit = screen.getByLabelText(new RegExp(`${KEY}.fields.securityDepositLabel`));
+    await userEvent.type(deposit, '150');
+    expect(deposit).toHaveValue('150');
+
+    await userEvent.selectOptions(
+      screen.getByLabelText(new RegExp(`${KEY}.fields.businessTypeLabel`)),
+      String(BUSINESS_TYPE_SELL),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByLabelText(new RegExp(`${KEY}.fields.securityDepositLabel`)),
+      ).not.toBeInTheDocument(),
+    );
+
+    await userEvent.selectOptions(
+      screen.getByLabelText(new RegExp(`${KEY}.fields.businessTypeLabel`)),
+      '1',
+    );
+    expect(
+      await screen.findByLabelText(new RegExp(`${KEY}.fields.securityDepositLabel`)),
+    ).toHaveValue('');
+  });
+
+  it('re-checks the deposit ceiling as the replacement price moves (cross-field deps)', async () => {
+    // A valid draft (replacement Q900): Zod only runs cross-field rules once the base shape passes.
+    seedValidDraft();
+    renderForm();
+    const replacement = screen.getByLabelText(new RegExp(`${KEY}.fields.replacementPriceLabel`));
+    const deposit = screen.getByLabelText(new RegExp(`${KEY}.fields.securityDepositLabel`));
+    await userEvent.type(deposit, '950');
+    await userEvent.tab();
+    expect(await screen.findByText(`${KEY}.errors.securityDepositAboveReplacement`)).toBeInTheDocument();
+
+    // Raising the ceiling clears the deposit's error without touching the deposit itself.
+    await userEvent.type(replacement, '0');
+    await waitFor(() =>
+      expect(
+        screen.queryByText(`${KEY}.errors.securityDepositAboveReplacement`),
+      ).not.toBeInTheDocument(),
+    );
+  });
 });
 
 describe('ProductForm — details sub-editor', () => {
@@ -520,6 +564,7 @@ describe('ProductForm — edit mode', () => {
     rentTimeUnit: 'Día',
     rentTimeUnitId: 2,
     replacementPrice: 900,
+    securityDeposit: 150,
     inStock: true,
     available: 35,
     total: 40,
@@ -547,6 +592,8 @@ describe('ProductForm — edit mode', () => {
     // Strings: the numeric fields are text inputs the schema parses (see `@utils/numericInput`).
     expect(screen.getByLabelText(new RegExp(`${KEY}.fields.quantityLabel`))).toHaveValue('40');
     expect(screen.getByLabelText(new RegExp(`${KEY}.fields.rentPriceLabel`))).toHaveValue('75');
+    // Full-state rule: the deposit loads, or the first save would erase it.
+    expect(screen.getByLabelText(new RegExp(`${KEY}.fields.securityDepositLabel`))).toHaveValue('150');
     expect(screen.getByLabelText(new RegExp(`${KEY}.fields.detailValueLabel`))).toHaveValue('Blanco nieve');
 
     // The gallery holds the EXISTING photos (remote previews), the flagged one starred.
@@ -602,6 +649,7 @@ describe('ProductForm — edit mode', () => {
         rentPrice: 75,
         rentTimeUnitId: 2,
         replacementPrice: 900,
+        securityDeposit: 150,
         productDetails: [{ id: 21, detailTypeId: 1, detail: 'Blanco nieve' }],
         images: [
           { id: 11, isPrimary: true },

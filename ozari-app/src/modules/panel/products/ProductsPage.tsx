@@ -1,7 +1,12 @@
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { HiOutlineArrowPath, HiOutlinePlus, HiOutlineXMark } from 'react-icons/hi2';
+import {
+  HiOutlineArrowPath,
+  HiOutlineArrowsUpDown,
+  HiOutlinePlus,
+  HiOutlineXMark,
+} from 'react-icons/hi2';
 import Button from '@components/Button';
 import RoleGate from '@components/RoleGate';
 import SkeletonFade from '@components/SkeletonFade';
@@ -257,17 +262,28 @@ const ProductsPage: React.FC = () => {
   };
 
   const addButton = (
-    <Button
-      size="sm"
-      startIcon={<HiOutlinePlus className="size-4" />}
-      onClick={handleAdd}
-      // Keeps the action on the RIGHT once the lead text wraps it onto its own line: a lone item on
-      // a wrapped `justify-between` line falls back to flex-start, which reads as neither aligned
-      // nor centred. Inert while the two share a line (there is no free space to push into).
-      className="ml-auto"
-    >
+    <Button size="sm" startIcon={<HiOutlinePlus className="size-4" />} onClick={handleAdd}>
       {t(`${KEY}.add`)}
     </Button>
+  );
+
+  // The header's Admin actions: arranging the catalog's display order (its own page) beside "add".
+  // The group carries `ml-auto` so it stays on the RIGHT once the lead text wraps it onto its own
+  // line — a lone item on a wrapped `justify-between` line falls back to flex-start (§10) — and it
+  // wraps by its own width at 320px, the primary action keeping the end of the line.
+  const headerActions = (
+    <div className="ml-auto flex flex-wrap justify-end gap-2">
+      <Button
+        variant="soft"
+        color={SECONDARY_COLOR}
+        size="sm"
+        startIcon={<HiOutlineArrowsUpDown className="size-4" />}
+        onClick={() => panelNavigate('/panel/productos/ordenar')}
+      >
+        {t(`${KEY}.arrangeEntry`)}
+      </Button>
+      {addButton}
+    </div>
   );
 
   // How many grid SLOTS are on screen. Slots are keyed by INDEX so a cell keeps its identity
@@ -295,7 +311,7 @@ const ProductsPage: React.FC = () => {
             className={`reveal-item products-chrome${chromeSkeletonClass} flex flex-wrap items-center justify-between gap-3`}
           >
             <p className="text-sm text-charcoal/55">{t(`${KEY}.lead`)}</p>
-            <RoleGate roles={[Role.Admin]}>{addButton}</RoleGate>
+            <RoleGate roles={[Role.Admin]}>{headerActions}</RoleGate>
           </div>
           <div className={`reveal-item products-chrome${chromeSkeletonClass}`}>
             <ProductsFilterBar search={search} onChange={applyFilters} />
