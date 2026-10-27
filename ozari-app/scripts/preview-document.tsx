@@ -21,6 +21,9 @@
  *   `--quote` The cotización — the same model with a different `kind`: no order number, a validity
  *             date, and the "sujeta a cambios" notice. Those three differences are otherwise only
  *             visible through a running app and a half-filled form.
+ *   `--deposit=held|refunded|damages|uncovered` — the security deposit ("garantía") in each state
+ *             `documentModel` decides; composes with the rest (see `depositState` below).
+ *             `pnpm doc:preview:deposit` / `:refunded` / `:damages` are the three named shortcuts.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -33,6 +36,20 @@ import type { DocumentLine, DocumentModel } from '../src/modules/panel/documents
 const long = process.argv.includes('--long');
 const free = process.argv.includes('--free');
 const quote = process.argv.includes('--quote');
+/**
+ * `--deposit=STATE` — the security deposit ("garantía") panel under the totals, in each of the
+ * states `documentModel` can decide. Composes with every other flag (`--quote --deposit=held`,
+ * `--rows=N --deposit=damages`), because the panel lives inside the summary's `wrap={false}` block
+ * and its height is what moves the page break.
+ *   `held`       collected on top of the order, refundable — a quote, or an unsettled comprobante.
+ *   `refunded`   the happy path: settled with nothing claimed. Still a deposit, never a cost.
+ *   `damages`    a retention with a long reason plus two replacements (one with a wrapping product
+ *                name) — more than the deposit covers, so a balance is still owed. Paid order, so
+ *                the PAGADO mark and a zero order saldo sit beside a non-zero damages balance.
+ *   `uncovered`  replacements on lines that carried NO deposit — no "covered"/"returned" lines.
+ */
+const depositArgument = process.argv.find((argument) => argument.startsWith('--deposit='));
+const depositState = depositArgument?.slice('--deposit='.length);
 /**
  * `--rows=N` — the rental group's line count, overriding the variant's own.
  *
@@ -115,6 +132,69 @@ const banks = [
 const ISSUED_AT = new Date('2026-08-06T15:00:00Z');
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// 120 chairs × Q5 + 12 tables × Q25 — the per-unit deposits the default rental lines would carry.
+const DEPOSIT_TOTAL = 900;
+const securityDeposit: DocumentModel['securityDeposit'] =
+  depositState === 'held'
+    ? { status: 'held', amount: DEPOSIT_TOTAL }
+    : depositState === 'refunded'
+      ? { status: 'refunded', amount: DEPOSIT_TOTAL, refund: DEPOSIT_TOTAL }
+      : depositState === 'damages'
+        ? {
+            status: 'settled',
+            amount: DEPOSIT_TOTAL,
+            claims: [
+              {
+                kind: 'retention',
+                amount: 150,
+                reason:
+                  'Manteles con manchas de vino que no salieron en el lavado ordinario; se descuenta la limpieza especializada.',
+              },
+              {
+                kind: 'replacement',
+                description: 'Mantelería de lino con cubremantel a juego, incluye planchado y entrega',
+                quantity: 2,
+                unitAmount: 350,
+                amount: 700,
+                note: 'Quemaduras de cigarro en ambas piezas.',
+              },
+              {
+                kind: 'replacement',
+                description: 'Sillas plásticas blancas',
+                quantity: 4,
+                unitAmount: 45,
+                amount: 180,
+              },
+            ],
+            claimsTotal: 1030,
+            applied: 900,
+            refund: 0,
+            balanceDue: 130,
+          }
+        : depositState === 'uncovered'
+          ? {
+              status: 'settled',
+              amount: 0,
+              claims: [
+                {
+                  kind: 'replacement',
+                  description: 'Sillas plásticas blancas',
+                  quantity: 1,
+                  unitAmount: 45,
+                  amount: 45,
+                  note: 'No se devolvió.',
+                },
+              ],
+              claimsTotal: 45,
+              applied: 0,
+              refund: 0,
+              balanceDue: 45,
+            }
+          : undefined;
+// The damages case is the realistic one AFTER the pickup: the order itself is long paid, and what
+// is still owed is the damage — two different saldos that must not read as one.
+const isPaid = depositState === 'damages';
+
 const model: DocumentModel = {
   // A cotización is the SAME model with a different `kind`: no order id to print, a validity date,
   // and the "sujeta a cambios" notice the template adds for a quote. Checking it here is the only
@@ -122,7 +202,7 @@ const model: DocumentModel = {
   kind: quote ? 'quote' : 'receipt',
   ...(quote ? { validUntil: new Date(ISSUED_AT.getTime() + 7 * DAY_MS) } : { reference: 8 }),
   issuedAt: ISSUED_AT,
-  isPaid: false,
+  isPaid,
   letterhead: {
     businessName: 'Party Rentals GT',
     businessPhone: '5555-1234',
@@ -161,8 +241,9 @@ const model: DocumentModel = {
     ...(discount !== undefined && { discount }),
     total,
     ...(deposit !== undefined && { deposit }),
-    balance: total - (deposit ?? 0),
+    balance: isPaid ? 0 : total - (deposit ?? 0),
   },
+  ...(securityDeposit !== undefined && { securityDeposit }),
   currencySymbol: 'Q',
 };
 
@@ -217,21 +298,38 @@ const copy: DocumentCopy = {
   total: 'TOTAL',
   deposit: 'Anticipo',
   balance: 'Saldo pendiente',
+  guaranteeHeld: 'Depósito en garantía (reembolsable)',
+  guaranteeHeldNote: 'Aparte del total; se devuelve al recoger, previa revisión.',
+  guaranteeRefunded: 'Depósito en garantía (devuelto)',
+  guaranteeRefundedNote: 'Revisión sin cargos: se devolvió completo.',
+  settlementTitle: 'Liquidación de garantía',
+  settlementRetention: 'Retención por daños',
+  settlementReplacement: (product) => `Reposición: ${product}`,
+  settlementReplacementDetail: (quantity, unitAmount) => `${quantity} × ${unitAmount}`,
+  settlementClaimsTotal: 'Total por daños',
+  settlementApplied: 'Cubierto con la garantía',
+  settlementBalanceDue: 'Saldo pendiente por daños',
+  settlementRefund: 'Garantía devuelta',
+  settlementRefundNote: (amount) => `De un depósito de ${amount}`,
   conditions: 'Condiciones',
   banks: 'Datos para depósito',
   page: (pageNumber, totalPages) => `Página ${pageNumber} de ${totalPages}`,
 };
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const variant = rowCount !== undefined
-  ? `-rows${rowCount}`
-  : long
-    ? '-long'
-    : free
-      ? '-free'
-      : quote
-        ? '-quote'
-        : '';
+const variant =
+  (rowCount !== undefined
+    ? `-rows${rowCount}`
+    : long
+      ? '-long'
+      : free
+        ? '-free'
+        : quote
+          ? '-quote'
+          : '') +
+  // Composes with the rest, so `--quote --deposit=held` and `--rows=N --deposit=damages` each land
+  // in their own file instead of overwriting the base variant's.
+  (depositState === undefined ? '' : `-deposit-${depositState}`);
 const out = path.join(here, `preview${variant}.pdf`);
 
 const buffer = await renderToBuffer(

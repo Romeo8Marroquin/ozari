@@ -29,7 +29,9 @@ describe('parseProductListSearch', () => {
     for (const orden of PRODUCT_LIST_ORDERS) {
       expect(parseProductListSearch({ orden })).toEqual({ orden });
     }
-    expect(parseProductListSearch({ orden: 'recientes' })).toEqual({}); // the default is absence
+    // "Más recientes" is an explicit choice now; the default (the arranged catalog) is absence.
+    expect(parseProductListSearch({ orden: 'recientes' })).toEqual({ orden: 'recientes' });
+    expect(parseProductListSearch({ orden: 'destacados' })).toEqual({});
     expect(parseProductListSearch({ orden: 'precio' })).toEqual({});
     expect(parseProductListSearch({ orden: 3 })).toEqual({});
   });
@@ -57,6 +59,7 @@ describe('toProductListParams', () => {
   });
 
   it('translates every URL order to its API sort value', () => {
+    expect(toProductListParams({ orden: 'recientes' })).toEqual({ sort: 'recent' });
     expect(toProductListParams({ orden: 'nombre-az' })).toEqual({ sort: 'nameAsc' });
     expect(toProductListParams({ orden: 'nombre-za' })).toEqual({ sort: 'nameDesc' });
     expect(toProductListParams({ orden: 'precio-menor' })).toEqual({ sort: 'priceAsc' });

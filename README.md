@@ -82,8 +82,8 @@ rate limiting, strict CORS, API-key/origin validation, request-ID tracing, JWT s
 in the database (revocable; refresh rotation with reuse detection), CSRF double-submit, AES-256-GCM
 encryption for PII at rest, TOTP two-factor auth, and audit logging in deployed environments. The
 OpenAPI spec is hand-authored and served at `/api/docs` outside production; a structural test keeps
-it in sync with the mounted routes. Local ops scripts (session cleanup, the R2/DB image reconcile)
-live alongside and never deploy. Details, endpoint tables, and script usage:
+it in sync with the mounted routes. Local ops scripts (session cleanup, the R2/DB image reconcile,
+the cross-environment product catalog merge) live alongside and never deploy. Details, endpoint tables, and script usage:
 **[ozari-api/README.md](./ozari-api/README.md)**.
 
 ## Frontend (`ozari-app`)

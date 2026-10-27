@@ -778,3 +778,56 @@ doc is its spec. For NOW: finish the ADMIN flow (agenda + creation exist; next i
 building the shared sub-components reuse-friendly per 11.C, and keeping the endpoint/projection doors open
 per 11.A/11.E. When the Client flow lands it's a separate page + a widened `POST /orders` + the two
 availability endpoints — no rewrite of what exists.
+
+---
+
+## 12. Security deposit ("garantía") & damage settlement (✅ BUILT, owner 2026-10-27)
+
+**The business.** Some expensive rental items ask the client for a refundable deposit on top of the
+order. After the pickup (photos taken), the admin either gives it back whole, or keeps part of it for
+damage that is not a total loss (with a reason). A unit that comes back broken beyond repair — or never
+comes back — is billed at its **replacement price** ("lo que cuesta uno nuevo"), possibly just 1 of the
+line's units. The deposit covers what it can; the client owes the difference. A deposit is assumed lower
+than a replacement (enforced on the product).
+
+**Decisions (made without the owner on purpose — they asked for the most practical design):**
+
+| Question | Decision | Why |
+|---|---|---|
+| A pipeline step, or a state anytime (like payment)? | **Its own door, like payment** — `PUT/DELETE /orders/:id/settlement`. Never a lifecycle status. | It is a money judgement made at the pickup or days later (after washing/inspection). A step would block the "listo" press on a decision unrelated to whether the units are back in the fleet. |
+| When can it be recorded? | Once **delivered** (`deliveredAt`) and while **not cancelled**, only if a rental line carries a deposit > 0 or a replacement value. Undo is always allowed. | Before delivery nothing can come back damaged. Sale lines never come back to be judged, so they never qualify; the option does not appear at all otherwise. |
+| A separate "damage order"? | **No.** Damage lives ON the order lines (`damagedQuantity`, `damageNote`); the money is DERIVED. | One order = one document; no second order to reconcile, delete or invoice. |
+| Deposit per order or per product? | **Per product (per unit), snapshotted per line** (`service_details.security_deposit`, `.replacement_price`), re-derived on every order save like the prices. | The owner thinks of "the expensive items" asking it. A per-order override is a documented door, not built. |
+| Does a broken unit leave the fleet? | **No automatic stock change.** | A broken chair is normally replaced with the client's money, so the fleet the business intends to own is unchanged. A unit that will not be replaced is an edit of the product's quantity (the settlement page says so). |
+| Is the deposit's receipt or the balance's payment tracked? | **No (v1).** `paidAt` remains the order total's payment. | Documented door: a deposit-received / balance-paid stamp would be two more columns + the payment-door pattern. |
+
+**Product rule** (both mirrors): `securityDeposit` optional money, Alquiler only, `≤ replacementPrice`
+when both are set. Visible to every role (a public commercial condition like the price; unlike
+`replacementPrice`, which stays Admin-only on the product projection).
+
+**Money** (`orders.service.ts` — the only place it is computed):
+- `D` = Σ rental lines' `securityDeposit × quantity` (never inside `totalAmount`).
+- claims = `depositRetainedAmount` + Σ damaged units × the line's `replacementPrice`.
+- `appliedFromDeposit = min(D, claims)`, `refundAmount = D − applied`, `balanceDue = max(0, claims − D)`.
+- `retainedAmount ≤ D` (400 otherwise); its reason is required iff `> 0`.
+
+**Settlement writes** — declarative (the body is the FINAL state: a line absent from `damages` has none);
+re-sending corrects it WITHOUT re-stamping `depositSettledAt` (first settled = the fact worth keeping).
+DELETE clears the three service columns and every line's damage (NO-TRASH: nothing references it).
+
+**Interaction with the order edit** (`PUT /orders/:id`): the edit re-derives the line snapshots, then
+`assertSettlementSurvivesEdit` refuses (409 `settlementConflict`) a damaged line dropped, reduced below its
+damaged units, left without a replacement value or turned into a sale, and a deposit shrunk below what was
+retained. The admin undoes the settlement first. The edit never writes the damage columns. Order delete
+removes the lines (and with them the damage) in its transaction.
+
+**Projections:** list items carry `depositSettlementPending` (delivered + settleable + not cancelled + not
+settled — the agenda's "Garantía por liquidar" chip); the detail carries per-line snapshots + damage and a
+`securityDeposit { total, canSettle, settlement? }` block with every derived figure. The UI and the PDF
+render those numbers; they never re-derive them.
+
+**Documents:** a deposit is NEVER a cost on the happy path (shown as "depósito en garantía", refunded); only
+what was retained or billed for replacement becomes a cost (EPIC-2-DOCUMENTS).
+
+**Migrations:** `20261027100000_order_security_deposit` (engine-written). No backfill: every column is
+nullable or defaults to 0, and an order with no deposit/replacement lines behaves exactly as before.

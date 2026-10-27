@@ -81,6 +81,9 @@ const makeRawOrder = () => ({
   paidAt: null,
   cancelledAt: null,
   cancelReason: null,
+  depositSettledAt: null,
+  depositRetainedAmount: null,
+  depositRetainedReason: null,
   currencyId: 1,
   serviceStatusId: 1,
   paymentStatusId: 1,
@@ -94,8 +97,16 @@ const makeRawOrder = () => ({
   paymentStatus: { id: 1, name: "Pendiente" },
   currency: { id: 1, iso4217Code: "GTQ", name: "Quetzal Guatemalteco", symbol: "Q" },
   assignedUser: null,
-  serviceDetails: [{ quantity: 25, isRental: true }],
+  serviceDetails: [{ quantity: 25, isRental: true, securityDeposit: null, replacementPrice: null }],
 });
+
+/** The deposit/damage columns of a line with none — spread into every rich line fixture. */
+const NO_GUARANTEE = {
+  securityDeposit: null,
+  replacementPrice: null,
+  damagedQuantity: 0,
+  damageNote: null,
+};
 
 /** The same order as the RICH include fetches it (full lines, extras, history, driver). */
 const makeRawRichOrder = () => ({
@@ -109,6 +120,7 @@ const makeRawRichOrder = () => ({
       isRental: true,
       unitaryPrice: new Prisma.Decimal("6.00"),
       parcialPrice: new Prisma.Decimal("150.00"),
+      ...NO_GUARANTEE,
       product: { name: "Silla plegable" },
     },
   ],
@@ -376,6 +388,8 @@ const txRentalProduct = {
   rentTimeUnitId: 2,
   rentPrice: new Prisma.Decimal("6.00"),
   sellPrice: null,
+  securityDeposit: new Prisma.Decimal("40.00"),
+  replacementPrice: new Prisma.Decimal("120.00"),
 };
 const txSaleProduct = {
   id: 4,
@@ -386,6 +400,8 @@ const txSaleProduct = {
   rentTimeUnitId: null,
   rentPrice: null,
   sellPrice: new Prisma.Decimal("3.50"),
+  securityDeposit: null,
+  replacementPrice: null,
 };
 
 /** The seeded timing rules as `loadOrderTimingPreferences` reads them. */
@@ -499,9 +515,28 @@ describe("createOrder", () => {
     // PII snapshots are encrypted at rest — never the plaintext.
     expect(createArg.data["deliveryNameKms"]).toBeTruthy();
     expect(createArg.data["deliveryNameKms"]).not.toBe(body.deliveryName);
+    // The rental line snapshots its per-unit deposit and replacement value; the sale carries none.
     expect(createArg.data.serviceDetails.create).toEqual([
-      { productId: 3, quantity: 25, isRental: true, unitaryPrice: 6, parcialPrice: 300, currencyId: 1 },
-      { productId: 4, quantity: 10, isRental: false, unitaryPrice: 3.5, parcialPrice: 35, currencyId: 1 },
+      {
+        productId: 3,
+        quantity: 25,
+        isRental: true,
+        unitaryPrice: 6,
+        parcialPrice: 300,
+        securityDeposit: 40,
+        replacementPrice: 120,
+        currencyId: 1,
+      },
+      {
+        productId: 4,
+        quantity: 10,
+        isRental: false,
+        unitaryPrice: 3.5,
+        parcialPrice: 35,
+        securityDeposit: null,
+        replacementPrice: null,
+        currencyId: 1,
+      },
     ]);
     expect(createArg.data.statusHistory.create).toEqual({ toStatusId: 1, byUserId: 1 });
     // Only the SALE line consumes stock permanently.
@@ -684,6 +719,7 @@ const existingSaleLine = {
   isRental: false,
   unitaryPrice: new Prisma.Decimal("3.50"),
   parcialPrice: new Prisma.Decimal("35.00"),
+  ...NO_GUARANTEE,
   product: { name: "Vasos desechables" },
 };
 
@@ -762,11 +798,27 @@ describe("updateOrder", () => {
     // The surviving product keeps its ROW (and its id) and is re-priced: 6 × 30 × 2 billed days.
     expect(tx.serviceDetail.update).toHaveBeenCalledWith({
       where: { id: 31 },
-      data: { quantity: 30, isRental: true, unitaryPrice: 6, parcialPrice: 360, currencyId: 1 },
+      data: {
+        quantity: 30,
+        isRental: true,
+        unitaryPrice: 6,
+        parcialPrice: 360,
+        securityDeposit: 40,
+        replacementPrice: 120,
+        currencyId: 1,
+      },
     });
     expect(tx.serviceDetail.update).toHaveBeenCalledWith({
       where: { id: 32 },
-      data: { quantity: 4, isRental: false, unitaryPrice: 3.5, parcialPrice: 14, currencyId: 1 },
+      data: {
+        quantity: 4,
+        isRental: false,
+        unitaryPrice: 3.5,
+        parcialPrice: 14,
+        securityDeposit: null,
+        replacementPrice: null,
+        currencyId: 1,
+      },
     });
     expect(tx.serviceDetail.create).not.toHaveBeenCalled();
     expect(tx.serviceDetail.deleteMany).not.toHaveBeenCalled();
@@ -815,6 +867,8 @@ describe("updateOrder", () => {
         isRental: true,
         unitaryPrice: 6,
         parcialPrice: 60,
+        securityDeposit: 40,
+        replacementPrice: 120,
         currencyId: 1,
         serviceId: 12,
         productId: 3,
@@ -825,6 +879,34 @@ describe("updateOrder", () => {
       where: { id: 4 },
       data: { quantity: { increment: 10 } },
     });
+  });
+
+  it("409s an edit that would contradict the recorded deposit settlement — nothing is written", async () => {
+    // 2 chairs were recorded as broken; dropping the chairs would orphan that damage.
+    const damagedChairs = {
+      ...(makeRawRichOrder().serviceDetails[0] as object),
+      replacementPrice: new Prisma.Decimal("120.00"),
+      damagedQuantity: 2,
+    };
+    const tx = mockUpdateTx({
+      order: {
+        ...makeRawRichOrder(),
+        depositSettledAt: new Date("2026-08-02T12:00:00.000Z"),
+        serviceDetails: [damagedChairs, existingSaleLine],
+      },
+    });
+    await updateOrder(
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, quantity: 10 }], pickupAt: undefined }),
+      {} as Response,
+    );
+
+    expect(tx.service.update).not.toHaveBeenCalled();
+    expect(tx.serviceDetail.deleteMany).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.updateOrder.settlementConflict",
+    );
   });
 
   it("excludes the order from its OWN availability and driver checks", async () => {

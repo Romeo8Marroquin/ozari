@@ -10,7 +10,7 @@ import {
 } from './documentModel';
 import { createOrderDefaultValues } from '../orders/SchemaCreateOrder';
 import type { CreateOrderFormType } from '../orders/SchemaCreateOrder';
-import type { OrderDetail } from '../orders/order.types';
+import type { OrderDetail, OrderSecurityDeposit } from '../orders/order.types';
 import type { Product } from '../products/product.types';
 import type { PreferenceSetting } from '../preferences/preference.types';
 
@@ -37,6 +37,7 @@ const line = (over: Partial<OrderDetail['lines'][number]> = {}) => ({
   quantity: 5,
   unitaryPrice: 10,
   parcialPrice: 150,
+  damagedQuantity: 0,
   ...over,
 });
 
@@ -248,6 +249,142 @@ describe('fromOrderDetail', () => {
   });
 });
 
+describe('fromOrderDetail — the security deposit', () => {
+  // The owner's rule (2026-10-27): the deposit is NEVER a cost on the happy path — only what a
+  // settlement retained or billed is. Which story the figures tell is decided here, not in the PDF.
+  const settlement = (
+    over: Partial<NonNullable<OrderSecurityDeposit['settlement']>> = {},
+  ): NonNullable<OrderSecurityDeposit['settlement']> => ({
+    settledAt: '2026-08-02T10:00:00Z',
+    retainedAmount: 0,
+    damages: [],
+    damagesTotal: 0,
+    claimsTotal: 0,
+    appliedFromDeposit: 0,
+    refundAmount: 500,
+    balanceDue: 0,
+    ...over,
+  });
+  const withDeposit = (securityDeposit?: OrderSecurityDeposit) =>
+    fromOrderDetail(order(securityDeposit && { securityDeposit }), letterhead, ISSUED_AT);
+
+  it('says nothing for an order that cannot carry one', () => {
+    expect(withDeposit().securityDeposit).toBeUndefined();
+  });
+
+  it('HOLDS an unsettled deposit — refundable, and never folded into the total', () => {
+    const model = withDeposit({ total: 500, canSettle: false });
+    expect(model.securityDeposit).toEqual({ status: 'held', amount: 500 });
+    // The order's own figures are untouched: the deposit is collected ON TOP.
+    expect(model.totals.total).toBe(150);
+    expect(model.totals.balance).toBe(150);
+  });
+
+  it('stays silent about a zero deposit with nothing settled', () => {
+    // A line can carry a replacement value without a deposit; "Depósito en garantía Q0.00" would
+    // announce a guarantee nobody asked the client for.
+    expect(withDeposit({ total: 0, canSettle: true }).securityDeposit).toBeUndefined();
+  });
+
+  it('the HAPPY PATH is still a deposit — returned, not a cost', () => {
+    const model = withDeposit({ total: 500, canSettle: true, settlement: settlement() });
+    expect(model.securityDeposit).toEqual({ status: 'refunded', amount: 500, refund: 500 });
+  });
+
+  it('a clean settlement of a zero deposit says nothing at all', () => {
+    const model = withDeposit({
+      total: 0,
+      canSettle: true,
+      settlement: settlement({ refundAmount: 0 }),
+    });
+    expect(model.securityDeposit).toBeUndefined();
+  });
+
+  it('turns a retention and replacements into COSTS, with every figure the API computed', () => {
+    const model = withDeposit({
+      total: 500,
+      canSettle: true,
+      settlement: settlement({
+        retainedAmount: 150,
+        retainedReason: 'Manteles manchados',
+        damages: [
+          {
+            lineId: 1,
+            productName: 'Mesa redonda',
+            quantity: 2,
+            unitAmount: 300,
+            amount: 600,
+            note: 'Patas rotas',
+          },
+          { lineId: 1, productName: 'Silla', quantity: 1, unitAmount: 45, amount: 45 },
+        ],
+        damagesTotal: 645,
+        // Deliberately NOT what the parts add up to: the document copies, it never re-derives —
+        // so a figure the server rounded or capped is printed exactly as the record holds it.
+        claimsTotal: 795.01,
+        appliedFromDeposit: 500,
+        refundAmount: 0,
+        balanceDue: 295.01,
+      }),
+    });
+    expect(model.securityDeposit).toEqual({
+      status: 'settled',
+      amount: 500,
+      claims: [
+        { kind: 'retention', amount: 150, reason: 'Manteles manchados' },
+        {
+          kind: 'replacement',
+          description: 'Mesa redonda',
+          quantity: 2,
+          unitAmount: 300,
+          amount: 600,
+          note: 'Patas rotas',
+        },
+        { kind: 'replacement', description: 'Silla', quantity: 1, unitAmount: 45, amount: 45 },
+      ],
+      claimsTotal: 795.01,
+      applied: 500,
+      refund: 0,
+      balanceDue: 295.01,
+    });
+    // And the ORDER's own total and balance still never absorb any of it.
+    expect(model.totals.total).toBe(150);
+  });
+
+  it('a retention without a reason is still a cost, just an unexplained one', () => {
+    const model = withDeposit({
+      total: 500,
+      canSettle: true,
+      settlement: settlement({
+        retainedAmount: 100,
+        claimsTotal: 100,
+        appliedFromDeposit: 100,
+        refundAmount: 400,
+      }),
+    });
+    expect(model.securityDeposit).toMatchObject({
+      status: 'settled',
+      claims: [{ kind: 'retention', amount: 100 }],
+      refund: 400,
+    });
+  });
+
+  it('bills replacements on lines that carried NO deposit — all of it is owed', () => {
+    const model = withDeposit({
+      total: 0,
+      canSettle: true,
+      settlement: settlement({
+        damages: [{ lineId: 1, productName: 'Silla', quantity: 1, unitAmount: 45, amount: 45 }],
+        damagesTotal: 45,
+        claimsTotal: 45,
+        refundAmount: 0,
+        balanceDue: 45,
+      }),
+    });
+    expect(model.securityDeposit).toMatchObject({ status: 'settled', amount: 0, balanceDue: 45 });
+  });
+});
+
 describe('the DÍAS column', () => {
   // `rent_time_units` seeds Hora, Día, Semana, Mes and Evento. Only a "Día" product multiplies by
   // the window, and the document has no way to see a product's time unit — so it checks the
@@ -428,6 +565,33 @@ describe('fromOrderForm', () => {
       [product({ id: 2, businessTypeId: 2, sellPrice: 40, rentPrice: undefined })],
     );
     expect(model?.event.pickupAt).toBeUndefined();
+  });
+
+  it('quotes the security deposit the order WOULD carry, outside the total', () => {
+    // The server's rule — Σ rental line's per-unit deposit × quantity — estimated from the catalog.
+    // Collected on top and refunded at pickup, so folding it into the total would overstate the
+    // price of the event.
+    const model = quote(
+      {
+        lines: [
+          { productId: 1, quantity: '5', isRental: true },
+          { productId: 3, quantity: '2', isRental: true },
+          { productId: 2, quantity: '1', isRental: false },
+        ],
+      },
+      [
+        product({ securityDeposit: 20.5 }),
+        product({ id: 3, rentPrice: 5 }), // a rental with no deposit adds nothing
+        // A sale line never carries one, whatever the catalog row says.
+        product({ id: 2, businessTypeId: 2, sellPrice: 40, rentPrice: undefined, securityDeposit: 99 }),
+      ],
+    );
+    expect(model?.securityDeposit).toEqual({ status: 'held', amount: 102.5 });
+    expect(model?.totals.total).toBe(150 + 30 + 40);
+  });
+
+  it('says nothing about a deposit when no quoted product carries one', () => {
+    expect(quote()?.securityDeposit).toBeUndefined();
   });
 
   it('wears the currency of the products quoted, never a hardcoded Q', () => {

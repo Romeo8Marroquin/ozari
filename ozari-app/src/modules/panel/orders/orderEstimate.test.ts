@@ -3,6 +3,7 @@ import type { Product } from '../products/product.types';
 import {
   billedDaysFromStrings,
   computeBilledDays,
+  estimateDepositTotal,
   estimateLineSubtotal,
   estimateOrderTotal,
   formatMoney,
@@ -111,6 +112,30 @@ describe('estimateOrderTotal', () => {
       0,
     );
     expect(total).toBe(0);
+  });
+});
+
+describe('estimateDepositTotal', () => {
+  it('sums rental deposits × quantity — never a sale, a deposit-less rental or a bad quantity', () => {
+    const productsById = new Map<number, Product>([
+      [3, rental({ securityDeposit: 12.5 })],
+      [5, rental({ id: 5, securityDeposit: undefined })],
+      // A sale can't carry one (the API forbids it); were one to slip through, it still counts 0.
+      [4, sale({ securityDeposit: 99 })],
+    ]);
+    expect(
+      estimateDepositTotal(
+        [
+          { productId: 3, quantity: '10' },
+          { productId: 5, quantity: '4' },
+          { productId: 4, quantity: '2' },
+          { productId: 3, quantity: 'x' },
+          { productId: 999, quantity: '1' },
+        ],
+        productsById,
+      ),
+    ).toBe(125);
+    expect(estimateDepositTotal([], productsById)).toBe(0);
   });
 });
 

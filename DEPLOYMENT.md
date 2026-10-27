@@ -58,6 +58,7 @@ not by an assistant.
 | `new-secrets.ps1 <env> [-Rotate k1,k2]` | Generates `jwt_secret`, `jwt_refresh_secret`, `encryption_key`, `api_key` straight into the file. Prints names only. |
 | `neon.ps1 <env> [-RotateAppPassword \| -RotateMigratorPassword \| -VerifyOnly]` | Neon project → migrator + app roles → verification → both URLs saved. |
 | `db-seed.ps1 <env>` | `pnpm db:seed` against that environment, as the migrator; then revokes the app's access to `_prisma_migrations`. Once per fresh database. |
+| `sync-products.ps1 <from> <to> [-Apply]` | MERGES the product catalog (details + photos) from one of `local\|staging\|prod` into another: products the target lacks are created, photos re-uploaded to the target's bucket; nothing in the target is modified. Dry run by default; `-Apply` to prod asks you to type `prod`. Both sides must run the current migrations. Rules: `EPIC-1-INVENTORY.md` §5. |
 | `retire.ps1 <target> [-Execute]` | Delete an environment everywhere (Cloudflare → Neon → GCP project last). Dry run by default. |
 | `tf.ps1 <env> <bootstrap\|cloudflare\|gcp> <plan\|apply\|output\|validate>` | Terraform. `plan` saves the plan; `apply` applies exactly that saved plan. |
 | `cf-inventory.ps1 <env>` | Read-only: every Cloudflare object labelled OURS / CONFLICT / not ours. |

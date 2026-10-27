@@ -97,6 +97,11 @@ export interface OrderListItemResponseModel {
   itemCount: number;
   totalAmount: number;
   currency: CurrencyModel;
+  /** True when the goods are back in the admin's hands to judge but the security deposit / damage
+   *  settlement has not been recorded yet: the order carries a deposit or a replaceable rental line,
+   *  was delivered, is not cancelled, and has no settlement. Derived, never stored — the agenda and
+   *  history flag it so a deposit is never forgotten (EPIC-2-ORDERS §12). */
+  depositSettlementPending: boolean;
 }
 
 /** One order line (an active `service_details` row) as the detail page renders it. */
@@ -109,6 +114,58 @@ export interface OrderLineResponseModel {
   quantity: number;
   unitaryPrice: number;
   parcialPrice: number;
+  /** Per-unit refundable deposit snapshot (rental lines only; absent when the product asks none). */
+  securityDeposit: number | undefined;
+  /** Per-unit replacement value snapshot (rental lines only) — what a lost/broken unit is billed. */
+  replacementPrice: number | undefined;
+  /** Units recorded as lost/broken by the settlement (0 = none). */
+  damagedQuantity: number;
+  damageNote: string | undefined;
+}
+
+/** One lost/broken entry of a settlement — a line with `damagedQuantity > 0`, priced. */
+export interface OrderDamageResponseModel {
+  lineId: number;
+  productName: string;
+  quantity: number;
+  /** The line's replacement-price snapshot — never typed by the admin. */
+  unitAmount: number;
+  amount: number;
+  note: string | undefined;
+}
+
+/**
+ * What the admin decided after the pickup, with every derived figure (EPIC-2-ORDERS §12). The math
+ * lives HERE so the detail page, the agenda and the PDF never re-derive it:
+ * claims = retained + damages; the deposit covers what it can (`appliedFromDeposit`), the rest of it
+ * goes back (`refundAmount`) and what it cannot cover is owed (`balanceDue`).
+ */
+export interface OrderDepositSettlementResponseModel {
+  settledAt: Date;
+  /** Kept from the deposit for partial damage; 0 = fully refunded. */
+  retainedAmount: number;
+  retainedReason: string | undefined;
+  damages: OrderDamageResponseModel[];
+  damagesTotal: number;
+  claimsTotal: number;
+  appliedFromDeposit: number;
+  refundAmount: number;
+  balanceDue: number;
+}
+
+/**
+ * The order's security deposit (`OrderDetailResponseModel.securityDeposit`) — present only when the
+ * order has something to settle: a rental line with a deposit, or one with a replacement value.
+ */
+export interface OrderSecurityDepositResponseModel {
+  /** Σ rental lines' deposit snapshot × quantity — collected on top of the order, never part of its
+   *  total. 0 when only replacement values exist. */
+  total: number;
+  /** May a settlement be RECORDED (or changed) right now: delivered and not cancelled. Deleting an
+   *  existing one is always possible. */
+  canSettle: boolean;
+  /** Absent until settled. */
+  settlement: OrderDepositSettlementResponseModel | undefined;
 }
 
 /** One ad-hoc extra (an active `service_extras` row) — every money field may be absent. */
@@ -175,6 +232,8 @@ export interface OrderDetailResponseModel extends OrderListItemResponseModel {
   serviceEnd: Date;
   lines: OrderLineResponseModel[];
   extras: OrderExtraResponseModel[];
+  /** The refundable deposit + damage settlement; absent when no line can carry either. */
+  securityDeposit: OrderSecurityDepositResponseModel | undefined;
   statusHistory: OrderStatusHistoryResponseModel[];
   /** Tracking photos, each tagged with the step it documents (the detail page groups by `statusId`).
    *  Absent entries are normal: a rewound step drops its photos, and old evidence is purged by the
@@ -302,6 +361,24 @@ export interface CreateOrderRequestModel {
    */
   assignedUserId: number;
   lines: CreateOrderLineRequestModel[];
+}
+
+/** One lost/broken entry in a settlement request — the price is NEVER sent (the line's snapshot). */
+export interface SettleOrderDamageRequestModel {
+  lineId: number;
+  quantity: number;
+  note: string | undefined;
+}
+
+/**
+ * `PUT /orders/:id/settlement` — the settlement's FINAL state (declarative, like every write here):
+ * a line absent from `damages` has no damage. `retainedReason` is required exactly when something
+ * is retained, and stripped when nothing is.
+ */
+export interface SettleOrderRequestModel {
+  retainedAmount: number;
+  retainedReason: string | undefined;
+  damages: SettleOrderDamageRequestModel[];
 }
 
 /** One line the requested window cannot satisfy — the 409 payload the form renders (EPIC-2 §8). */

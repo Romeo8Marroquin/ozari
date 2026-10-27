@@ -106,6 +106,9 @@ export interface OrderListItem {
   itemCount: number;
   totalAmount: number;
   currency: OrderCurrency;
+  /** Delivered, settleable (a rental line with a deposit or a replacement value), not cancelled and
+   *  not settled yet — the "garantía por liquidar" flag. Derived server-side (EPIC-2-ORDERS §12). */
+  depositSettlementPending: boolean;
 }
 
 export interface OrderListPagination {
@@ -231,6 +234,54 @@ export interface OrderLine {
   quantity: number;
   unitaryPrice: number;
   parcialPrice: number;
+  /** Per-unit refundable deposit snapshot (rental lines only). */
+  securityDeposit?: number;
+  /** Per-unit replacement value snapshot (rental lines only) — what a lost/broken unit bills. */
+  replacementPrice?: number;
+  /** Units recorded as lost/broken by the deposit settlement (0 = none). */
+  damagedQuantity: number;
+  damageNote?: string;
+}
+
+/** One lost/broken entry of a settlement, priced by the SERVER from the line's snapshot. */
+export interface OrderDamage {
+  lineId: number;
+  productName: string;
+  quantity: number;
+  unitAmount: number;
+  amount: number;
+  note?: string;
+}
+
+/** What the admin decided after the pickup, with every derived figure computed by the API:
+ *  claims = retained + damages; the deposit covers what it can, the rest is refunded, and what it
+ *  cannot cover is owed. The UI renders these — it never re-derives them. */
+export interface OrderDepositSettlement {
+  settledAt: string;
+  retainedAmount: number;
+  retainedReason?: string;
+  damages: OrderDamage[];
+  damagesTotal: number;
+  claimsTotal: number;
+  appliedFromDeposit: number;
+  refundAmount: number;
+  balanceDue: number;
+}
+
+/** The order's refundable security deposit — absent when no line can carry a deposit or damage. */
+export interface OrderSecurityDeposit {
+  /** Σ rental lines' deposit × quantity — collected ON TOP of the order, never in `totalAmount`. */
+  total: number;
+  /** May a settlement be recorded/changed now (delivered, not cancelled). Undo is always possible. */
+  canSettle: boolean;
+  settlement?: OrderDepositSettlement;
+}
+
+/** `PUT /orders/:id/settlement` — the settlement's FINAL state (declarative). */
+export interface SettleOrderBody {
+  retainedAmount: number;
+  retainedReason?: string;
+  damages: { lineId: number; quantity: number; note?: string }[];
 }
 
 export interface OrderStatusChange {
@@ -274,6 +325,7 @@ export interface OrderDetail extends OrderListItem {
   serviceEnd: string;
   lines: OrderLine[];
   extras: unknown[];
+  securityDeposit?: OrderSecurityDeposit;
   statusHistory: OrderStatusChange[];
   evidence: OrderEvidence[];
   createdAt: string;

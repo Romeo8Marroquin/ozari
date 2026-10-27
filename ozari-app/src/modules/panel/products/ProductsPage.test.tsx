@@ -180,6 +180,7 @@ describe('ProductsPage', () => {
     expect(screen.getAllByRole('button', { name: new RegExp(cardName) })).toHaveLength(2);
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: addName })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `${K}.arrangeEntry` })).not.toBeInTheDocument();
   });
 
   it('shows the Admin add button and navigates to the create page through the panel transition', async () => {
@@ -190,6 +191,15 @@ describe('ProductsPage', () => {
     const add = screen.getByRole('button', { name: addName });
     await userEvent.click(add);
     expect(panelNavigate).toHaveBeenCalledWith('/panel/productos/nuevo');
+  });
+
+  it('shows the Admin "Ordenar" action beside add, opening the arrangement page', async () => {
+    useHasRole.mockReturnValue(true);
+    setProducts(withProducts([product(1, 'Mesa redonda')]));
+    const { panelNavigate } = renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: `${K}.arrangeEntry` }));
+    expect(panelNavigate).toHaveBeenCalledWith('/panel/productos/ordenar');
   });
 
   it('commits filter changes to the URL (replace honoured, panel transition bypassed)', async () => {

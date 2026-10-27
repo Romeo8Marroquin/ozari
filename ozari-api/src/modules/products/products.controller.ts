@@ -21,23 +21,32 @@ import {
   type ProductCatalogResponseModel,
   type ProductDetailResponseModel,
   type ProductImageUploadsResponseModel,
+  type ProductArrangementResponseModel,
   type ProductListResponseModel,
+  type UpdateProductDisplayOrderRequestModel,
   type UpdateProductRequestModel,
 } from "./products.models.js";
 import {
   applyProductDelete,
+  applyProductDisplayOrder,
   applyProductUpdate,
+  arrangementQuery,
   buildPaginationMeta,
   buildProductImagesCreate,
   buildProductListWhere,
   buildRentedNowWhere,
+  isSqlProductSort,
   parseProductListQuery,
+  ProductDisplayOrderConflictError,
   ProductStateConflictError,
+  productScalarData,
   productSortSelect,
+  projectArrangementItem,
   projectProductForRole,
   rentProductIds,
   richProductInclude,
   sortProductIdPage,
+  SQL_PRODUCT_ORDERS,
   type RichProduct,
 } from "./products.service.js";
 
@@ -90,14 +99,14 @@ export const getProducts = async (
 
     let rawProducts: RichProduct[];
     let total: number;
-    if (sort === "recent") {
-      // The default order lives in SQL: newest first (oldest land at the bottom of the grid),
-      // `id` tiebreaking same-timestamp rows so pagination pages never shuffle.
+    if (isSqlProductSort(sort)) {
+      // The catalog arrangement (the default) and newest-first live in SQL — see
+      // `SQL_PRODUCT_ORDERS` for the tiebreakers that keep pagination pages from shuffling.
       [rawProducts, total] = await Promise.all([
         prismaClient.product.findMany({
           where,
           include: richProductInclude,
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          orderBy: SQL_PRODUCT_ORDERS[sort],
           skip: (page - 1) * pageSize,
           take: pageSize,
         }),
@@ -324,16 +333,7 @@ export const createProduct = async (
     const prismaClient = await getPrismaClient();
     const created = await prismaClient.product.create({
       data: {
-        name: body.name,
-        description: body.description ?? null,
-        productBusinessTypeId: body.businessTypeId,
-        productCategoryId: body.categoryId,
-        currencyId: body.currencyId,
-        quantity: body.quantity,
-        rentPrice: body.rentPrice ?? null,
-        sellPrice: body.sellPrice ?? null,
-        replacementPrice: body.replacementPrice ?? null,
-        rentTimeUnitId: body.rentTimeUnitId ?? null,
+        ...productScalarData(body),
         ...(body.productDetails.length > 0 && {
           productDetails: {
             create: body.productDetails.map((detail) => ({
@@ -659,6 +659,86 @@ export const deleteProduct = async (
       res,
       HttpEnum.INTERNAL_SERVER_ERROR,
       i18next.t("products.deleteProduct.genericError"),
+    );
+  }
+};
+
+/**
+ * `GET /products/display-order` — **Admin only**: the whole ACTIVE catalog in its current order, a
+ * card's worth per product, for the arrangement screen. Unpaginated on purpose: arranging needs
+ * every product on one surface, and the catalog is tens to low hundreds of rows.
+ */
+export const getProductDisplayOrder = async (
+  _req: CustomRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const prismaClient = await getPrismaClient();
+    const rows = await prismaClient.product.findMany(arrangementQuery);
+    const response: ProductArrangementResponseModel = {
+      products: rows.map(projectArrangementItem),
+    };
+    logger.info(
+      i18next.t("products.displayOrder.logs.fetched", { count: rows.length }),
+    );
+    sendOzariSuccess(res, HttpEnum.OK, i18next.t("products.displayOrder.fetched"), response);
+  } catch (error) {
+    logger.error(i18next.t("products.displayOrder.logs.errorFetching", { error }));
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("products.displayOrder.errorFetching"),
+    );
+  }
+};
+
+/**
+ * `PUT /products/display-order` — **Admin only**: the declarative arrangement. The body is the
+ * FULL ordered list of active ids (the validator has shaped it); `applyProductDisplayOrder`
+ * renumbers 1..N in ONE transaction and the response is the committed order, re-read inside it. A
+ * list that no longer matches the active catalog is a **409** — reload, then arrange again.
+ */
+export const updateProductDisplayOrder = async (
+  req: CustomRequest,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { productIds } = req.body as UpdateProductDisplayOrderRequestModel;
+    const prismaClient = await getPrismaClient();
+    const rows = await prismaClient.$transaction(async (tx) => {
+      await applyProductDisplayOrder(tx, productIds);
+      return tx.product.findMany(arrangementQuery);
+    });
+
+    logger.info(
+      i18next.t("products.displayOrder.logs.updated", { count: productIds.length }),
+    );
+    if (isDeployedEnvironment()) {
+      logAudit({
+        action: AuditAction.ADMIN_ACTION,
+        ...(req.user && { userId: req.user.userId }),
+        ...(req.ip && { ipAddress: req.ip }),
+        resource: "Product display order",
+        success: true,
+        metadata: { operation: "PRODUCT_DISPLAY_ORDER_UPDATED", count: productIds.length },
+      });
+    }
+
+    const response: ProductArrangementResponseModel = {
+      products: rows.map(projectArrangementItem),
+    };
+    sendOzariSuccess(res, HttpEnum.OK, i18next.t("products.displayOrder.updated"), response);
+  } catch (error) {
+    if (error instanceof ProductDisplayOrderConflictError) {
+      logger.warn(i18next.t("products.displayOrder.logs.conflict", { error }));
+      sendOzariError(res, HttpEnum.CONFLICT, i18next.t("products.displayOrder.conflict"));
+      return;
+    }
+    logger.error(i18next.t("products.displayOrder.logs.errorUpdating", { error }));
+    sendOzariError(
+      res,
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      i18next.t("products.displayOrder.errorUpdating"),
     );
   }
 };

@@ -25,6 +25,7 @@ const order = (id: number): OrderListItem => ({
   itemCount: 1,
   totalAmount: 100,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
+  depositSettlementPending: false,
 });
 
 const pageResponse = (page: number, totalPages: number): { data: { data: OrderListResponse } } => ({

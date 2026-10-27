@@ -227,6 +227,8 @@ function Get-OzTarget {
                 gcp_project = $e.project_id; neon_project = $e.neon.project_name; survivor = (Get-OzEnvironment "prod").project_id
                 hosts = $stagingHosts
                 workers = @("ozari-staging-api-proxy"); pages = @("ozari-staging"); buckets = @("ozari-staging-assets")
+                # The bucket's public host (= the gcp root's r2_public_url) — what stored image URLs use.
+                assets_host = "assets-stg.partyrentalsgt.com"
             }
         }
         "prod" {
@@ -236,6 +238,7 @@ function Get-OzTarget {
                 gcp_project = $e.project_id; neon_project = $e.neon.project_name; survivor = (Get-OzEnvironment "staging").project_id
                 hosts = @("api.partyrentalsgt.com", "partyrentalsgt.com", "assets.partyrentalsgt.com")
                 workers = @("ozari-prod-api-proxy"); pages = @("ozari-prod"); buckets = @("ozari-prod-assets")
+                assets_host = "assets.partyrentalsgt.com"
             }
         }
         "legacy-staging" {

@@ -43,7 +43,8 @@ interface ProductsFilterBarProps {
  * business type / sort, all roles) live in a `grid-rows 0fr↔1fr` panel that eases open and closed.
  * The SORT is a single select with explicit combined options ("Nombre: A → Z", "Precio: menor a
  * mayor" — each states its own direction, no separate asc/desc switch to decode; the placeholder
- * IS the default, "Más recientes"). It replaced the old availability filter (owner decision,
+ * IS the default, "Destacados" — the order the admin arranged; "Más recientes" is an explicit option).
+ * It replaced the old availability filter (owner decision,
  * 2026-07-15): availability means different things per role, while an ordering serves everyone. Keeping the search out of the panel is deliberate best practice: hiding
  * the highest-frequency control behind a click hurts discoverability; the facets are the part that
  * earns progressive disclosure. Hidden never means invisible: the toggle is badged with the active
@@ -225,7 +226,7 @@ const ProductsFilterBar: React.FC<ProductsFilterBarProps> = ({ search, onChange 
               id="products-filter-orden"
               label={t(`${KEY}.sort`)}
               options={sortOptions}
-              placeholderOption={t(`${KEY}.sortOptions.recientes`)}
+              placeholderOption={t(`${KEY}.sortOptions.destacados`)}
               value={search.orden ?? ''}
               onChange={(event) => {
                 const raw = event.target.value;

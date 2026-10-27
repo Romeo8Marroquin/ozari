@@ -458,6 +458,16 @@ const ProductDetailPage: React.FC = () => {
                     {formatMoney(product.replacementPrice, product.currency.symbol)}
                   </p>
                 )}
+                {/* The refundable deposit per unit — a public commercial condition (every role
+                    receives it), shown beside the price because the client pays it up front. It is
+                    NOT part of the price: it comes back when the goods do. */}
+                {product.securityDeposit !== undefined && (
+                  <p className="reveal-item text-sm text-charcoal/70">
+                    <span className="font-medium text-charcoal/60">{t(`${DKEY}.securityDeposit`)}: </span>
+                    {formatMoney(product.securityDeposit, product.currency.symbol)}
+                    <span className="text-charcoal/50"> · {t(`${DKEY}.securityDepositNote`)}</span>
+                  </p>
+                )}
                 <div className="reveal-item flex flex-col gap-1.5">
                   <h3 className="text-sm font-semibold text-charcoal">{t(`${DKEY}.descriptionTitle`)}</h3>
                   <p className="text-sm leading-relaxed text-charcoal/70">

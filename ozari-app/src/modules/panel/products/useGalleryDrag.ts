@@ -8,7 +8,11 @@ import {
   getTileRestingRect,
 } from '../pageMotion';
 import { computeDragTranslation, dragDistance, findReorderIndex } from './galleryReorder';
-import type { GalleryImage } from './useGalleryImages';
+
+/** All the drag needs of an item: a stable string id. Gallery photos and catalog tiles both fit. */
+export interface DraggableItem {
+  id: string;
+}
 
 /** Movement (px) that turns a fine-pointer press into a drag — under it, it's a click. */
 const DRAG_THRESHOLD_PX = 6;
@@ -47,16 +51,18 @@ export interface GalleryDragState {
 
 interface UseGalleryDragOptions {
   disabled: boolean;
-  images: GalleryImage[];
+  /** The items in DISPLAY order — only their ids are read. */
+  images: readonly DraggableItem[];
   moveImage: (id: string, toIndex: number) => void;
-  /** The FLIP scope (the gallery swap container). */
-  scopeRef: React.RefObject<HTMLDivElement | null>;
-  /** The rendered thumbnails, keyed by local image id (the component already maintains this). */
-  thumbRefs: React.RefObject<Map<string, HTMLLIElement>>;
+  /** The FLIP scope (the container holding the `.gallery-flip` tiles). */
+  scopeRef: React.RefObject<HTMLElement | null>;
+  /** The rendered tiles, keyed by item id (the component already maintains this). */
+  thumbRefs: React.RefObject<ReadonlyMap<string, HTMLElement>>;
 }
 
 /**
- * Drag-to-reorder for the photo gallery — the CARD itself moves (never the browser's phantom image
+ * Drag-to-reorder for a grid of tiles — the product photo gallery and the catalog arrangement page
+ * (`ProductArrangePage`) both ride it. The CARD itself moves (never the browser's phantom image
  * copy): pointer-based, so one path serves mouse, pen and touch. The interaction contract:
  *
  * - A fine-pointer press becomes a drag after {@link DRAG_THRESHOLD_PX}; under that it stays a

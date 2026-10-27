@@ -629,6 +629,28 @@ describe('OrderForm', () => {
     await waitFor(() => expect(screen.getByText('Q 350.00')).toBeInTheDocument()); // the total
   });
 
+  it('shows the rentals\' security deposit APART from the total — and only once there is one', async () => {
+    useOrderProducts.mockReturnValue(
+      q({ data: [{ ...rentalProduct, securityDeposit: 15 }, { ...saleProduct, id: 4 }] }),
+    );
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    const depositLine = screen
+      .getByText(`${KEY}.estimate.securityDeposit`)
+      .closest('[aria-hidden]') as HTMLElement;
+    // Collapsed while nothing picked carries a deposit.
+    expect(depositLine).toHaveAttribute('aria-hidden', 'true');
+
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    await user.type(byId(container, 'order-line-quantity-0'), '25');
+    // 15 × 25 = 375 — its own line, and NOT folded into the estimated total (6 × 25 × 1 = 150).
+    await waitFor(() => expect(depositLine).toHaveAttribute('aria-hidden', 'false'));
+    expect(screen.getByText('Q 375.00')).toBeInTheDocument();
+    expect(screen.getByText(`${KEY}.estimate.securityDepositNote`)).toBeInTheDocument();
+    expect(screen.queryByText('Q 525.00')).not.toBeInTheDocument();
+  });
+
   it('fetches availability on window change, reconciles picked lines, and annotates the picker', async () => {
     const user = userEvent.setup({ delay: null });
     const { container } = renderForm();
@@ -1108,6 +1130,19 @@ describe('OrderForm (edit mode)', () => {
       }),
     );
     expect(await screen.findByText(`${KEY}.errors.lineUnavailable`)).toBeInTheDocument();
+  }, 20000);
+
+  it('an edit that contradicts the recorded deposit settlement lands INLINE with the server\'s words', async () => {
+    renderForm({ mode: 'edit', order: existingOrder });
+    await userEvent.click(screen.getByRole('button', { name: `${EKEY}.actions.submit` }));
+    await waitFor(() => expect(updateOrder).toHaveBeenCalled());
+    const handlers = updateOrder.mock.calls[0][1] as Handlers;
+
+    // A bare 409 (no stock list, no logistics payload): nothing maps onto a line — the banner says
+    // exactly what the API said (deshaz la liquidación primero), never a stock message.
+    act(() => handlers.onError(axiosError(409, 'Deshaz la liquidación de la garantía primero.')));
+    expect(await screen.findByText('Deshaz la liquidación de la garantía primero.')).toBeInTheDocument();
+    expect(screen.queryByText(`${KEY}.errors.lineUnavailable`)).not.toBeInTheDocument();
   }, 20000);
 
   it('excludes ITSELF from the driver probe — an order cannot block its own dates', async () => {

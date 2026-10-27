@@ -45,6 +45,8 @@ import {
   DIVIDER_WIDTH,
   footerPadding,
   GROUP_HEAD_AHEAD,
+  GUARANTEE_GAP,
+  GUARANTEE_PADDING,
   HAIRLINE,
   HEADER_GAP,
   INK,
@@ -65,7 +67,12 @@ import {
   TOTALS_PADDING,
   TOTALS_WIDTH,
 } from './documentTheme';
-import type { DocumentGroup, DocumentLine, DocumentModel } from './documentModel';
+import type {
+  DocumentGroup,
+  DocumentLine,
+  DocumentModel,
+  DocumentSecurityDeposit,
+} from './documentModel';
 /** * The rendered document — ONE template for both the comprobante and the cotización, so a client can * never receive two pieces of paper that look like they came from different companies. * * **Coverage-excluded, like `leafletMap`.** react-pdf's primitives are not DOM elements and render * through its own layout engine, which jsdom cannot drive, so a test here could only assert that our * own mock was called. Everything that DECIDES anything — what the groups are, what the balance is, * which conditions print, when the button appears, what the file is called — lives in * `documentModel.ts` and `downloadDocument.tsx`, which are pure and fully tested. What this file * holds is the LOOK, and the way to check a look is to render it: `pnpm doc:preview` writes a PDF * from fixture data. * * **It wears the app's brand, not a generic invoice's** (redesigned 2026-08-06 after the first draft * shipped entirely monochrome). react-pdf has no CSS gradients — but it does ship SVG primitives * including `LinearGradient`, which is how the cream→blossom rules, the table header and the balance * chip are drawn for real, with no PNG strips to maintain. The same `LinearGradient` trick is what * makes the brand mark possible: it is the app's own `LogoMark` geometry (`logoMarkPaths.ts`), drawn * through react-pdf's `Path`, so the logo on a client's document cannot drift from the logo in the app. * * **Every label says what it labels** (2026-08-25, after the owner read a generated one beside the * hand-made template it replaced). The rules that came out of that pass, and that new blocks should * follow: *
   - *A bare value is not a fact.* A phone number under a business name reads as a mystery number *
     until it says `Tel.`; a `Contacto` inside a card that never named the client could belong to *
@@ -380,6 +387,64 @@ const styles = StyleSheet.create({
   },
   balanceLabel: { fontFamily: 'Helvetica-Bold', fontSize: 9.5, lineHeight: 1, color: CHARCOAL },
   balanceValue: { fontFamily: 'Helvetica-Bold', fontSize: 12, lineHeight: 1, color: CHARCOAL },
+  // ── Security deposit ("garantía") ─────────────────────────────────────────────────────────────
+  // The money column: the totals panel (with a still-a-deposit line under its saldo chip — see
+  // `GuaranteeLine`), then a settlement with charges as its own panel (`SettlementPanel`). All of it
+  // shares the summary's `wrap={false}`, so the deposit can never be separated from the totals.
+  summaryMoney: { width: TOTALS_WIDTH, gap: GUARANTEE_GAP },
+  // No vertical padding on its row, unlike `totalLine`: the chip above is already a hard stop, and
+  // every point here comes out of the ordinary order's one-page budget (#15) — `doc:preview:free`
+  // with a deposit fit with ~1pt of slack WITH that padding; dropping it buys back ~6pt.
+  guaranteeLine: { marginTop: GUARANTEE_GAP },
+  guaranteeLineRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  guarantee: {
+    backgroundColor: TINT,
+    borderRadius: 10,
+    paddingVertical: GUARANTEE_PADDING,
+    paddingHorizontal: TOTALS_PADDING,
+  },
+  // The label side GROWS and wraps (a long product name, a long reason); the figure never shrinks,
+  // so every amount stays on the panel's right edge.
+  guaranteeLabelBox: { flex: 1, paddingRight: 12 },
+  guaranteeLabel: { fontSize: 9, lineHeight: 1.35, color: CHARCOAL },
+  guaranteeValue: { flexShrink: 0, fontSize: 9, lineHeight: 1.35, color: INK },
+  guaranteeStrong: {
+    flexShrink: 0,
+    fontFamily: 'Helvetica-Bold',
+    fontSize: 9.5,
+    lineHeight: 1.35,
+    color: CHARCOAL,
+  },
+  // A sub-total inside the panel: a hairline, not the charcoal rule the order's TOTAL has — the
+  // damages are a summary within a summary, and must not compete with the TOTAL above.
+  guaranteeSum: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginTop: 4,
+    paddingTop: 5,
+    paddingBottom: 3,
+    borderTopWidth: 1,
+    borderTopColor: HAIRLINE,
+  },
+  // What the client must still pay for the damage — weight, not the gradient (decision #17: the
+  // gradient marks the frame and the ORDER's saldo; a new element does not get it).
+  guaranteeDue: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginTop: 4,
+    paddingTop: 6,
+    paddingBottom: 3,
+    borderTopWidth: 1.2,
+    borderTopColor: CHARCOAL,
+  },
+  guaranteeDueText: {
+    fontFamily: 'Helvetica-Bold',
+    fontSize: 10,
+    lineHeight: 1.3,
+    color: CHARCOAL,
+  },
   // ── Deposit details (inside the summary's left column) + page furniture ─────────────────────
   banks: { gap: BANK_ROW_GAP },
   bank: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
@@ -483,6 +548,22 @@ export interface DocumentCopy {
   total: string;
   deposit: string;
   balance: string;
+  /** The security deposit ("garantía") — never inside the total; see `DocumentSecurityDeposit`. */
+  guaranteeHeld: string;
+  guaranteeHeldNote: string;
+  guaranteeRefunded: string;
+  guaranteeRefundedNote: string;
+  settlementTitle: string;
+  settlementRetention: string;
+  /** FUNCTIONS where a value is interpolated, for the same reason as `page`: the template never
+   *  assembles a sentence out of fragments. */
+  settlementReplacement: (product: string) => string;
+  settlementReplacementDetail: (quantity: number, unitAmount: string) => string;
+  settlementClaimsTotal: string;
+  settlementApplied: string;
+  settlementBalanceDue: string;
+  settlementRefund: string;
+  settlementRefundNote: (amount: string) => string;
   conditions: string;
   banks: string;
   /** A FUNCTION, not a template: the numbers only exist inside react-pdf's per-page `render`, and
@@ -593,6 +674,150 @@ const Fact: React.FC<{ label: string; value: string; hint?: string }> = ({ label
     <Text style={styles.factValue}>{value}</Text>
     {hint !== undefined && <Text style={styles.factHint}>{hint}</Text>}
   </View>);
+/** One row of the deposit panel: a label that wraps (with optional caption lines under it) and a
+ *  figure pinned to the right edge. */
+const GuaranteeRow: React.FC<{
+  label: string;
+  value: string;
+  notes?: (string | undefined)[];
+  strong?: boolean;
+}> = ({ label, value, notes = [], strong = false }) => (
+  <View style={styles.totalLine}>
+    <View style={styles.guaranteeLabelBox}>
+      <Text style={strong ? styles.guaranteeStrong : styles.guaranteeLabel}>{label}</Text>
+      {notes
+        .filter((note): note is string => note !== undefined && note !== '')
+        .map((note, index) => (
+          <Text key={index} style={styles.totalNote}>
+            {note}
+          </Text>
+        ))}
+    </View>
+    <Text style={strong ? styles.guaranteeStrong : styles.guaranteeValue}>{value}</Text>
+  </View>);
+type DepositOf<S extends DocumentSecurityDeposit['status']> = Extract<
+  DocumentSecurityDeposit,
+  { status: S }
+>;
+/**
+ * A security deposit that is still a DEPOSIT — `held` (to collect, refundable) or `refunded` (the
+ * happy path). One line under the saldo chip, inside the totals panel, with its caption stating in
+ * words that it is apart from the total.
+ *
+ * Inside the panel rather than a panel of its own, and that was MEASURED, not preferred (2026-10-27):
+ * a separate panel made the summary ~47pt taller (gap + its own padding + a caption wrapping beside
+ * the figure), while `doc:preview:free` — the ordinary two-bank order — had ~19pt to spare, so
+ * every order with a deposit went to two pages (#15). As a line under the chip it adds ~30pt to the
+ * totals column, most of which the taller conditions+banks column already absorbs: the free fixture
+ * with a deposit still ends on page one. It still reads as outside the arithmetic — the chip is
+ * where the order's sums END, and the line says "(reembolsable)" / "aparte del total" itself.
+ * ⚠️ That budget is now nearly spent; check `pnpm doc:preview:free -- --deposit=held` after any
+ * change to the summary.
+ */
+const GuaranteeLine: React.FC<{
+  deposit: DepositOf<'held'> | DepositOf<'refunded'>;
+  copy: DocumentCopy;
+  money: (amount: number) => string;
+}> = ({ deposit, copy, money }) => {
+  const held = deposit.status === 'held';
+  return (
+    <View style={styles.guaranteeLine}>
+      <View style={styles.guaranteeLineRow}>
+        <Text style={[styles.guaranteeLabel, styles.guaranteeLabelBox]}>
+          {held ? copy.guaranteeHeld : copy.guaranteeRefunded}
+        </Text>
+        <Text style={styles.guaranteeStrong}>
+          {money(held ? deposit.amount : deposit.refund)}
+        </Text>
+      </View>
+      {/* Full width, under both the label and the figure — beside the figure it wrapped to a
+          second line, which was most of what the old separate panel cost. */}
+      <Text style={styles.totalNote}>
+        {held ? copy.guaranteeHeldNote : copy.guaranteeRefundedNote}
+      </Text>
+    </View>
+  );
+};
+/**
+ * The deposit SETTLEMENT once something was claimed — the one case where the deposit stops being a
+ * deposit (owner, 2026-10-27). The charges come first, as COSTS, then the arithmetic that settles
+ * them; every figure is the API's own, selected by `documentModel` and never re-derived here.
+ *
+ * Its OWN panel under the totals, because it is a second statement rather than a qualifier of the
+ * first: a list of charges with its own total and its own amount owed. It is tall, so an order that
+ * carries one may well take a second page — correct rather than broken, since the summary's
+ * `wrap={false}` keeps it with the totals (#20).
+ */
+const SettlementPanel: React.FC<{
+  deposit: DepositOf<'settled'>;
+  copy: DocumentCopy;
+  money: (amount: number) => string;
+}> = ({ deposit, copy, money }) => {
+  // A deposit of zero (replacement values without a deposit) has nothing to cover or return, so the
+  // two deposit lines would only print "Q0.00" twice; the charges and what is owed say it all.
+  const hadDeposit = deposit.amount > 0;
+  return (
+    <View style={styles.guarantee}>
+      <Text style={styles.blockTitle}>{copy.settlementTitle.toUpperCase()}</Text>
+      {deposit.claims.map((claim, index) =>
+        claim.kind === 'retention' ? (
+          <GuaranteeRow
+            key={index}
+            label={copy.settlementRetention}
+            value={money(claim.amount)}
+            notes={[claim.reason]}
+          />
+        ) : (
+          <GuaranteeRow
+            key={index}
+            label={copy.settlementReplacement(claim.description)}
+            value={money(claim.amount)}
+            notes={[
+              copy.settlementReplacementDetail(claim.quantity, money(claim.unitAmount)),
+              claim.note,
+            ]}
+          />
+        ),
+      )}
+      {/* With no deposit to apply, the total of the charges IS what is owed — printing both would
+          state the same figure twice in a row. Compared, never assumed: a server that ever priced
+          them differently gets both lines. */}
+      {(hadDeposit || deposit.balanceDue !== deposit.claimsTotal) && (
+        <View style={styles.guaranteeSum}>
+          <Text style={styles.guaranteeLabel}>{copy.settlementClaimsTotal}</Text>
+          <Text style={styles.guaranteeStrong}>{money(deposit.claimsTotal)}</Text>
+        </View>
+      )}
+      {hadDeposit && (
+        <GuaranteeRow
+          label={copy.settlementApplied}
+          value={`${MINUS}${money(deposit.applied)}`}
+        />
+      )}
+      {deposit.balanceDue > 0 && (
+        <View style={styles.guaranteeDue}>
+          <Text style={[styles.guaranteeDueText, styles.guaranteeLabelBox]}>
+            {copy.settlementBalanceDue}
+          </Text>
+          <Text style={[styles.guaranteeDueText, { flexShrink: 0 }]}>
+            {money(deposit.balanceDue)}
+          </Text>
+        </View>
+      )}
+      {/* What came back of the deposit — printed even at Q0.00 once something was claimed: the
+          client handed money over, and "nothing came back" is an answer they are owed in writing. */}
+      {hadDeposit && (
+        <View style={styles.guaranteeSum}>
+          <View style={styles.guaranteeLabelBox}>
+            <Text style={styles.guaranteeLabel}>{copy.settlementRefund}</Text>
+            <Text style={styles.totalNote}>{copy.settlementRefundNote(money(deposit.amount))}</Text>
+          </View>
+          <Text style={styles.guaranteeValue}>{money(deposit.refund)}</Text>
+        </View>
+      )}
+    </View>
+  );
+};
 const OrderDocument: React.FC<OrderDocumentProps> = ({ model, copy, money, date, dateTime }) => {
   const reference = documentReference(model);
   const groupTitle = (group: DocumentGroup): string =>
@@ -864,51 +1089,59 @@ const OrderDocument: React.FC<OrderDocumentProps> = ({ model, copy, money, date,
               </View>
             )}
           </View>
-          <View style={styles.totals}>
-            {model.totals.groups.map((group) => (
-              <View key={group.kind} style={styles.totalLine}>
-                <Text style={styles.totalLabel}>
-                  {copy.subtotal} {group.kind === 'rental' ? copy.groupRental : copy.groupSale}
-                </Text>
-                <Text style={styles.totalValue}>{money(group.subtotal)}</Text>
-              </View>
-            ))}
-            {model.totals.delivery !== undefined && (
-              <View style={styles.totalLine}>
-                <View>
-                  <Text style={styles.totalLabel}>{copy.deliveryFee}</Text>
-                  <Text style={styles.totalNote}>{deliveryNote}</Text>
+          <View style={styles.summaryMoney}>
+            <View style={styles.totals}>
+              {model.totals.groups.map((group) => (
+                <View key={group.kind} style={styles.totalLine}>
+                  <Text style={styles.totalLabel}>
+                    {copy.subtotal} {group.kind === 'rental' ? copy.groupRental : copy.groupSale}
+                  </Text>
+                  <Text style={styles.totalValue}>{money(group.subtotal)}</Text>
                 </View>
-                {/* Zero is not blank: "Gratis" is something the business is telling the client. */}
-                <Text style={styles.totalValue}>
-                  {model.totals.delivery === 0 ? copy.free : money(model.totals.delivery)}
-                </Text>
+              ))}
+              {model.totals.delivery !== undefined && (
+                <View style={styles.totalLine}>
+                  <View>
+                    <Text style={styles.totalLabel}>{copy.deliveryFee}</Text>
+                    <Text style={styles.totalNote}>{deliveryNote}</Text>
+                  </View>
+                  {/* Zero is not blank: "Gratis" is something the business is telling the client. */}
+                  <Text style={styles.totalValue}>
+                    {model.totals.delivery === 0 ? copy.free : money(model.totals.delivery)}
+                  </Text>
+                </View>
+              )}
+              {model.totals.discount !== undefined && (
+                <View style={styles.totalLine}>
+                  <Text style={styles.totalLabel}>{copy.discount}</Text>
+                  <Text style={styles.totalValue}>{MINUS}{money(model.totals.discount)}</Text>
+                </View>
+              )}
+              <View style={styles.grandLine}>
+                <Text style={styles.grandLabel}>{copy.total}</Text>
+                <Text style={styles.grandValue}>{money(model.totals.total)}</Text>
               </View>
-            )}
-            {model.totals.discount !== undefined && (
-              <View style={styles.totalLine}>
-                <Text style={styles.totalLabel}>{copy.discount}</Text>
-                <Text style={styles.totalValue}>{MINUS}{money(model.totals.discount)}</Text>
+              {model.totals.deposit !== undefined && (
+                <View style={styles.totalLine}>
+                  <Text style={styles.totalLabel}>{copy.deposit}</Text>
+                  <Text style={styles.totalValue}>{MINUS}{money(model.totals.deposit)}</Text>
+                </View>
+              )}
+              {/* The number the client acts on, so it gets the brand and the weight. */}
+              <View style={styles.balanceChip}>
+                <BrandFill id="balance" width={TOTALS_INNER_WIDTH} height={30} radius={8} />
+                <View style={styles.balanceRow}>
+                  <Text style={styles.balanceLabel}>{copy.balance}</Text>
+                  <Text style={styles.balanceValue}>{money(model.totals.balance)}</Text>
+                </View>
               </View>
-            )}
-            <View style={styles.grandLine}>
-              <Text style={styles.grandLabel}>{copy.total}</Text>
-              <Text style={styles.grandValue}>{money(model.totals.total)}</Text>
+              {model.securityDeposit !== undefined && model.securityDeposit.status !== 'settled' && (
+                <GuaranteeLine deposit={model.securityDeposit} copy={copy} money={money} />
+              )}
             </View>
-            {model.totals.deposit !== undefined && (
-              <View style={styles.totalLine}>
-                <Text style={styles.totalLabel}>{copy.deposit}</Text>
-                <Text style={styles.totalValue}>{MINUS}{money(model.totals.deposit)}</Text>
-              </View>
+            {model.securityDeposit?.status === 'settled' && (
+              <SettlementPanel deposit={model.securityDeposit} copy={copy} money={money} />
             )}
-            {/* The number the client acts on, so it gets the brand and the weight. */}
-            <View style={styles.balanceChip}>
-              <BrandFill id="balance" width={TOTALS_INNER_WIDTH} height={30} radius={8} />
-              <View style={styles.balanceRow}>
-                <Text style={styles.balanceLabel}>{copy.balance}</Text>
-                <Text style={styles.balanceValue}>{money(model.totals.balance)}</Text>
-              </View>
-            </View>
           </View>
         </View>
         <View style={styles.notes} fixed>

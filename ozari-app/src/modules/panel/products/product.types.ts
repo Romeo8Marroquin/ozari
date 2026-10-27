@@ -56,6 +56,9 @@ export interface Product {
   rentTimeUnit?: string;
   /** Its lookup id (Alquiler only) — present alongside `rentTimeUnit`. */
   rentTimeUnitId?: number;
+  /** Refundable security deposit per unit ("garantía", Alquiler only) — a public commercial
+   *  condition like the price, so every role receives it. Never part of a price. */
+  securityDeposit?: number;
   images: ProductImage[];
   details: ProductDetail[];
   /** Availability signal (`available > 0`) — Admin only (never sent to Client). */
@@ -91,6 +94,30 @@ export interface ProductListResponse {
 /** `GET /products/:id` — the same role-projected shape as a list item, single row. */
 export interface ProductDetailResponse {
   product: Product;
+}
+
+/**
+ * One tile of the catalog ARRANGEMENT (`GET|PUT /products/display-order`, Admin-only) — mirrors the
+ * backend `ProductArrangementItemModel`. Deliberately tiny: the arrange page shows a photo, a name
+ * and a category, nothing priced or stocked.
+ */
+export interface ProductArrangementItem {
+  id: number;
+  name: string;
+  category: string;
+  businessType: string;
+  /** The primary photo (else the first one); absent when the product has no photos. */
+  imageUrl?: string;
+  /**
+   * `false` = never arranged (`display_order` 0): a product created since the last arrangement,
+   * which leads the catalog until the admin places it. Saving places every product.
+   */
+  placed: boolean;
+}
+
+/** `GET /products/display-order` and the `PUT`'s answer — every ACTIVE product, catalog order. */
+export interface ProductArrangementResponse {
+  products: ProductArrangementItem[];
 }
 
 /** A seeded lookup row (`GET /products/catalog`) — just enough to render a select option. */
