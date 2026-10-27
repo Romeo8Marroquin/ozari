@@ -28,11 +28,13 @@ import useMorphOnChange from '../useMorphOnChange';
 import OrderDocumentButton from '../documents/OrderDocumentButton';
 import ProductsStatus from '../products/ProductsStatus';
 import SectionReveal from '../products/SectionReveal';
-import { formatTime } from './orderDayGroups';
+import { formatMoment } from './orderDayGroups';
 import OrderAdvanceModal from './OrderAdvanceModal';
 import OrderDeleteModal from './OrderDeleteModal';
 import OrderPaymentModal from './OrderPaymentModal';
+import OrderDepositCard from './OrderDepositCard';
 import OrderPaymentUndoModal from './OrderPaymentUndoModal';
+import OrderSettlementUndoModal from './OrderSettlementUndoModal';
 import OrderStatusModal from './OrderStatusModal';
 import { statusTone } from './statusTone';
 import { useOrder } from './useOrder';
@@ -53,17 +55,6 @@ const MONEY = new Intl.NumberFormat('es-GT', {
 
 /** `Q 1,250.00` — the currency is the order's own, so the symbol travels with every amount. */
 const money = (symbol: string, value: number): string => `${symbol} ${MONEY.format(value)}`;
-
-/** `viernes 1 de agosto, 2:00 p. m.` — the detail has room to spell a moment out in full. */
-const formatMoment = (iso: string): string => {
-  const date = new Date(iso);
-  const day = new Intl.DateTimeFormat('es-GT', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  }).format(date);
-  return `${day.charAt(0).toUpperCase()}${day.slice(1)}, ${formatTime(iso)}`;
-};
 
 /** One labelled fact. `value` absent ⇒ the row isn't rendered at all (never an empty label).
  *  Carries its label as a FLIP identity so a fact that appears when the order advances (the
@@ -182,6 +173,7 @@ const OrderDetailPage: React.FC = () => {
   const [advancing, setAdvancing] = useState<OrderAction | undefined>(undefined);
   const [paying, setPaying] = useState(false);
   const [undoingPayment, setUndoingPayment] = useState(false);
+  const [undoingSettlement, setUndoingSettlement] = useState(false);
   const [changingStatus, setChangingStatus] = useState(false);
   const [deleting, setDeleting] = useState(false);
   /** The evidence set being viewed full-size — ONE step's photos, never the whole order's. */
@@ -651,6 +643,14 @@ const OrderDetailPage: React.FC = () => {
                         })}
                         {' · '}
                         {t(`${KEY}.lines.${line.isRental ? 'rental' : 'sale'}`)}
+                        {/* What the deposit settlement recorded as lost/broken on THIS line —
+                            stated where the line is, so the count is never only in the breakdown. */}
+                        {line.damagedQuantity > 0 && (
+                          <span className="text-red-600">
+                            {' · '}
+                            {t(`${KEY}.lines.damaged`, { count: line.damagedQuantity })}
+                          </span>
+                        )}
                       </p>
                     </div>
                     <span className="shrink-0 text-sm font-semibold tabular-nums text-charcoal">
@@ -728,6 +728,19 @@ const OrderDetailPage: React.FC = () => {
               </div>
             )}
           </Section>
+
+          {/* GARANTÍA — only for an order that can carry a deposit or a damage (the API omits the
+              block otherwise). Absent from the skeleton for the evidence card's reason: a
+              placeholder would promise a section most orders never have. */}
+          {order?.securityDeposit && (
+            <OrderDepositCard
+              order={order}
+              deposit={order.securityDeposit}
+              isAdmin={isAdmin}
+              onSettle={() => panelNavigate(`/panel/pedidos/${order.id}/garantia`)}
+              onUndo={() => setUndoingSettlement(true)}
+            />
+          )}
 
           {/* EVIDENCE — grouped by the step it documents. Absent from the skeleton on purpose: a
               placeholder for photos that may not exist would promise something. It joins the column
@@ -875,6 +888,11 @@ const OrderDetailPage: React.FC = () => {
           <OrderPaymentUndoModal
             order={undoingPayment ? order : undefined}
             onClose={() => setUndoingPayment(false)}
+          />
+          {/* The settlement's way back — a confirm, because it clears a record (never money). */}
+          <OrderSettlementUndoModal
+            order={undoingSettlement ? order : undefined}
+            onClose={() => setUndoingSettlement(false)}
           />
           <OrderStatusModal
             order={changingStatus ? order : undefined}

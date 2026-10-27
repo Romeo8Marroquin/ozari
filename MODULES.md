@@ -66,6 +66,16 @@ public reference data the edit form prefills from).
   hard-deletes. Its `product_details`/`product_images` rows hard-delete EITHER WAY (their `is_active`
   columns were dropped — migration `20260715000000_products_drop_gallery_tombstones`) and the
   gallery's R2 objects are removed post-commit in ONE batched call (`storage.deleteObjects`).
+- **`securityDeposit`** (refundable deposit per unit, owner 2026-10-27): optional, Alquiler-only,
+  `≤ replacementPrice` when both set (`securityDepositViolation`, shared by both validators). In the
+  BASE projection (every role — a commercial condition like the price). Create and update write the
+  scalars through ONE mapping, `productScalarData`.
+- **Catalog order:** `GET|PUT /products/display-order` (Admin) — the full ordered list of ACTIVE ids,
+  renumbered 1..N in one transaction (only changed rows written; a list that isn't exactly the active
+  catalog = `409`). `display_order` 0 = never placed → leads the grid; all zeros = the old
+  newest-first order (no backfill). `sort=catalog` is the list default.
+- **Cross-environment copy:** `infrastructure/scripts/sync-products.ps1` (MERGE, dry run first —
+  `EPIC-1-INVENTORY.md` §5).
 
 ### Frontend
 
@@ -80,6 +90,23 @@ public reference data the edit form prefills from).
 - The gallery supports **pointer drag-to-reorder** (`useGalleryDrag` + the pure `galleryReorder.ts`
   geometry — the card itself moves; `<img draggable={false}>` on purpose, the native phantom-image
   drag used to re-add the photo as a duplicate).
+- **Catalog order** is `/panel/productos/ordenar` (`ProductArrangePage`, Admin-only route guard,
+  entered from the list header's "Organizar" button — arrange, not the retired purchase CTA). One
+  tile grid over `GET /products/display-order`, reordered three ways: pointer drag (the SAME
+  `useGalleryDrag`, generalized to any `{ id }`), the tile's ‹ › buttons, and the keyboard on the
+  focused tile (arrows / Home / End, announced through an `aria-live` region). Moves are a local
+  draft (`productArrangement.ts`); "Guardar orden" sends the FULL ordered id list in ONE
+  `PUT /products/display-order` (declarative full-state — no per-move endpoint). Never-placed
+  products lead the grid with a "Nuevo" badge, and their presence alone enables save. A **409** (the
+  active set changed underneath) swaps "Descartar cambios" for "Recargar catálogo"; a background
+  refetch reconciles the draft (vanished ids drop, arrivals are prepended).
+- The list's default sort IS that order: no `orden` param = "Destacados" (API sort `catalog`);
+  "Más recientes" is the explicit `orden=recientes`.
+- **Security deposit** (`securityDeposit`, per unit): an optional `decimalInput` beside "Precio de
+  reposición", Alquiler-only (switching to Venta clears it, like the rent fields). The Zod mirror
+  holds the API's rules — money in [0, 1,000,000], forbidden for Venta, ≤ the replacement price
+  (`deps` re-checks it when the replacement changes). The edit form prefills it and sends it back
+  (full-state save); the detail page shows it per unit.
 - Edit deliberately has **no sessionStorage draft** (server state is the source of truth; a stale
   draft would resurrect old values).
 - Delete is `ProductDeleteModal` (confirm dialog on the detail page; success drops the detail cache,
@@ -87,7 +114,7 @@ public reference data the edit form prefills from).
 
 ---
 
-## 2. Orders — read, create, edit, payment (Admin) — `EPIC-2-ORDERS.md`
+## 2. Orders — read, create, edit, payment, deposit settlement (Admin) — `EPIC-2-ORDERS.md`
 
 ### Schema
 
@@ -238,6 +265,43 @@ nothing: a method must be observed, not guessed.
   refund.** Money travelling back to a client is a different event with its own amount, date and
   method, and would be its own door. Same rule for any confirm dialog here: describe the operation,
   not the user's supposed error.
+
+### Security deposit + damage settlement — backend (owner 2026-10-27, EPIC-2-ORDERS §12)
+
+- **Its own door like payment, never a pipeline step:** `PUT /orders/:id/settlement` (declarative —
+  the settlement's FINAL state; re-sending corrects it without re-stamping `depositSettledAt`) and
+  `DELETE /orders/:id/settlement` (hard delete of the record; moves no money). Admin-only, in
+  `orders/settlement/`. Recordable once delivered and while not cancelled, only when a rental line
+  carries a deposit > 0 or a replacement value (`isSettleableLine`) — else `409`.
+- Lines snapshot `securityDeposit` + `replacementPrice` per unit (re-derived on every save like the
+  prices, through `orderPricingProductSelect` + `pricedLineData` — ONE shape for create and edit) and
+  carry `damagedQuantity`/`damageNote`, written ONLY by the settlement.
+- **All money is `orders.service.ts`** (`computeDepositTotal`, `computeSettlementMoney`,
+  `projectSecurityDeposit`): applied = min(deposit, retained + damages), refund = the rest, balance =
+  what the deposit can't cover. Retained ≤ deposit (400). No stock moves.
+- An order EDIT that would contradict a recorded settlement is a `409 settlementConflict`
+  (`assertSettlementSurvivesEdit`); undo the settlement first.
+
+### Security deposit + damage settlement — frontend
+
+- **Order form:** the money summary adds a "Depósito en garantía" line (Σ product deposit × qty,
+  rental lines only — `estimateDepositTotal`) BELOW the total and labelled as not part of it; the
+  line exists only when > 0 (always-mounted `grid-rows` collapse). An edit's `409` settlement
+  conflict lands in the inline banner (the existing `toFormError` route).
+- **Order detail:** `OrderDepositCard` ("Garantía", only when `order.securityDeposit`) renders ONLY
+  the API's numbers in three states — not yet settleable / settleable ("Liquidar garantía") /
+  settled (breakdown + "Editar liquidación" + "Deshacer liquidación"). Lines show their damaged
+  quantity. Undo is `OrderSettlementUndoModal` (+ `useUndoOrderSettlement`, `DELETE
+  /orders/:id/settlement`): it clears the record and moves no money — the copy says so.
+- **Settlement editor is a PAGE**, `/panel/pedidos/:id/garantia` (`OrderSettlementPage` →
+  `OrderSettlementForm`, Admin route guard, in `PanelPath`): retained amount + reason (required iff
+  retained > 0), and per damageable line (rental + replacement value — `damageableLines`) damaged
+  units 0..qty + a note. `SchemaSettleOrder.ts` mirrors the API validator plus the two per-order
+  ceilings; the body is the settlement's FINAL state (`PUT /orders/:id/settlement`, `useSettleOrder`)
+  and an edit prefills the recorded one. The outcome card is a live ESTIMATE of the API formula,
+  labelled as such. Blank inputs mean 0.
+- **Agenda/history tickets** carry an amber "Garantía por liquidar" chip on
+  `depositSettlementPending`.
 
 ---
 

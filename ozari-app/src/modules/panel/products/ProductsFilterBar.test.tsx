@@ -199,7 +199,15 @@ describe('ProductsFilterBar', () => {
     fireEvent.change(sort, { target: { value: 'nombre-za' } });
     expect(onChange).toHaveBeenLastCalledWith({ orden: 'nombre-za' });
 
-    // The placeholder IS the default ("Más recientes") — picking it clears the param.
+    // "Más recientes" is an explicit option now…
+    fireEvent.change(sort, { target: { value: 'recientes' } });
+    expect(onChange).toHaveBeenLastCalledWith({ orden: 'recientes' });
+
+    // …and the placeholder IS the default ("Destacados", the arranged catalog) — picking it
+    // clears the param.
+    expect(
+      screen.getByRole('option', { name: `${K}.sortOptions.destacados`, hidden: true }),
+    ).toBeInTheDocument();
     rerender(<ProductsFilterBar search={{ orden: 'precio-mayor' }} onChange={onChange} />);
     expect(screen.getByLabelText<HTMLSelectElement>(`${K}.sort`).value).toBe('precio-mayor');
     fireEvent.change(screen.getByLabelText(`${K}.sort`), { target: { value: '' } });

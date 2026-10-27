@@ -129,6 +129,47 @@ describe('createProductSchema', () => {
       expect(createProductSchema.safeParse({ ...validRent(), replacementPrice: '' }).success).toBe(true);
     });
 
+    describe('the security deposit (mirrors the backend deposit rules)', () => {
+      it('is optional money within [0, 1,000,000] on Alquiler', () => {
+        expect(createProductSchema.safeParse({ ...validRent(), securityDeposit: '' }).success).toBe(true);
+        expect(createProductSchema.safeParse({ ...validRent(), securityDeposit: undefined }).success).toBe(true);
+        expect(createProductSchema.safeParse({ ...validRent(), securityDeposit: '0' }).success).toBe(true);
+        expect(createProductSchema.safeParse({ ...validRent(), securityDeposit: '150.5' }).success).toBe(true);
+        expect(errorPaths({ ...validRent(), securityDeposit: 'abc' })).toContain('securityDeposit');
+        expect(errorPaths({ ...validRent(), securityDeposit: '-1' })).toContain('securityDeposit');
+        expect(
+          errorPaths({ ...validRent(), replacementPrice: '', securityDeposit: '1000001' }),
+        ).toContain('securityDeposit');
+      });
+
+      it('may not exceed the replacement price (equal is fine; compared on cents)', () => {
+        expect(errorPaths({ ...validRent(), securityDeposit: '900.01' })).toContain('securityDeposit');
+        expect(createProductSchema.safeParse({ ...validRent(), securityDeposit: '900' }).success).toBe(true);
+        // The API truncates to cents before comparing, so a third decimal never tips it over.
+        expect(createProductSchema.safeParse({ ...validRent(), securityDeposit: '900.009' }).success).toBe(
+          true,
+        );
+        // Without a replacement price (empty OR absent) there is no ceiling but the global one.
+        expect(
+          createProductSchema.safeParse({ ...validRent(), replacementPrice: '', securityDeposit: '5000' }).success,
+        ).toBe(true);
+        expect(
+          createProductSchema.safeParse({ ...validRent(), replacementPrice: undefined, securityDeposit: '5000' })
+            .success,
+        ).toBe(true);
+        // An INVALID replacement reports on its own field only — no bogus cross-field issue.
+        const paths = errorPaths({ ...validRent(), replacementPrice: 'abc', securityDeposit: '5' });
+        expect(paths).toContain('replacementPrice');
+        expect(paths).not.toContain('securityDeposit');
+      });
+
+      it('is forbidden on Venta (nothing comes back from a sale)', () => {
+        expect(errorPaths({ ...validSell(), securityDeposit: '50' })).toContain('securityDeposit');
+        expect(createProductSchema.safeParse({ ...validSell(), securityDeposit: '' }).success).toBe(true);
+        expect(createProductSchema.safeParse({ ...validSell(), securityDeposit: undefined }).success).toBe(true);
+      });
+    });
+
     it('treats fully ABSENT price fields like empty ones (optional strings)', () => {
       expect(errorPaths({ ...validRent(), rentPrice: undefined })).toContain('rentPrice');
       expect(errorPaths({ ...validSell(), sellPrice: undefined })).toContain('sellPrice');
@@ -242,6 +283,16 @@ describe('toCreateProductBody', () => {
     const nullUnit = toCreateProductBody({ ...validRent(), rentTimeUnitId: null as never });
     expect(nullUnit.rentTimeUnitId).toBeUndefined();
   });
+
+  it('sends the security deposit (truncated to cents) for Alquiler only, omitted when empty', () => {
+    expect(toCreateProductBody({ ...validRent(), securityDeposit: '150.559' }).securityDeposit).toBe(150.55);
+    expect(toCreateProductBody({ ...validRent(), securityDeposit: '' })).not.toHaveProperty('securityDeposit');
+    expect(toCreateProductBody({ ...validRent(), securityDeposit: undefined })).not.toHaveProperty(
+      'securityDeposit',
+    );
+    expect(toCreateProductBody({ ...validSell(), securityDeposit: '50' })).not.toHaveProperty('securityDeposit');
+    expect(toUpdateProductBody({ ...validRent(), securityDeposit: '150' }).securityDeposit).toBe(150);
+  });
 });
 
 describe('toUpdateProductBody', () => {
@@ -300,9 +351,14 @@ describe('productToFormValues', () => {
       rentPrice: '75',
       rentTimeUnitId: 2,
       replacementPrice: '900',
+      securityDeposit: '',
       sellPrice: '',
       details: [{ id: 12, detailTypeId: 1, detail: 'Blanco' }],
     });
+  });
+
+  it('prefills the security deposit so a full-state edit sends it back (never erases it)', () => {
+    expect(productToFormValues({ ...adminRentProduct, securityDeposit: 150 }).securityDeposit).toBe('150');
   });
 
   it('prefills a Venta product — the recorded quantity IS `available` (no fleet total)', () => {

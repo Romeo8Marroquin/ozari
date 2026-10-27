@@ -12,12 +12,15 @@ export const PRODUCT_SEARCH_MAX_LENGTH = 100;
 
 /**
  * The user-facing (URL) sort values, mapped to the API's `sort` in {@link toProductListParams}.
- * The default — newest first — is represented by the param's ABSENCE, like every other filter.
- * There is deliberately no availability filter (owner decision, 2026-07-15): "available" means
- * different things per role (an admin NEEDS to see unavailable rows; a rented-out Alquiler may
- * free up tomorrow), so ordering replaced it.
+ * The default — the CATALOG order the admin arranged (`/panel/productos/ordenar`), "Destacados" —
+ * is represented by the param's ABSENCE, like every other filter, and is also the API's default, so
+ * absent here means absent there. "Más recientes" (the default before the arrangement existed) is
+ * now an explicit choice. There is deliberately no availability filter (owner decision,
+ * 2026-07-15): "available" means different things per role (an admin NEEDS to see unavailable
+ * rows; a rented-out Alquiler may free up tomorrow), so ordering replaced it.
  */
 export const PRODUCT_LIST_ORDERS = [
+  'recientes',
   'nombre-az',
   'nombre-za',
   'precio-menor',
@@ -28,6 +31,7 @@ export type ProductListOrder = (typeof PRODUCT_LIST_ORDERS)[number];
 
 /** URL order value → the API's `sort` query param. */
 const ORDER_TO_SORT: Record<ProductListOrder, string> = {
+  recientes: 'recent',
   'nombre-az': 'nameAsc',
   'nombre-za': 'nameDesc',
   'precio-menor': 'priceAsc',
@@ -41,7 +45,7 @@ export interface ProductListSearch {
   categoria?: number;
   /** Business type id (Alquiler/Venta). */
   tipo?: number;
-  /** Presentation order; absent = newest first (the default). */
+  /** Presentation order; absent = the admin-arranged catalog order (the default). */
   orden?: ProductListOrder;
 }
 

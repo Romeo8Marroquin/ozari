@@ -55,6 +55,7 @@ import type {
 import { formatDateTime } from './orderDayGroups';
 import {
   billedDaysFromStrings,
+  estimateDepositTotal,
   estimateLineSubtotal,
   estimateOrderTotal,
   formatMoney,
@@ -847,6 +848,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   );
   const deliveryFee = parseMoney(deliveryAmountRaw) ?? 0;
   const estimate = Math.round((linesSubtotal + deliveryFee) * 100) / 100;
+  // The refundable guarantee the picked rentals carry — collected APART from the order and given
+  // back at pickup, so it is shown beside the total and never added into it.
+  const depositTotal = estimateDepositTotal(
+    lineValues.flatMap((line) =>
+      line.productId != null ? [{ productId: line.productId, quantity: line.quantity }] : [],
+    ),
+    productsById,
+  );
 
   // Saved-data quick-fill: the selected client's contacts/addresses become picker options that fill
   // the (always-editable) snapshot fields. The picker's value is DERIVED from the current text —
@@ -1382,6 +1391,29 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                         <span aria-live="polite" className="text-lg font-bold tabular-nums text-charcoal">
                           {formatMoney(currencySymbol, estimate)}
                         </span>
+                      </div>
+                      {/* The security deposit: its own line UNDER the total, outside it — it is a
+                          refundable guarantee, not a price. Always mounted, collapsed by
+                          `grid-rows` while no picked rental carries one, so picking the first such
+                          product eases the line in rather than shoving the card. */}
+                      <div
+                        aria-hidden={depositTotal <= 0}
+                        // `-mt-2` cancels the column's gap while collapsed; the line brings its own.
+                        className={`-mt-2 grid transition-[grid-template-rows,opacity] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
+                          depositTotal > 0 ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                        }`}
+                      >
+                        <div className="min-h-0 overflow-hidden">
+                          <div className="mt-2 flex flex-wrap items-start justify-between gap-x-4 gap-y-0.5 border-t border-dashed border-charcoal/10 pt-2">
+                            <div className="min-w-0 grow basis-48">
+                              <p className="text-sm text-charcoal/70">{t(`${KEY}.estimate.securityDeposit`)}</p>
+                              <p className="text-xs text-charcoal/45">{t(`${KEY}.estimate.securityDepositNote`)}</p>
+                            </div>
+                            <span className="shrink-0 text-sm font-semibold tabular-nums text-charcoal/80">
+                              {formatMoney(currencySymbol, depositTotal)}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                     <p className="reveal-item text-xs text-charcoal/45">{t(`${KEY}.estimate.note`)}</p>

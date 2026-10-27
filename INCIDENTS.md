@@ -101,9 +101,11 @@ host and the source matches. The free plan includes custom rules and one rate-li
   the frontend host only. ⚠️ **Never turn on "I'm Under Attack" for the whole zone**: the API is
   called by JavaScript, which cannot solve a challenge, so it takes the app down for everyone.
 - **Known gap**: Cloud Run's own `ozari-api-<number>.us-east4.run.app` address is public, so a flood
-  aimed at it bypasses Cloudflare. Such requests are refused cheaply (no browser origin, no API key)
-  and instances stay capped. Closing it means the Worker sending a secret header the API requires —
-  a code change, listed in `ROADMAP.md`.
+  aimed at it bypasses Cloudflare, and a WAF block there achieves nothing. ⚠️ Do not count on the
+  API-key check to refuse it: a script can send the browser headers that check trusts, and it can
+  choose its own `req.ip`. Instances and spend stay capped. If logs show traffic arriving without
+  going through the Worker, treat the IPs in them as unreliable. The fix and its rollout:
+  `AUTH-AND-SECURITY.md` §12.
 
 ### S5 — Data deleted or corrupted
 

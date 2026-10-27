@@ -159,12 +159,10 @@ DEPLOYMENT.md R2 section.)*
   (`DEPLOYMENT.md` §3d "Production publishing").
 - **Employee/role management UI** — deferred until the business grows past a single admin; promotion
   stays a manual DB op for now.
-- **Close the `run.app` side door** — Cloud Run's own address is public, so traffic aimed at it skips
-  Cloudflare (WAF, rate limits, DDoS absorption; `INCIDENTS.md` S4) — and can write any address
-  into `X-Forwarded-For`, which `trust proxy = 2` then believes, so per-IP limits are evadable there
-  (per-account limits in the database are not). Fix: the Worker adds a secret
-  header and the API refuses requests without it (one more registry secret, rotated by
-  `rotate.ps1`). Ingress restrictions cannot do it — a Worker is not a Google load balancer.
+- **Close the `run.app` side door** (medium): Cloud Run's own address skips Cloudflare and lets a
+  caller choose `req.ip`, so the per-IP limits and the WAF can be bypassed there (the per-account
+  limits still hold). The fix is an edge secret the Worker adds and the API requires. The full
+  record (impact, design, rollout order, tests, verification) is in `AUTH-AND-SECURITY.md` §12.
 - **`sslmode=verify-full` in the stored database URLs** — `pg` warns that `sslmode=require` is
   today treated as `verify-full` (certificate checked) but will mean libpq's weaker `require` (no
   check) in its next major. Harmless now; before upgrading `pg`, make `neon.ps1` write

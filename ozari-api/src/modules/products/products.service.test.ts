@@ -6,7 +6,12 @@ import { SEEDED_HOLDING_IDS } from "@/tests/fixtures/lifecycleCatalog.js";
 import { getStorage } from "@helpers/storage.js";
 import {
   applyProductDelete,
+  applyProductDisplayOrder,
   applyProductUpdate,
+  isSqlProductSort,
+  ProductDisplayOrderConflictError,
+  projectArrangementItem,
+  type ArrangementRow,
   buildPaginationMeta,
   buildProductImagesCreate,
   buildProductListWhere,
@@ -36,6 +41,7 @@ const makeProduct = (overrides: Partial<RichProduct> = {}): RichProduct =>
     rentPrice: 75,
     sellPrice: null,
     replacementPrice: 900,
+    securityDeposit: 300,
     quantity: 40,
     isActive: true,
     createdAt: new Date("2026-07-01T00:00:00.000Z"),
@@ -67,6 +73,8 @@ describe("projectProductForRole", () => {
       sellPrice: undefined,
       rentTimeUnit: "Día",
       rentTimeUnitId: 2,
+      // The deposit is a public commercial condition, like the price — unlike `replacementPrice`.
+      securityDeposit: 300,
       images: [{ id: 1, url: "https://cdn.example.com/a.webp", isPrimary: true, sortOrder: 0 }],
       details: [{ id: 12, detail: "Blanco", detailType: "Color", detailTypeId: 1 }],
     });
@@ -123,12 +131,14 @@ describe("projectProductForRole", () => {
         rentPrice: null,
         sellPrice: null,
         replacementPrice: null,
+        securityDeposit: null,
         rentTimeUnit: null,
         rentTimeUnitId: null,
         description: null,
       }),
       RolesEnum.Admin,
     );
+    expect(result.securityDeposit).toBeUndefined();
     expect(result.rentPrice).toBeUndefined();
     expect(result.sellPrice).toBeUndefined();
     expect(result.rentTimeUnit).toBeUndefined();
@@ -262,7 +272,7 @@ const makeQuery = (
   search: undefined,
   categoryId: undefined,
   businessTypeId: undefined,
-  sort: "recent",
+  sort: "catalog",
   includeInactive: false,
   ...overrides,
 });
@@ -355,14 +365,15 @@ describe("parseProductListQuery", () => {
     ).toBeUndefined();
   });
 
-  it("accepts every allowlisted sort for ANY role and clamps anything else to recent", () => {
+  it("accepts every allowlisted sort for ANY role and clamps anything else to catalog", () => {
     expect(parseProductListQuery({ sort: "priceDesc" }, RolesEnum.Client).sort).toBe("priceDesc");
     expect(parseProductListQuery({ sort: "nameAsc" }, RolesEnum.Driver).sort).toBe("nameAsc");
     expect(parseProductListQuery({ sort: "nameDesc" }, RolesEnum.Admin).sort).toBe("nameDesc");
     expect(parseProductListQuery({ sort: "priceAsc" }, RolesEnum.Client).sort).toBe("priceAsc");
-    expect(parseProductListQuery({ sort: "cheapest" }, RolesEnum.Admin).sort).toBe("recent");
-    expect(parseProductListQuery({ sort: 42 }, RolesEnum.Admin).sort).toBe("recent");
-    expect(parseProductListQuery({}, RolesEnum.Admin).sort).toBe("recent");
+    expect(parseProductListQuery({ sort: "recent" }, RolesEnum.Client).sort).toBe("recent");
+    expect(parseProductListQuery({ sort: "cheapest" }, RolesEnum.Admin).sort).toBe("catalog");
+    expect(parseProductListQuery({ sort: 42 }, RolesEnum.Admin).sort).toBe("catalog");
+    expect(parseProductListQuery({}, RolesEnum.Admin).sort).toBe("catalog");
   });
 
   it("honours includeInactive for Admin only, and only the literal 'true'", () => {
@@ -460,6 +471,7 @@ describe("applyProductUpdate", () => {
         rentPrice: null,
         sellPrice: 12.5,
         replacementPrice: null,
+        securityDeposit: null,
         rentTimeUnitId: null,
       },
     });
@@ -627,6 +639,98 @@ describe("applyProductDelete (the no-trash policy)", () => {
     const result = await run(tx);
     expect(result.removedImageKeys).toEqual([]);
     expect(tx.product.delete).toHaveBeenCalled();
+  });
+});
+
+describe("isSqlProductSort", () => {
+  it("routes the catalog arrangement and newest-first to SQL, everything else in memory", () => {
+    expect(isSqlProductSort("catalog")).toBe(true);
+    expect(isSqlProductSort("recent")).toBe(true);
+    expect(isSqlProductSort("nameAsc")).toBe(false);
+    expect(isSqlProductSort("priceDesc")).toBe(false);
+  });
+});
+
+describe("projectArrangementItem", () => {
+  const row = (overrides: Partial<ArrangementRow> = {}): ArrangementRow => ({
+    id: 7,
+    name: "Mesa redonda",
+    displayOrder: 3,
+    category: { name: "Mesas" },
+    businessType: { name: "Alquiler" },
+    productImages: [
+      { url: "https://cdn.test/first.webp", isPrimary: false },
+      { url: "https://cdn.test/primary.webp", isPrimary: true },
+    ],
+    ...overrides,
+  });
+
+  it("shows the FLAGGED primary photo, wherever it sits in the gallery", () => {
+    expect(projectArrangementItem(row())).toEqual({
+      id: 7,
+      name: "Mesa redonda",
+      category: "Mesas",
+      businessType: "Alquiler",
+      imageUrl: "https://cdn.test/primary.webp",
+      placed: true,
+    });
+  });
+
+  it("falls back to the first photo, and omits the url for a photo-less product", () => {
+    expect(
+      projectArrangementItem(
+        row({ productImages: [{ url: "https://cdn.test/only.webp", isPrimary: false }] }),
+      ).imageUrl,
+    ).toBe("https://cdn.test/only.webp");
+    expect(projectArrangementItem(row({ productImages: [] }))).not.toHaveProperty("imageUrl");
+  });
+
+  it("reports display_order 0 as not placed (a new product that leads the grid)", () => {
+    expect(projectArrangementItem(row({ displayOrder: 0 })).placed).toBe(false);
+  });
+});
+
+describe("applyProductDisplayOrder", () => {
+  const makeOrderTx = (current: { id: number; displayOrder: number }[]) => ({
+    product: {
+      findMany: vi.fn().mockResolvedValue(current),
+      update: vi.fn().mockResolvedValue({}),
+    },
+  });
+  const run = (tx: ReturnType<typeof makeOrderTx>, ids: number[]) =>
+    applyProductDisplayOrder(tx as unknown as Parameters<typeof applyProductDisplayOrder>[0], ids);
+
+  it("renumbers 1..N and writes ONLY the rows whose position changed", async () => {
+    const tx = makeOrderTx([
+      { id: 1, displayOrder: 1 },
+      { id: 2, displayOrder: 2 },
+      { id: 3, displayOrder: 0 },
+    ]);
+
+    await run(tx, [1, 3, 2]);
+
+    expect(tx.product.findMany).toHaveBeenCalledWith({
+      where: { isActive: true },
+      select: { id: true, displayOrder: true },
+    });
+    expect(tx.product.update).toHaveBeenCalledTimes(2);
+    expect(tx.product.update).toHaveBeenCalledWith({ where: { id: 3 }, data: { displayOrder: 2 } });
+    expect(tx.product.update).toHaveBeenCalledWith({ where: { id: 2 }, data: { displayOrder: 3 } });
+  });
+
+  it("rejects a list that is missing an active product (one was created meanwhile)", async () => {
+    const tx = makeOrderTx([
+      { id: 1, displayOrder: 0 },
+      { id: 2, displayOrder: 0 },
+    ]);
+    await expect(run(tx, [1])).rejects.toBeInstanceOf(ProductDisplayOrderConflictError);
+    expect(tx.product.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects a list naming a product that is no longer active (deleted meanwhile)", async () => {
+    const tx = makeOrderTx([{ id: 1, displayOrder: 0 }]);
+    await expect(run(tx, [9])).rejects.toBeInstanceOf(ProductDisplayOrderConflictError);
+    expect(tx.product.update).not.toHaveBeenCalled();
   });
 });
 

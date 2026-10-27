@@ -420,6 +420,17 @@ describe('ProductDetailPage', () => {
     expect(screen.queryByText(`${D}.replacementPrice`, { exact: false })).not.toBeInTheDocument();
   });
 
+  it('shows the security deposit per unit whenever the product carries one (every role)', () => {
+    setProduct({ data: { ...base, securityDeposit: 150 } });
+    const { rerender } = renderPage();
+    expect(screen.getByText(`${D}.securityDeposit:`)).toBeInTheDocument();
+    expect(screen.getByText(`· ${D}.securityDepositNote`)).toBeInTheDocument();
+
+    setProduct({ data: base }); // no deposit configured — nothing rendered
+    rerender(<ProductDetailPage />);
+    expect(screen.queryByText(`${D}.securityDeposit:`)).not.toBeInTheDocument();
+  });
+
   it('shows availability variants: zero wording by type, fleet view, bare signal, Client nothing', () => {
     // The base fixture is Alquiler — a fully-booked fleet is "No disponible", never "Agotado".
     setProduct({ data: { ...base, available: 0, inStock: false } });

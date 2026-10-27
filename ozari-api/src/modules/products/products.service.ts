@@ -6,7 +6,9 @@ import { isValidEnumValue } from "@helpers/utils.js";
 import { getStorage, type Storage } from "@helpers/storage.js";
 import {
   type CreateProductImageRequestModel,
+  type CreateProductRequestModel,
   type PaginationMeta,
+  type ProductArrangementItemModel,
   type ProductListItemResponseModel,
   type ProductListQueryModel,
   type ProductListSortModel,
@@ -78,12 +80,29 @@ export function buildProductListWhere(
 
 /** Every accepted `sort` value — the parse allowlist (anything else clamps to the default). */
 export const PRODUCT_LIST_SORTS: readonly ProductListSortModel[] = [
+  "catalog",
   "recent",
   "nameAsc",
   "nameDesc",
   "priceAsc",
   "priceDesc",
 ];
+
+/**
+ * The two orders that live in SQL (every other sort is the in-memory id-page path). `catalog` is
+ * the admin's arrangement: `display_order` first — 0 = never placed, so a new product LEADS — and
+ * newest first underneath, which is also exactly the old default for a catalog nobody arranged.
+ * `id` tiebreaks same-timestamp rows so pagination pages never shuffle.
+ */
+export const SQL_PRODUCT_ORDERS = {
+  catalog: [{ displayOrder: "asc" }, { createdAt: "desc" }, { id: "desc" }],
+  recent: [{ createdAt: "desc" }, { id: "desc" }],
+} satisfies Record<"catalog" | "recent", Prisma.ProductOrderByWithRelationInput[]>;
+
+/** Whether `sort` is ordered by the database (vs the in-memory name/price path). */
+export const isSqlProductSort = (
+  sort: ProductListSortModel,
+): sort is keyof typeof SQL_PRODUCT_ORDERS => sort in SQL_PRODUCT_ORDERS;
 
 /** The five scalar columns the in-memory sorts need — a deliberately tiny select. */
 export const productSortSelect = {
@@ -105,7 +124,7 @@ const effectivePrice = (row: ProductSortRow): number | null => {
   return value !== null ? Number(value) : null;
 };
 
-/** The default order (newest first, id tiebreak) — also every other sort's tiebreaker. */
+/** Newest first (id tiebreak) — every in-memory sort's tiebreaker, like the SQL orders' tail. */
 const byRecency = (a: ProductSortRow, b: ProductSortRow): number =>
   b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id;
 
@@ -254,6 +273,7 @@ export function projectProductForRole(
     sellPrice: toMoney(product.sellPrice),
     rentTimeUnit: product.rentTimeUnit?.name ?? undefined,
     rentTimeUnitId: product.rentTimeUnitId ?? undefined,
+    securityDeposit: toMoney(product.securityDeposit),
     images: product.productImages.map((image) => ({
       id: image.id,
       url: image.url,
@@ -330,7 +350,7 @@ export function parseProductListQuery(
   // Any role may sort (an ordering leaks nothing role-gated); an unknown value clamps to the
   // default, like every other bad input here.
   const rawSort = source["sort"];
-  const sort = PRODUCT_LIST_SORTS.find((value) => value === rawSort) ?? "recent";
+  const sort = PRODUCT_LIST_SORTS.find((value) => value === rawSort) ?? "catalog";
 
   const includeInactive =
     role === RolesEnum.Admin && source["includeInactive"] === "true";
@@ -404,6 +424,27 @@ export class ProductStateConflictError extends Error {
 }
 
 /**
+ * The product's SCALAR columns from a validated create/update body — ONE mapping for both doors, so
+ * a new column can never be written on create and forgotten on edit. Absent conditional fields are
+ * explicit `null`s: a business-type switch must never leave a stale price behind.
+ */
+export function productScalarData(body: CreateProductRequestModel | UpdateProductRequestModel) {
+  return {
+    name: body.name,
+    description: body.description ?? null,
+    productBusinessTypeId: body.businessTypeId,
+    productCategoryId: body.categoryId,
+    currencyId: body.currencyId,
+    quantity: body.quantity,
+    rentPrice: body.rentPrice ?? null,
+    sellPrice: body.sellPrice ?? null,
+    replacementPrice: body.replacementPrice ?? null,
+    securityDeposit: body.securityDeposit ?? null,
+    rentTimeUnitId: body.rentTimeUnitId ?? null,
+  };
+}
+
+/**
  * Applies a validated `PUT /products/:id` body inside ONE transaction — the RECONCILE design
  * (owner decision, 2026-07-13): the body carries the product's FINAL desired state and this diffs
  * it against the current rows.
@@ -427,21 +468,7 @@ export async function applyProductUpdate(
   productId: number,
   body: UpdateProductRequestModel,
 ): Promise<{ removedImageKeys: string[] }> {
-  await tx.product.update({
-    where: { id: productId },
-    data: {
-      name: body.name,
-      description: body.description ?? null,
-      productBusinessTypeId: body.businessTypeId,
-      productCategoryId: body.categoryId,
-      currencyId: body.currencyId,
-      quantity: body.quantity,
-      rentPrice: body.rentPrice ?? null,
-      sellPrice: body.sellPrice ?? null,
-      replacementPrice: body.replacementPrice ?? null,
-      rentTimeUnitId: body.rentTimeUnitId ?? null,
-    },
-  });
+  await tx.product.update({ where: { id: productId }, data: productScalarData(body) });
   const removedImageKeys = await reconcileGalleryRows(tx, productId, body.images);
   await reconcileDetailRows(tx, productId, body.productDetails);
   return { removedImageKeys };
@@ -598,6 +625,89 @@ export async function applyProductDelete(
     removedImageKeys: images.map((image) => image.r2Key),
     hardDeleted: orderReferences === 0,
   };
+}
+
+/** What the arrangement screen reads per product — a card's worth, nothing more. */
+export const arrangementSelect = {
+  id: true,
+  name: true,
+  displayOrder: true,
+  category: { select: { name: true } },
+  businessType: { select: { name: true } },
+  productImages: {
+    orderBy: [{ sortOrder: "asc" }],
+    select: { url: true, isPrimary: true },
+  },
+} satisfies Prisma.ProductSelect;
+
+export type ArrangementRow = Prisma.ProductGetPayload<{ select: typeof arrangementSelect }>;
+
+/** The arrangement screen's rows: the ACTIVE catalog, in catalog order (the grid's default). */
+export const arrangementQuery = {
+  where: { isActive: true },
+  orderBy: SQL_PRODUCT_ORDERS.catalog,
+  select: arrangementSelect,
+} satisfies Prisma.ProductFindManyArgs;
+
+/** One arrangement tile — the photo the grid card shows (the flagged primary, else the first). */
+export function projectArrangementItem(row: ArrangementRow): ProductArrangementItemModel {
+  const image =
+    row.productImages.find((candidate) => candidate.isPrimary) ?? row.productImages[0];
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category.name,
+    businessType: row.businessType.name,
+    ...(image && { imageUrl: image.url }),
+    placed: row.displayOrder > 0,
+  };
+}
+
+/**
+ * Thrown inside the arrangement transaction when the submitted ids are not EXACTLY the active
+ * catalog (a product was created or deleted while the screen was open). Rolls back; the controller
+ * answers 409 — re-ordering a list the admin can no longer see would place products blindly.
+ */
+export class ProductDisplayOrderConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProductDisplayOrderConflictError";
+  }
+}
+
+/**
+ * Renumbers the active catalog to `productIds`' order (1..N) inside ONE transaction — and writes
+ * only the rows whose position actually changed, so a typical drag of one card is one or two
+ * UPDATEs, not N. The set check runs against the rows read INSIDE the transaction. Inactive
+ * (soft-deleted) products keep whatever number they had; they are not in the grid.
+ */
+export async function applyProductDisplayOrder(
+  tx: Prisma.TransactionClient,
+  productIds: readonly number[],
+): Promise<void> {
+  const current = await tx.product.findMany({
+    where: { isActive: true },
+    select: { id: true, displayOrder: true },
+  });
+  const submitted = new Set(productIds);
+  const matches =
+    current.length === productIds.length &&
+    current.every((row) => submitted.has(row.id));
+  if (!matches) {
+    throw new ProductDisplayOrderConflictError(
+      `Submitted ${productIds.length} ids for an active catalog of ${current.length}`,
+    );
+  }
+  const currentOrder = new Map(current.map((row) => [row.id, row.displayOrder]));
+  // Sequential on purpose: one connection per interactive transaction (same stance as the gallery).
+  for (const [index, id] of productIds.entries()) {
+    const position = index + 1;
+    if (currentOrder.get(id) === position) {
+      continue;
+    }
+    // eslint-disable-next-line no-await-in-loop -- transactional writes must stay sequential
+    await tx.product.update({ where: { id }, data: { displayOrder: position } });
+  }
 }
 
 /** Builds the pagination envelope returned alongside the products. */

@@ -554,6 +554,41 @@
         "error": "Error al registrar el pago: {{-error}}."
       }
     },
+    "settlement": {
+      "settled": "Liquidación de garantía registrada exitosamente.",
+      "undone": "Liquidación de garantía deshecha exitosamente.",
+      "notFound": "El pedido no existe o ya no está disponible.",
+      "notSettleable": "Este pedido no admite liquidación de garantía: debe estar entregado, no cancelado, y tener productos con depósito o precio de reposición.",
+      "notSettled": "Este pedido no tiene una liquidación de garantía registrada.",
+      "invalidDamage": "Un producto marcado como dañado no admite reposición o excede la cantidad del pedido.",
+      "retainedAboveDeposit": "El monto retenido no puede ser mayor que el depósito en garantía.",
+      "errorSettling": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "errorUndoing": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidId": "El identificador del pedido no es válido.",
+        "invalidRetainedAmount": "El monto retenido no es válido.",
+        "invalidRetainedReason": "El motivo de la retención no es válido.",
+        "retainedReasonRequired": "Indica el motivo por el que se retiene parte del depósito.",
+        "invalidDamages": "La lista de productos dañados no es válida.",
+        "logs": {
+          "invalidId": "Identificador de pedido inválido en la liquidación de garantía.",
+          "invalidRetainedAmount": "Monto retenido inválido en la liquidación de garantía.",
+          "invalidRetainedReason": "Motivo de retención inválido en la liquidación de garantía.",
+          "retainedReasonRequired": "Retención sin motivo en la liquidación de garantía.",
+          "invalidDamages": "Lista de daños inválida en la liquidación de garantía."
+        }
+      },
+      "logs": {
+        "settled": "Liquidación de garantía registrada para el pedido {{id}}.",
+        "undone": "Liquidación de garantía deshecha para el pedido {{id}}.",
+        "notSettleable": "El pedido {{id}} no admite liquidación de garantía.",
+        "notSettled": "El pedido {{id}} no tenía liquidación de garantía.",
+        "invalidDamage": "Daño inválido en la liquidación del pedido {{id}}.",
+        "retainedAboveDeposit": "Retención mayor que el depósito en el pedido {{id}}.",
+        "error": "Error al registrar la liquidación de garantía.",
+        "undoError": "Error al deshacer la liquidación de garantía."
+      }
+    },
     "undoPayment": {
       "undone": "Registro de pago deshecho exitosamente.",
       "notFound": "El pedido no existe o ya no está disponible.",
@@ -699,6 +734,7 @@
       "stockConflict": "Algunos productos no tienen disponibilidad para las fechas solicitadas.",
       "driverConflict": "El responsable asignado ya tiene un evento demasiado cerca de ese horario.",
       "selfOverlap": "La entrega y la recolección de este pedido están demasiado cerca entre sí.",
+      "settlementConflict": "Este cambio contradice la liquidación de garantía registrada (un producto dañado o el monto retenido). Deshaz la liquidación primero.",
       "errorUpdatingOrder": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "validators": {
         "invalidClientRegistryId": "El cliente del pedido es requerido y debe ser válido.",
@@ -760,6 +796,7 @@
         "stockConflict": "Conflicto de disponibilidad al actualizar pedido: {{-conflicts}}.",
         "driverConflict": "Conflicto de agenda al actualizar pedido: <{{-driver}}> ya tiene un evento en <{{-conflictAt}}> (pedido <{{-orderId}}>).",
         "selfOverlap": "La entrega y la recolección del pedido a actualizar están a menos de <{{-gap}}> minutos.",
+        "settlementConflict": "La edición del pedido <{{-id}}> contradice su liquidación de garantía.",
         "errorUpdatingOrder": "Error al actualizar el pedido: {{-error}}."
       }
     }
@@ -945,6 +982,9 @@
         "sellPricingRequired": "Un producto de venta requiere precio de venta.",
         "pricingMismatch": "Los precios enviados no corresponden al tipo de negocio del producto.",
         "replacementPriceForbidden": "Un producto de venta no lleva precio de reposición.",
+        "invalidSecurityDeposit": "El depósito en garantía debe ser válido.",
+        "securityDepositForbidden": "Un producto de venta no lleva depósito en garantía.",
+        "securityDepositAboveReplacement": "El depósito en garantía no puede ser mayor que el precio de reposición.",
         "invalidRentAndSellPrice": "El precio de renta y el precio de venta no pueden ser vacíos al mismo tiempo.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
@@ -970,6 +1010,9 @@
           "sellPricingRequired": "Producto de venta sin precio de venta <{{-sellPrice}}>.",
           "pricingMismatch": "Precios inconsistentes con el tipo de negocio <{{-businessTypeId}}>: renta <{{-rentPrice}}>, venta <{{-sellPrice}}>, unidad <{{-rentTimeUnitId}}>.",
           "replacementPriceForbidden": "Producto de venta con precio de reposición <{{-replacementPrice}}>; solo aplica a alquiler.",
+          "invalidSecurityDeposit": "El depósito en garantía <{{-securityDeposit}}> no es válido.",
+          "securityDepositForbidden": "Producto de venta con depósito en garantía <{{-securityDeposit}}>; solo aplica a alquiler.",
+          "securityDepositAboveReplacement": "Depósito en garantía <{{-securityDeposit}}> mayor que el precio de reposición <{{-replacementPrice}}>.",
           "invalidRentAndSellPrice": "El precio de renta <{{-rentPrice}}> y el precio de venta <{{-sellPrice}}> no pueden ser vacíos al mismo tiempo.",
           "validationError": "Error de validación: {{-error}}."
         }
@@ -1056,6 +1099,26 @@
         "productDeactivated": "Producto id <{{-id}}> desactivado (conservado por historial de órdenes).",
         "imageCleanupFailed": "No se pudieron eliminar <{{-count}}> objetos R2 tras el borrado: {{-error}}.",
         "genericError": "Error al eliminar producto: {{-error}}."
+      }
+    },
+    "displayOrder": {
+      "fetched": "Orden del catálogo obtenido exitosamente.",
+      "updated": "Orden del catálogo guardado exitosamente.",
+      "conflict": "El catálogo cambió mientras lo ordenabas. Recarga y vuelve a ordenarlo.",
+      "errorFetching": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "errorUpdating": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidProductIds": "La lista de productos a ordenar no es válida.",
+        "logs": {
+          "invalidProductIds": "Lista de ids para ordenar inválida (<{{-count}}> elementos)."
+        }
+      },
+      "logs": {
+        "fetched": "Orden del catálogo obtenido: <{{-count}}> productos.",
+        "updated": "Orden del catálogo guardado: <{{-count}}> productos.",
+        "conflict": "El orden enviado no coincide con el catálogo activo: {{-error}}.",
+        "errorFetching": "Error al obtener el orden del catálogo: {{-error}}.",
+        "errorUpdating": "Error al guardar el orden del catálogo: {{-error}}."
       }
     }
   }

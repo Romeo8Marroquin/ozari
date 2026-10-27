@@ -67,6 +67,19 @@ vi.mock('./OrderPaymentUndoModal', () => ({
     ) : null,
 }));
 
+// The settlement undo likewise: its suite owns the copy ("moves no money") and the 409.
+vi.mock('./OrderSettlementUndoModal', () => ({
+  default: ({ order, onClose }: { order?: { id: number }; onClose: () => void }) =>
+    order ? (
+      <div data-testid="settlement-undo-modal">
+        {order.id}
+        <button type="button" onClick={onClose}>
+          cerrar-deshacer-liquidacion
+        </button>
+      </div>
+    ) : null,
+}));
+
 vi.mock('./OrderAdvanceModal', () => ({
   default: ({ action, onClose }: { action?: { statusName: string }; onClose: () => void }) =>
     action ? (
@@ -178,6 +191,7 @@ const order = (over: Partial<OrderDetail> = {}): OrderDetail =>
         quantity: 25,
         unitaryPrice: 6,
         parcialPrice: 150,
+        damagedQuantity: 0,
       },
     ],
     extras: [],
@@ -451,6 +465,63 @@ describe('OrderDetailPage', () => {
     expect(navigate).toHaveBeenCalledWith('/panel/pedidos/12/editar');
   });
 
+  it('has NO Garantía card when the API sent no deposit block (most orders)', () => {
+    setOrder({ data: order() });
+    renderPage();
+    expect(screen.queryByRole('heading', { name: `${KEY}.deposit.title` })).not.toBeInTheDocument();
+  });
+
+  it('the Garantía card sends an admin to the settlement PAGE, and undoes through a confirm', async () => {
+    setOrder({ data: order({ securityDeposit: { total: 500, canSettle: true } }) });
+    const { unmount } = renderPage();
+    expect(screen.getByRole('heading', { name: `${KEY}.deposit.title` })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.deposit.settle` }));
+    expect(navigate).toHaveBeenCalledWith('/panel/pedidos/12/garantia');
+    unmount();
+
+    setOrder({
+      data: order({
+        lines: [
+          {
+            id: 31,
+            productId: 3,
+            productName: 'Silla plegable',
+            isRental: true,
+            quantity: 25,
+            unitaryPrice: 6,
+            parcialPrice: 150,
+            securityDeposit: 20,
+            replacementPrice: 90,
+            damagedQuantity: 2,
+          },
+        ],
+        securityDeposit: {
+          total: 500,
+          canSettle: true,
+          settlement: {
+            settledAt: new Date('2026-08-03T10:00:00').toISOString(),
+            retainedAmount: 0,
+            damages: [
+              { lineId: 31, productName: 'Silla plegable', quantity: 2, unitAmount: 90, amount: 180 },
+            ],
+            damagesTotal: 180,
+            claimsTotal: 180,
+            appliedFromDeposit: 180,
+            refundAmount: 320,
+            balanceDue: 0,
+          },
+        },
+      }),
+    });
+    renderPage();
+    // The lost/broken count is stated on the LINE too, not only in the breakdown.
+    expect(screen.getByText(new RegExp(`${KEY}.lines.damaged`))).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.deposit.undo` }));
+    expect(screen.getByTestId('settlement-undo-modal')).toHaveTextContent('12');
+    await userEvent.click(screen.getByRole('button', { name: 'cerrar-deshacer-liquidacion' }));
+    expect(screen.queryByTestId('settlement-undo-modal')).not.toBeInTheDocument();
+  });
+
   it('deletes and then leaves — there is no detail left to show', async () => {
     setOrder({ data: order() });
     renderPage();
@@ -582,6 +653,7 @@ describe('OrderDetailPage', () => {
             quantity: 10,
             unitaryPrice: 3.5,
             parcialPrice: 35,
+            damagedQuantity: 0,
           },
         ],
       }),

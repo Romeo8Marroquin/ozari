@@ -291,6 +291,15 @@ export const TOTALS_PADDING = 12;
  *  because it is an SVG, and an SVG cannot be told to fill its parent. */
 export const TOTALS_INNER_WIDTH = TOTALS_WIDTH - TOTALS_PADDING * 2;
 
+/**
+ * The security deposit (2026-10-27). `GUARANTEE_GAP` is the air above the still-a-deposit line under
+ * the saldo chip AND between the totals panel and a settlement panel; `GUARANTEE_PADDING` is the
+ * settlement panel's own vertical padding — tighter than the totals', it is a second statement
+ * under the first, not a rival to it.
+ */
+export const GUARANTEE_GAP = 8;
+export const GUARANTEE_PADDING = 9;
+
 // ── Bank details ──────────────────────────────────────────────────────────────────────────────
 
 /**

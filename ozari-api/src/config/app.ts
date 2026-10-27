@@ -208,6 +208,9 @@ export const appConfig = {
   // frontend's infinite-scroll batch AND the orders default below (owner: keep them congruent).
   defaultProductPageSize: 20,
   maxProductPageSize: 50,
+  // Upper bound on `PUT /products/display-order`'s id list — far above any real catalog, and well
+  // inside the 10 kB body cap (1000 four-digit ids ≈ 5 kB), so it only ever rejects nonsense.
+  maxArrangedProducts: 1000,
   // Longest name-search string the list endpoint honours; longer input is truncated, not rejected
   // (the same clamp stance as the pagination params).
   maxProductSearchLength: 100,

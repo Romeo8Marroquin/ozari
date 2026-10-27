@@ -137,6 +137,16 @@ export function formatDateTime(iso: string): string {
   return `${formatShortDate(iso)}, ${formatTime(iso)}`;
 }
 
+/** `Viernes 1 de agosto, 2:00 p. m.` — the order detail has room to spell a moment out in full. */
+export function formatMoment(iso: string): string {
+  const day = new Intl.DateTimeFormat('es-GT', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(new Date(iso));
+  return `${day.charAt(0).toUpperCase()}${day.slice(1)}, ${formatTime(iso)}`;
+}
+
 /**
  * The AGENDA grouping: split into MINE-first / the-rest owner bands (from the backend's `isMine`
  * flag; the list already arrives mine-first), each grouped by its NEXT-ACTION day. When only one

@@ -383,6 +383,14 @@ export const schemas: Record<string, Schema> = {
       sellPrice: { type: "number", nullable: true, description: "Venta price.", example: null },
       rentTimeUnit: { type: "string", nullable: true, description: "Period the rent price is quoted against (Alquiler only).", example: "Día" },
       rentTimeUnitId: { type: "integer", nullable: true, description: "Its lookup id (Alquiler only).", example: 2 },
+      securityDeposit: {
+        type: "number",
+        nullable: true,
+        description:
+          "Refundable security deposit per unit (Alquiler only) — a public commercial condition like " +
+          "the price, so every role receives it. Never part of a price.",
+        example: 300,
+      },
       images: { type: "array", items: schemaRef("ProductImage") },
       details: { type: "array", items: schemaRef("ProductDetailItem") },
       inStock: { type: "boolean", description: "Availability signal (`available > 0`) — **Admin only**.", example: true },
@@ -801,6 +809,13 @@ export const schemas: Record<string, Schema> = {
           symbol: { type: "string", example: "Q" },
         },
       },
+      depositSettlementPending: {
+        type: "boolean",
+        description:
+          "True when the order carries a deposit or a replaceable rental line, was delivered, is not " +
+          "cancelled, and has no deposit settlement yet — the agenda's \"garantía por liquidar\" flag.",
+        example: false,
+      },
     },
   },
   OrderListResponse: {
@@ -824,6 +839,98 @@ export const schemas: Record<string, Schema> = {
       quantity: { type: "integer", example: 25 },
       unitaryPrice: { type: "number", example: 6 },
       parcialPrice: { type: "number", example: 150 },
+      securityDeposit: {
+        type: "number",
+        nullable: true,
+        description: "Per-unit deposit SNAPSHOT (rental lines only), re-derived on every order save.",
+        example: 40,
+      },
+      replacementPrice: {
+        type: "number",
+        nullable: true,
+        description: "Per-unit replacement value SNAPSHOT (rental lines only) — what a lost unit bills.",
+        example: 120,
+      },
+      damagedQuantity: {
+        type: "integer",
+        description: "Units recorded as lost/broken by the deposit settlement (0 = none).",
+        example: 0,
+      },
+      damageNote: { type: "string", nullable: true, example: null },
+    },
+  },
+  OrderDamage: {
+    type: "object",
+    description: "One lost/broken entry of a settlement, priced from the line's snapshot.",
+    properties: {
+      lineId: { type: "integer", example: 31 },
+      productName: { type: "string", example: "Silla plegable" },
+      quantity: { type: "integer", example: 2 },
+      unitAmount: { type: "number", example: 120 },
+      amount: { type: "number", example: 240 },
+      note: { type: "string", nullable: true, example: "Patas rotas" },
+    },
+  },
+  OrderDepositSettlement: {
+    type: "object",
+    description:
+      "What the admin decided after the pickup, with every derived figure: claims = retained + " +
+      "damages; the deposit covers what it can (`appliedFromDeposit`), the rest goes back " +
+      "(`refundAmount`), and what it cannot cover is owed (`balanceDue`).",
+    properties: {
+      settledAt: { type: "string", format: "date-time", description: "When it was FIRST settled." },
+      retainedAmount: { type: "number", description: "Kept for partial damage; 0 = fully refunded.", example: 50 },
+      retainedReason: { type: "string", nullable: true, example: "Manchas de vino en 3 manteles" },
+      damages: { type: "array", items: schemaRef("OrderDamage") },
+      damagesTotal: { type: "number", example: 240 },
+      claimsTotal: { type: "number", example: 290 },
+      appliedFromDeposit: { type: "number", example: 200 },
+      refundAmount: { type: "number", example: 0 },
+      balanceDue: { type: "number", example: 90 },
+    },
+  },
+  OrderSecurityDeposit: {
+    type: "object",
+    description:
+      "The order's refundable security deposit — present only when a rental line carries a deposit " +
+      "or a replacement value.",
+    properties: {
+      total: {
+        type: "number",
+        description: "Σ rental lines' deposit × quantity — collected on top of the order, never in its total.",
+        example: 200,
+      },
+      canSettle: {
+        type: "boolean",
+        description: "May a settlement be recorded or changed now (delivered, not cancelled).",
+        example: true,
+      },
+      settlement: { allOf: [schemaRef("OrderDepositSettlement")], nullable: true },
+    },
+  },
+  SettleOrderRequest: {
+    type: "object",
+    required: ["retainedAmount"],
+    description:
+      "The settlement's FINAL state (declarative). A line absent from `damages` has no damage. " +
+      "`retainedReason` is required exactly when `retainedAmount > 0`. Amounts for damages are " +
+      "never sent — each is the line's replacement-value snapshot.",
+    properties: {
+      retainedAmount: { type: "number", minimum: 0, example: 50 },
+      retainedReason: { type: "string", nullable: true, maxLength: 500, example: "Manchas de vino" },
+      damages: {
+        type: "array",
+        maxItems: 50,
+        items: {
+          type: "object",
+          required: ["lineId", "quantity"],
+          properties: {
+            lineId: { type: "integer", example: 31 },
+            quantity: { type: "integer", minimum: 1, example: 2 },
+            note: { type: "string", nullable: true, maxLength: 500, example: "Patas rotas" },
+          },
+        },
+      },
     },
   },
   OrderExtra: {
@@ -911,6 +1018,7 @@ export const schemas: Record<string, Schema> = {
           serviceEnd: { type: "string", format: "date-time" },
           lines: { type: "array", items: schemaRef("OrderLine") },
           extras: { type: "array", items: schemaRef("OrderExtra") },
+          securityDeposit: { allOf: [schemaRef("OrderSecurityDeposit")], nullable: true },
           statusHistory: { type: "array", items: schemaRef("OrderStatusChange") },
           createdAt: { type: "string", format: "date-time" },
         },
@@ -1819,6 +1927,15 @@ export const schemas: Record<string, Schema> = {
       rentPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Alquiler; forbidden for Venta.", example: 75 },
       rentTimeUnitId: { type: "integer", nullable: true, description: "Required for Alquiler; forbidden for Venta.", example: 2 },
       replacementPrice: { type: "number", nullable: true, minimum: 0, example: 900 },
+      securityDeposit: {
+        type: "number",
+        nullable: true,
+        minimum: 0,
+        description:
+          "Refundable deposit per unit — optional for Alquiler, forbidden for Venta, and never above " +
+          "`replacementPrice` when both are set.",
+        example: 300,
+      },
       sellPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Venta; forbidden for Alquiler.", example: null },
       productDetails: {
         type: "array",
@@ -1877,6 +1994,15 @@ export const schemas: Record<string, Schema> = {
       rentPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Alquiler; forbidden for Venta.", example: 75 },
       rentTimeUnitId: { type: "integer", nullable: true, description: "Required for Alquiler; forbidden for Venta.", example: 2 },
       replacementPrice: { type: "number", nullable: true, minimum: 0, example: 900 },
+      securityDeposit: {
+        type: "number",
+        nullable: true,
+        minimum: 0,
+        description:
+          "Refundable deposit per unit — optional for Alquiler, forbidden for Venta, and never above " +
+          "`replacementPrice` when both are set.",
+        example: 300,
+      },
       sellPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Venta; forbidden for Alquiler.", example: null },
       productDetails: {
         type: "array",
@@ -1979,6 +2105,58 @@ export const schemas: Record<string, Schema> = {
             },
           },
         },
+      },
+    },
+  },
+  ProductArrangement: {
+    type: "object",
+    description:
+      "The ACTIVE catalog in its display order (`display_order` ascending, then newest first) — a " +
+      "card's worth per product for the arrangement screen.",
+    required: ["products"],
+    properties: {
+      products: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["id", "name", "category", "businessType", "placed"],
+          properties: {
+            id: { type: "integer", example: 7 },
+            name: { type: "string", example: "Mesa redonda" },
+            category: { type: "string", example: "Mesas" },
+            businessType: { type: "string", example: "Alquiler" },
+            imageUrl: {
+              type: "string",
+              format: "uri",
+              description: "The primary photo (else the first); absent when the product has none.",
+              example: "https://cdn.example.com/products/7/hero.webp",
+            },
+            placed: {
+              type: "boolean",
+              description:
+                "`false` while the product was never arranged (`display_order` 0) — it currently " +
+                "leads the grid.",
+              example: true,
+            },
+          },
+        },
+      },
+    },
+  },
+  UpdateProductDisplayOrderRequest: {
+    type: "object",
+    description:
+      "The FULL ordered list of active product ids (declarative: the list IS the order). Distinct " +
+      "positive integers, 1–1000 of them.",
+    required: ["productIds"],
+    properties: {
+      productIds: {
+        type: "array",
+        minItems: 1,
+        maxItems: 1000,
+        uniqueItems: true,
+        items: { type: "integer", minimum: 1 },
+        example: [7, 3, 12],
       },
     },
   },

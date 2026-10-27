@@ -359,9 +359,19 @@ model Product {
   rentPrice             Decimal?  @db.Decimal(15, 2)
   sellPrice             Decimal?  @db.Decimal(15, 2)
   replacementPrice      Decimal?  @map("replacement_price") @db.Decimal(15, 2)
+  // The refundable SECURITY DEPOSIT per unit ("garantía", owner 2026-10-27) — Alquiler only,
+  // optional, never above `replacementPrice`. Not a price: orders snapshot it per line and settle it
+  // after the pickup (refund, or retain with a reason). See EPIC-2-ORDERS §12.
+  securityDeposit       Decimal?  @map("security_deposit") @db.Decimal(15, 2)
   rentTimeUnitId        Int?      @map("rent_time_unit_id")
   currencyId            Int       @map("currency_id")
   quantity              Int
+  // The admin's CATALOG ORDER (owner 2026-10-27) — the grid's default sort, `display_order ASC`
+  // then newest first. 0 = "not placed yet": a new product LEADS the grid until it is arranged, and
+  // a catalog nobody has arranged is all zeros, which ties into exactly the old newest-first order
+  // (so the column needed no backfill). Written only by `PUT /products/display-order`, which
+  // renumbers the whole active catalog 1..N; deliberately NOT unique (no reorder dance).
+  displayOrder          Int       @default(0) @map("display_order")
   isActive              Boolean   @default(true) @map("is_active")
   updatedAt             DateTime? @updatedAt @map("updated_at")
   createdAt             DateTime  @default(now()) @map("created_at")
@@ -768,6 +778,15 @@ model Service {
   cancelledAt  DateTime? @map("cancelled_at")
   cancelReason String?   @map("cancel_reason")
 
+  // The SECURITY-DEPOSIT SETTLEMENT (owner 2026-10-27, EPIC-2-ORDERS §12) — its own axis like
+  // payment, never a pipeline step. The deposit itself is DERIVED (Σ line snapshot × qty); these
+  // record what the admin decided after the pickup: `depositSettledAt` NULL = not settled yet;
+  // `depositRetainedAmount` = what is kept for partial damage (0 = fully refunded), with its
+  // REQUIRED reason when > 0. Lost/broken units live on the lines (`damagedQuantity`).
+  depositSettledAt      DateTime? @map("deposit_settled_at")
+  depositRetainedAmount Decimal?  @map("deposit_retained_amount") @db.Decimal(15, 2)
+  depositRetainedReason String?   @map("deposit_retained_reason")
+
   currencyId       Int       @map("currency_id")
   serviceStatusId  Int       @map("service_status_id")
   paymentStatusId  Int       @map("payment_status_id")
@@ -814,6 +833,15 @@ model ServiceDetail {
   isRental     Boolean   @map("is_rental")
   unitaryPrice Decimal   @map("unitary_price") @db.Decimal(15, 2)
   parcialPrice Decimal   @map("parcial_price") @db.Decimal(15, 2)
+  // Per-UNIT snapshots of the product's security deposit and replacement value (EPIC-2-ORDERS §12),
+  // re-derived from the product row on every order save exactly like the price. Rental lines only;
+  // NULL = the product asks none / has none.
+  securityDeposit  Decimal? @map("security_deposit") @db.Decimal(15, 2)
+  replacementPrice Decimal? @map("replacement_price") @db.Decimal(15, 2)
+  // Units of this line returned BROKEN or never returned — billed at `replacementPrice` each. Written
+  // only by the deposit settlement (`PUT /orders/:id/settlement`); 0 = none.
+  damagedQuantity  Int      @default(0) @map("damaged_quantity")
+  damageNote       String?  @map("damage_note")
   currencyId   Int       @map("currency_id")
   isActive     Boolean   @default(true) @map("is_active")
   updatedAt    DateTime? @updatedAt @map("updated_at")

@@ -39,6 +39,11 @@ export const parseQuantity = (value: string): number | null => {
   return parsed;
 };
 
+/** A parsed money value truncated to cents (the API's own storage step); absent/invalid pass through
+ *  as `undefined` — the field's own refinement already reports an invalid one. */
+const toCents = (value: number | undefined | null): number | undefined =>
+  value === undefined || value === null ? undefined : Math.trunc(value * 100) / 100;
+
 const moneyField = (invalidMessage: string) =>
   z.string().refine((value) => parseMoney(value) !== null, invalidMessage);
 
@@ -72,6 +77,8 @@ const baseCreateProductSchema = z.object({
   // enforces presence for Alquiler; a bare `.optional()` would reject the sentinel outright.
   rentTimeUnitId: z.number().nullable().optional(),
   replacementPrice: moneyField(t(`${KEY}.invalidReplacementPrice`)).optional(),
+  // Refundable deposit per unit ("garantía") — never a price; Alquiler-only, ≤ replacement price.
+  securityDeposit: moneyField(t(`${KEY}.invalidSecurityDeposit`)).optional(),
   sellPrice: moneyField(t(`${KEY}.invalidSellPrice`)).optional(),
   details: z.array(
     z.object({
@@ -125,6 +132,18 @@ export const createProductSchema = baseCreateProductSchema.superRefine((data, ct
     if (sell !== undefined) {
       ctx.addIssue({ code: 'custom', path: ['sellPrice'], message: t(`${KEY}.forbiddenSellPrice`) });
     }
+    // The deposit covers PARTIAL damage; a total loss bills the replacement value — so a deposit
+    // above it would make "broken" cheaper than "scratched" (mirrors the backend's
+    // `securityDepositAboveReplacement`, compared on the cent-truncated values the API stores).
+    const deposit = toCents(parseMoney(data.securityDeposit ?? ''));
+    const replacement = toCents(parseMoney(data.replacementPrice ?? ''));
+    if (deposit !== undefined && replacement !== undefined && deposit > replacement) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['securityDeposit'],
+        message: t(`${KEY}.securityDepositAboveReplacement`),
+      });
+    }
   } else if (data.businessTypeId === BUSINESS_TYPE_SELL) {
     if (sell === undefined) {
       ctx.addIssue({ code: 'custom', path: ['sellPrice'], message: t(`${KEY}.requiredSellPrice`) });
@@ -142,6 +161,15 @@ export const createProductSchema = baseCreateProductSchema.superRefine((data, ct
         message: t(`${KEY}.forbiddenReplacementPrice`),
       });
     }
+    // Same for the deposit: nothing comes back from a sale, so there is no guarantee to hold
+    // (mirrors `securityDepositForbidden`).
+    if (parseMoney(data.securityDeposit ?? '') !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['securityDeposit'],
+        message: t(`${KEY}.forbiddenSecurityDeposit`),
+      });
+    }
   }
 });
 
@@ -157,6 +185,7 @@ export const createProductDefaultValues: CreateProductFormType = {
   rentPrice: '',
   rentTimeUnitId: DEFAULT_RENT_TIME_UNIT_ID,
   replacementPrice: '',
+  securityDeposit: '',
   sellPrice: '',
   details: [],
 };
@@ -178,6 +207,8 @@ export interface CreateProductBody {
   rentPrice?: number;
   rentTimeUnitId?: number;
   replacementPrice?: number;
+  /** Refundable deposit per unit (Alquiler only) — omitted = none. */
+  securityDeposit?: number;
   sellPrice?: number;
   productDetails: { detailTypeId: number; detail: string }[];
   /** Uploaded gallery photos (array order = display order). Omitted when there are none. */
@@ -186,12 +217,7 @@ export interface CreateProductBody {
 
 /** Maps the validated form values to the API body (money truncated to 2 decimals, like the backend). */
 export function toCreateProductBody(data: CreateProductFormType): CreateProductBody {
-  const money = (value: string | undefined): number | undefined => {
-    const parsed = parseMoney(value ?? '');
-    return parsed === undefined || parsed === null
-      ? undefined
-      : Math.trunc(parsed * 100) / 100;
-  };
+  const money = (value: string | undefined): number | undefined => toCents(parseMoney(value ?? ''));
   const isRent = data.businessTypeId === BUSINESS_TYPE_RENT;
   const description = data.description?.trim();
   return {
@@ -207,6 +233,12 @@ export function toCreateProductBody(data: CreateProductFormType): CreateProductB
     ...(isRent &&
       money(data.replacementPrice) !== undefined && {
         replacementPrice: money(data.replacementPrice),
+      }),
+    // Alquiler only, like the replacement price. An absent key on an UPDATE clears the column
+    // (the body is the product's full state), so the edit form must load and resend it.
+    ...(isRent &&
+      money(data.securityDeposit) !== undefined && {
+        securityDeposit: money(data.securityDeposit),
       }),
     productDetails: data.details.map((row) => ({
       detailTypeId: row.detailTypeId,
@@ -264,6 +296,7 @@ export function productToFormValues(product: {
   sellPrice?: number;
   rentTimeUnitId?: number;
   replacementPrice?: number;
+  securityDeposit?: number;
   total?: number;
   available?: number;
   details: { id: number; detailTypeId: number; detail: string }[];
@@ -279,6 +312,7 @@ export function productToFormValues(product: {
     rentPrice: money(product.rentPrice),
     rentTimeUnitId: product.rentTimeUnitId ?? null,
     replacementPrice: money(product.replacementPrice),
+    securityDeposit: money(product.securityDeposit),
     sellPrice: money(product.sellPrice),
     details: product.details.map((detail) => ({
       id: detail.id,

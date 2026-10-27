@@ -28,7 +28,9 @@ import { Route as PanelPedidosOrderIdRouteImport } from './routes/panel/pedidos_
 import { Route as PanelPedidosNuevoRouteImport } from './routes/panel/pedidos_.nuevo'
 import { Route as PanelProductosProductIdRouteImport } from './routes/panel/productos_.$productId'
 import { Route as PanelProductosNuevoRouteImport } from './routes/panel/productos_.nuevo'
+import { Route as PanelProductosOrdenarRouteImport } from './routes/panel/productos_.ordenar'
 import { Route as PanelPedidosOrderIdEditarRouteImport } from './routes/panel/pedidos_.$orderId_.editar'
+import { Route as PanelPedidosOrderIdGarantiaRouteImport } from './routes/panel/pedidos_.$orderId_.garantia'
 import { Route as PanelProductosProductIdEditarRouteImport } from './routes/panel/productos_.$productId_.editar'
 
 const IndexRoute = IndexRouteImport.update({
@@ -126,10 +128,21 @@ const PanelProductosNuevoRoute = PanelProductosNuevoRouteImport.update({
   path: '/productos/nuevo',
   getParentRoute: () => PanelRoute,
 } as any)
+const PanelProductosOrdenarRoute = PanelProductosOrdenarRouteImport.update({
+  id: '/productos_/ordenar',
+  path: '/productos/ordenar',
+  getParentRoute: () => PanelRoute,
+} as any)
 const PanelPedidosOrderIdEditarRoute =
   PanelPedidosOrderIdEditarRouteImport.update({
     id: '/pedidos_/$orderId_/editar',
     path: '/pedidos/$orderId/editar',
+    getParentRoute: () => PanelRoute,
+  } as any)
+const PanelPedidosOrderIdGarantiaRoute =
+  PanelPedidosOrderIdGarantiaRouteImport.update({
+    id: '/pedidos_/$orderId_/garantia',
+    path: '/pedidos/$orderId/garantia',
     getParentRoute: () => PanelRoute,
   } as any)
 const PanelProductosProductIdEditarRoute =
@@ -159,7 +172,9 @@ export interface FileRoutesByFullPath {
   '/panel/pedidos/nuevo': typeof PanelPedidosNuevoRoute
   '/panel/productos/$productId': typeof PanelProductosProductIdRoute
   '/panel/productos/nuevo': typeof PanelProductosNuevoRoute
+  '/panel/productos/ordenar': typeof PanelProductosOrdenarRoute
   '/panel/pedidos/$orderId/editar': typeof PanelPedidosOrderIdEditarRoute
+  '/panel/pedidos/$orderId/garantia': typeof PanelPedidosOrderIdGarantiaRoute
   '/panel/productos/$productId/editar': typeof PanelProductosProductIdEditarRoute
 }
 export interface FileRoutesByTo {
@@ -181,7 +196,9 @@ export interface FileRoutesByTo {
   '/panel/pedidos/nuevo': typeof PanelPedidosNuevoRoute
   '/panel/productos/$productId': typeof PanelProductosProductIdRoute
   '/panel/productos/nuevo': typeof PanelProductosNuevoRoute
+  '/panel/productos/ordenar': typeof PanelProductosOrdenarRoute
   '/panel/pedidos/$orderId/editar': typeof PanelPedidosOrderIdEditarRoute
+  '/panel/pedidos/$orderId/garantia': typeof PanelPedidosOrderIdGarantiaRoute
   '/panel/productos/$productId/editar': typeof PanelProductosProductIdEditarRoute
 }
 export interface FileRoutesById {
@@ -205,7 +222,9 @@ export interface FileRoutesById {
   '/panel/pedidos_/nuevo': typeof PanelPedidosNuevoRoute
   '/panel/productos_/$productId': typeof PanelProductosProductIdRoute
   '/panel/productos_/nuevo': typeof PanelProductosNuevoRoute
+  '/panel/productos_/ordenar': typeof PanelProductosOrdenarRoute
   '/panel/pedidos_/$orderId_/editar': typeof PanelPedidosOrderIdEditarRoute
+  '/panel/pedidos_/$orderId_/garantia': typeof PanelPedidosOrderIdGarantiaRoute
   '/panel/productos_/$productId_/editar': typeof PanelProductosProductIdEditarRoute
 }
 export interface FileRouteTypes {
@@ -230,7 +249,9 @@ export interface FileRouteTypes {
     | '/panel/pedidos/nuevo'
     | '/panel/productos/$productId'
     | '/panel/productos/nuevo'
+    | '/panel/productos/ordenar'
     | '/panel/pedidos/$orderId/editar'
+    | '/panel/pedidos/$orderId/garantia'
     | '/panel/productos/$productId/editar'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -252,7 +273,9 @@ export interface FileRouteTypes {
     | '/panel/pedidos/nuevo'
     | '/panel/productos/$productId'
     | '/panel/productos/nuevo'
+    | '/panel/productos/ordenar'
     | '/panel/pedidos/$orderId/editar'
+    | '/panel/pedidos/$orderId/garantia'
     | '/panel/productos/$productId/editar'
   id:
     | '__root__'
@@ -275,7 +298,9 @@ export interface FileRouteTypes {
     | '/panel/pedidos_/nuevo'
     | '/panel/productos_/$productId'
     | '/panel/productos_/nuevo'
+    | '/panel/productos_/ordenar'
     | '/panel/pedidos_/$orderId_/editar'
+    | '/panel/pedidos_/$orderId_/garantia'
     | '/panel/productos_/$productId_/editar'
   fileRoutesById: FileRoutesById
 }
@@ -421,11 +446,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PanelProductosNuevoRouteImport
       parentRoute: typeof PanelRoute
     }
+    '/panel/productos_/ordenar': {
+      id: '/panel/productos_/ordenar'
+      path: '/productos/ordenar'
+      fullPath: '/panel/productos/ordenar'
+      preLoaderRoute: typeof PanelProductosOrdenarRouteImport
+      parentRoute: typeof PanelRoute
+    }
     '/panel/pedidos_/$orderId_/editar': {
       id: '/panel/pedidos_/$orderId_/editar'
       path: '/pedidos/$orderId/editar'
       fullPath: '/panel/pedidos/$orderId/editar'
       preLoaderRoute: typeof PanelPedidosOrderIdEditarRouteImport
+      parentRoute: typeof PanelRoute
+    }
+    '/panel/pedidos_/$orderId_/garantia': {
+      id: '/panel/pedidos_/$orderId_/garantia'
+      path: '/pedidos/$orderId/garantia'
+      fullPath: '/panel/pedidos/$orderId/garantia'
+      preLoaderRoute: typeof PanelPedidosOrderIdGarantiaRouteImport
       parentRoute: typeof PanelRoute
     }
     '/panel/productos_/$productId_/editar': {
@@ -450,7 +489,9 @@ interface PanelRouteChildren {
   PanelPedidosNuevoRoute: typeof PanelPedidosNuevoRoute
   PanelProductosProductIdRoute: typeof PanelProductosProductIdRoute
   PanelProductosNuevoRoute: typeof PanelProductosNuevoRoute
+  PanelProductosOrdenarRoute: typeof PanelProductosOrdenarRoute
   PanelPedidosOrderIdEditarRoute: typeof PanelPedidosOrderIdEditarRoute
+  PanelPedidosOrderIdGarantiaRoute: typeof PanelPedidosOrderIdGarantiaRoute
   PanelProductosProductIdEditarRoute: typeof PanelProductosProductIdEditarRoute
 }
 
@@ -466,7 +507,9 @@ const PanelRouteChildren: PanelRouteChildren = {
   PanelPedidosNuevoRoute: PanelPedidosNuevoRoute,
   PanelProductosProductIdRoute: PanelProductosProductIdRoute,
   PanelProductosNuevoRoute: PanelProductosNuevoRoute,
+  PanelProductosOrdenarRoute: PanelProductosOrdenarRoute,
   PanelPedidosOrderIdEditarRoute: PanelPedidosOrderIdEditarRoute,
+  PanelPedidosOrderIdGarantiaRoute: PanelPedidosOrderIdGarantiaRoute,
   PanelProductosProductIdEditarRoute: PanelProductosProductIdEditarRoute,
 }
 

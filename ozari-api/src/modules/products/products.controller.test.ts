@@ -7,8 +7,10 @@ import {
   deleteProduct,
   getProductById,
   getProductCatalog,
+  getProductDisplayOrder,
   getProducts,
   updateProduct,
+  updateProductDisplayOrder,
 } from "./products.controller.js";
 import { getStorage, StorageValidationError } from "@helpers/storage.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
@@ -248,6 +250,22 @@ describe("getProducts", () => {
     expect(findMany).toHaveBeenCalledTimes(1); // no page ids → no second query
     expect(successData().products).toEqual([]);
     expect(successData().pagination).toMatchObject({ total: 0, totalPages: 1 });
+  });
+
+  it("orders by the catalog arrangement by default, and newest-first for sort=recent, in SQL", async () => {
+    const { findMany } = mockPrisma([], 0);
+    await getProducts(buildReq(RolesEnum.Client), {} as Response);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ displayOrder: "asc" }, { createdAt: "desc" }, { id: "desc" }],
+      }),
+    );
+
+    findMany.mockClear();
+    await getProducts(buildReq(RolesEnum.Client, { sort: "recent" }), {} as Response);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: [{ createdAt: "desc" }, { id: "desc" }] }),
+    );
   });
 
   it("widens to inactive rows for an Admin sending includeInactive", async () => {
@@ -903,5 +921,156 @@ describe("getProductCatalog", () => {
     await getProductCatalog({} as CustomRequest, {} as Response);
     expect(sendOzariError).toHaveBeenCalled();
     expect(sendOzariSuccess).not.toHaveBeenCalled();
+  });
+});
+
+describe("getProductDisplayOrder", () => {
+  const arrangementRow = {
+    id: 7,
+    name: "Mesa redonda",
+    displayOrder: 0,
+    category: { name: "Mesas" },
+    businessType: { name: "Alquiler" },
+    productImages: [{ url: "https://cdn.example.com/a.webp", isPrimary: true }],
+  };
+
+  it("returns every active product in catalog order, a card's worth each", async () => {
+    const findMany = vi.fn().mockResolvedValue([arrangementRow]);
+    (getPrismaClient as Mock).mockResolvedValue({ product: { findMany } });
+
+    await getProductDisplayOrder(buildReq(RolesEnum.Admin), {} as Response);
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { isActive: true },
+        orderBy: [{ displayOrder: "asc" }, { createdAt: "desc" }, { id: "desc" }],
+      }),
+    );
+    expect(sendOzariSuccess).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.OK,
+      "products.displayOrder.fetched",
+      {
+        products: [
+          {
+            id: 7,
+            name: "Mesa redonda",
+            category: "Mesas",
+            businessType: "Alquiler",
+            imageUrl: "https://cdn.example.com/a.webp",
+            placed: false,
+          },
+        ],
+      },
+    );
+  });
+
+  it("sends a 500 when the read fails", async () => {
+    (getPrismaClient as Mock).mockRejectedValue(new Error("db down"));
+    await getProductDisplayOrder(buildReq(RolesEnum.Admin), {} as Response);
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      "products.displayOrder.errorFetching",
+    );
+  });
+});
+
+describe("updateProductDisplayOrder", () => {
+  const buildOrderReq = (productIds: number[], withUser = true): CustomRequest =>
+    ({
+      body: { productIds },
+      ip: "127.0.0.1",
+      user: withUser ? { userRole: RolesEnum.Admin, userId: 1 } : undefined,
+    }) as unknown as CustomRequest;
+
+  /** A prisma mock whose $transaction hands the callback a tx holding `current` active rows. */
+  function mockOrderPrisma(current: { id: number; displayOrder: number }[]) {
+    const committed = current.map((row) => ({
+      id: row.id,
+      name: `P${row.id}`,
+      displayOrder: row.displayOrder,
+      category: { name: "Mesas" },
+      businessType: { name: "Alquiler" },
+      productImages: [],
+    }));
+    const tx = {
+      product: {
+        findMany: vi
+          .fn()
+          .mockResolvedValueOnce(current) // the set check inside applyProductDisplayOrder
+          .mockResolvedValueOnce(committed), // the committed re-read
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const $transaction = vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx));
+    (getPrismaClient as Mock).mockResolvedValue({ $transaction });
+    return { tx, $transaction };
+  }
+
+  it("renumbers in ONE transaction and answers with the committed order", async () => {
+    const { tx, $transaction } = mockOrderPrisma([
+      { id: 1, displayOrder: 0 },
+      { id: 2, displayOrder: 0 },
+    ]);
+
+    await updateProductDisplayOrder(buildOrderReq([2, 1]), {} as Response);
+
+    expect($transaction).toHaveBeenCalledTimes(1);
+    expect(tx.product.update).toHaveBeenCalledWith({ where: { id: 2 }, data: { displayOrder: 1 } });
+    expect(tx.product.update).toHaveBeenCalledWith({ where: { id: 1 }, data: { displayOrder: 2 } });
+    expect(sendOzariSuccess).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.OK,
+      "products.displayOrder.updated",
+      { products: expect.arrayContaining([expect.objectContaining({ id: 1 })]) },
+    );
+    expect(logAudit).not.toHaveBeenCalled();
+  });
+
+  it("audit-logs the arrangement only in deployed environments", async () => {
+    (isDeployedEnvironment as Mock).mockReturnValue(true);
+    mockOrderPrisma([{ id: 1, displayOrder: 1 }]);
+    await updateProductDisplayOrder(buildOrderReq([1]), {} as Response);
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ADMIN_ACTION",
+        userId: 1,
+        resource: "Product display order",
+        metadata: { operation: "PRODUCT_DISPLAY_ORDER_UPDATED", count: 1 },
+      }),
+    );
+
+    vi.clearAllMocks();
+    mockOrderPrisma([{ id: 1, displayOrder: 1 }]);
+    await updateProductDisplayOrder(buildOrderReq([1], false), {} as Response);
+    expect(logAudit).toHaveBeenCalledWith(expect.not.objectContaining({ userId: 1 }));
+    (isDeployedEnvironment as Mock).mockReturnValue(false);
+  });
+
+  it("answers 409 when the list no longer matches the active catalog", async () => {
+    mockOrderPrisma([
+      { id: 1, displayOrder: 0 },
+      { id: 2, displayOrder: 0 },
+    ]);
+    await updateProductDisplayOrder(buildOrderReq([1]), {} as Response);
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "products.displayOrder.conflict",
+    );
+    expect(sendOzariSuccess).not.toHaveBeenCalled();
+  });
+
+  it("sends a 500 when the transaction fails", async () => {
+    (getPrismaClient as Mock).mockResolvedValue({
+      $transaction: vi.fn().mockRejectedValue(new Error("db down")),
+    });
+    await updateProductDisplayOrder(buildOrderReq([1]), {} as Response);
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.INTERNAL_SERVER_ERROR,
+      "products.displayOrder.errorUpdating",
+    );
   });
 });

@@ -5,6 +5,7 @@ import {
   validateCreateProductImageUploads,
   validateDeleteProduct,
   validateUpdateProduct,
+  validateUpdateProductDisplayOrder,
 } from "./products.validator.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
@@ -38,6 +39,7 @@ vi.mock("@/config/app.js", () => ({
     host: "http://localhost:3000",
     maxGlobalAmount: 1000000,
     maxGlobalQuantity: 5000,
+    maxArrangedProducts: 3,
     storage: {
       maxUploadBytes: 5 * 1024 * 1024,
       maxImagesPerProduct: 8,
@@ -400,6 +402,35 @@ describe("Products Validator", () => {
       expectRejected("replacementPriceForbidden");
     });
 
+    // ── The security-deposit rule ─────────────────────────────────────────────────────────────
+
+    it.each([
+      ["an invalid deposit", { ...validRentBody(), securityDeposit: -5 }, "invalidSecurityDeposit"],
+      ["a deposit on a Venta product", { ...validSellBody(), securityDeposit: 50 }, "securityDepositForbidden"],
+      [
+        "a deposit above the replacement price",
+        { ...validRentBody(), replacementPrice: 900, securityDeposit: 900.01 },
+        "securityDepositAboveReplacement",
+      ],
+    ])("rejects %s", async (_label, body, key) => {
+      await mockValidPrisma();
+      mockReq.body = body;
+      await run();
+      expectRejected(key);
+    });
+
+    it("accepts a deposit equal to the replacement price, or without one", async () => {
+      await mockValidPrisma();
+      mockReq.body = { ...validRentBody(), replacementPrice: 900, securityDeposit: 900 };
+      await run();
+      expect((mockReq.body as { securityDeposit: number }).securityDeposit).toBe(900);
+
+      mockReq.body = { ...validRentBody(), replacementPrice: undefined, securityDeposit: 250.559 };
+      await run();
+      expect((mockReq.body as { securityDeposit: number }).securityDeposit).toBe(250.55);
+      expect(sendOzariError).not.toHaveBeenCalled();
+    });
+
     // ── Happy paths ───────────────────────────────────────────────────────────────────────────
 
     it("Alquiler: passes and sanitizes the body (truncated money, trimmed text, no sell fields)", async () => {
@@ -461,6 +492,40 @@ describe("Products Validator", () => {
 
       expect(mockNext).not.toHaveBeenCalled();
       expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.INTERNAL_SERVER_ERROR);
+    });
+  });
+
+  describe("validateUpdateProductDisplayOrder", () => {
+    const runOrder = () =>
+      validateUpdateProductDisplayOrder(
+        mockReq as Request,
+        mockRes as Response,
+        mockNext as NextFunction,
+      );
+
+    it("passes a list of distinct positive integers through, reshaped to exactly that field", () => {
+      mockReq.body = { productIds: [3, 1, 2], extra: "dropped" };
+      runOrder();
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.body).toEqual({ productIds: [3, 1, 2] });
+    });
+
+    it.each([
+      ["a missing body", undefined],
+      ["a missing list", {}],
+      ["a non-array", { productIds: "1,2" }],
+      ["an empty list", { productIds: [] }],
+      ["more ids than the cap", { productIds: [1, 2, 3, 4] }],
+      ["a duplicate", { productIds: [1, 1] }],
+      ["a zero", { productIds: [0, 1] }],
+      ["a fraction", { productIds: [1.5] }],
+      ["a numeric string", { productIds: ["2"] }],
+    ])("rejects %s with a 400", (_label, body) => {
+      mockReq.body = body;
+      runOrder();
+      expect(mockNext).not.toHaveBeenCalled();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.BAD_REQUEST);
+      expect(lastErrorKey()).toBe("products.displayOrder.validators.invalidProductIds");
     });
   });
 
@@ -658,6 +723,26 @@ describe("Products Validator", () => {
       mockReq.body = { ...validUpdateBody(), businessTypeId: BusinessTypeEnum.SELL, sellPrice: 10 };
       await runUpdate();
       expectRejected("pricingMismatch");
+    });
+
+    it("enforces the shared security-deposit rule, and carries a valid deposit through", async () => {
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), securityDeposit: "mucho" };
+      await runUpdate();
+      expectRejected("invalidSecurityDeposit");
+
+      vi.clearAllMocks();
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), securityDeposit: 901 };
+      await runUpdate();
+      expectRejected("securityDepositAboveReplacement");
+
+      vi.clearAllMocks();
+      await mockValidPrisma();
+      mockReq.body = { ...validUpdateBody(), securityDeposit: 300 };
+      await runUpdate();
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.body).toMatchObject({ securityDeposit: 300, replacementPrice: 900 });
     });
 
     it("rejects a detail id that doesn't belong to the product", async () => {

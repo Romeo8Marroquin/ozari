@@ -221,9 +221,16 @@ as the default landing.
   periodically after.
 - The delete/edit flows' post-commit R2 deletes are live (RECONCILE design), so the diff should
   normally be empty — the script is the auditable proof.
-- If staging catalog data is migrated to production at MVP: `pg_dump` the product tables +
-  bucket-to-bucket object copy + remap `R2_PUBLIC_URL` hosts — then run the reconcile script on
-  prod as the post-migration check.
+- **Copying the catalog between environments is `infrastructure/scripts/sync-products.ps1 <from> <to>`**
+  (dry run; `-Apply` writes; `local|staging|prod` either way; owner 2026-10-27). A MERGE, never a
+  dump: a product the target already has (same name + Alquiler/Venta, ignoring case/accents/
+  punctuation) is skipped and never modified; every other one is created with its details, its
+  lookups re-resolved BY NAME (categories/detail types created when missing; business types, rent
+  units and currencies must already be seeded), its photos downloaded from the source bucket and
+  re-uploaded to the target's under fresh keys (the target never points at the source's storage), and
+  appended after the target's arranged catalog. Both databases must run this checkout's migrations.
+  Each side uses its own app login + R2 token. Run the reconcile script on the target afterwards as
+  the post-copy check. Rules live in the header of `ozari-api/scripts/sync-products.ts`.
 - **Custom domain BEFORE real mobile users (session-critical — a production-cutover GATE, not a
   nice-to-have).** Deployed FE (`ozari-c28.pages.dev`) and API (Cloud Run `run.app`) are different
   registrable domains, so the 30-day refresh cookie is a **third-party cookie** there — Safari/iOS

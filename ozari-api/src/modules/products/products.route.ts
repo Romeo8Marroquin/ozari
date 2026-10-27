@@ -8,14 +8,17 @@ import {
   deleteProduct,
   getProductById,
   getProductCatalog,
+  getProductDisplayOrder,
   getProducts,
   updateProduct,
+  updateProductDisplayOrder,
 } from "./products.controller.js";
 import {
   validateCreateProduct,
   validateCreateProductImageUploads,
   validateDeleteProduct,
   validateUpdateProduct,
+  validateUpdateProductDisplayOrder,
 } from "./products.validator.js";
 
 const router: RouterType = Router();
@@ -27,6 +30,23 @@ const router: RouterType = Router();
 const canReadProducts = isGrantedRoles([RolesEnum.Admin, RolesEnum.Client]);
 router.get("/", verifyJwt, canReadProducts, getProducts);
 router.get("/catalog", verifyJwt, canReadProducts, getProductCatalog);
+
+// The admin's catalog ARRANGEMENT (the grid's default order). Declared before `/:id` so the literal
+// segment never matches as a param. GET is Admin-only too: it exists to feed the editing screen.
+router.get(
+  "/display-order",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  getProductDisplayOrder,
+);
+router.put(
+  "/display-order",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  validateUpdateProductDisplayOrder,
+  updateProductDisplayOrder,
+);
+
 router.get("/:id", verifyJwt, canReadProducts, getProductById);
 
 // Region: Role-protected writes (Admin only). The cheap DB-free role check runs BEFORE the
