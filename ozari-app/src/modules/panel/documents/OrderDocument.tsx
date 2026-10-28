@@ -47,8 +47,6 @@ import {
   fillWidth,
   footerPadding,
   GROUP_HEAD_AHEAD,
-  GUARANTEE_GAP,
-  GUARANTEE_PADDING,
   HAIRLINE,
   HEADER_GAP,
   INK,
@@ -56,15 +54,16 @@ import {
   MUTED,
   opticalCenterPad,
   PAGE_WIDTH,
+  RESULT_CHIP_HEIGHT,
   roundedTopPath,
   ROW_ALT,
   ROW_BASE,
   ROW_MIN_HEIGHT,
   ROW_PADDING,
-  SETTLEMENT_COLUMN_GAP,
   SETTLEMENT_COLUMN_WIDTH,
   SETTLEMENT_GAP,
   SETTLEMENT_HEAD_AHEAD,
+  SETTLEMENT_PADDING,
   settlementFitsOnePage,
   TABLE_HEAD,
   TABLE_HEAD_HEIGHT,
@@ -78,10 +77,11 @@ import type { SettlementRowText } from './documentTheme';
 import type {
   DamageReportModel,
   DocumentBankAccount,
+  DocumentDamages,
   DocumentLetterhead,
   DocumentModel,
-  DocumentSecurityDeposit,
 } from './documentModel';
+import type { OrderBalance } from '../orders/orderBalance';
 
 /**
  * The rendered documents — ONE template file for the comprobante, the cotización AND the damage
@@ -204,8 +204,8 @@ const styles = StyleSheet.create({
     color: CHARCOAL,
   },
   docMeta: { fontSize: 8.5, lineHeight: 1.4, color: MUTED },
-  // The PAGADO mark — and, on a draft damage report, the BORRADOR one. Charcoal and weight, never
-  // the gradient (decision #17): it states what the document IS, it is not a figure to act on.
+  // The PAGADO mark. Charcoal and weight, never the gradient (decision #17): it states what the
+  // document IS, it is not a figure to act on.
   headerMark: {
     marginTop: 6,
     paddingTop: 3,
@@ -430,13 +430,13 @@ const styles = StyleSheet.create({
     color: CHARCOAL,
   },
   grandValue: { fontFamily: 'Helvetica-Bold', fontSize: 13, lineHeight: 1.3, color: CHARCOAL },
-  balanceChip: { position: 'relative', height: 30, marginTop: 8 },
+  balanceChip: { position: 'relative', height: RESULT_CHIP_HEIGHT, marginTop: 8 },
   balanceRow: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: 30,
+    height: RESULT_CHIP_HEIGHT,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -447,36 +447,38 @@ const styles = StyleSheet.create({
   },
   balanceLabel: { fontFamily: 'Helvetica-Bold', fontSize: 9.5, lineHeight: 1, color: CHARCOAL },
   balanceValue: { fontFamily: 'Helvetica-Bold', fontSize: 12, lineHeight: 1, color: CHARCOAL },
-  // ── Security deposit ("Depósito") ───────────────────────────────────────────────────────────
-  // Still a deposit (`held`/`refunded`): one line under the saldo chip, inside the totals panel —
-  // see `DepositLine`. Settled with charges: the "DEPÓSITO Y DAÑOS" section after the summary — see
-  // `SettlementSection`.
-  // No vertical padding on its row, unlike `totalLine`: the chip above is already a hard stop, and
-  // every point here comes out of the ordinary order's one-page budget (#15) — `doc:preview:free`
-  // with a deposit fit with ~1pt of slack WITH that padding; dropping it buys back ~6pt.
-  depositLine: { marginTop: GUARANTEE_GAP },
-  depositLineRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  // The REFUND chip's type — white on charcoal, the brand chip inverted (see `ResultChip`).
+  balanceInverseText: { color: '#ffffff' },
+  // Nothing to move: a plain, bold row under a hairline — no chip at all, because a highlight
+  // would ask the reader to act on a zero.
+  resultNone: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginTop: 8,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: HAIRLINE,
+  },
+  // A deposit already in our hands before the review: information UNDER the result, outside the
+  // sum — it is not owed and not yet credited; it comes back at pickup.
+  onHand: { marginTop: 8 },
+  onHandRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  // ── The damages section ("DEPÓSITO Y DAÑOS") ────────────────────────────────────────────────
   // The gap between the summary and the section is the SUMMARY's bottom margin, never the
   // section's top one: a margin travels with the node it belongs to, so as the section's it would
   // follow it onto the next page and stack on top of the letterhead's own gap (§8a rule 1 — seen
   // in a render, 2026-10-27). Left behind with the summary, it disappears at a break, as it should.
   summaryBeforeSettlement: { marginBottom: SETTLEMENT_GAP },
   settlementPanel: {
-    flexDirection: 'row',
-    gap: SETTLEMENT_COLUMN_GAP,
     backgroundColor: TINT,
     borderRadius: 10,
-    paddingVertical: GUARANTEE_PADDING,
+    paddingVertical: SETTLEMENT_PADDING,
     paddingHorizontal: TOTALS_PADDING,
   },
-  // The OVERSIZED arrangement (`settlementFitsOnePage` false): the charges run full width and the
-  // arithmetic follows them, so the panel can continue onto the next page between two charges and
-  // its total still comes AFTER everything it adds up.
-  settlementPanelStacked: { flexDirection: 'column', gap: 6 },
-  settlementColumn: { width: SETTLEMENT_COLUMN_WIDTH },
-  // Stacked, the arithmetic keeps its column's width and moves to the right edge — under the
-  // totals' figures, exactly where it sits beside the charges in the ordinary arrangement.
-  settlementMathStacked: { alignSelf: 'flex-end' },
+  // The damages' total keeps the totals panel's inner width at the right edge — its figure under
+  // the TOTAL's, on the same vertical line.
+  settlementTotal: { width: SETTLEMENT_COLUMN_WIDTH, alignSelf: 'flex-end' },
   // The label side GROWS and wraps (a long product name, a long reason); the figure never shrinks,
   // so every amount stays on its column's right edge.
   moneyLabelBox: { flex: 1, paddingRight: 12 },
@@ -502,24 +504,6 @@ const styles = StyleSheet.create({
     borderTopColor: HAIRLINE,
   },
   hairline: { marginTop: 4, marginBottom: 2, borderTopWidth: 1, borderTopColor: HAIRLINE },
-  // What the client must still pay for the damage — weight, not the gradient (decision #17: the
-  // gradient marks the frame and the ORDER's saldo; a new element does not get it).
-  moneyDue: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginTop: 4,
-    paddingTop: 6,
-    paddingBottom: 3,
-    borderTopWidth: 1.2,
-    borderTopColor: CHARCOAL,
-  },
-  moneyDueText: {
-    fontFamily: 'Helvetica-Bold',
-    fontSize: 10,
-    lineHeight: 1.3,
-    color: CHARCOAL,
-  },
   // ── Bank details + page furniture ───────────────────────────────────────────────────────────
   banks: { gap: BANK_ROW_GAP },
   bank: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
@@ -601,6 +585,27 @@ export interface DocumentChromeCopy {
   /** A FUNCTION, not a template: the numbers only exist inside react-pdf's per-page `render`, and
    *  hand-substituting them would ship an unfilled `{{page}}` through i18next. */
   page: (pageNumber: number, totalPages: number) => string;
+  /** The squared balance's rows and its one result — shared, so both documents word the outcome
+   *  identically. */
+  balance: BalanceCopy;
+}
+
+/** The words of the squared balance (`SquaredBalance`). */
+export interface BalanceCopy {
+  depositDue: string;
+  depositDueNote: string;
+  claims: string;
+  claimsNote: string;
+  depositCredit: string;
+  serviceDue: string;
+  /** "Saldo a favor del cliente" — an unpaid order's anticipo above the service cost. */
+  advanceCredit: string;
+  /** The result, by direction: the client pays us / we pay the client / nothing moves. */
+  collect: string;
+  refund: string;
+  none: string;
+  depositOnHand: string;
+  depositOnHandNote: string;
 }
 
 /** The comprobante's and the cotización's vocabulary. */
@@ -631,33 +636,26 @@ export interface DocumentCopy extends DocumentChromeCopy {
   free: string;
   discount: string;
   total: string;
-  deposit: string;
-  balance: string;
-  /** The security deposit, printed as "Depósito" — never inside the total; see
-   *  `DocumentSecurityDeposit`. */
-  depositHeld: string;
-  depositHeldNote: string;
-  depositRefunded: string;
-  depositRefundedNote: string;
+  /** "Anticipo" — the advance, not the security deposit. */
+  advance: string;
+  /** The caption under an `Anticipo` row that stops at the TOTAL: the amount actually received. */
+  advanceReceived: (amount: string) => string;
+  /** "Pagado" — what a paid order's payment settled after the anticipo. */
+  paidAmount: string;
+  /** "Depósito y daños" with a deposit; "Daños" when there was none (or it was waived). */
   settlementTitle: string;
+  damagesTitle: string;
   settlementRetention: string;
   /** FUNCTIONS where a value is interpolated, for the same reason as `page`: the template never
    *  assembles a sentence out of fragments. */
   settlementReplacement: (product: string) => string;
   settlementReplacementDetail: (quantity: number, unitAmount: string) => string;
   settlementClaimsTotal: string;
-  settlementApplied: string;
-  settlementBalanceDue: string;
-  settlementRefund: string;
-  settlementRefundNote: (amount: string) => string;
   conditions: string;
 }
 
 /** The damage report's vocabulary (EPIC-2-DOCUMENTS §2c). */
 export interface DamageReportCopy extends DocumentChromeCopy {
-  /** "Borrador — sujeto a revisión", the mark a draft carries in its letterhead on every page. */
-  draftMark: string;
-  settledAt: string;
   depositTitle: string;
   columnProduct: string;
   columnDepositEach: string;
@@ -667,16 +665,13 @@ export interface DamageReportCopy extends DocumentChromeCopy {
   replacementsTitle: string;
   columnUnits: string;
   columnReplacementEach: string;
-  /** The statement printed instead of the charge tables when the review found nothing. */
+  /** The statement printed instead of the charge tables when the review found nothing — with a
+   *  deposit, and without one (none on the lines, or waived: the deposit is then never mentioned). */
   noClaims: string;
+  noClaimsNoDeposit: string;
   claimsTotal: string;
   /** "Retención {{retained}} + piezas {{damages}}" — reconciles the total when both kinds exist. */
   claimsBreakdown: (retained: string, damages: string) => string;
-  /** "De un depósito de {{amount}}" — the deposit's total, as the caption of what came back. */
-  refundNote: (amount: string) => string;
-  applied: string;
-  refund: string;
-  balanceDue: string;
   payTitle: string;
   payLead: string;
 }
@@ -812,7 +807,7 @@ const DocumentFrame: React.FC<{
   /** The PDF's own title metadata. */
   pdfTitle: string;
   meta: string[];
-  /** PAGADO on a paid order, BORRADOR on a draft report. */
+  /** PAGADO on a paid order. */
   mark?: string;
   notes: string[];
   children: React.ReactNode;
@@ -846,7 +841,7 @@ const DocumentFrame: React.FC<{
               {line}
             </Text>
           ))}
-          {/* A mark is the document stating what it IS: proof of payment, or not yet final. */}
+          {/* A mark is the document stating what it IS: proof of payment. */}
           {mark !== undefined && <Text style={styles.headerMark}>{mark}</Text>}
         </View>
       </View>
@@ -1107,15 +1102,126 @@ const TotalLine: React.FC<{ label: string; value: string; note?: string; strong?
   </View>
 );
 
-/** The figure the client acts on — the brand gradient's one place inside the content (#17). */
-const BalanceChip: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+/**
+ * The ONE result of the squared balance, as a chip of the same shape in two tones that cannot be
+ * confused (owner, 2026-10-27):
+ *
+ * - `collect` — the client pays us: the brand gradient, the content's one place for it (#17);
+ * - `refund` — we pay the client back: the chip INVERTED, charcoal with white type. Same weight and
+ *   place, so it reads as "the outcome", but a reader skimming for the pastel band they have to pay
+ *   does not find it.
+ */
+const ResultChip: React.FC<{ label: string; value: string; tone: 'collect' | 'refund' }> = ({
+  label,
+  value,
+  tone,
+}) => (
   <View style={styles.balanceChip}>
-    <BrandFill id="balance" width={TOTALS_INNER_WIDTH} height={30} radius={8} />
+    {tone === 'collect' ? (
+      <BrandFill id="balance" width={TOTALS_INNER_WIDTH} height={RESULT_CHIP_HEIGHT} radius={8} />
+    ) : (
+      <Svg
+        width={TOTALS_INNER_WIDTH}
+        height={RESULT_CHIP_HEIGHT}
+        viewBox={`0 0 ${TOTALS_INNER_WIDTH} ${RESULT_CHIP_HEIGHT}`}
+      >
+        <Rect
+          x={0}
+          y={0}
+          width={TOTALS_INNER_WIDTH}
+          height={RESULT_CHIP_HEIGHT}
+          rx={8}
+          ry={8}
+          fill={CHARCOAL}
+        />
+      </Svg>
+    )}
     <View style={styles.balanceRow}>
-      <Text style={styles.balanceLabel}>{label}</Text>
-      <Text style={styles.balanceValue}>{value}</Text>
+      <Text style={[styles.balanceLabel, tone === 'refund' ? styles.balanceInverseText : {}]}>
+        {label}
+      </Text>
+      <Text style={[styles.balanceValue, tone === 'refund' ? styles.balanceInverseText : {}]}>
+        {value}
+      </Text>
     </View>
   </View>
+);
+
+/** An addition below the TOTAL — signed, so the column reads as arithmetic. ASCII `+`, like `-`. */
+const PLUS = '+';
+
+/**
+ * The order SQUARED (`squareOrderBalance`, EPIC-2-DOCUMENTS §2b): the rows that move the money
+ * after the cost, then the ONE result — what has to happen with the money, and which way.
+ *
+ * Every row appears only when it is not zero, and every row is SIGNED, so the reader can add the
+ * column and arrive at the result (owner, 2026-10-27: the client must see that they PAY the deposit
+ * to get the service even though it is not a cost, and must never see two competing balances):
+ *
+ * - `Saldo del servicio +` — the damage report only (`serviceRow`), whose own first figure is the
+ *   damages; on the comprobante the TOTAL and its anticipo/pagado rows already say it;
+ * - `Saldo a favor del cliente -` — an unpaid order's anticipo above the service cost (on every
+ *   document: the comprobante's `Anticipo` row then stops at the TOTAL, so nothing counts twice);
+ * - `Depósito (reembolsable) +` — before the review, a deposit still to be handed over;
+ * - `Daños +` — the comprobante only (`claimsRow`), pointing at the itemised section below;
+ * - `Depósito recibido -` — after the review, the deposit credited back against all of it;
+ * - the result: `Monto a pagar` (gradient), `Monto a devolver al cliente` (inverted) or a plain
+ *   `Sin saldo pendiente` row — no highlight on a zero;
+ * - and, under it and OUTSIDE the sum, a deposit already on hand before the review.
+ */
+const SquaredBalance: React.FC<{
+  balance: OrderBalance;
+  copy: BalanceCopy;
+  money: (amount: number) => string;
+  serviceRow: boolean;
+  claimsRow: boolean;
+}> = ({ balance, copy, money, serviceRow, claimsRow }) => (
+  <>
+    {serviceRow && balance.serviceDue > 0 && (
+      <TotalLine label={copy.serviceDue} value={`${PLUS}${money(balance.serviceDue)}`} />
+    )}
+    {balance.advanceCredit > 0 && (
+      <TotalLine label={copy.advanceCredit} value={`${MINUS}${money(balance.advanceCredit)}`} />
+    )}
+    {balance.depositDue > 0 && (
+      <TotalLine
+        label={copy.depositDue}
+        note={copy.depositDueNote}
+        value={`${PLUS}${money(balance.depositDue)}`}
+      />
+    )}
+    {claimsRow && balance.claims > 0 && (
+      <TotalLine
+        label={copy.claims}
+        note={copy.claimsNote}
+        value={`${PLUS}${money(balance.claims)}`}
+      />
+    )}
+    {balance.depositCredit > 0 && (
+      <TotalLine label={copy.depositCredit} value={`${MINUS}${money(balance.depositCredit)}`} />
+    )}
+    {balance.direction === 'none' ? (
+      <View style={styles.resultNone}>
+        <Text style={styles.moneyStrong}>{copy.none}</Text>
+        <Text style={styles.moneyStrong}>{money(0)}</Text>
+      </View>
+    ) : (
+      <ResultChip
+        tone={balance.direction}
+        label={balance.direction === 'collect' ? copy.collect : copy.refund}
+        value={money(balance.amount)}
+      />
+    )}
+    {balance.depositOnHand > 0 && (
+      <View style={styles.onHand}>
+        <View style={styles.onHandRow}>
+          <Text style={[styles.moneyLabel, styles.moneyLabelBox]}>{copy.depositOnHand}</Text>
+          <Text style={styles.moneyStrong}>{money(balance.depositOnHand)}</Text>
+        </View>
+        <Text style={styles.totalNote}>{copy.depositOnHandNote}</Text>
+      </View>
+    )}
+  </>
 );
 
 /** One charge of the settlement panel: a label that wraps (with caption lines under it) and a
@@ -1137,78 +1243,34 @@ const ChargeRow: React.FC<{ row: SettlementRowText; value: string }> = ({ row, v
 
 // ── The comprobante / cotización ──────────────────────────────────────────────────────────────
 
-type DepositOf<S extends DocumentSecurityDeposit['status']> = Extract<
-  DocumentSecurityDeposit,
-  { status: S }
->;
-
 /**
- * A security deposit that is still a DEPOSIT — `held` (to collect, refundable) or `refunded` (the
- * happy path). One line under the saldo chip, inside the totals panel, with its caption stating in
- * words that it is apart from the total.
+ * "DEPÓSITO Y DAÑOS" (or "DAÑOS", with no deposit) — the itemised charges of a recorded damage
+ * report and their total. Nothing else (owner, 2026-10-27): what the damages DO to the money is the
+ * squared result in the totals panel above, so this section never states a competing balance —
+ * it is the detail the totals' `Daños` row points at.
  *
- * Inside the panel rather than a panel of its own, and that was MEASURED, not preferred (2026-10-27):
- * a separate panel made the summary ~47pt taller, while `doc:preview:free` — the ordinary two-bank
- * order — had ~19pt to spare, so every order with a deposit went to two pages (#15). As a line under
- * the chip the free fixture with a deposit still ends on page one. ⚠️ That budget is now nearly
- * spent; check `pnpm doc:preview:free -- --deposit=held` after any change to the summary.
- */
-const DepositLine: React.FC<{
-  deposit: DepositOf<'held'> | DepositOf<'refunded'>;
-  copy: DocumentCopy;
-  money: (amount: number) => string;
-}> = ({ deposit, copy, money }) => {
-  const held = deposit.status === 'held';
-  return (
-    <View style={styles.depositLine}>
-      <View style={styles.depositLineRow}>
-        <Text style={[styles.moneyLabel, styles.moneyLabelBox]}>
-          {held ? copy.depositHeld : copy.depositRefunded}
-        </Text>
-        <Text style={styles.moneyStrong}>{money(held ? deposit.amount : deposit.refund)}</Text>
-      </View>
-      {/* Full width, under both the label and the figure — beside the figure it wrapped to a
-          second line, which was most of what a separate panel cost. */}
-      <Text style={styles.totalNote}>{held ? copy.depositHeldNote : copy.depositRefundedNote}</Text>
-    </View>
-  );
-};
-
-/**
- * "DEPÓSITO Y DAÑOS" — the settlement once something was claimed, the one case where the deposit
- * stops being only a deposit (owner, 2026-10-27). The charges come first, as COSTS, then the
- * arithmetic that settles them; every figure is the API's own, selected by `documentModel` and
- * never re-derived here.
- *
- * **Its OWN block after the summary, and it never splits** (owner, 2026-10-27 — §8a rule 5). It used
- * to sit inside the summary's `wrap={false}`, which kept it whole only by dragging the totals, the
- * conditions and the banks with it; and because react-pdf cannot MOVE a `wrap={false}` block taller
- * than a page (it leaves it on the current page and lets it run off the bottom edge), a settlement
- * with many charges would have silently lost the end of the summary. Now:
+ * **Its OWN block after the summary, and it never splits** (§8a rule 5). It used to sit inside the
+ * summary's `wrap={false}`, which kept it whole only by dragging the totals, the conditions and the
+ * banks with it; and because react-pdf cannot MOVE a `wrap={false}` block taller than a page (it
+ * leaves it on the current page and lets it run off the bottom edge), a settlement with many charges
+ * would have silently lost the end of the page. Now:
  *
  * - **the ordinary case** — heading and panel in one `wrap={false}` View: if it does not fit what is
  *   left of the page, it moves WHOLE to the next one, heading included (the same rule as the
  *   summary, §8a);
  * - **the oversized case** (`settlementFitsOnePage` false, by a pessimistic estimate) — the heading
  *   is a page-level sibling with `minPresenceAhead`, so it cannot end a page alone; the charges are
- *   atomic rows stacked full width; the arithmetic follows them as one atomic block. The panel may
- *   then continue onto the next page between two charges, which is the only sane option left for a
- *   block taller than a page — and nothing is ever lost off an edge.
- *
- * Full width, two columns: the charges on the left, the arithmetic on the right with its figures on
- * the same vertical line as the totals' above (`SETTLEMENT_COLUMN_WIDTH`). Half the height of the
- * single column it replaced, which is what usually lets it stay on the page with the summary.
+ *   atomic rows and the total is one atomic row after them. The panel may then continue onto the
+ *   next page between two charges, which is the only sane option left for a block taller than a
+ *   page — and nothing is ever lost off an edge.
  */
-const SettlementSection: React.FC<{
-  deposit: DepositOf<'settled'>;
+const DamagesSection: React.FC<{
+  damages: DocumentDamages;
   copy: DocumentCopy;
   money: (amount: number) => string;
   noteCount: number;
-}> = ({ deposit, copy, money, noteCount }) => {
-  // A deposit of zero (replacement values without a deposit) has nothing to cover or return, so the
-  // two deposit lines would only print "Q0.00" twice; the charges and what is owed say it all.
-  const hadDeposit = deposit.amount > 0;
-  const charges = deposit.claims.map((claim) =>
+}> = ({ damages, copy, money, noteCount }) => {
+  const charges = damages.claims.map((claim) =>
     claim.kind === 'retention'
       ? {
           row: {
@@ -1238,57 +1300,18 @@ const SettlementSection: React.FC<{
       style={styles.blockTitle}
       {...(!fits && { minPresenceAhead: SETTLEMENT_HEAD_AHEAD })}
     >
-      {copy.settlementTitle.toUpperCase()}
+      {(damages.withDeposit ? copy.settlementTitle : copy.damagesTitle).toUpperCase()}
     </Text>
   );
   const panel = (
-    <View style={[styles.settlementPanel, fits ? {} : styles.settlementPanelStacked]}>
-      <View style={fits ? styles.settlementColumn : {}}>
-        {charges.map((charge, index) => (
-          <ChargeRow key={index} row={charge.row} value={charge.value} />
-        ))}
-      </View>
-      <View
-        style={[styles.settlementColumn, fits ? {} : styles.settlementMathStacked]}
-        wrap={false}
-      >
-        {/* With no deposit to apply, the total of the charges IS what is owed — printing both
-            would state the same figure twice in a row. Compared, never assumed: a server that ever
-            priced them differently gets both lines. Beside the charges it heads its column; under
-            them (stacked) it takes the hairline a sub-total has. */}
-        {(hadDeposit || deposit.balanceDue !== deposit.claimsTotal) && (
-          <View style={fits ? styles.totalLine : styles.moneySum}>
-            <Text style={styles.moneyLabel}>{copy.settlementClaimsTotal}</Text>
-            <Text style={styles.moneyStrong}>{money(deposit.claimsTotal)}</Text>
-          </View>
-        )}
-        {hadDeposit && (
-          <View style={styles.totalLine}>
-            <Text style={[styles.moneyLabel, styles.moneyLabelBox]}>{copy.settlementApplied}</Text>
-            <Text style={styles.moneyValue}>{`${MINUS}${money(deposit.applied)}`}</Text>
-          </View>
-        )}
-        {deposit.balanceDue > 0 && (
-          <View style={styles.moneyDue}>
-            <Text style={[styles.moneyDueText, styles.moneyLabelBox]}>
-              {copy.settlementBalanceDue}
-            </Text>
-            <Text style={[styles.moneyDueText, { flexShrink: 0 }]}>
-              {money(deposit.balanceDue)}
-            </Text>
-          </View>
-        )}
-        {/* What came back of the deposit — printed even at Q0.00 once something was claimed: the
-            client handed money over, and "nothing came back" is an answer owed in writing. */}
-        {hadDeposit && (
-          <View style={styles.moneySum}>
-            <View style={styles.moneyLabelBox}>
-              <Text style={styles.moneyLabel}>{copy.settlementRefund}</Text>
-              <Text style={styles.totalNote}>{copy.settlementRefundNote(money(deposit.amount))}</Text>
-            </View>
-            <Text style={styles.moneyValue}>{money(deposit.refund)}</Text>
-          </View>
-        )}
+    <View style={styles.settlementPanel}>
+      {charges.map((charge, index) => (
+        <ChargeRow key={index} row={charge.row} value={charge.value} />
+      ))}
+      {/* The total of the charges — the figure the totals' `Daños` row carries. */}
+      <View style={[styles.moneySum, styles.settlementTotal]} wrap={false}>
+        <Text style={styles.moneyLabel}>{copy.settlementClaimsTotal}</Text>
+        <Text style={styles.moneyStrong}>{money(damages.total)}</Text>
       </View>
     </View>
   );
@@ -1415,10 +1438,7 @@ const OrderDocument: React.FC<OrderDocumentProps> = ({ model, copy, money, date,
       {/* Everything that closes the document is ONE block, and it must not be split by a page
           break: the conditions and the deposit details qualify the very figures beside them. */}
       <View
-        style={[
-          styles.summary,
-          model.securityDeposit?.status === 'settled' ? styles.summaryBeforeSettlement : {},
-        ]}
+        style={[styles.summary, model.damages !== undefined ? styles.summaryBeforeSettlement : {}]}
         wrap={false}
       >
         <View style={styles.summaryNotes}>
@@ -1460,19 +1480,32 @@ const OrderDocument: React.FC<OrderDocumentProps> = ({ model, copy, money, date,
             <Text style={styles.grandLabel}>{copy.total}</Text>
             <Text style={styles.grandValue}>{money(model.totals.total)}</Text>
           </View>
-          {model.totals.deposit !== undefined && (
-            <TotalLine label={copy.deposit} value={`${MINUS}${money(model.totals.deposit)}`} />
+          {/* Under the cost, what has moved and what must: the anticipo, a paid order's payment,
+              then the squared rows and the ONE result. */}
+          {model.totals.advance !== undefined && (
+            <TotalLine
+              label={copy.advance}
+              {...(model.totals.advanceReceived !== undefined && {
+                note: copy.advanceReceived(money(model.totals.advanceReceived)),
+              })}
+              value={`${MINUS}${money(model.totals.advance)}`}
+            />
           )}
-          {/* The number the client acts on, so it gets the brand and the weight. */}
-          <BalanceChip label={copy.balance} value={money(model.totals.balance)} />
-          {model.securityDeposit !== undefined && model.securityDeposit.status !== 'settled' && (
-            <DepositLine deposit={model.securityDeposit} copy={copy} money={money} />
+          {model.totals.paid !== undefined && (
+            <TotalLine label={copy.paidAmount} value={`${MINUS}${money(model.totals.paid)}`} />
           )}
+          <SquaredBalance
+            balance={model.totals.balance}
+            copy={copy.balance}
+            money={money}
+            serviceRow={false}
+            claimsRow
+          />
         </View>
       </View>
-      {model.securityDeposit?.status === 'settled' && (
-        <SettlementSection
-          deposit={model.securityDeposit}
+      {model.damages !== undefined && (
+        <DamagesSection
+          damages={model.damages}
           copy={copy}
           money={money}
           noteCount={notes.length}
@@ -1492,18 +1525,18 @@ interface DamageReportDocumentProps extends Formatters {
 }
 
 /**
- * "REPORTE DE DAÑOS" — what the pickup review found, what it costs and how it is settled against
- * the deposit (EPIC-2-DOCUMENTS §2c). A client-facing statement the admin can hand over, or — as a
- * DRAFT from the unsaved report-damages form — a damage QUOTE to discuss before recording it.
+ * "REPORTE DE DAÑOS" — what the pickup review found, what it costs and how the order squares with
+ * it (EPIC-2-DOCUMENTS §2c). Generated from what the admin entered — saved, or still in the report
+ * form — and it is THE report either way: no draft mark, issued at the download.
  *
  * Built from the comprobante's own parts, so it reads as the same company's paperwork: the frame,
  * the fact cards, the line tables (repeating headers, keep-with-next titles, rows that never split)
  * and a summary that is `wrap={false}` — totals on the right, and on the left the bank accounts,
- * but ONLY when there is a balance to pay into them.
+ * but ONLY when the client has something to pay into them.
  *
- * Its balance — "Saldo por cobrar al cliente" — takes the gradient chip, because on this document it
- * IS the one number the client has to act on (decision #17's "the frame and the balance"); the
- * comprobante's own saldo never appears here, so the two can never be confused.
+ * Its result is the comprobante's, by construction: the same `squareOrderBalance` over the same
+ * order with the same claims, under the same words and the same chip — so the two documents can
+ * never end on different amounts.
  */
 export const DamageReportDocument: React.FC<DamageReportDocumentProps> = ({
   model,
@@ -1514,10 +1547,10 @@ export const DamageReportDocument: React.FC<DamageReportDocumentProps> = ({
 }) => {
   const reference = formatReference(model.reference);
   const hasDeposit = model.deposit.total > 0;
-  const owes = model.totals.balanceDue > 0;
-  // How to pay the difference — only when there IS a difference. A report that settles inside the
-  // deposit has nothing to pay, and bank details there would read as a request for money.
-  const showBanks = owes && model.letterhead.banks.length > 0;
+  const { balance } = model;
+  // How to pay — only when the client HAS to pay. A report that ends in a refund or at zero has
+  // nothing to pay, and bank details there would read as a request for money.
+  const showBanks = balance.direction === 'collect' && model.letterhead.banks.length > 0;
   const hasClaims = model.retention !== undefined || model.replacements.length > 0;
   const tables: Omit<React.ComponentProps<typeof LineTable>, 'first' | 'dividerGap'>[] = [
     ...(model.deposit.lines.length > 0
@@ -1589,13 +1622,7 @@ export const DamageReportDocument: React.FC<DamageReportDocumentProps> = ({
       letterhead={model.letterhead}
       copy={copy}
       pdfTitle={`${copy.title} ${reference}`}
-      meta={[
-        `${copy.reference} ${reference}`,
-        `${copy.issuedAt} ${date(model.issuedAt)}`,
-        ...(model.settledAt === undefined ? [] : [`${copy.settledAt} ${date(model.settledAt)}`]),
-      ]}
-      // `fixed` with the letterhead, so EVERY page of a draft says it is one.
-      {...(model.draft && { mark: copy.draftMark.toUpperCase() })}
+      meta={[`${copy.reference} ${reference}`, `${copy.issuedAt} ${date(model.issuedAt)}`]}
       notes={[]}
     >
       <View style={styles.facts}>
@@ -1630,7 +1657,7 @@ export const DamageReportDocument: React.FC<DamageReportDocumentProps> = ({
           table above it, it also supplies the gap the first table's title would have. */}
       {!hasClaims && (
         <Text style={[styles.lead, { marginTop: tables.length === 0 ? 16 : 0, marginBottom: 16 }]}>
-          {copy.noClaims}
+          {hasDeposit ? copy.noClaims : copy.noClaimsNoDeposit}
         </Text>
       )}
       {/* One block, `wrap={false}` like the comprobante's: the accounts qualify the balance beside
@@ -1661,23 +1688,19 @@ export const DamageReportDocument: React.FC<DamageReportDocumentProps> = ({
             </View>
             <Text style={styles.grandValue}>{money(model.totals.claims)}</Text>
           </View>
-          {/* What the charges cost, then how the deposit settles them: a hairline between the
-              two, never the TOTAL's charcoal rule. */}
-          {hasDeposit && <View style={styles.hairline} />}
-          {hasDeposit && (
-            <>
-              <TotalLine label={copy.applied} value={`${MINUS}${money(model.totals.applied)}`} />
-              <TotalLine
-                label={copy.refund}
-                value={money(model.totals.refund)}
-                // The deposit's total, under what came back of it — the comprobante's own wording.
-                note={copy.refundNote(money(model.deposit.total))}
-                // When nothing is owed, what comes back IS the outcome — weight, not the gradient.
-                strong={!owes}
-              />
-            </>
+          {/* What the charges cost, then how the order squares with them: a hairline between the
+              two, never the TOTAL's charcoal rule — and only when rows follow it (the result
+              brings its own separation). */}
+          {(balance.serviceDue > 0 || balance.advanceCredit > 0 || balance.depositCredit > 0) && (
+            <View style={styles.hairline} />
           )}
-          {owes && <BalanceChip label={copy.balanceDue} value={money(model.totals.balanceDue)} />}
+          <SquaredBalance
+            balance={balance}
+            copy={copy.balance}
+            money={money}
+            serviceRow
+            claimsRow={false}
+          />
         </View>
       </View>
     </DocumentFrame>

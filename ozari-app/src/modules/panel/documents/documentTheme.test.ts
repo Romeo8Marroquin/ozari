@@ -18,7 +18,6 @@ import {
   opticalCenterPad,
   PAGE_HEIGHT,
   pageContentHeight,
-  SETTLEMENT_COLUMN_GAP,
   SETTLEMENT_COLUMN_WIDTH,
   SETTLEMENT_HEAD_AHEAD,
   settlementFitsOnePage,
@@ -45,15 +44,12 @@ describe('fillWidth', () => {
   });
 });
 
-describe('the DEPÓSITO Y DAÑOS section geometry', () => {
-  it('puts the arithmetic column under the totals’ figures, with the summary’s own gutter', () => {
-    // Two columns of the totals panel's inner width, inside a full-width panel with the totals'
-    // padding: the right column then starts and ends exactly where the totals' content does.
+describe('the damages section geometry', () => {
+  it('puts the damages total under the totals’ figures', () => {
+    // The total's row is the totals panel's inner width at the right edge of a full-width panel
+    // with the same padding — so its figure sits on the TOTAL's vertical line.
     expect(SETTLEMENT_COLUMN_WIDTH).toBe(TOTALS_INNER_WIDTH);
-    expect(TOTALS_PADDING * 2 + SETTLEMENT_COLUMN_WIDTH * 2 + SETTLEMENT_COLUMN_GAP).toBe(
-      CONTENT_WIDTH,
-    );
-    expect(SETTLEMENT_COLUMN_GAP).toBe(24);
+    expect(TOTALS_WIDTH).toBeLessThan(CONTENT_WIDTH);
   });
 });
 
@@ -77,17 +73,18 @@ describe('the oversized-panel rule', () => {
     expect(estimateLines(LONGEST, 164, 7)).toBe(13);
   });
 
-  it('is never shorter than the arithmetic column, whatever the charges', () => {
-    // The panel is two columns side by side: the taller one sets its height.
+  it('grows with every charge and every caption line', () => {
+    // One column of charges, then the total: each row adds its own height.
+    const none = estimateSettlementHeight([]);
     const one = estimateSettlementHeight([charge('Retención del depósito')]);
-    expect(one).toBe(estimateSettlementHeight([]));
+    expect(one).toBeGreaterThan(none);
     expect(estimateSettlementHeight([charge('a', [LONGEST])])).toBeGreaterThan(one);
   });
 
   it('lets the ordinary settlement travel WHOLE', () => {
     // The fixture's case — a retention with a reason and two replacements — is a fraction of a page.
     const rows = [
-      charge('Retención del depósito', ['Manteles con manchas de vino que no salieron.']),
+      charge('Retención del depósito', ['Daño físico en la mantelería: manchas persistentes tras el lavado.']),
       charge('Reposición: Mantelería de lino con cubremantel a juego', ['2 × Q 350.00 c/u', 'Quemaduras.']),
       charge('Reposición: Sillas plásticas blancas', ['4 × Q 45.00 c/u']),
     ];

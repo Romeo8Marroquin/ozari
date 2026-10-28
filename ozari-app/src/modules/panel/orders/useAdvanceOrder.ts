@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@api/client';
 import { QueryKeys } from '@constants/QueryKeys';
 import type { OzariSuccessResponse } from '../../../types/api.types';
-import type { OrderDetailEnvelope } from './order.types';
+import type { DepositCollectionBody, OrderDetailEnvelope } from './order.types';
 
 /** The advance body — a TARGET status and whatever that move needs. The client never says which
  *  KIND of move it is: the backend engine derives that (and re-authorises it) under a row lock. */
@@ -21,6 +21,9 @@ export interface AdvanceOrderBody {
   evidence?: AdvanceEvidence[];
   /** Why it's being cancelled — sent on a disruptive move. */
   reason?: string;
+  /** Whether the security deposit was received — sent only when the move offered
+   *  `depositToCollect` (the delivery step of an order whose deposit is still pending). */
+  depositCollection?: DepositCollectionBody;
 }
 
 export interface AdvanceOrderVariables extends AdvanceOrderBody {

@@ -14,29 +14,21 @@ const SECONDARY_COLOR = '#262626';
 
 export interface DamageReportButtonProps {
   order: OrderDetail;
-  /** The saved settlement, or a DRAFT built from the report-damages form's current values. */
+  /** The settlement the admin entered — the saved one, or the report form's current values. */
   settlement: OrderDepositSettlement;
-  /** True when `settlement` is unsaved form state — the document says so. */
-  draft?: boolean;
 }
 
 /**
  * "Descargar reporte de daños" — the client-facing damage statement (EPIC-2-DOCUMENTS §2c).
  *
- * Two homes, one component: the order's deposit card, with the SAVED settlement (the statement of
- * record), and the "Reportar daños" page, with a DRAFT built from the unsaved form (a damage quote
- * to discuss with the client before recording it). `draft` is what separates them on paper — the
- * BORRADOR mark on every page, no settlement date, and `-borrador` in the file name — so a
- * provisional figure can never pass for the recorded one.
+ * The report is generated from what the admin entered, saved or not yet saved, and it is THE damage
+ * report either way (owner, 2026-10-27): no draft mark, no draft file name, issued at the download.
  *
- * The figures are the settlement's own, copied verbatim (`fromDamageReport`); this component only
- * gathers the letterhead and the vocabulary and hands them over, exactly like `OrderDocumentButton`.
+ * The figures are the settlement's own, copied verbatim, and the outcome is the order squared with
+ * them (`fromDamageReport`); this component only gathers the letterhead and the vocabulary and
+ * hands them over, exactly like `OrderDocumentButton`.
  */
-const DamageReportButton: React.FC<DamageReportButtonProps> = ({
-  order,
-  settlement,
-  draft = false,
-}) => {
+const DamageReportButton: React.FC<DamageReportButtonProps> = ({ order, settlement }) => {
   const { t } = useTranslation();
   const copy = useDamageReportCopy();
   const letterhead = useDocumentLetterhead();
@@ -45,7 +37,7 @@ const DamageReportButton: React.FC<DamageReportButtonProps> = ({
   const download = (): void => {
     setBusy(true);
     void downloadDamageReport({
-      model: fromDamageReport(order, settlement, letterhead, new Date(), draft),
+      model: fromDamageReport(order, settlement, letterhead, new Date()),
       copy,
       money: documentMoney(order.currency.symbol),
       date: (value) => DOCUMENT_DATE.format(value),

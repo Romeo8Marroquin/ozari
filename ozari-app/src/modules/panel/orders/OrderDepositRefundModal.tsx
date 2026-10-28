@@ -48,7 +48,9 @@ const OrderDepositRefundModal: React.FC<{
   }
   if (order && order !== shown) setShown(order);
 
-  const total = shown?.securityDeposit?.total ?? 0;
+  // What goes back is what was HELD — 0 when the goods left without collecting the deposit, which
+  // makes this the "Sin daños" confirmation even though the order states a deposit.
+  const total = shown?.securityDeposit?.held ?? 0;
   const symbol = shown?.currency.symbol ?? '';
   const client = shown?.clientName ?? '';
   const variant = total > 0 ? '' : 'NoDeposit';

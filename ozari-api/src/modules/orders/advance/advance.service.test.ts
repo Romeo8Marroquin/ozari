@@ -9,6 +9,7 @@ import {
   AdvanceOrderError,
   assertEvidenceSatisfies,
   buildTransitionData,
+  confirmsDelivery,
   planStatusPath,
 } from "./advance.service.js";
 
@@ -197,6 +198,23 @@ describe("planStatusPath", () => {
       NOW,
     ]);
     expect(steps[1]?.evidenceKeys).toEqual(["a"]);
+  });
+
+  it("knows when a walk CONFIRMS the delivery — the only move that may carry the deposit answer", () => {
+    // The ordinary tap into Entregado, and an admin jump THROUGH it, both confirm it.
+    expect(confirmsDelivery(plan(order({ serviceStatusId: 5 }), [ENTREGADO], [[3, ["a"]]]))).toBe(true);
+    expect(
+      confirmsDelivery(
+        plan(order({ serviceStatusId: 1 }), [EN_RUTA, ENTREGADO, RECOLECTADO], [
+          [3, ["a"]],
+          [4, ["b"]],
+        ]),
+      ),
+    ).toBe(true);
+    // A forward move elsewhere, a rewind INTO Entregado and a cancel do not.
+    expect(confirmsDelivery(plan(order({ serviceStatusId: 1 }), [EN_RUTA]))).toBe(false);
+    expect(confirmsDelivery(plan(order({ serviceStatusId: 4 }), [ENTREGADO]))).toBe(false);
+    expect(confirmsDelivery(plan(order({ serviceStatusId: 5 }), [CANCELADO]))).toBe(false);
   });
 
   it("marks each backward leg with the step whose photos it destroys", () => {

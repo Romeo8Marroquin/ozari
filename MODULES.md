@@ -278,15 +278,26 @@ nothing: a method must be observed, not guessed.
 - Lines snapshot `securityDeposit` + `replacementPrice` per unit (re-derived on every save like the
   prices, through `orderPricingProductSelect` + `pricedLineData` — ONE shape for create and edit) and
   carry `damagedQuantity`/`damageNote`, written ONLY by the settlement.
-- **All money is `orders.service.ts`** (`computeDepositTotal`, `computeSettlementMoney`,
-  `projectSecurityDeposit`): applied = min(deposit, retained + damages), refund = the rest, balance =
-  what the deposit can't cover. Retained ≤ deposit (400). No stock moves.
+- **All money is `orders.service.ts`** (`computeDepositTotal`, `heldDeposit`, `computeSettlementMoney`,
+  `projectSecurityDeposit`): applied = min(HELD, retained + damages), refund = the rest, balance =
+  what the deposit can't cover. Retained ≤ HELD (400). No stock moves. **HELD = `heldDeposit`** — the
+  nominal deposit, or 0 when its collection was WAIVED; every settlement figure, the edit re-check and
+  the dashboard read it, never the nominal total.
+- **Deposit collection** (`orders/deposit-collection/`): `services.depositReceivedAt` /
+  `depositWaivedAt` + `depositWaivedReason` → PENDING / RECEIVED / WAIVED (exclusive). Recorded at the
+  delivery (the forward DELIVERY action's `depositToCollect` → the advance's optional
+  `depositCollection`, applied only when `pendingDepositToCollect` holds, silently ignored otherwise —
+  never blocks) or any time through `PUT/DELETE /orders/:id/deposit-collection` (Admin; `409` when
+  cancelled, no deposit, or a damage report exists). ONE write, `applyDepositCollection`, shared by the
+  PUT, the advance and the settle (a report on a PENDING collection stamps RECEIVED); a re-send of the
+  same answer changes nothing. Projected as `securityDeposit.held` + `.collection`.
 - An order EDIT that would contradict a recorded settlement is a `409 settlementConflict`
   (`assertSettlementSurvivesEdit`); undo the settlement first.
 - **Append-only trail** `service_deposit_history`: every settle/undo writes ONE row in its transaction —
-  `RECORDED` (first), `CORRECTED` (re-send), `UNDONE` — with a money snapshot (`depositTotal`,
-  `claimsTotal`, `refundAmount`, `balanceDue`; NULL on `UNDONE`) and `byUserId`. Projected as the
-  detail's top-level `depositHistory[]`; deleted with the order (before the row — RESTRICT FK).
+  `RECORDED` (first), `CORRECTED` (re-send), `UNDONE` — with a money snapshot (`depositTotal` = HELD,
+  `claimsTotal`, `refundAmount`, `balanceDue`; NULL on `UNDONE`) and `byUserId`; the collection adds
+  `RECEIVED` / `WAIVED` (`note` = reason) / `COLLECTION_CLEARED` (nominal `depositTotal`). Projected as
+  the detail's top-level `depositHistory[]`; deleted with the order (before the row — RESTRICT FK).
 - User-facing API messages say **"depósito"**, never "garantía"/"liquidación" (owner 2026-10-27).
 
 ### Security deposit + damage settlement — frontend
@@ -301,8 +312,10 @@ nothing: a method must be observed, not guessed.
 - **Order detail:** `OrderDepositCard` ("Depósito", only when `order.securityDeposit`) renders ONLY
   the API's numbers. Chip: "Pendiente" (recordable, not recorded) / "Devuelto" (recorded,
   `claimsTotal` 0) / "Con daños" (claims > 0) — branched on the API's `claimsTotal`, never
-  recomputed. Pending + `canSettle` (Admin): the HAPPY path leads — **"Devolver depósito"** (or "Sin
-  daños" when `total` is 0, replacement values only) opens `OrderDepositRefundModal`, a confirm that
+  recomputed. The amount shown is the API's **`held`** (0 when it was handed over without collecting
+  it), never the nominal `total`. Pending + `canSettle` (Admin): the HAPPY path leads — **"Devolver
+  depósito"** (or "Sin daños" when `held` is 0: waived, or replacement values only — the modal words
+  itself on `held` too) opens `OrderDepositRefundModal`, a confirm that
   sends `{ retainedAmount: 0, damages: [] }` through `useSettleOrder` (confirm first, seeds the
   detail cache from the response, then the hook re-reads) — then the DAMAGE path, **"Reportar
   daños"** → the page. Recorded: "Reportar daños" (clean refund) / "Editar reporte de daños"
@@ -310,6 +323,29 @@ nothing: a method must be observed, not guessed.
   `DamageReportButton` with the SAVED settlement, only when claims > 0) and "Deshacer". Lines show
   their damaged quantity. Undo is `OrderSettlementUndoModal` (+ `useUndoOrderSettlement`, `DELETE
   /orders/:id/settlement`): it clears the record and moves no money — the copy says so.
+- **"Cobro del depósito" row** (on the card, only when the API sent `securityDeposit.collection`):
+  PENDING "Pendiente de recibir" + "Marcar como recibido" / "Entregar sin depósito"; RECEIVED
+  "Recibido el {fecha}"; WAIVED "Sin depósito: {motivo}", labelled an internal note (never printed).
+  "Corregir" back to pending on RECEIVED/WAIVED. Actions only for an Admin while `canRecord`; when
+  `canRecord` is false because a report exists, the row says to undo the report first. All three
+  acts are ONE dialog, `OrderDepositCollectionModal` (`receive` → `PUT
+  /orders/:id/deposit-collection {received:true}`; `waive` → the required reason, mirrored by
+  `SchemaDepositCollection.ts` (1–500 trimmed), `{received:false, reason}`; `clear` → `DELETE`,
+  an alertdialog), through `useDepositCollection.ts` (confirm first, seed the detail, re-read
+  orders + dashboard).
+- **Advance dialog:** a move carrying `depositToCollect` adds "Depósito recibido (Q…)", checked by
+  default; unchecked opens the required "¿Por qué se entrega sin depósito?" (same schema) and the hint
+  that damages can still be charged. The answer rides the advance as `depositCollection`; only a
+  missing/too-long reason holds the confirm.
+- **Money card cuadre** (`OrderBalanceSummary`, under the TOTAL, which never includes the deposit):
+  built ONLY from `squareOrderBalance` (`orderBalance.ts`, shared with the documents) over the API's
+  figures — rows only when relevant: Anticipo (−), Saldo del servicio, Saldo a favor del cliente (−
+  `advanceCredit`: an anticipo above the cost, paid or not, NET of a deposit in hand — that excess is
+  usually the deposit itself, so it is never credited twice), Depósito (reembolsable) (+
+  while PENDING), Daños (+) and Depósito recibido (− credited) after the report; ONE result: "Monto a
+  pagar" (light highlight) / "Monto a devolver al cliente" (inverted charcoal highlight) / plain "Sin
+  saldo pendiente". A deposit already received is a small line under it, outside the sum. The
+  "Anticipo" fact shows only once paid (before that, the cuadre states it).
 - **Discoverable from the top:** while `depositSettlementPending` (Admin), the state card's
   `ActionRow` carries an amber **"Depósito pendiente"** button (after the payment action) that
   brings the Depósito card into view (`bringIntoPanelView`) and focuses it — it only takes the admin
@@ -317,9 +353,11 @@ nothing: a method must be observed, not guessed.
 - **History:** the "Historial" card merges `order.depositHistory` into `statusHistory`
   chronologically (`mergeTrail`, stable — a status change reads first on a tie): RECORDED + claims 0
   "Depósito devuelto completo"; RECORDED + claims "Daños reportados"; CORRECTED "Reporte de daños
-  corregido"; UNDONE "Registro del depósito deshecho". Damages and corrections add "Daños X · se
-  devuelve Y" (+ "saldo por cobrar Z" when owed), from the entry's own snapshot. The dot is tinted
-  emerald / red / neutral.
+  corregido"; UNDONE "Registro del depósito deshecho"; RECEIVED "Depósito recibido" (+ its amount);
+  WAIVED "Entregado sin depósito" (+ the internal note as a sub-line); COLLECTION_CLEARED "Registro
+  del cobro del depósito deshecho". Damages and corrections add "Daños X · se devuelve Y" (+ "saldo
+  por cobrar Z" when owed), from the entry's own snapshot. The dot is tinted emerald / red / amber /
+  neutral.
 - **"Reportar daños" is a PAGE**, `/panel/pedidos/:id/danos` (`OrderSettlementPage` →
   `OrderSettlementForm`, Admin route guard, in `PanelPath`): "Retención del depósito" (amount,
   total or partial, + "Descripción del daño", required iff retained > 0), and per damageable line
@@ -327,9 +365,12 @@ nothing: a method must be observed, not guessed.
   price "c/u") + a note. `SchemaSettleOrder.ts` mirrors the API validator plus the two per-order
   ceilings; the body is the settlement's FINAL state (`PUT /orders/:id/settlement`, `useSettleOrder`)
   and an edit prefills the recorded one. The "Resultado" card is a live ESTIMATE of the API formula,
-  labelled as such. Blank inputs mean 0. It also offers the damage report as a **DRAFT**:
-  `buildDraftSettlement(order, values, now)` shapes the current values like the API record (same
-  formula as `previewSettlement`) for `<DamageReportButton draft />`, shown (always-mounted
+  labelled as such. Blank inputs mean 0. The ceiling and the estimate use the API's `held`; at
+  `held` 0 the retention section is replaced by "Este pedido se entregó sin depósito: solo se pueden
+  cobrar piezas perdidas o rotas." It also offers the damage report BEFORE saving (never labelled a
+  draft — "Puedes descargar el reporte de daños para entregárselo al cliente antes de guardarlo."):
+  `buildUnsavedSettlement(order, values, now)` shapes the current values like the API record (same
+  formula as `previewSettlement`) for `<DamageReportButton settlement />`, shown (always-mounted
   `grid-rows` collapse, `inert` while closed) only when claims > 0 AND the values pass the resolver's
   own schema — a typo never prints.
 - **Agenda/history tickets** carry an amber "Depósito pendiente" chip on
@@ -551,9 +592,10 @@ destination, platform)` decides, and `openMapsLink` follows it:
   Postgres's timezone handling); **the trigger to move it into a `date_trunc` group-by** is the year's
   order count reaching a few thousand.
 - **`deposits`** (EPIC-2-ORDERS §12): `pending` = EVERY open deposit (the list's
-  `depositSettlementPending` predicate in SQL) counted and summed, the oldest
-  `PENDING_DEPOSITS_LIMIT` (5) listed as order list items; `month` = settlements first recorded this
-  month, totalled by `summarizeSettlements` through the shared `computeSettlementMoney`. Both queries
+  `depositSettlementPending` predicate in SQL) counted and its HELD deposits summed (`heldDeposit` — a
+  waived one adds 0), the oldest `PENDING_DEPOSITS_LIMIT` (5) listed as order list items; `month` =
+  settlements first recorded this month, totalled by `summarizeSettlements` through the shared
+  `heldDeposit` + `computeSettlementMoney` (the select carries `depositWaivedAt`). Both queries
   sit in the same `Promise.all`; the shaping is `projectDeposits`.
 - **A delta badge is omitted when the previous period was zero** (`deltaPercent` absent ⇒ "sin
   comparación"): "+100%" on a month that started from nothing is the kind of number that teaches an

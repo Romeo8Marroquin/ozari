@@ -74,6 +74,12 @@ const rawOrder = (overrides: Record<string, unknown> = {}) => ({
   paidAt: null,
   cancelledAt: null,
   cancelReason: null,
+  depositSettledAt: null,
+  depositRetainedAmount: null,
+  depositRetainedReason: null,
+  depositReceivedAt: null,
+  depositWaivedAt: null,
+  depositWaivedReason: null,
   currencyId: 1,
   serviceStatusId: 1,
   paymentStatusId: 1,
@@ -97,6 +103,10 @@ const rawOrder = (overrides: Record<string, unknown> = {}) => ({
       isRental: true,
       unitaryPrice: new Prisma.Decimal("6.00"),
       parcialPrice: new Prisma.Decimal("150.00"),
+      securityDeposit: null,
+      replacementPrice: null,
+      damagedQuantity: 0,
+      damageNote: null,
       product: { name: "Silla plegable" },
     },
   ],
@@ -132,6 +142,8 @@ function mockTx(order: ReturnType<typeof rawOrder> | null = rawOrder()) {
       update: vi.fn().mockResolvedValue({}),
     },
     serviceDetail: { groupBy: vi.fn().mockResolvedValue([]) },
+    // The deposit answered at the door leaves its trail row here.
+    serviceDepositHistory: { create: vi.fn().mockResolvedValue({}) },
     // A reopen re-checks the fleet under the same clock rules a create uses (washing included).
     appPreference: {
       findMany: vi.fn().mockResolvedValue([
@@ -216,6 +228,86 @@ describe("advanceOrder", () => {
     });
     // Entering Entregado stamps the delivery actual it declares.
     expect(data["deliveredAt"]).toBeInstanceOf(Date);
+  });
+
+  describe("the deposit, asked at the delivery", () => {
+    /** En ruta, 5 chairs carrying a Q40 deposit each (Q200), collection still PENDING. */
+    const onTheWay = (overrides: Record<string, unknown> = {}) =>
+      rawOrder({
+        serviceStatusId: 5,
+        serviceStatus: { id: 5, name: "En ruta" },
+        serviceDetails: [
+          {
+            id: 31,
+            productId: 3,
+            quantity: 5,
+            isRental: true,
+            unitaryPrice: new Prisma.Decimal("6.00"),
+            parcialPrice: new Prisma.Decimal("30.00"),
+            securityDeposit: new Prisma.Decimal("40"),
+            replacementPrice: new Prisma.Decimal("120"),
+            damagedQuantity: 0,
+            damageNote: null,
+            product: { name: "Silla plegable" },
+          },
+        ],
+        ...overrides,
+      });
+    const deliver = (depositCollection?: Record<string, unknown>, toStatusId = 3) =>
+      buildReq({
+        toStatusId,
+        evidence: toStatusId === 3 ? [{ statusId: 3, keys: [KEY] }] : [],
+        ...(depositCollection && { depositCollection }),
+      });
+    /** The collection write is the update AFTER the status step's. */
+    const collectionWrite = (tx: ReturnType<typeof mockTx>) =>
+      (tx.service.update as Mock).mock.calls[1]?.[0] as { data: Record<string, unknown> } | undefined;
+
+    it("records a RECEIVED deposit with the delivery, in the same transaction", async () => {
+      const tx = mockTx(onTheWay());
+      await advanceOrder(deliver({ received: true, reason: undefined }), {} as Response);
+
+      expect(collectionWrite(tx)?.data).toEqual({
+        depositReceivedAt: expect.any(Date),
+        depositWaivedAt: null,
+        depositWaivedReason: null,
+      });
+      expect(tx.serviceDepositHistory.create).toHaveBeenCalledWith({
+        data: { serviceId: 12, kind: "RECEIVED", note: null, depositTotal: 200, byUserId: 1 },
+      });
+      expect(sendOzariSuccess).toHaveBeenCalled();
+    });
+
+    it("records a WAIVED deposit with its reason", async () => {
+      const tx = mockTx(onTheWay());
+      await advanceOrder(deliver({ received: false, reason: "Un familiar" }), {} as Response);
+      expect(tx.serviceDepositHistory.create).toHaveBeenCalledWith({
+        data: { serviceId: 12, kind: "WAIVED", note: "Un familiar", depositTotal: 200, byUserId: 1 },
+      });
+    });
+
+    it("never blocks the delivery when the answer is absent", async () => {
+      const tx = mockTx(onTheWay());
+      await advanceOrder(deliver(), {} as Response);
+      expect(tx.service.update).toHaveBeenCalledTimes(1);
+      expect(tx.serviceDepositHistory.create).not.toHaveBeenCalled();
+      expect(sendOzariSuccess).toHaveBeenCalled();
+    });
+
+    // Factories, not rows: building a row encrypts, and the key is only set in `beforeAll`.
+    const EARLIER = new Date("2026-07-30T10:00:00Z");
+    it.each([
+      ["the move is not the delivery", () => onTheWay({ serviceStatusId: 1, serviceStatus: { id: 1, name: "Pendiente" } }), 5],
+      ["the deposit was already received", () => onTheWay({ depositReceivedAt: EARLIER }), 3],
+      ["the deposit was already waived", () => onTheWay({ depositWaivedAt: EARLIER }), 3],
+      ["the order carries no deposit", () => rawOrder({ serviceStatusId: 5, serviceStatus: { id: 5, name: "En ruta" } }), 3],
+    ])("silently ignores the answer when %s — and still moves", async (_label, makeOrder, toStatusId) => {
+      const tx = mockTx(makeOrder());
+      await advanceOrder(deliver({ received: false, reason: "x" }, toStatusId), {} as Response);
+      expect(tx.serviceDepositHistory.create).not.toHaveBeenCalled();
+      expect(tx.service.update).toHaveBeenCalledTimes(1);
+      expect(sendOzariSuccess).toHaveBeenCalled();
+    });
   });
 
   it("refuses a step that demands photos when none were uploaded (422)", async () => {

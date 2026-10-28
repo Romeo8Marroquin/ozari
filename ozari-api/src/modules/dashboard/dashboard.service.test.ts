@@ -360,6 +360,7 @@ describe("summarizeSettlements", () => {
     overrides: Partial<SettledDepositRowModel["serviceDetails"][number]> = {},
   ): SettledDepositRowModel => ({
     depositRetainedAmount: retained === null ? null : dec(retained),
+    depositWaivedAt: null,
     serviceDetails: [
       {
         isRental: true,
@@ -419,6 +420,17 @@ describe("summarizeSettlements", () => {
     });
   });
 
+  it("a WAIVED deposit counts 0: nothing refunded, every replacement owed in full", () => {
+    const waived = { ...settled("0", 1), depositWaivedAt: new Date("2026-08-01T15:00:00Z") };
+    expect(summarizeSettlements([waived])).toEqual({
+      settled: 1,
+      refunded: 0,
+      retained: 0,
+      replacements: 120,
+      balanceDue: 120,
+    });
+  });
+
   it("a damaged line without a replacement value prices at zero", () => {
     expect(
       summarizeSettlements([settled("0", 1, { replacementPrice: null })]).replacements,
@@ -429,6 +441,7 @@ describe("summarizeSettlements", () => {
     // Prices that float addition cannot represent exactly: 0.1 + 0.2 territory.
     const awkward = (retained: string): SettledDepositRowModel => ({
       depositRetainedAmount: dec(retained),
+      depositWaivedAt: null,
       serviceDetails: [
         {
           isRental: true,

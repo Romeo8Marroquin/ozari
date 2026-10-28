@@ -5,11 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 // The damage report download is the documents' own component (and suite); here it is a marker that
 // records WHICH settlement it was handed.
 vi.mock('../documents/DamageReportButton', () => ({
-  default: ({ settlement, draft }: { settlement: { claimsTotal: number }; draft?: boolean }) => (
-    <span data-testid="damage-report">
-      {settlement.claimsTotal}
-      {draft ? '-draft' : ''}
-    </span>
+  default: ({ settlement }: { settlement: { claimsTotal: number } }) => (
+    <span data-testid="damage-report">{settlement.claimsTotal}</span>
   ),
 }));
 
@@ -61,6 +58,7 @@ const renderCard = (deposit: OrderSecurityDeposit, isAdmin = true) => {
   const onRefund = vi.fn();
   const onReport = vi.fn();
   const onUndo = vi.fn();
+  const onCollection = vi.fn();
   render(
     <OrderDepositCard
       order={order}
@@ -69,14 +67,17 @@ const renderCard = (deposit: OrderSecurityDeposit, isAdmin = true) => {
       onRefund={onRefund}
       onReport={onReport}
       onUndo={onUndo}
+      onCollection={onCollection}
     />,
   );
-  return { onRefund, onReport, onUndo };
+  return { onRefund, onReport, onUndo, onCollection };
 };
+
+const C = `${K}.collection`;
 
 describe('OrderDepositCard', () => {
   it('before delivery: the total and "después de la entrega", nothing to press', () => {
-    renderCard({ total: 200, canSettle: false });
+    renderCard({ total: 200, held: 200, canSettle: false });
     expect(screen.getByRole('heading', { name: `${K}.title` })).toBeInTheDocument();
     expect(screen.getByText(/Q\s*200\.00/)).toBeInTheDocument();
     // Collected ON TOP of the order — said where the amount is.
@@ -87,7 +88,7 @@ describe('OrderDepositCard', () => {
   });
 
   it('delivered, pending: the HAPPY path leads ("Devolver depósito"), the damage path follows', async () => {
-    const { onRefund, onReport } = renderCard({ total: 200, canSettle: true });
+    const { onRefund, onReport } = renderCard({ total: 200, held: 200, canSettle: true });
     expect(screen.getByText(`${K}.chipPending`)).toBeInTheDocument();
     expect(screen.getByText(`${K}.due`)).toBeInTheDocument();
     const buttons = screen.getAllByRole('button');
@@ -102,14 +103,14 @@ describe('OrderDepositCard', () => {
   });
 
   it('replacement values only (no deposit): the quick action reads "Sin daños"', () => {
-    renderCard({ total: 0, canSettle: true });
+    renderCard({ total: 0, held: 0, canSettle: true });
     expect(screen.getByText(`${K}.dueNoDeposit`)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: `${K}.noDamageAction` })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: `${K}.refundAction` })).not.toBeInTheDocument();
   });
 
   it('a non-admin sees the state but no actions (the endpoints are Admin-only)', () => {
-    renderCard({ total: 200, canSettle: true, settlement: settlement() }, false);
+    renderCard({ total: 200, held: 200, canSettle: true, settlement: settlement() }, false);
     expect(screen.getByText(`${K}.chipDamaged`)).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(screen.queryByTestId('damage-report')).not.toBeInTheDocument();
@@ -118,6 +119,7 @@ describe('OrderDepositCard', () => {
   it('with damages: the API\'s breakdown verbatim, "Con daños", the report, edit and undo', async () => {
     const { onReport, onUndo } = renderCard({
       total: 200,
+      held: 200,
       canSettle: true,
       settlement: settlement(),
     });
@@ -133,7 +135,7 @@ describe('OrderDepositCard', () => {
     expect(screen.getByText(/^Q\s*70\.00$/)).toBeInTheDocument();
     expect(screen.getByText(new RegExp(`${K}.settledAt`))).toBeInTheDocument();
     expect(screen.queryByText(`${K}.noClaims`)).not.toBeInTheDocument();
-    // The SAVED settlement goes to the download, never as a draft.
+    // The SAVED settlement — the API's numbers — is what goes to the download.
     expect(screen.getByTestId('damage-report')).toHaveTextContent(/^270$/);
     expect(screen.queryByRole('button', { name: `${K}.refundAction` })).not.toBeInTheDocument();
 
@@ -144,7 +146,7 @@ describe('OrderDepositCard', () => {
   });
 
   it('a whole refund: "Devuelto", no report to download, and it can still become a damage report', () => {
-    renderCard({ total: 200, canSettle: true, settlement: clean() });
+    renderCard({ total: 200, held: 200, canSettle: true, settlement: clean() });
     expect(screen.getByText(`${K}.chipRefunded`)).toBeInTheDocument();
     expect(screen.getByText(`${K}.noClaims`)).toBeInTheDocument();
     expect(screen.queryByText(`${K}.retained`)).not.toBeInTheDocument();
@@ -157,6 +159,7 @@ describe('OrderDepositCard', () => {
   it('a clean return with no deposit says "todo volvió en buen estado"', () => {
     renderCard({
       total: 0,
+      held: 0,
       canSettle: true,
       settlement: { ...clean(), refundAmount: 0 },
     });
@@ -166,6 +169,7 @@ describe('OrderDepositCard', () => {
   it('a retention without a reason and a loss without a note render no empty sub-lines', () => {
     renderCard({
       total: 200,
+      held: 200,
       canSettle: true,
       settlement: settlement({
         retainedReason: undefined,
@@ -177,8 +181,113 @@ describe('OrderDepositCard', () => {
   });
 
   it('on a cancelled/rewound order the record can still be UNDONE, never edited', () => {
-    renderCard({ total: 200, canSettle: false, settlement: settlement() });
+    renderCard({ total: 200, held: 200, canSettle: false, settlement: settlement() });
     expect(screen.getByRole('button', { name: `${K}.undo` })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: `${K}.editReport` })).not.toBeInTheDocument();
+  });
+
+  describe('Cobro del depósito', () => {
+    it('only exists when the API sent a collection (a deposit > 0)', () => {
+      renderCard({ total: 200, held: 200, canSettle: true });
+      expect(screen.queryByText(`${C}.title`)).not.toBeInTheDocument();
+    });
+
+    it('PENDING: "Pendiente de recibir" with "Marcar como recibido" and "Entregar sin depósito"', async () => {
+      const { onCollection } = renderCard({
+        total: 200,
+        held: 200,
+        canSettle: false,
+        collection: { status: 'PENDING', canRecord: true },
+      });
+      expect(screen.getByText(`${C}.title`)).toBeInTheDocument();
+      expect(screen.getByText(`${C}.pending`)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: `${C}.markReceived` }));
+      expect(onCollection).toHaveBeenLastCalledWith('receive');
+      await userEvent.click(screen.getByRole('button', { name: `${C}.waive` }));
+      expect(onCollection).toHaveBeenLastCalledWith('waive');
+      expect(screen.queryByRole('button', { name: `${C}.correct` })).not.toBeInTheDocument();
+    });
+
+    it('RECEIVED: when it was received, and "Corregir" while recordable', async () => {
+      const { onCollection } = renderCard({
+        total: 200,
+        held: 200,
+        canSettle: true,
+        collection: { status: 'RECEIVED', at: '2026-08-01T15:00:00.000Z', canRecord: true },
+      });
+      expect(screen.getByText(`${C}.received`)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: `${C}.correct` }));
+      expect(onCollection).toHaveBeenLastCalledWith('clear');
+      // A received deposit is a real one: the happy path still gives it back.
+      expect(screen.getByRole('button', { name: `${K}.refundAction` })).toBeInTheDocument();
+    });
+
+    it('RECEIVED without a date still says it was received', () => {
+      renderCard({
+        total: 200,
+        held: 200,
+        canSettle: true,
+        collection: { status: 'RECEIVED', canRecord: true },
+      });
+      expect(screen.getByText(`${C}.receivedNoDate`)).toBeInTheDocument();
+    });
+
+    it('WAIVED: the reason as an INTERNAL note, held 0 ⇒ "Sin daños", never "Devolver depósito"', () => {
+      renderCard({
+        total: 200,
+        held: 0,
+        canSettle: true,
+        collection: { status: 'WAIVED', reason: 'Familiar', at: '2026-08-01T15:00:00.000Z', canRecord: true },
+      });
+      expect(screen.getByText(`${C}.waived`)).toBeInTheDocument();
+      expect(screen.getByText(`${C}.internalNote`)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: `${K}.noDamageAction` })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: `${K}.refundAction` })).not.toBeInTheDocument();
+      // The amount shown is the API's `held`, not the nominal total.
+      expect(screen.getByText(/^Q\s*0\.00$/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: `${C}.correct` })).toBeInTheDocument();
+    });
+
+    it('WAIVED without a reason still renders the line', () => {
+      renderCard({
+        total: 200,
+        held: 0,
+        canSettle: true,
+        collection: { status: 'WAIVED', canRecord: true },
+      });
+      expect(screen.getByText(`${C}.waived`)).toBeInTheDocument();
+    });
+
+    it('a recorded damage report LOCKS it: no actions, and the hint says how to change it', () => {
+      renderCard({
+        total: 200,
+        held: 200,
+        canSettle: true,
+        collection: { status: 'RECEIVED', at: '2026-08-01T15:00:00.000Z', canRecord: false },
+        settlement: settlement(),
+      });
+      expect(screen.getByText(`${C}.lockedByReport`)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: `${C}.correct` })).not.toBeInTheDocument();
+    });
+
+    it('not recordable for another reason (cancelled): no actions and no report hint', () => {
+      renderCard({
+        total: 200,
+        held: 200,
+        canSettle: false,
+        collection: { status: 'PENDING', canRecord: false },
+      });
+      expect(screen.queryByText(`${C}.lockedByReport`)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: `${C}.markReceived` })).not.toBeInTheDocument();
+    });
+
+    it('a non-admin sees the state but cannot record it', () => {
+      renderCard(
+        { total: 200, held: 200, canSettle: false, collection: { status: 'PENDING', canRecord: true } },
+        false,
+      );
+      expect(screen.getByText(`${C}.pending`)).toBeInTheDocument();
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
   });
 });

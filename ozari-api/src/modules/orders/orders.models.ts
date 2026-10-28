@@ -159,8 +159,13 @@ export interface OrderDepositSettlementResponseModel {
  */
 export interface OrderSecurityDepositResponseModel {
   /** Σ rental lines' deposit snapshot × quantity — collected on top of the order, never part of its
-   *  total. 0 when only replacement values exist. */
+   *  total. 0 when only replacement values exist. The NOMINAL deposit, whatever was collected. */
   total: number;
+  /** The deposit the settlement counts (`heldDeposit`): `total`, or 0 when the collection was WAIVED
+   *  — every settlement figure is computed from THIS, never from `total`. */
+  held: number;
+  /** Was the deposit actually collected? Absent when `total` is 0 (nothing to collect). */
+  collection: OrderDepositCollectionResponseModel | undefined;
   /** May a settlement be RECORDED (or changed) right now: delivered and not cancelled. Deleting an
    *  existing one is always possible. */
   canSettle: boolean;
@@ -189,8 +194,38 @@ export interface OrderStatusHistoryResponseModel {
   at: Date;
 }
 
-/** What a deposit-history row records: the first settlement, a later correction, or its undo. */
-export type OrderDepositEventKindModel = "RECORDED" | "CORRECTED" | "UNDONE";
+/** Whether the deposit was collected: neither stamp = PENDING, `depositReceivedAt` = RECEIVED,
+ *  `depositWaivedAt` = WAIVED (handed over without a deposit on purpose). */
+export type OrderDepositCollectionStatusModel = "PENDING" | "RECEIVED" | "WAIVED";
+
+/** `OrderSecurityDepositResponseModel.collection` — the deposit's COLLECTION, beside its settlement. */
+export interface OrderDepositCollectionResponseModel {
+  status: OrderDepositCollectionStatusModel;
+  /** When it was received / waived; absent while PENDING. */
+  at: Date | undefined;
+  /** WAIVED only — an internal note, never printed on a client document. */
+  reason: string | undefined;
+  /** May it be recorded / changed / cleared now: not cancelled and no damage report recorded (the
+   *  report's money was computed from it — undo the report first). */
+  canRecord: boolean;
+}
+
+/** `PUT /orders/:id/deposit-collection` (and `depositCollection` on the delivery advance). */
+export interface DepositCollectionRequestModel {
+  received: boolean;
+  /** Required when `received` is false (why no deposit was taken); dropped when true. */
+  reason: string | undefined;
+}
+
+/** What a deposit-history row records: the damage report (first settlement, a later correction, its
+ *  undo) or the deposit's collection (received, waived, back to pending). */
+export type OrderDepositEventKindModel =
+  | "RECORDED"
+  | "CORRECTED"
+  | "UNDONE"
+  | "RECEIVED"
+  | "WAIVED"
+  | "COLLECTION_CLEARED";
 
 /**
  * One entry of the deposit's append-only trail (`service_deposit_history`) — shown beside the status
@@ -200,6 +235,8 @@ export type OrderDepositEventKindModel = "RECORDED" | "CORRECTED" | "UNDONE";
 export interface OrderDepositHistoryEntryResponseModel {
   id: number;
   kind: OrderDepositEventKindModel;
+  /** The waive reason on a WAIVED entry (internal, never printed); absent otherwise. */
+  note: string | undefined;
   depositTotal: number | undefined;
   claimsTotal: number | undefined;
   refundAmount: number | undefined;

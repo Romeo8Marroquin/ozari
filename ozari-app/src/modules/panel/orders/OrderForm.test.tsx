@@ -287,8 +287,16 @@ const lastProbeBody = (): Record<string, unknown> | undefined => {
   const calls = checkAvailability.mock.calls;
   return calls.length > 0 ? (calls[calls.length - 1][0] as Record<string, unknown>) : undefined;
 };
+/**
+ * The probe is DEBOUNCED (400ms after the window settles), so the default 1s `waitFor` left ~600ms
+ * for an edit-mode mount of this whole form — enough on an idle machine, a timeout under a loaded
+ * one. The wait states the real budget instead of racing the debounce.
+ */
+const PROBE_WAIT = { timeout: 5000 };
+const waitForProbe = (): Promise<void> =>
+  waitFor(() => expect(checkAvailability).toHaveBeenCalled(), PROBE_WAIT);
 const waitForFullProbe = (): Promise<void> =>
-  waitFor(() => expect(lastProbeBody()?.['pickupAt']).toBeTruthy());
+  waitFor(() => expect(lastProbeBody()?.['pickupAt']).toBeTruthy(), PROBE_WAIT);
 afterEach(() => vi.restoreAllMocks());
 
 describe('OrderForm', () => {
@@ -663,7 +671,7 @@ describe('OrderForm', () => {
     // Setting the FULL window fires the (debounced) probe with delivery + pickup + all product ids.
     setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
     setDateTime(byId(container, 'order-pickup-at'), '2026-08-02T15:00');
-    await waitFor(() => expect(checkAvailability).toHaveBeenCalled());
+    await waitForProbe();
     const body = checkAvailability.mock.calls[checkAvailability.mock.calls.length - 1][0];
     expect(body.deliveryAt).toMatch(/^2026-08-01T/);
     expect(body.pickupAt).toMatch(/^2026-08-02T/);
@@ -720,7 +728,7 @@ describe('OrderForm', () => {
     await user.selectOptions(byId(container, 'order-line-product-0'), '3');
     await user.type(byId(container, 'order-line-quantity-0'), '10');
     setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
-    await waitFor(() => expect(checkAvailability).toHaveBeenCalled());
+    await waitForProbe();
 
     // An empty payload → the `?? []` fallback; nothing to reconcile.
     act(() => availabilityHandlers().onSuccess({ data: {} }));
@@ -745,7 +753,7 @@ describe('OrderForm', () => {
     await user.selectOptions(byId(container, 'order-line-product-0'), '3'); // product, but NO quantity
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` })); // an empty line (no product)
     setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
-    await waitFor(() => expect(checkAvailability).toHaveBeenCalled());
+    await waitForProbe();
     // Product 3 is sold out, but its line has no quantity → left alone; the empty line is skipped too.
     act(() => availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 0 }])));
     expect(byId(container, 'order-line-product-0')).toBeInTheDocument();
@@ -1147,7 +1155,7 @@ describe('OrderForm (edit mode)', () => {
 
   it('excludes ITSELF from the driver probe — an order cannot block its own dates', async () => {
     renderForm({ mode: 'edit', order: existingOrder });
-    await waitFor(() => expect(checkAvailability).toHaveBeenCalled());
+    await waitForProbe();
     // Without this the order would clash with the two blocks it already occupies, and every edit
     // would open reporting a conflict with itself.
     expect(lastProbeBody()).toMatchObject({ excludeOrderId: 12, assignedUserId: 5 });
@@ -1159,7 +1167,7 @@ describe('OrderForm (edit mode)', () => {
     // hint, and silently REDUCE the historical quantity to today's shelf on the next probe.
     const finished = { ...existingOrder, holdsInventory: false } as unknown as OrderDetail;
     const { container } = renderForm({ mode: 'edit', order: finished });
-    await waitFor(() => expect(checkAvailability).toHaveBeenCalled());
+    await waitForProbe();
 
     act(() => availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 2 }])));
 
@@ -1175,7 +1183,7 @@ describe('OrderForm (edit mode)', () => {
 
   it('keeps capping a LIVE order — the exception is the exception', async () => {
     const { container } = renderForm({ mode: 'edit', order: existingOrder });
-    await waitFor(() => expect(checkAvailability).toHaveBeenCalled());
+    await waitForProbe();
 
     act(() => availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 2 }])));
 

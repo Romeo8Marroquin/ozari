@@ -7,6 +7,7 @@ import {
   fromDamageReport,
   fromOrderDetail,
   fromOrderForm,
+  orderBalanceInput,
   printedConditions,
   readLetterhead,
   type DocumentLetterhead,
@@ -206,26 +207,76 @@ describe('fromOrderDetail', () => {
     expect(charged.totals.discount).toBe(25);
   });
 
-  it('subtracts the deposit from the balance but never from the TOTAL', () => {
+  it('subtracts the ANTICIPO from what is owed but never from the TOTAL', () => {
     const model = fromOrderDetail(order({ depositAmount: 50 }), letterhead, ISSUED_AT);
     expect(model.totals.total).toBe(150);
-    expect(model.totals.balance).toBe(100);
+    expect(model.totals.advance).toBe(50);
+    expect(model.totals.balance).toMatchObject({ serviceDue: 100, amount: 100, direction: 'collect' });
   });
 
-  it('a PAID order owes zero and says so, while still showing what was charged', () => {
+  it('prints no anticipo row when none (or zero) was taken', () => {
+    expect(fromOrderDetail(order(), letterhead, ISSUED_AT).totals.advance).toBeUndefined();
+    expect(
+      fromOrderDetail(order({ depositAmount: 0 }), letterhead, ISSUED_AT).totals.advance,
+    ).toBeUndefined();
+  });
+
+  it('a PAID order owes nothing, and states what the payment covered so the box squares', () => {
     // The same page goes out as a request for payment and comes back as proof of one. Zeroing the
-    // TOTAL instead would be evidence that nothing was ever charged.
-    const model = fromOrderDetail(order({ isPaid: true, depositAmount: 20 }), letterhead, ISSUED_AT);
+    // TOTAL instead would be evidence that nothing was ever charged — so TOTAL 150 − anticipo 20 −
+    // pagado 130 = 0, on paper.
+    const model = fromOrderDetail(
+      order({ isPaid: true, paidAt: '2026-08-01T00:00:00Z', depositAmount: 20 }),
+      letterhead,
+      ISSUED_AT,
+    );
     expect(model.isPaid).toBe(true);
-    expect(model.totals.balance).toBe(0);
     expect(model.totals.total).toBe(150);
+    expect(model.totals.paid).toBe(130);
+    expect(model.totals.balance).toMatchObject({ amount: 0, direction: 'none' });
   });
 
-  it('CLAMPS a balance that would go negative', () => {
-    // A deposit larger than the total is a slip; printing a negative balance would read as the
-    // business owing the client money. Same stance as the dashboard's outstanding figure.
+  it('prints no "pagado" row when the anticipo already covered the whole total', () => {
+    const model = fromOrderDetail(
+      order({ paidAt: '2026-08-01T00:00:00Z', depositAmount: 150 }),
+      letterhead,
+      ISSUED_AT,
+    );
+    expect(model.totals.paid).toBeUndefined();
+  });
+
+  it('CREDITS an anticipo above the total, and splits its row so nothing counts twice', () => {
+    // Usually the deposit sent along with the anticipo. The rule credits the excess ("Saldo a favor
+    // del cliente") instead of dropping it — so the Anticipo row stops at the TOTAL and the caption
+    // keeps what was received: TOTAL 150 − anticipo 150 − saldo a favor 350 = devolver 350.
     const model = fromOrderDetail(order({ depositAmount: 500 }), letterhead, ISSUED_AT);
-    expect(model.totals.balance).toBe(0);
+    expect(model.totals.advance).toBe(150);
+    expect(model.totals.advanceReceived).toBe(500);
+    expect(model.totals.balance).toMatchObject({
+      serviceDue: 0,
+      advanceCredit: 350,
+      amount: 350,
+      direction: 'refund',
+    });
+  });
+
+  it('a PAID order with an oversized anticipo still credits the excess, its row stopping at the total', () => {
+    // Paid settles the cost; it does not swallow money received above it.
+    const model = fromOrderDetail(
+      order({ paidAt: '2026-08-01T00:00:00Z', depositAmount: 500 }),
+      letterhead,
+      ISSUED_AT,
+    );
+    expect(model.totals.advance).toBe(150);
+    expect(model.totals.advanceReceived).toBe(500);
+    expect(model.totals.paid).toBeUndefined();
+    expect(model.totals.balance).toMatchObject({ advanceCredit: 350, amount: 350, direction: 'refund' });
+  });
+
+  it('carries no "received" caption when the anticipo fits inside the total', () => {
+    expect(
+      fromOrderDetail(order({ depositAmount: 150 }), letterhead, ISSUED_AT).totals.advanceReceived,
+    ).toBeUndefined();
   });
 
   it('takes every figure from the order, never re-deriving one', () => {
@@ -256,12 +307,11 @@ describe('fromOrderDetail', () => {
   });
 });
 
-describe('fromOrderDetail — the security deposit', () => {
-  // The owner's rule (2026-10-27): the deposit is NEVER a cost on the happy path — only what a
-  // settlement retained or billed is. Which story the figures tell is decided here, not in the PDF.
-  const settlement = (
-    over: Partial<NonNullable<OrderSecurityDeposit['settlement']>> = {},
-  ): NonNullable<OrderSecurityDeposit['settlement']> => ({
+describe('fromOrderDetail — the security deposit, squared', () => {
+  // The owner's rule (2026-10-27): the deposit is NEVER a cost — it is money to hand over, money on
+  // hand, or a credit — and the box ends on ONE result. The arithmetic is `squareOrderBalance`'s;
+  // what is tested here is that the comprobante feeds it the order's own figures.
+  const settlement = (over: Partial<OrderDepositSettlement> = {}): OrderDepositSettlement => ({
     settledAt: '2026-08-02T10:00:00Z',
     retainedAmount: 0,
     damages: [],
@@ -272,73 +322,122 @@ describe('fromOrderDetail — the security deposit', () => {
     balanceDue: 0,
     ...over,
   });
-  const withDeposit = (securityDeposit?: OrderSecurityDeposit) =>
-    fromOrderDetail(order(securityDeposit && { securityDeposit }), letterhead, ISSUED_AT);
+  const deposit = (
+    status: 'PENDING' | 'RECEIVED' | 'WAIVED',
+    over: Partial<OrderSecurityDeposit> = {},
+  ): OrderSecurityDeposit => ({
+    total: 500,
+    held: status === 'WAIVED' ? 0 : 500,
+    collection: { status, canRecord: true },
+    canSettle: true,
+    ...over,
+  });
+  const withDeposit = (securityDeposit?: OrderSecurityDeposit, over: Partial<OrderDetail> = {}) =>
+    fromOrderDetail(order({ ...(securityDeposit && { securityDeposit }), ...over }), letterhead, ISSUED_AT);
 
   it('says nothing for an order that cannot carry one', () => {
-    expect(withDeposit().securityDeposit).toBeUndefined();
+    const model = withDeposit();
+    expect(model.damages).toBeUndefined();
+    expect(model.totals.balance).toMatchObject({ depositDue: 0, depositOnHand: 0, amount: 150 });
   });
 
-  it('HOLDS an unsettled deposit — refundable, and never folded into the total', () => {
-    const model = withDeposit({ total: 500, canSettle: false });
-    expect(model.securityDeposit).toEqual({ status: 'held', amount: 500 });
-    // The order's own figures are untouched: the deposit is collected ON TOP.
+  it('ignores a deposit with no collection to speak of (replacement values only)', () => {
+    const model = withDeposit({ total: 0, held: 0, canSettle: true });
+    expect(model.totals.balance).toMatchObject({ depositDue: 0, depositCredit: 0, amount: 150 });
+  });
+
+  it('a PENDING deposit is money to PAY to get the service — added, never folded into the TOTAL', () => {
+    // The owner's Q23 + Q80 = Q103 case, at this fixture's figures.
+    const model = withDeposit(deposit('PENDING'));
     expect(model.totals.total).toBe(150);
-    expect(model.totals.balance).toBe(150);
-  });
-
-  it('stays silent about a zero deposit with nothing settled', () => {
-    // A line can carry a replacement value without a deposit; "Depósito (reembolsable) Q0.00" would
-    // announce a deposit nobody asked the client for.
-    expect(withDeposit({ total: 0, canSettle: true }).securityDeposit).toBeUndefined();
-  });
-
-  it('the HAPPY PATH is still a deposit — returned, not a cost', () => {
-    const model = withDeposit({ total: 500, canSettle: true, settlement: settlement() });
-    expect(model.securityDeposit).toEqual({ status: 'refunded', amount: 500, refund: 500 });
-  });
-
-  it('a clean settlement of a zero deposit says nothing at all', () => {
-    const model = withDeposit({
-      total: 0,
-      canSettle: true,
-      settlement: settlement({ refundAmount: 0 }),
+    expect(model.totals.balance).toMatchObject({
+      depositDue: 500,
+      amount: 650,
+      direction: 'collect',
     });
-    expect(model.securityDeposit).toBeUndefined();
   });
 
-  it('turns a retention and replacements into COSTS, with every figure the API computed', () => {
-    const model = withDeposit({
-      total: 500,
-      canSettle: true,
-      settlement: settlement({
-        retainedAmount: 150,
-        retainedReason: 'Manteles manchados',
-        damages: [
-          {
-            lineId: 1,
-            productName: 'Mesa redonda',
-            quantity: 2,
-            unitAmount: 300,
-            amount: 600,
-            note: 'Patas rotas',
-          },
-          { lineId: 1, productName: 'Silla', quantity: 1, unitAmount: 45, amount: 45 },
-        ],
-        damagesTotal: 645,
-        // Deliberately NOT what the parts add up to: the document copies, it never re-derives —
-        // so a figure the server rounded or capped is printed exactly as the record holds it.
-        claimsTotal: 795.01,
-        appliedFromDeposit: 500,
-        refundAmount: 0,
-        balanceDue: 295.01,
-      }),
+  it('an anticipo of exactly the total plus the pending deposit squares to zero', () => {
+    // The deposit sent along with the anticipo: TOTAL 150 − anticipo 150 − saldo a favor 500 +
+    // depósito 500 = 0, "Sin saldo pendiente".
+    const model = withDeposit(deposit('PENDING'), { depositAmount: 650 });
+    expect(model.totals.advance).toBe(150);
+    expect(model.totals.advanceReceived).toBe(650);
+    expect(model.totals.balance).toMatchObject({
+      advanceCredit: 500,
+      depositDue: 500,
+      amount: 0,
+      direction: 'none',
     });
-    expect(model.securityDeposit).toEqual({
-      status: 'settled',
+  });
+
+  it('a RECEIVED deposit before the report is information, outside the sum', () => {
+    const model = withDeposit(deposit('RECEIVED'), {
+      paidAt: '2026-08-01T00:00:00Z',
+      isPaid: true,
+    });
+    expect(model.totals.balance).toMatchObject({
+      depositOnHand: 500,
+      amount: 0,
+      direction: 'none',
+    });
+  });
+
+  it('a WAIVED deposit does not exist on the document at all', () => {
+    const model = withDeposit(deposit('WAIVED'));
+    expect(model.totals.balance).toMatchObject({
+      depositDue: 0,
+      depositOnHand: 0,
+      depositCredit: 0,
+      amount: 150,
+    });
+  });
+
+  it('a CLEAN report refunds the whole deposit — still a deposit, never a cost', () => {
+    const model = withDeposit(deposit('RECEIVED', { settlement: settlement() }), {
+      paidAt: '2026-08-01T00:00:00Z',
+      isPaid: true,
+    });
+    expect(model.damages).toBeUndefined();
+    expect(model.totals.balance).toMatchObject({
+      depositCredit: 500,
       amount: 500,
+      direction: 'refund',
+    });
+  });
+
+  it('itemises the charges of a report, with every figure the API computed', () => {
+    const model = withDeposit(
+      deposit('RECEIVED', {
+        settlement: settlement({
+          retainedAmount: 150,
+          retainedReason: 'Mantelería con daño físico',
+          damages: [
+            {
+              lineId: 1,
+              productName: 'Mesa redonda',
+              quantity: 2,
+              unitAmount: 300,
+              amount: 600,
+              note: 'Patas rotas',
+            },
+            { lineId: 1, productName: 'Silla', quantity: 1, unitAmount: 45, amount: 45 },
+          ],
+          damagesTotal: 645,
+          // Deliberately NOT what the parts add up to: the document copies, it never re-derives —
+          // so a figure the server rounded or capped is printed exactly as the record holds it.
+          claimsTotal: 795.01,
+          appliedFromDeposit: 500,
+          refundAmount: 0,
+          balanceDue: 295.01,
+        }),
+      }),
+      { paidAt: '2026-08-01T00:00:00Z', isPaid: true },
+    );
+    expect(model.damages).toEqual({
+      withDeposit: true,
       claims: [
-        { kind: 'retention', amount: 150, reason: 'Manteles manchados' },
+        { kind: 'retention', amount: 150, reason: 'Mantelería con daño físico' },
         {
           kind: 'replacement',
           description: 'Mesa redonda',
@@ -349,46 +448,48 @@ describe('fromOrderDetail — the security deposit', () => {
         },
         { kind: 'replacement', description: 'Silla', quantity: 1, unitAmount: 45, amount: 45 },
       ],
-      claimsTotal: 795.01,
-      applied: 500,
-      refund: 0,
-      balanceDue: 295.01,
+      total: 795.01,
     });
-    // And the ORDER's own total and balance still never absorb any of it.
+    // ONE outcome: the claims less the deposit credit — never a second "saldo por daños".
+    expect(model.totals.balance).toMatchObject({
+      claims: 795.01,
+      depositCredit: 500,
+      amount: 295.01,
+      direction: 'collect',
+    });
+    // And the ORDER's own total still never absorbs any of it.
     expect(model.totals.total).toBe(150);
   });
 
-  it('a retention without a reason is still a cost, just an unexplained one', () => {
-    const model = withDeposit({
-      total: 500,
-      canSettle: true,
-      settlement: settlement({
-        retainedAmount: 100,
-        claimsTotal: 100,
-        appliedFromDeposit: 100,
-        refundAmount: 400,
+  it('a retention without a reason is still a charge, just an unexplained one', () => {
+    const model = withDeposit(
+      deposit('RECEIVED', {
+        settlement: settlement({ retainedAmount: 100, claimsTotal: 100 }),
       }),
-    });
-    expect(model.securityDeposit).toMatchObject({
-      status: 'settled',
-      claims: [{ kind: 'retention', amount: 100 }],
-      refund: 400,
-    });
+    );
+    expect(model.damages?.claims).toEqual([{ kind: 'retention', amount: 100 }]);
+    // Service 150 + claims 100 − deposit 500 ⇒ 250 back to the client.
+    expect(model.totals.balance).toMatchObject({ amount: 250, direction: 'refund' });
   });
 
-  it('bills replacements on lines that carried NO deposit — all of it is owed', () => {
-    const model = withDeposit({
-      total: 0,
-      canSettle: true,
-      settlement: settlement({
-        damages: [{ lineId: 1, productName: 'Silla', quantity: 1, unitAmount: 45, amount: 45 }],
-        damagesTotal: 45,
-        claimsTotal: 45,
-        refundAmount: 0,
-        balanceDue: 45,
+  it('bills damages WHOLE when the deposit was waived, and never calls it a deposit section', () => {
+    const model = withDeposit(
+      deposit('WAIVED', {
+        settlement: settlement({
+          damages: [{ lineId: 1, productName: 'Silla', quantity: 1, unitAmount: 45, amount: 45 }],
+          damagesTotal: 45,
+          claimsTotal: 45,
+          refundAmount: 0,
+        }),
       }),
+      { paidAt: '2026-08-01T00:00:00Z', isPaid: true },
+    );
+    expect(model.damages?.withDeposit).toBe(false);
+    expect(model.totals.balance).toMatchObject({
+      depositCredit: 0,
+      amount: 45,
+      direction: 'collect',
     });
-    expect(model.securityDeposit).toMatchObject({ status: 'settled', amount: 0, balanceDue: 45 });
   });
 });
 
@@ -545,12 +646,16 @@ describe('fromOrderForm', () => {
     expect(quote({ deliveryAmount: '75' })?.totals.total).toBe(225);
   });
 
-  it('subtracts a deposit from the balance but never from the total', () => {
+  it('subtracts an ANTICIPO from what is owed but never from the total', () => {
     const model = quote({ depositAmount: '50' });
     expect(model?.totals.total).toBe(150);
-    expect(model?.totals.balance).toBe(100);
-    // Clamped, like the comprobante's: a deposit above the total is a slip, not a credit.
-    expect(quote({ depositAmount: '500' })?.totals.balance).toBe(0);
+    expect(model?.totals.advance).toBe(50);
+    expect(model?.totals.balance).toMatchObject({ amount: 100, direction: 'collect' });
+    // Credited, like the comprobante's: the excess is the client's, and the row stops at the total.
+    const over = quote({ depositAmount: '500' });
+    expect(over?.totals).toMatchObject({ advance: 150, advanceReceived: 500 });
+    expect(over?.totals.balance).toMatchObject({ advanceCredit: 350, amount: 350, direction: 'refund' });
+    expect(quote()?.totals.advance).toBeUndefined();
   });
 
   it('drops the pickup and the days for a purchase-only quote', () => {
@@ -593,12 +698,17 @@ describe('fromOrderForm', () => {
         product({ id: 2, businessTypeId: 2, sellPrice: 40, rentPrice: undefined, securityDeposit: 99 }),
       ],
     );
-    expect(model?.securityDeposit).toEqual({ status: 'held', amount: 102.5 });
+    // A quote's deposit is always still to be handed over: added to what the client pays.
     expect(model?.totals.total).toBe(150 + 30 + 40);
+    expect(model?.totals.balance).toMatchObject({
+      depositDue: 102.5,
+      amount: 220 + 102.5,
+      direction: 'collect',
+    });
   });
 
   it('says nothing about a deposit when no quoted product carries one', () => {
-    expect(quote()?.securityDeposit).toBeUndefined();
+    expect(quote()?.totals.balance).toMatchObject({ depositDue: 0, amount: 150 });
   });
 
   it('wears the currency of the products quoted, never a hardcoded Q', () => {
@@ -621,7 +731,7 @@ describe('fromDamageReport', () => {
   ): OrderDepositSettlement => ({
     settledAt: '2026-08-02T10:00:00Z',
     retainedAmount: 150,
-    retainedReason: 'Manteles con manchas de vino que no salieron en el lavado.',
+    retainedReason: 'Mantelería con daño físico: manchas persistentes tras el lavado.',
     damages: [
       {
         lineId: 1,
@@ -643,7 +753,12 @@ describe('fromDamageReport', () => {
   });
   const depositOrder = (over: Partial<OrderDetail> = {}) =>
     order({
-      securityDeposit: { total: 500, canSettle: true },
+      securityDeposit: {
+        total: 500,
+        held: 500,
+        collection: { status: 'RECEIVED', canRecord: false },
+        canSettle: true,
+      },
       lines: [
         line({ securityDeposit: 50, quantity: 5 }),
         line({ id: 2, productName: 'Silla', securityDeposit: 12.5, quantity: 20 }),
@@ -655,18 +770,11 @@ describe('fromDamageReport', () => {
     });
 
   it('copies every settlement figure verbatim, never re-deriving one', () => {
-    const model = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, false);
-    expect(model.totals).toEqual({
-      retained: 150,
-      damages: 645,
-      claims: 795.01,
-      applied: 500,
-      refund: 0,
-      balanceDue: 295.01,
-    });
+    const model = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT);
+    expect(model.totals).toEqual({ retained: 150, damages: 645, claims: 795.01 });
     expect(model.retention).toEqual({
       amount: 150,
-      reason: 'Manteles con manchas de vino que no salieron en el lavado.',
+      reason: 'Mantelería con daño físico: manchas persistentes tras el lavado.',
     });
     expect(model.replacements).toEqual([
       { description: 'Mesa redonda', quantity: 2, unitAmount: 300, amount: 600, note: 'Patas rotas' },
@@ -674,8 +782,47 @@ describe('fromDamageReport', () => {
     ]);
   });
 
+  it('squares the order with THESE claims — the same result the comprobante shows', () => {
+    // Unpaid: service 150 still due + claims 795.01 − the deposit 500 ⇒ 445.01 to collect.
+    const unpaid = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT);
+    expect(unpaid.balance).toMatchObject({
+      serviceDue: 150,
+      claims: 795.01,
+      depositCredit: 500,
+      amount: 445.01,
+      direction: 'collect',
+    });
+    // The claims come from the settlement GIVEN (a form's values before saving), not the record.
+    const small = fromDamageReport(
+      depositOrder({ paidAt: '2026-08-01T00:00:00Z', isPaid: true }),
+      settlement({ claimsTotal: 20 }),
+      letterhead,
+      ISSUED_AT,
+    );
+    expect(small.balance).toMatchObject({ amount: 480, direction: 'refund' });
+    // An anticipo above the service cost is credited here too ("Saldo a favor del cliente"), net of
+    // the deposit it already carried: 700 − cost 150 − depósito 500 = 50 a favor;
+    // claims 795.01 − saldo a favor 50 − depósito 500 ⇒ 245.01 to collect.
+    const over = fromDamageReport(
+      depositOrder({ depositAmount: 700 }),
+      settlement(),
+      letterhead,
+      ISSUED_AT,
+    );
+    expect(over.balance).toMatchObject({
+      serviceDue: 0,
+      advanceCredit: 50,
+      amount: 245.01,
+      direction: 'collect',
+    });
+    // An excess smaller than the deposit IS part of that deposit — nothing is credited twice.
+    expect(
+      fromDamageReport(depositOrder({ depositAmount: 200 }), settlement(), letterhead, ISSUED_AT).balance,
+    ).toMatchObject({ advanceCredit: 0, amount: 295.01, direction: 'collect' });
+  });
+
   it('breaks the deposit down by the rental lines that actually carried one', () => {
-    const model = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, false);
+    const model = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT);
     // The TOTAL is the API's; the per-line rows are its breakdown (the server's own Σ rule).
     expect(model.deposit).toEqual({
       total: 500,
@@ -686,8 +833,26 @@ describe('fromDamageReport', () => {
     });
   });
 
+  it('shows NO deposit at all when it was waived — and bills the damages whole', () => {
+    const waived = depositOrder({
+      securityDeposit: {
+        total: 500,
+        held: 0,
+        collection: { status: 'WAIVED', reason: 'Cliente frecuente', canRecord: false },
+        canSettle: true,
+      },
+      paidAt: '2026-08-01T00:00:00Z',
+      isPaid: true,
+    });
+    const model = fromDamageReport(waived, settlement({ retainedAmount: 0 }), letterhead, ISSUED_AT);
+    expect(model.deposit).toEqual({ total: 0, lines: [] });
+    expect(model.balance).toMatchObject({ depositCredit: 0, amount: 795.01, direction: 'collect' });
+    // The waive reason is an internal note: nothing in the model can carry it to the page.
+    expect(JSON.stringify(model)).not.toContain('Cliente frecuente');
+  });
+
   it('reports an order with no deposit at all as a zero deposit with no breakdown', () => {
-    const model = fromDamageReport(order(), settlement(), letterhead, ISSUED_AT, false);
+    const model = fromDamageReport(order(), settlement(), letterhead, ISSUED_AT);
     expect(model.deposit).toEqual({ total: 0, lines: [] });
   });
 
@@ -697,7 +862,6 @@ describe('fromDamageReport', () => {
       settlement({ retainedAmount: 0, retainedReason: undefined }),
       letterhead,
       ISSUED_AT,
-      false,
     );
     expect(none.retention).toBeUndefined();
     const bare = fromDamageReport(
@@ -705,35 +869,14 @@ describe('fromDamageReport', () => {
       settlement({ retainedReason: undefined }),
       letterhead,
       ISSUED_AT,
-      false,
     );
     expect(bare.retention).toEqual({ amount: 150 });
   });
 
-  it('a FINAL report carries the settlement date; a DRAFT never does', () => {
-    const final = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, false);
-    expect(final.draft).toBe(false);
-    expect(final.settledAt).toEqual(new Date('2026-08-02T10:00:00Z'));
-    // A draft has recorded nothing — whatever date the form state carries is not a settlement's.
-    const draft = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, true);
-    expect(draft.draft).toBe(true);
-    expect(draft.settledAt).toBeUndefined();
-  });
-
-  it('drops an unparseable settlement date rather than printing "Invalid Date"', () => {
-    const model = fromDamageReport(
-      depositOrder(),
-      settlement({ settledAt: '' }),
-      letterhead,
-      ISSUED_AT,
-      false,
-    );
-    expect(model.settledAt).toBeUndefined();
-  });
-
   it('carries the order identity, the client and event snapshots and the currency', () => {
-    const model = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, false);
+    const model = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT);
     expect(model.reference).toBe(42);
+    // Issued at the download — the report's only date.
     expect(model.issuedAt).toBe(ISSUED_AT);
     expect(model.letterhead).toBe(letterhead);
     expect(model.client).toEqual({ name: 'Test cliente', contact: '1234-1234', address: 'Test dirección' });
@@ -749,16 +892,43 @@ describe('fromDamageReport', () => {
       settlement(),
       letterhead,
       ISSUED_AT,
-      false,
     );
     expect(purchase.event.pickupAt).toBeUndefined();
   });
 
-  it('is named after the order, and a draft says so in its file name', () => {
-    const final = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, false);
-    expect(damageReportFileName(final)).toBe('reporte-danos-ped-00042.pdf');
-    const draft = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, true);
-    expect(damageReportFileName(draft)).toBe('reporte-danos-ped-00042-borrador.pdf');
+  it('is named after the order', () => {
+    const model = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT);
+    expect(damageReportFileName(model)).toBe('reporte-danos-ped-00042.pdf');
+  });
+});
+
+describe('orderBalanceInput', () => {
+  it('reads the ANTICIPO from depositAmount, the payment from paidAt, and the deposit collection', () => {
+    expect(
+      orderBalanceInput(
+        order({
+          depositAmount: 40,
+          paidAt: '2026-08-01T00:00:00Z',
+          securityDeposit: {
+            total: 80,
+            held: 80,
+            collection: { status: 'PENDING', canRecord: true },
+            canSettle: false,
+          },
+        }),
+        12,
+      ),
+    ).toEqual({
+      total: 150,
+      advance: 40,
+      paid: true,
+      deposit: { amount: 80, status: 'PENDING' },
+      claimsTotal: 12,
+    });
+  });
+
+  it('leaves out what the order does not have — no anticipo is 0, no report is no claims', () => {
+    expect(orderBalanceInput(order(), undefined)).toEqual({ total: 150, advance: 0, paid: false });
   });
 });
 

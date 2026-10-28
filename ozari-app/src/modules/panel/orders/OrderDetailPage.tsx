@@ -39,7 +39,9 @@ import { formatMoment } from './orderDayGroups';
 import OrderAdvanceModal from './OrderAdvanceModal';
 import OrderDeleteModal from './OrderDeleteModal';
 import OrderPaymentModal from './OrderPaymentModal';
+import OrderBalanceSummary from './OrderBalanceSummary';
 import OrderDepositCard from './OrderDepositCard';
+import OrderDepositCollectionModal, { type DepositCollectionMode } from './OrderDepositCollectionModal';
 import OrderDepositRefundModal from './OrderDepositRefundModal';
 import OrderPaymentUndoModal from './OrderPaymentUndoModal';
 import OrderSettlementUndoModal from './OrderSettlementUndoModal';
@@ -209,6 +211,7 @@ const OrderDetailPage: React.FC = () => {
   const [undoingPayment, setUndoingPayment] = useState(false);
   const [undoingSettlement, setUndoingSettlement] = useState(false);
   const [refundingDeposit, setRefundingDeposit] = useState(false);
+  const [collectionMode, setCollectionMode] = useState<DepositCollectionMode | undefined>(undefined);
   const [changingStatus, setChangingStatus] = useState(false);
   const [deleting, setDeleting] = useState(false);
   /** The evidence set being viewed full-size — ONE step's photos, never the whole order's. */
@@ -782,11 +785,16 @@ const OrderDetailPage: React.FC = () => {
                     {money(order.currency.symbol, order.totalAmount)}
                   </span>
                 </div>
+                {/* The CUADRE — the one amount that changes hands, and which way. The deposit joins
+                    it here, never the cost above. */}
+                <OrderBalanceSummary order={order} />
                 <div className="mt-1 grid gap-4 sm:grid-cols-2">
+                  {/* The anticipo as a fact once the order is paid; while it is not, the cuadre
+                      above already subtracts it, so it is not said twice. */}
                   <Fact
                     label={t(`${KEY}.money.deposit`)}
                     value={
-                      order.depositAmount !== undefined
+                      order.depositAmount !== undefined && order.paidAt !== undefined
                         ? money(order.currency.symbol, order.depositAmount)
                         : undefined
                     }
@@ -814,6 +822,7 @@ const OrderDetailPage: React.FC = () => {
               onRefund={() => setRefundingDeposit(true)}
               onReport={() => panelNavigate(`/panel/pedidos/${order.id}/danos`)}
               onUndo={() => setUndoingSettlement(true)}
+              onCollection={setCollectionMode}
             />
           )}
 
@@ -908,6 +917,21 @@ const OrderDetailPage: React.FC = () => {
                     const balance = deposit.balanceDue ?? 0;
                     if (deposit.kind === 'UNDONE') {
                       label = t(`${KEY}.history.depositUndone`);
+                    } else if (deposit.kind === 'COLLECTION_CLEARED') {
+                      label = t(`${KEY}.history.collectionCleared`);
+                    } else if (deposit.kind === 'RECEIVED') {
+                      dot = 'bg-emerald-500/70';
+                      label = t(`${KEY}.history.depositReceived`);
+                      if (deposit.depositTotal !== undefined) {
+                        detail = money(order.currency.symbol, deposit.depositTotal);
+                      }
+                    } else if (deposit.kind === 'WAIVED') {
+                      dot = 'bg-amber-500/70';
+                      label = t(`${KEY}.history.depositWaived`);
+                      // The waive reason is an INTERNAL note — said as one.
+                      if (deposit.note) {
+                        detail = t(`${KEY}.history.internalNote`, { note: deposit.note });
+                      }
                     } else {
                       dot = claims > 0 ? 'bg-red-500/70' : 'bg-emerald-500/70';
                       label =
@@ -1004,6 +1028,12 @@ const OrderDetailPage: React.FC = () => {
           <OrderPaymentUndoModal
             order={undoingPayment ? order : undefined}
             onClose={() => setUndoingPayment(false)}
+          />
+          {/* "Cobro del depósito" — received / without deposit / "Corregir". */}
+          <OrderDepositCollectionModal
+            order={collectionMode ? order : undefined}
+            mode={collectionMode}
+            onClose={() => setCollectionMode(undefined)}
           />
           {/* The deposit's happy path — one confirm, nothing claimed. */}
           <OrderDepositRefundModal

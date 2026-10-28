@@ -81,15 +81,15 @@ describe('downloadDocument', () => {
 
   it('renders the DAMAGE REPORT through the same machinery, under its own name', async () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
-    const report = { reference: 42, draft: true } as unknown as DamageReportModel;
+    const report = { reference: 42 } as unknown as DamageReportModel;
     await downloadDamageReport({ ...input, model: report, copy: {} as DamageReportCopy });
     const element = pdf.mock.calls[0]?.[0] as unknown as { props: Record<string, unknown> };
     // The report's own model reaches the template — not a comprobante's.
     expect(element.props['model']).toBe(report);
     expect(element.props['money']).toBe(input.money);
-    // A draft says so in its file name, so it cannot pass for the recorded statement.
+    // Named after the order, with what the document IS in front.
     const anchor = click.mock.instances[0] as HTMLAnchorElement;
-    expect(anchor.download).toBe('reporte-danos-ped-00042-borrador.pdf');
+    expect(anchor.download).toBe('reporte-danos-ped-00042.pdf');
     click.mockRestore();
   });
 

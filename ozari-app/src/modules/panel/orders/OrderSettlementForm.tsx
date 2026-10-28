@@ -16,7 +16,7 @@ import { usePanelNavigate } from '../PanelNavContext';
 import { FormSection } from '../products/ProductFormChrome';
 import { formatMoney } from './orderEstimate';
 import {
-  buildDraftSettlement,
+  buildUnsavedSettlement,
   createSettlementSchema,
   damageableLines,
   previewSettlement,
@@ -59,8 +59,8 @@ const PreviewLine: React.FC<{ label: string; amount: string; className?: string 
  * API's formula, labelled as such; the saved numbers come back from the API and the detail page
  * shows only those.
  *
- * The outcome card also offers the damage report as a DRAFT (`buildDraftSettlement` → the documents'
- * `DamageReportButton` with `draft`), so the admin can hand the client a quote before saving. It is
+ * The outcome card also offers the damage report BEFORE saving (`buildUnsavedSettlement` → the
+ * documents' `DamageReportButton`), so the admin can hand it to the client on the spot. It is
  * offered only while something is claimed AND the whole form validates against the very schema the
  * resolver uses — a typo never prints. Always mounted inside a `grid-rows` collapse (`inert` while
  * closed), so it eases in and out with the numbers instead of popping.
@@ -83,14 +83,15 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
   );
   const [schema] = useState(() =>
     createSettlementSchema({
-      depositTotal: deposit.total,
+      // `held`, not `total`: a deposit handed over WITHOUT collecting it (WAIVED) holds nothing.
+      depositTotal: deposit.held,
       currencySymbol: order.currency.symbol,
       maxByLine: new Map(lines.map((line) => [line.id, line.quantity])),
     }),
   );
-  const hasDeposit = deposit.total > 0;
-  // The draft's date — when this report was opened. Captured once (render stays pure).
-  const [draftedAt] = useState(() => new Date());
+  const hasDeposit = deposit.held > 0;
+  // The unsaved report's date — when this page was opened. Captured once (render stays pure).
+  const [openedAt] = useState(() => new Date());
 
   const methods = useForm<SettlementFormValues>({
     resolver: zodResolver(schema),
@@ -100,9 +101,9 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
   const { handleSubmit, control } = methods;
   // `useWatch`, never `watch()` (the React Compiler lint) — the preview follows every keystroke.
   const values = useWatch({ control }) as SettlementFormValues;
-  const preview = previewSettlement(deposit.total, values, lineById);
-  const draft = buildDraftSettlement(order, values, draftedAt);
-  const showDraft = draft.claimsTotal > 0 && schema.safeParse(values).success;
+  const preview = previewSettlement(deposit.held, values, lineById);
+  const unsaved = buildUnsavedSettlement(order, values, openedAt);
+  const showReport = unsaved.claimsTotal > 0 && schema.safeParse(values).success;
   const exitPath = `/panel/pedidos/${order.id}` as const;
 
   const onSubmit = (data: SettlementFormValues): void => {
@@ -135,6 +136,13 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
     <FormProvider {...methods}>
       {/* `noValidate`: our mirrored messages speak, never the browser's untranslated bubble. */}
       <form id={FORM_ID} noValidate onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6">
+        {/* Nothing held (handed over without a deposit, or replacement values only): there is
+            nothing to retain from, so the retention section is gone and this line says why. */}
+        {!hasDeposit && (
+          <p className="reveal-block rounded-control bg-charcoal/[0.04] px-4 py-3 text-sm text-charcoal/70">
+            {t(`${KEY}.noDepositHeld`)}
+          </p>
+        )}
         {hasDeposit && (
           <FormSection
             title={t(`${KEY}.sections.retention.title`)}
@@ -148,7 +156,7 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
                 label={t(`${KEY}.fields.retainedLabel`)}
                 placeholder={t(`${KEY}.fields.moneyPlaceholder`)}
                 aria-label={t(`${KEY}.fields.retainedLabel`)}
-                instructions={t(`${KEY}.fields.retainedHint`, { deposit: money(deposit.total) })}
+                instructions={t(`${KEY}.fields.retainedHint`, { deposit: money(deposit.held) })}
                 // Whether the reason is required follows this amount.
                 deps={['retainedReason']}
               />
@@ -220,7 +228,7 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
           description={t(`${KEY}.sections.outcome.description`)}
         >
           <div className="flex flex-col gap-2 rounded-control bg-charcoal/[0.03] px-4 py-3">
-            <PreviewLine label={t(`${KEY}.preview.deposit`)} amount={money(deposit.total)} />
+            <PreviewLine label={t(`${KEY}.preview.deposit`)} amount={money(deposit.held)} />
             {hasDeposit && (
               <PreviewLine
                 label={t(`${KEY}.preview.retained`)}
@@ -258,14 +266,14 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
             </div>
           </div>
           <p className="mt-2 text-xs text-charcoal/45">{t(`${KEY}.preview.note`)}</p>
-          {/* The DRAFT damage report — always mounted, collapsed by `grid-rows` and `inert` while
+          {/* The damage report, before saving — always mounted, collapsed by `grid-rows` and `inert` while
               there is nothing valid to print, so it eases in with the numbers instead of popping. */}
           <div
-            aria-hidden={!showDraft}
-            inert={!showDraft}
-            data-testid="settlement-draft-report"
+            aria-hidden={!showReport}
+            inert={!showReport}
+            data-testid="settlement-damage-report"
             className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
-              showDraft ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+              showReport ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
             }`}
           >
             <div className="min-h-0 overflow-hidden">
@@ -273,9 +281,9 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
                   wraps, so on a narrow card the button folds under it instead of squashing it. */}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-3">
                 <p className="min-w-0 grow basis-56 text-xs text-charcoal/55">
-                  {t(`${KEY}.draftReport`)}
+                  {t(`${KEY}.reportNote`)}
                 </p>
-                <DamageReportButton order={order} settlement={draft} draft />
+                <DamageReportButton order={order} settlement={unsaved} />
               </div>
             </div>
           </div>

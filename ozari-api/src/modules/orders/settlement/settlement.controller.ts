@@ -13,6 +13,8 @@ import {
   canRecordSettlement,
   computeDepositTotal,
   computeSettlementMoney,
+  depositCollectionStatus,
+  heldDeposit,
   isSettleableLine,
   loadOrderProjectionContext,
   projectOrderDetail,
@@ -23,6 +25,7 @@ import type {
   OrderDetailEnvelopeModel,
   SettleOrderRequestModel,
 } from "../orders.models.js";
+import { applyDepositCollection } from "../deposit-collection/depositCollection.service.js";
 
 /** Projects the written order into the shared `{ order }` envelope and answers with it. */
 const respondWithOrder = async (
@@ -74,6 +77,12 @@ const auditSettlement = (req: CustomRequest, id: number, operation: string): voi
  * `400` about the request. Stock is deliberately NOT touched: a broken chair is normally replaced
  * with the client's money, so the fleet the business intends to own is unchanged; a unit that will
  * not be replaced is an edit of the product's quantity.
+ *
+ * **The deposit counted is the HELD one** (`heldDeposit`): 0 when its collection was WAIVED, so a
+ * waived order refunds and retains nothing (any retention is `retainedAboveDeposit`) while its
+ * replacements are billed in full. A report recorded while the collection is still PENDING stamps
+ * it RECEIVED (with its own trail row) — recording what came back confirms the deposit was in hand;
+ * undoing the report does not revert that.
  */
 export const settleOrder = async (
   req: CustomRequest,
@@ -98,6 +107,9 @@ export const settleOrder = async (
           deliveredAt: true,
           cancelledAt: true,
           depositSettledAt: true,
+          depositReceivedAt: true,
+          depositWaivedAt: true,
+          depositWaivedReason: true,
           serviceDetails: {
             where: { isActive: true },
             select: {
@@ -128,9 +140,27 @@ export const settleOrder = async (
       if (!damageable) {
         return { kind: "invalidDamage" as const };
       }
+      // Every settlement figure counts the HELD deposit (0 when its collection was waived), never the
+      // nominal one: a waived deposit cannot be retained from, nor refunded.
       const depositTotal = computeDepositTotal(order.serviceDetails);
-      if (body.retainedAmount > depositTotal) {
+      const held = heldDeposit(order);
+      if (body.retainedAmount > held) {
         return { kind: "retainedAboveDeposit" as const };
+      }
+
+      const now = new Date();
+      // A damage report on a still-PENDING collection confirms the deposit was in hand (the normal
+      // case) — stamped received, with its own trail row, BEFORE the report's row. Undoing the report
+      // later does not revert it.
+      if (depositTotal > 0 && depositCollectionStatus(order) === "PENDING") {
+        await applyDepositCollection(tx, {
+          serviceId: id,
+          current: order,
+          input: { received: true, reason: undefined },
+          depositTotal,
+          byUserId: req.user?.userId ?? 0,
+          now,
+        });
       }
 
       // Every line whose damage CHANGES — newly damaged, corrected, or no longer damaged.
@@ -152,7 +182,7 @@ export const settleOrder = async (
       await tx.service.update({
         where: { id },
         data: {
-          depositSettledAt: order.depositSettledAt ?? new Date(),
+          depositSettledAt: order.depositSettledAt ?? now,
           depositRetainedAmount: body.retainedAmount,
           depositRetainedReason: body.retainedReason ?? null,
         },
@@ -166,12 +196,12 @@ export const settleOrder = async (
           Number(line.replacementPrice ?? 0) * (damageByLine.get(line.id)?.quantity ?? 0),
         0,
       );
-      const money = computeSettlementMoney(depositTotal, body.retainedAmount, damagesTotal);
+      const money = computeSettlementMoney(held, body.retainedAmount, damagesTotal);
       await tx.serviceDepositHistory.create({
         data: {
           serviceId: id,
           kind: order.depositSettledAt === null ? "RECORDED" : "CORRECTED",
-          depositTotal,
+          depositTotal: held,
           claimsTotal: money.claimsTotal,
           refundAmount: money.refundAmount,
           balanceDue: money.balanceDue,

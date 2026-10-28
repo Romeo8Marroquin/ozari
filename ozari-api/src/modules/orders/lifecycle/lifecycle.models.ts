@@ -137,6 +137,13 @@ export interface OrderActionModel {
    * not a journey, and offering navigation there would be noise.
    */
   tracksEvent: TrackedEventEnum | null;
+  /**
+   * Present ONLY on the forward move INTO a DELIVERY-tracking step of an order whose security deposit
+   * is still to be confirmed (deposit > 0, collection PENDING, not cancelled, no damage report): the
+   * nominal deposit to ask about ("¿Se recibió el depósito?"). The engine leaves it undefined — it is
+   * an ORDER fact, filled in by the order projection (`withDepositToCollect`), never a status one.
+   */
+  depositToCollect: number | undefined;
 }
 
 /** The global evidence bounds (from `app_preferences`, with `appConfig` fallbacks). */

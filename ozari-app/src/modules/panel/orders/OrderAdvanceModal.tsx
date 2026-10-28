@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Button from '@components/Button';
+import Checkbox from '@components/Checkbox';
 import CustomTextarea from '@components/CustomTextarea';
 import FormError from '@components/FormError';
 import Modal from '@components/Modal';
@@ -10,7 +11,9 @@ import { useHasRole } from '@hooks/useRole';
 import { toFormError } from '@utils/apiError';
 import { mintEvidencePhotos, revokeEvidencePhotos, type EvidencePhoto } from './evidencePhotos';
 import OrderEvidencePicker from './OrderEvidencePicker';
+import { formatMoney } from './orderEstimate';
 import type { OrderAction, OrderListItem } from './order.types';
+import { depositCollectionReasonError, toDepositCollectionBody } from './SchemaDepositCollection';
 import { useAdvanceOrder } from './useAdvanceOrder';
 import { useOrderEvidenceUploads } from './useOrderEvidenceUploads';
 
@@ -34,6 +37,13 @@ interface OrderAdvanceModalProps {
  * is disruptive. Adding, renaming or re-flagging a step in "Estados del pedido" changes this dialog
  * with no code change.
  *
+ * A delivery move that carries `depositToCollect` also asks whether the security deposit was
+ * received — checked by default (the common case costs nothing), and unchecking it asks for the
+ * reason (mirrored by `SchemaDepositCollection`). The answer rides the advance as
+ * `depositCollection`; it never blocks the move beyond that missing reason. Like the cancel reason,
+ * it lives in this dialog's own state and is submitted by its button (FRONTEND-DOCTRINE §8 — a
+ * `<textarea>` dialog).
+ *
  * Photos upload straight to R2 FIRST (presign → PUT); only their keys travel with the advance, so a
  * failed upload never leaves a half-advanced order. Errors follow the form doctrine
  * (`skipErrorNotification` + `toFormError`): the 409 "it already moved", the 422 "evidence
@@ -47,6 +57,8 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({
   const { t } = useTranslation();
   const [photos, setPhotos] = useState<EvidencePhoto[]>([]);
   const [reason, setReason] = useState('');
+  const [depositReceived, setDepositReceived] = useState(true);
+  const [depositReason, setDepositReason] = useState('');
   const [formError, setFormError] = useState<string | undefined>(undefined);
   const isAdmin = useHasRole([Role.Admin]);
   const { advanceOrder, isPending } = useAdvanceOrder();
@@ -76,6 +88,8 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({
     revokeEvidencePhotos(photos);
     setPhotos([]);
     setReason('');
+    setDepositReceived(true);
+    setDepositReason('');
     setFormError(undefined);
   }
 
@@ -87,6 +101,13 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({
   const needsReason = action.requiresReason;
   const enoughEvidence = !needsEvidence || photos.length >= action.minEvidence;
   const enoughReason = !needsReason || reason.trim().length > 0;
+  // The deposit question — only on a move that offers it.
+  const asksDeposit = action.depositToCollect !== undefined;
+  const depositValues = { received: depositReceived, reason: depositReason };
+  const depositError = asksDeposit ? depositCollectionReasonError(depositValues) : undefined;
+  // "Required" is said by the disabled button; only a TOO-LONG reason needs words under the field.
+  const visibleDepositError = depositReason.trim() === '' ? undefined : depositError;
+  const ready = enoughEvidence && enoughReason && depositError === undefined;
 
   const addPhotos = (files: File[]): void => {
     const added = mintEvidencePhotos(files);
@@ -109,7 +130,7 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({
   const submit = (): void => {
     /* v8 ignore next -- belt to the disabled button: unreachable through the UI, and a double
        submit while uploading/advancing would double-charge the lifecycle */
-    if (busy || !enoughEvidence || !enoughReason) return;
+    if (busy || !ready) return;
     setFormError(undefined);
     const fallback = t(`${KEY}.errors.fallback`);
     // Photos first: their keys are what the advance records, and a failed upload must leave the
@@ -126,6 +147,7 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({
               evidence: [{ statusId: action.statusId, keys: evidenceKeys }],
             }),
             ...(needsReason && { reason: reason.trim() }),
+            ...(asksDeposit && { depositCollection: toDepositCollectionBody(depositValues) }),
           },
           {
             onSuccess: () => {
@@ -218,7 +240,7 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({
             color={pendingAction?.kind === 'disruptive' ? DANGER_COLOR : SECONDARY_COLOR}
             fullWidth
             loading={busy}
-            disabled={!enoughEvidence || !enoughReason}
+            disabled={!ready}
             onClick={submit}
             className="sm:w-auto"
           >
@@ -287,6 +309,53 @@ const OrderAdvanceModal: React.FC<OrderAdvanceModalProps> = ({
             onAdd={addPhotos}
             onRemove={removePhoto}
           />
+        )}
+
+        {/* Was the deposit received? Checked by default; unchecking opens the required reason and
+            the consequence (always mounted — a `grid-rows` collapse, never a pop). */}
+        {action.depositToCollect !== undefined && (
+          <div className="modal-stagger flex flex-col rounded-control bg-charcoal/[0.03] px-3 py-3">
+            <Checkbox
+              id="advance-deposit-received"
+              color={SECONDARY_COLOR}
+              checked={depositReceived}
+              disabled={busy}
+              onChange={(event) => setDepositReceived(event.target.checked)}
+              label={
+                <span className="text-sm text-charcoal">
+                  {t(`${KEY}.depositReceived`, {
+                    amount: formatMoney(order.currency.symbol, action.depositToCollect),
+                  })}
+                </span>
+              }
+            />
+            <div
+              aria-hidden={depositReceived}
+              inert={depositReceived}
+              data-testid="advance-deposit-reason"
+              className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
+                depositReceived ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100'
+              }`}
+            >
+              {/* `pt-6`: the textarea's floating label rises above its own box. */}
+              <div className="flex min-h-0 flex-col gap-1.5 overflow-hidden pt-6">
+                <CustomTextarea
+                  id="advance-deposit-reason-field"
+                  rows={2}
+                  label={t(`${KEY}.depositReasonLabel`)}
+                  placeholder={t(`${KEY}.depositReasonPlaceholder`)}
+                  aria-label={t(`${KEY}.depositReasonLabel`)}
+                  value={depositReason}
+                  error={visibleDepositError !== undefined}
+                  onChange={(event) => setDepositReason(event.target.value)}
+                />
+                {visibleDepositError && (
+                  <p className="px-2 text-xs text-red-600">{visibleDepositError}</p>
+                )}
+                <p className="px-2 text-xs text-charcoal/55">{t(`${KEY}.depositHint`)}</p>
+              </div>
+            </div>
+          </div>
         )}
 
         {needsReason && (

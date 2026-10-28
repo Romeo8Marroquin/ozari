@@ -13,12 +13,18 @@ import {
   assertSettlementSurvivesEdit,
   buildOrderListWhere,
   buildRentedInWindowWhere,
+  canRecordDepositCollection,
   canRecordSettlement,
   computeBilledDays,
   computeDepositTotal,
   computeNextActionAt,
   computeSettlementMoney,
+  depositCollectionStatus,
+  heldDeposit,
   isSettleableLine,
+  pendingDepositToCollect,
+  projectDepositCollection,
+  withDepositToCollect,
   orderListOrderBy,
   parseOrderListQuery,
   loadOrderTimingPreferences,
@@ -73,6 +79,9 @@ const makeListRow = (overrides: Partial<OrderListRow> = {}): OrderListRow => ({
   depositSettledAt: null,
   depositRetainedAmount: null,
   depositRetainedReason: null,
+  depositReceivedAt: null,
+  depositWaivedAt: null,
+  depositWaivedReason: null,
   currencyId: 1,
   serviceStatusId: 1,
   paymentStatusId: 1,
@@ -962,6 +971,8 @@ describe("security deposit & damage settlement", () => {
     });
     expect(projectOrderDetail(order, makeProjectionContext()).securityDeposit).toEqual({
       total: 200,
+      held: 200,
+      collection: { status: "PENDING", at: undefined, reason: undefined, canRecord: true },
       canSettle: false,
       settlement: undefined,
     });
@@ -993,6 +1004,9 @@ describe("security deposit & damage settlement", () => {
     expect(detail.lines[0]).toMatchObject({ damagedQuantity: 2, damageNote: "Patas rotas" });
     expect(detail.securityDeposit).toEqual({
       total: 200,
+      held: 200,
+      // PENDING, and no longer recordable: the report's money was computed from it.
+      collection: { status: "PENDING", at: undefined, reason: undefined, canRecord: false },
       canSettle: true,
       settlement: {
         settledAt: DELIVERED,
@@ -1050,18 +1064,32 @@ describe("security deposit & damage settlement", () => {
       replacementPrice: 120,
       ...overrides,
     });
-    const settled = (damagedQuantity: number, retained: string | null = null) => ({
+    const settled = (
+      damagedQuantity: number,
+      retained: string | null = null,
+      depositWaivedAt: Date | null = null,
+    ) => ({
       depositSettledAt: DELIVERED,
       depositRetainedAmount: retained === null ? null : dec(retained),
+      depositWaivedAt,
       serviceDetails: [{ productId: 3, damagedQuantity }],
     });
 
     it("passes an unsettled order, and a settled one the edit keeps coherent", () => {
       expect(() =>
         assertSettlementSurvivesEdit(
-          { depositSettledAt: null, depositRetainedAmount: null, serviceDetails: [] },
+          {
+            depositSettledAt: null,
+            depositRetainedAmount: null,
+            depositWaivedAt: null,
+            serviceDetails: [],
+          },
           [],
         ),
+      ).not.toThrow();
+      // A waived deposit with nothing retained (replacements only) survives any deposit change.
+      expect(() =>
+        assertSettlementSurvivesEdit(settled(2, "0", DELIVERED), [priced()]),
       ).not.toThrow();
       expect(() => assertSettlementSurvivesEdit(settled(2, "200"), [priced()])).not.toThrow();
       expect(() => assertSettlementSurvivesEdit(settled(0), [priced({ securityDeposit: null })])).not.toThrow();
@@ -1074,8 +1102,165 @@ describe("security deposit & damage settlement", () => {
       ["it became a sale", settled(2), [priced({ isRental: false })]],
       // 5 × Q40 = Q200 of deposit can no longer back the Q250 that was retained.
       ["the deposit shrank below what was retained", settled(0, "250"), [priced()]],
+      // A WAIVED collection holds nothing — any retention conflicts, whatever the nominal deposit.
+      ["the collection is waived and something was retained", settled(0, "0.01", DELIVERED), [priced()]],
     ])("refuses when %s", (_label, order, next) => {
       expect(() => assertSettlementSurvivesEdit(order, next)).toThrow(OrderSettlementConflictError);
     });
+  });
+});
+
+describe("deposit collection", () => {
+  const dec = (value: string) => new Prisma.Decimal(value);
+  const AT = new Date("2026-08-01T15:00:00Z");
+  /** 5 chairs × Q40 = Q200 of deposit, Q120 replacement each. */
+  const guardedLine = (overrides: Partial<RichOrder["serviceDetails"][number]> = {}) =>
+    makeRichLine({ securityDeposit: dec("40"), replacementPrice: dec("120"), ...overrides });
+  const stamps = { depositReceivedAt: null, depositWaivedAt: null };
+  const deposit = [{ isRental: true, quantity: 5, securityDeposit: dec("40"), replacementPrice: null }];
+
+  it("reads the status from whichever stamp is set", () => {
+    expect(depositCollectionStatus(stamps)).toBe("PENDING");
+    expect(depositCollectionStatus({ ...stamps, depositReceivedAt: AT })).toBe("RECEIVED");
+    expect(depositCollectionStatus({ ...stamps, depositWaivedAt: AT })).toBe("WAIVED");
+  });
+
+  it("holds the nominal deposit, or nothing once WAIVED", () => {
+    expect(heldDeposit({ depositWaivedAt: null, serviceDetails: deposit })).toBe(200);
+    expect(heldDeposit({ depositWaivedAt: AT, serviceDetails: deposit })).toBe(0);
+    // A freshly priced line (plain numbers) reads through the same rule.
+    expect(
+      heldDeposit({
+        depositWaivedAt: null,
+        serviceDetails: [{ isRental: true, quantity: 2, securityDeposit: 12.5, replacementPrice: null }],
+      }),
+    ).toBe(25);
+  });
+
+  it("may be recorded only while not cancelled and with no damage report", () => {
+    expect(canRecordDepositCollection({ cancelledAt: null, depositSettledAt: null })).toBe(true);
+    expect(canRecordDepositCollection({ cancelledAt: AT, depositSettledAt: null })).toBe(false);
+    expect(canRecordDepositCollection({ cancelledAt: null, depositSettledAt: AT })).toBe(false);
+  });
+
+  it("asks about the deposit only when there is one, still pending, on a live unsettled order", () => {
+    const order = { ...stamps, cancelledAt: null, depositSettledAt: null, serviceDetails: deposit };
+    expect(pendingDepositToCollect(order)).toBe(200);
+    expect(pendingDepositToCollect({ ...order, serviceDetails: [] })).toBeUndefined();
+    expect(pendingDepositToCollect({ ...order, depositReceivedAt: AT })).toBeUndefined();
+    expect(pendingDepositToCollect({ ...order, depositWaivedAt: AT })).toBeUndefined();
+    expect(pendingDepositToCollect({ ...order, cancelledAt: AT })).toBeUndefined();
+    expect(pendingDepositToCollect({ ...order, depositSettledAt: AT })).toBeUndefined();
+  });
+
+  it("stamps depositToCollect on the forward DELIVERY move only", () => {
+    const enRuta = { serviceStatusId: 5, serviceStatus: { id: 5, name: "En ruta" } };
+    const withDeposit = makeListRow({ ...enRuta, serviceDetails: deposit });
+    const actions = projectOrderListItem(withDeposit, makeProjectionContext()).actions;
+    const forward = actions.find((action) => action.kind === "forward");
+    expect(forward).toMatchObject({ statusId: 3, tracksEvent: "DELIVERY", depositToCollect: 200 });
+    // Rewind and cancel never ask.
+    for (const other of actions.filter((action) => action.kind !== "forward")) {
+      expect(other.depositToCollect).toBeUndefined();
+    }
+
+    // A forward move that is NOT the delivery (Pendiente → En ruta) does not ask either…
+    const pending = projectOrderListItem(makeListRow({ serviceDetails: deposit }), makeProjectionContext());
+    expect(pending.actions.find((action) => action.kind === "forward")?.depositToCollect).toBeUndefined();
+    // …nor does the delivery once the deposit was already received.
+    const received = projectOrderListItem(
+      makeListRow({ ...enRuta, serviceDetails: deposit, depositReceivedAt: AT }),
+      makeProjectionContext(),
+    );
+    expect(received.actions.every((action) => action.depositToCollect === undefined)).toBe(true);
+    // The pure helper passes actions through untouched when there is nothing to ask.
+    expect(withDepositToCollect(actions, undefined)).toBe(actions);
+  });
+
+  it("projects the collection block: absent without a deposit, the stamp time, the waive reason", () => {
+    const base = { ...stamps, depositWaivedReason: null, cancelledAt: null, depositSettledAt: null };
+    expect(projectDepositCollection(base, 0)).toBeUndefined();
+    expect(projectDepositCollection({ ...base, depositReceivedAt: AT }, 200)).toEqual({
+      status: "RECEIVED",
+      at: AT,
+      reason: undefined,
+      canRecord: true,
+    });
+    expect(
+      projectDepositCollection(
+        { ...base, depositWaivedAt: AT, depositWaivedReason: "Un familiar", cancelledAt: AT },
+        200,
+      ),
+    ).toEqual({ status: "WAIVED", at: AT, reason: "Un familiar", canRecord: false });
+    // A waived row whose reason is somehow missing still projects (no `null` leaks out).
+    expect(projectDepositCollection({ ...base, depositWaivedAt: AT }, 200)?.reason).toBeUndefined();
+  });
+
+  it("replacement values alone carry no collection block", () => {
+    const detail = projectOrderDetail(
+      makeRichOrder({ serviceDetails: [makeRichLine({ replacementPrice: dec("90") })] }),
+      makeProjectionContext(),
+    );
+    expect(detail.securityDeposit).toMatchObject({ total: 0, held: 0, collection: undefined });
+  });
+
+  it("a WAIVED deposit counts 0: nothing refunded, every replacement owed in full", () => {
+    const detail = projectOrderDetail(
+      makeRichOrder({
+        deliveredAt: AT,
+        depositWaivedAt: AT,
+        depositWaivedReason: "Entregado a un familiar",
+        depositSettledAt: AT,
+        depositRetainedAmount: dec("0"),
+        serviceDetails: [guardedLine({ damagedQuantity: 1 })],
+      }),
+      makeProjectionContext(),
+    );
+    expect(detail.securityDeposit).toMatchObject({
+      total: 200,
+      held: 0,
+      collection: { status: "WAIVED", reason: "Entregado a un familiar", canRecord: false },
+      settlement: {
+        damagesTotal: 120,
+        claimsTotal: 120,
+        appliedFromDeposit: 0,
+        refundAmount: 0,
+        balanceDue: 120,
+      },
+    });
+  });
+
+  it("maps the collection entries of the trail, with the waive note", () => {
+    const detail = projectOrderDetail(
+      makeRichOrder({
+        depositHistory: [
+          {
+            id: 3,
+            kind: "WAIVED",
+            note: "Entregado a un familiar",
+            depositTotal: dec("200.00"),
+            claimsTotal: null,
+            refundAmount: null,
+            balanceDue: null,
+            createdAt: AT,
+            byUser: { fullNameKms: encryptKms("Romeo Marroquín") },
+          },
+        ],
+      }),
+      makeProjectionContext(),
+    );
+    expect(detail.depositHistory).toEqual([
+      {
+        id: 3,
+        kind: "WAIVED",
+        note: "Entregado a un familiar",
+        depositTotal: 200,
+        claimsTotal: undefined,
+        refundAmount: undefined,
+        balanceDue: undefined,
+        byUserName: "Romeo Marroquín",
+        at: AT,
+      },
+    ]);
   });
 });

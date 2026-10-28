@@ -100,6 +100,26 @@ vi.mock('./OrderDepositRefundModal', () => ({
     ) : null,
 }));
 
+vi.mock('./OrderDepositCollectionModal', () => ({
+  default: ({
+    order,
+    mode,
+    onClose,
+  }: {
+    order?: { id: number };
+    mode?: string;
+    onClose: () => void;
+  }) =>
+    order ? (
+      <div data-testid="deposit-collection-modal">
+        {`${order.id}:${mode}`}
+        <button type="button" onClick={onClose}>
+          cerrar-cobro-deposito
+        </button>
+      </div>
+    ) : null,
+}));
+
 vi.mock('./OrderAdvanceModal', () => ({
   default: ({ action, onClose }: { action?: { statusName: string }; onClose: () => void }) =>
     action ? (
@@ -265,7 +285,9 @@ describe('OrderDetailPage', () => {
     expect(screen.getByText('WhatsApp 5555-1234')).toBeInTheDocument();
     expect(screen.getByText('Zona 10')).toBeInTheDocument();
     expect(screen.getByText('Silla plegable')).toBeInTheDocument();
-    expect(screen.getByText(/Q\s*450\.00/)).toBeInTheDocument();
+    // The TOTAL, and — nothing paid yet — the cuadre's single answer under it, the same amount.
+    expect(screen.getAllByText(/Q\s*450\.00/)).toHaveLength(2);
+    expect(screen.getByText(`${KEY}.money.balance.collect`)).toBeInTheDocument();
     expect(screen.getByText(`${KEY}.history.created`)).toBeInTheDocument();
     // The status line tells you what's next, without you having to read the chip.
     expect(screen.getByText(`${KEY}.state.next`)).toBeInTheDocument();
@@ -496,7 +518,7 @@ describe('OrderDetailPage', () => {
   });
 
   it('the Depósito card: "Devolver depósito" confirms, "Reportar daños" opens the PAGE', async () => {
-    setOrder({ data: order({ securityDeposit: { total: 500, canSettle: true } }) });
+    setOrder({ data: order({ securityDeposit: { total: 500, held: 500, canSettle: true } }) });
     renderPage();
     expect(screen.getByRole('heading', { name: `${KEY}.deposit.title` })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.deposit.refundAction` }));
@@ -512,7 +534,7 @@ describe('OrderDetailPage', () => {
     setOrder({
       data: order({
         depositSettlementPending: true,
-        securityDeposit: { total: 500, canSettle: true },
+        securityDeposit: { total: 500, held: 500, canSettle: true },
       }),
     });
     renderPage();
@@ -527,7 +549,7 @@ describe('OrderDetailPage', () => {
     setOrder({
       data: order({
         depositSettlementPending: true,
-        securityDeposit: { total: 500, canSettle: true },
+        securityDeposit: { total: 500, held: 500, canSettle: true },
       }),
     });
     renderPage();
@@ -617,6 +639,62 @@ describe('OrderDetailPage', () => {
     ).toHaveLength(1);
   });
 
+  it('the deposit COLLECTION joins the trail: received (with its amount), waived (with its note), cleared', () => {
+    const at = (iso: string) => new Date(iso).toISOString();
+    setOrder({
+      data: order({
+        depositHistory: [
+          { id: 9, kind: 'RECEIVED', depositTotal: 500, byUserName: 'Ana', at: at('2026-08-01T14:00:00') },
+          { id: 10, kind: 'COLLECTION_CLEARED', byUserName: 'Romeo', at: at('2026-08-01T15:00:00') },
+          { id: 11, kind: 'WAIVED', note: 'Familiar', byUserName: 'Romeo', at: at('2026-08-01T16:00:00') },
+          { id: 12, kind: 'COLLECTION_CLEARED', byUserName: 'Romeo', at: at('2026-08-01T17:00:00') },
+          // Older rows may carry neither figure nor note — the label alone still reads.
+          { id: 13, kind: 'RECEIVED', byUserName: 'Ana', at: at('2026-08-01T18:00:00') },
+          { id: 14, kind: 'WAIVED', byUserName: 'Romeo', at: at('2026-08-01T19:00:00') },
+        ],
+      }),
+    });
+    renderPage();
+    const labels = screen
+      .getAllByRole('listitem')
+      .map((item) => item.querySelector('p')?.textContent)
+      .filter((text) => text?.startsWith(`${KEY}.history.`));
+    expect(labels).toEqual([
+      `${KEY}.history.created`,
+      `${KEY}.history.depositReceived`,
+      `${KEY}.history.collectionCleared`,
+      `${KEY}.history.depositWaived`,
+      `${KEY}.history.collectionCleared`,
+      `${KEY}.history.depositReceived`,
+      `${KEY}.history.depositWaived`,
+    ]);
+    // The amount only where the row carries one; the internal note only where one was written.
+    expect(screen.getAllByText(`${KEY}.history.internalNote`)).toHaveLength(1);
+  });
+
+  it('the "Cobro del depósito" row opens its dialog in the right mode, and closing it clears it', async () => {
+    setOrder({
+      data: order({
+        securityDeposit: {
+          total: 500,
+          held: 500,
+          canSettle: false,
+          collection: { status: 'PENDING', canRecord: true },
+        },
+      }),
+    });
+    renderPage();
+    await userEvent.click(
+      screen.getByRole('button', { name: `${KEY}.deposit.collection.markReceived` }),
+    );
+    expect(screen.getByTestId('deposit-collection-modal')).toHaveTextContent('12:receive');
+    await userEvent.click(screen.getByRole('button', { name: 'cerrar-cobro-deposito' }));
+    expect(screen.queryByTestId('deposit-collection-modal')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.deposit.collection.waive` }));
+    expect(screen.getByTestId('deposit-collection-modal')).toHaveTextContent('12:waive');
+  });
+
   it('a recorded damage report: the count on the LINE, and undo through a confirm', async () => {
     setOrder({
       data: order({
@@ -636,6 +714,7 @@ describe('OrderDetailPage', () => {
         ],
         securityDeposit: {
           total: 500,
+          held: 500,
           canSettle: true,
           settlement: {
             settledAt: new Date('2026-08-03T10:00:00').toISOString(),

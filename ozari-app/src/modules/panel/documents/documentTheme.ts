@@ -295,27 +295,24 @@ export const TOTALS_PADDING = 12;
  *  because it is an SVG, and an SVG cannot be told to fill its parent. */
 export const TOTALS_INNER_WIDTH = TOTALS_WIDTH - TOTALS_PADDING * 2;
 
-/**
- * The security deposit (2026-10-27). `GUARANTEE_GAP` is the air above the still-a-deposit line under
- * the saldo chip AND between the totals panel and a settlement panel; `GUARANTEE_PADDING` is the
- * settlement panel's own vertical padding — tighter than the totals', it is a second statement
- * under the first, not a rival to it.
- */
-export const GUARANTEE_GAP = 8;
-export const GUARANTEE_PADDING = 9;
+/** The height of the RESULT chip under the totals — "Monto a pagar" on the brand gradient, or
+ *  "Monto a devolver al cliente" inverted (charcoal, white type). One shape, two tones. */
+export const RESULT_CHIP_HEIGHT = 30;
 
-// ── The "DEPÓSITO Y DAÑOS" section (comprobante, 2026-10-27) ──────────────────────────────────
+// ── The damages section (comprobante, 2026-10-27) ─────────────────────────────────────────────
 
 /**
- * The settlement section is its OWN block after the summary — a heading, then a full-width tinted
- * panel with two columns: the charges on the left, the arithmetic on the right.
+ * The damages section is its OWN block after the summary — a heading, then a full-width tinted
+ * panel: the itemised charges, then their total. It carries no arithmetic of its own (owner,
+ * 2026-10-27): what the damages DO to the money — credited against the deposit, added to what is
+ * owed — is the squared result in the totals panel, the one outcome on the page.
  *
- * Both columns are exactly the totals panel's INNER width, which puts the arithmetic's figures on
- * the same vertical line as the TOTAL and the saldo above them, and leaves a gutter equal to the
- * summary's own (24pt) between the columns. Derived, not chosen, so it cannot drift.
+ * `SETTLEMENT_PADDING` is the panel's vertical padding — tighter than the totals', it is a detail
+ * under the summary, not a rival to it. The total's row is the totals panel's INNER width at the
+ * right edge, which puts its figure on the same vertical line as the TOTAL above it.
  */
+export const SETTLEMENT_PADDING = 9;
 export const SETTLEMENT_COLUMN_WIDTH = TOTALS_INNER_WIDTH;
-export const SETTLEMENT_COLUMN_GAP = CONTENT_WIDTH - TOTALS_PADDING * 2 - SETTLEMENT_COLUMN_WIDTH * 2;
 /** The air between the summary and the section's heading. */
 export const SETTLEMENT_GAP = 18;
 
@@ -335,8 +332,8 @@ export const SETTLEMENT_GAP = 18;
 // sane degradation. Under-estimating would silently lose charges off the bottom of a page, which is
 // why every constant below errs the same way.
 
-/** The letterhead at its tallest: title, reference, issue date, a validity/settlement date and a
- *  PAGADO/BORRADOR pill. Measured ~61pt in a render; 64 is the ceiling the estimate assumes. */
+/** The letterhead at its tallest: title, reference, issue date, a validity date and the PAGADO
+ *  pill. Measured ~61pt in a render; 64 is the ceiling the estimate assumes. */
 const LETTERHEAD_MAX_HEIGHT = 64;
 /** Average glyph width as a fraction of the font size. Helvetica's lowercase averages ~0.5em; 0.6
  *  also covers digits, capitals and the waste of breaking at word boundaries. */
@@ -358,14 +355,15 @@ export interface SettlementRowText {
   notes: readonly string[];
 }
 
-/** The label's share of a charge row: the column, minus the gap before the figure and the figure. */
-const SETTLEMENT_LABEL_WIDTH = SETTLEMENT_COLUMN_WIDTH - 12 - 64;
-/** The section heading (8pt × 1.3 + 6 below), the panel's padding, and the arithmetic column at its
- *  tallest (total, covered, the bold balance under its rule, the refund with its caption). */
+/** The label's share of a charge row: the panel's inner width, minus the gap before the figure and
+ *  the figure. */
+const SETTLEMENT_LABEL_WIDTH = CONTENT_WIDTH - TOTALS_PADDING * 2 - 12 - 64;
+/** The section heading (8pt × 1.3 + 6 below), and the total's row under its hairline (rule, padding
+ *  and a 9.5pt line). */
 const SETTLEMENT_HEADING_HEIGHT = 8 * 1.3 + 6;
-const SETTLEMENT_MATH_HEIGHT = 120;
+const SETTLEMENT_TOTAL_HEIGHT = 24;
 
-/** The estimated height of the whole section — heading, panel and the taller of its two columns. */
+/** The estimated height of the whole section — heading, padding, the charges and their total. */
 export const estimateSettlementHeight = (rows: readonly SettlementRowText[]): number => {
   const charges = rows.reduce(
     (sum, row) =>
@@ -378,14 +376,14 @@ export const estimateSettlementHeight = (rows: readonly SettlementRowText[]): nu
       ),
     0,
   );
-  return SETTLEMENT_HEADING_HEIGHT + GUARANTEE_PADDING * 2 + Math.max(charges, SETTLEMENT_MATH_HEIGHT);
+  return SETTLEMENT_HEADING_HEIGHT + SETTLEMENT_PADDING * 2 + charges + SETTLEMENT_TOTAL_HEIGHT;
 };
 
 /**
- * Can the settlement section travel WHOLE (`wrap={false}`)? Only when it fits on a page by the
- * pessimistic estimate. Otherwise it is the oversized case: the template stacks the charges above
- * the arithmetic and lets the panel continue onto the next page — between two charges, never
- * through one, and never leaving the heading behind (EPIC-2-DOCUMENTS §8a rule 5).
+ * Can the damages section travel WHOLE (`wrap={false}`)? Only when it fits on a page by the
+ * pessimistic estimate. Otherwise it is the oversized case: the template lets the panel continue
+ * onto the next page — between two charges, never through one, and never leaving the heading
+ * behind (EPIC-2-DOCUMENTS §8a rule 5).
  */
 export const settlementFitsOnePage = (
   rows: readonly SettlementRowText[],
@@ -394,7 +392,7 @@ export const settlementFitsOnePage = (
 
 /** What the heading of an OVERSIZED panel reserves after itself — the panel's padding plus a
  *  two-line charge — so it can never end a page alone. */
-export const SETTLEMENT_HEAD_AHEAD = GUARANTEE_PADDING + 6 + 9 * 1.35 * 2 + 7 * 1.4;
+export const SETTLEMENT_HEAD_AHEAD = SETTLEMENT_PADDING + 6 + 9 * 1.35 * 2 + 7 * 1.4;
 
 // ── Bank details ──────────────────────────────────────────────────────────────────────────────
 

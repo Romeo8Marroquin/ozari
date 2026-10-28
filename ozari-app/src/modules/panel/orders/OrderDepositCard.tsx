@@ -1,7 +1,9 @@
 import { useTranslation } from 'react-i18next';
 import {
   HiOutlineArrowUturnLeft,
+  HiOutlineBanknotes,
   HiOutlineCheckCircle,
+  HiOutlineNoSymbol,
   HiOutlineExclamationTriangle,
   HiOutlinePencilSquare,
 } from 'react-icons/hi2';
@@ -12,6 +14,7 @@ import DamageReportButton from '../documents/DamageReportButton';
 import useMorphOnChange from '../useMorphOnChange';
 import { formatMoment } from './orderDayGroups';
 import { formatMoney } from './orderEstimate';
+import type { DepositCollectionMode } from './OrderDepositCollectionModal';
 import type { OrderDetail, OrderSecurityDeposit } from './order.types';
 
 const KEY = 'modules.panel.orders.detail.deposit';
@@ -49,8 +52,15 @@ const MoneyLine: React.FC<{
  *   damage report download when something was claimed, "Reportar daños"/"Editar reporte de daños"
  *   (while recordable) and "Deshacer".
  *
- * **Every figure is the API's.** The refund and the balance are rendered, never re-derived here —
- * the "Reportar daños" page may preview them, but this card is the record.
+ * **"Cobro del depósito"** (when the API sent `collection` — a deposit > 0): was the deposit actually
+ * handed over? PENDING offers "Marcar como recibido" / "Entregar sin depósito"; RECEIVED shows when;
+ * WAIVED shows the reason as an INTERNAL note; "Corregir" clears it while `canRecord`, and a recorded
+ * damage report locks it (said in a hint). A WAIVED deposit makes `held` 0, and `held` — never a
+ * recomputation — is what turns the quick action into "Sin daños".
+ *
+ * **Every figure is the API's** (`held`, the settlement's numbers). The refund and the balance are
+ * rendered, never re-derived here — the "Reportar daños" page may preview them, but this card is
+ * the record.
  *
  * The body is a morph region keyed on the settlement's identity, so an undo or a quick refund eases
  * the card between states instead of swapping it in one frame; the buttons are an `ActionRow` for
@@ -67,15 +77,18 @@ const OrderDepositCard: React.FC<{
   onReport: () => void;
   /** Opens the undo confirmation. */
   onUndo: () => void;
+  /** Opens a "Cobro del depósito" dialog: received, without deposit, or "Corregir". */
+  onCollection: (mode: DepositCollectionMode) => void;
   ref?: React.Ref<HTMLElement>;
-}> = ({ order, deposit, isAdmin, onRefund, onReport, onUndo, ref }) => {
+}> = ({ order, deposit, isAdmin, onRefund, onReport, onUndo, onCollection, ref }) => {
   const { t } = useTranslation();
   const money = (value: number): string => formatMoney(order.currency.symbol, value);
-  const { settlement, canSettle } = deposit;
-  const hasDeposit = deposit.total > 0;
+  const { settlement, canSettle, collection } = deposit;
+  // The deposit the report counts — 0 when there is none, or when it was WAIVED (the API's figure).
+  const hasDeposit = deposit.held > 0;
   const claimed = settlement !== undefined && settlement.claimsTotal > 0;
   const body = useMorphOnChange<HTMLDivElement>(
-    `${settlement?.settledAt ?? ''}|${settlement?.claimsTotal ?? ''}|${canSettle}`,
+    `${settlement?.settledAt ?? ''}|${settlement?.claimsTotal ?? ''}|${canSettle}|${collection?.status ?? ''}`,
   );
 
   const chip = settlement
@@ -194,9 +207,74 @@ const OrderDepositCard: React.FC<{
             <p className="text-xs text-charcoal/50">{t(`${KEY}.totalNote`)}</p>
           </div>
           <span className="shrink-0 font-semibold tabular-nums text-charcoal">
-            {money(deposit.total)}
+            {money(deposit.held)}
           </span>
         </div>
+
+        {/* Was it actually handed over? The label/control row rule: the description carries the
+            `basis-56` floor and the row wraps, so the actions fold under it on a narrow card. */}
+        {collection && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-black/[0.06] pt-3">
+            <div className="min-w-0 grow basis-56">
+              <p className="font-medium text-charcoal">{t(`${KEY}.collection.title`)}</p>
+              <p
+                className={`break-words text-xs ${
+                  collection.status === 'PENDING' ? 'text-amber-700' : 'text-charcoal/60'
+                }`}
+              >
+                {collection.status === 'PENDING'
+                  ? t(`${KEY}.collection.pending`)
+                  : collection.status === 'RECEIVED'
+                    ? collection.at
+                      ? t(`${KEY}.collection.received`, { date: formatMoment(collection.at) })
+                      : t(`${KEY}.collection.receivedNoDate`)
+                    : t(`${KEY}.collection.waived`, { reason: collection.reason ?? '—' })}
+              </p>
+              {collection.status === 'WAIVED' && (
+                <p className="text-xs text-charcoal/45">{t(`${KEY}.collection.internalNote`)}</p>
+              )}
+              {!collection.canRecord && settlement && (
+                <p className="text-xs text-charcoal/45">{t(`${KEY}.collection.lockedByReport`)}</p>
+              )}
+            </div>
+            {isAdmin && collection.canRecord && (
+              <div className="flex flex-wrap items-center gap-2">
+                {collection.status === 'PENDING' ? (
+                  <>
+                    <Button
+                      variant="soft"
+                      size="sm"
+                      color={SECONDARY_COLOR}
+                      startIcon={<HiOutlineBanknotes className="size-4" />}
+                      onClick={() => onCollection('receive')}
+                    >
+                      {t(`${KEY}.collection.markReceived`)}
+                    </Button>
+                    <Button
+                      variant="soft"
+                      size="sm"
+                      color={SECONDARY_COLOR}
+                      startIcon={<HiOutlineNoSymbol className="size-4" />}
+                      onClick={() => onCollection('waive')}
+                    >
+                      {t(`${KEY}.collection.waive`)}
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    variant="soft"
+                    size="sm"
+                    color={SECONDARY_COLOR}
+                    startIcon={<HiOutlineArrowUturnLeft className="size-4" />}
+                    onClick={() => onCollection('clear')}
+                  >
+                    {t(`${KEY}.collection.correct`)}
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {settlement ? (
           <div className="flex flex-col gap-2 border-t border-black/[0.06] pt-3">

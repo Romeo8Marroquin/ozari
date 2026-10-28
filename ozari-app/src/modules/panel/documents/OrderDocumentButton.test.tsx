@@ -115,11 +115,11 @@ describe('OrderDocumentButton', () => {
   });
 
   it('carries the PAID state through, so the same page becomes proof of payment', async () => {
-    render(<OrderDocumentButton order={order({ isPaid: true })} />);
+    render(<OrderDocumentButton order={order({ isPaid: true, paidAt: '2026-08-01T00:00:00Z' })} />);
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.download` }));
     await waitFor(() => expect(downloadDocument).toHaveBeenCalled());
     expect(lastInput().model.isPaid).toBe(true);
-    expect(lastInput().model.totals.balance).toBe(0);
+    expect(lastInput().model.totals.balance).toMatchObject({ amount: 0, direction: 'none' });
   });
 
   it('prints only the PUBLISHED bank accounts', async () => {
@@ -162,27 +162,43 @@ describe('OrderDocumentButton', () => {
     expect(input.copy.billedDaysValue(1)).toBe(`${KEY}.fields.billedDaysValue`);
     expect(input.copy.billedDaysValue(3)).toBe(`${KEY}.fields.billedDaysValue`);
     // The settlement lines that carry a value are interpolated by i18next too — the contract mock
-    // throws if a placeholder (`{{product}}`, `{{quantity}}`, `{{unitAmount}}`, `{{amount}}`) is
-    // left unfilled, which would otherwise reach a client as literal braces.
+    // throws if a placeholder (`{{product}}`, `{{quantity}}`, `{{unitAmount}}`) is left unfilled,
+    // which would otherwise reach a client as literal braces.
     expect(input.copy.settlementReplacement('Silla')).toBe(`${KEY}.securityDeposit.replacement`);
     expect(input.copy.settlementReplacementDetail(2, '$ 45.00')).toBe(
       `${KEY}.securityDeposit.replacementDetail`,
     );
-    expect(input.copy.settlementRefundNote('$ 500.00')).toBe(`${KEY}.securityDeposit.refundNote`);
     // The owner's word is "Depósito" — the copy leaves are the deposit ones, never a "garantía".
-    expect(input.copy.depositHeld).toBe(`${KEY}.securityDeposit.held`);
+    expect(input.copy.balance.depositDue).toBe(`${KEY}.balance.depositDue`);
     expect(input.copy.settlementTitle).toBe(`${KEY}.securityDeposit.settlementTitle`);
+    expect(input.copy.advance).toBe(`${KEY}.totals.advance`);
+    // An anticipo above the TOTAL: the caption interpolates the amount actually received (the
+    // contract mock throws on an unfilled `{{amount}}`), and its excess has its own squared row.
+    expect(input.copy.advanceReceived('$ 5,000.00')).toBe(`${KEY}.totals.advanceReceived`);
+    expect(input.copy.balance.advanceCredit).toBe(`${KEY}.balance.advanceCredit`);
   });
 
-  it('carries the security deposit through to the document', async () => {
+  it('carries the security deposit through to the document, squared', async () => {
     render(
       <OrderDocumentButton
-        order={order({ securityDeposit: { total: 500, canSettle: false } })}
+        order={order({
+          securityDeposit: {
+            total: 500,
+            held: 500,
+            collection: { status: 'PENDING', canRecord: true },
+            canSettle: false,
+          },
+        })}
       />,
     );
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.download` }));
     await waitFor(() => expect(downloadDocument).toHaveBeenCalled());
-    expect(lastInput().model.securityDeposit).toEqual({ status: 'held', amount: 500 });
+    // The service (150) plus a deposit still to be handed over (500): the client pays 650.
+    expect(lastInput().model.totals.balance).toMatchObject({
+      depositDue: 500,
+      amount: 650,
+      direction: 'collect',
+    });
   });
 
   it('still produces a document when the preferences have not loaded', async () => {
