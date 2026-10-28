@@ -59,6 +59,9 @@ const rawOrder = (overrides: Record<string, unknown> = {}) => ({
   paidAt: null,
   cancelledAt: null,
   depositSettledAt: null,
+  depositReceivedAt: null,
+  depositWaivedAt: null,
+  depositWaivedReason: null,
   currencyId: 1,
   serviceStatusId: 1,
   paymentStatusId: 1,
@@ -187,11 +190,25 @@ describe("getDashboard", () => {
         ],
       }),
     );
+    // An eighth, WAIVED at the door: still awaiting its damage report (it has replacement values),
+    // but it holds no money — it counts as an order and adds nothing to the amount in hand.
+    pendingDeposits.push(
+      rawOrder({
+        id: 200,
+        deliveredAt: delivered,
+        depositWaivedAt: delivered,
+        depositWaivedReason: "Un familiar",
+        serviceDetails: [
+          { quantity: 3, isRental: true, securityDeposit: dec("10.45"), replacementPrice: dec("80") },
+        ],
+      }),
+    );
     const client = mockPrisma({
       pendingDeposits,
       settledDeposits: [
         {
           depositRetainedAmount: dec("50"),
+          depositWaivedAt: null,
           serviceDetails: [
             {
               isRental: true,
@@ -207,8 +224,9 @@ describe("getDashboard", () => {
     await getDashboard(req, res);
 
     const { deposits } = sentDashboard();
-    expect(deposits.pending.orders).toBe(7);
-    // 7 × 31.35, rounded to cents (float addition would otherwise leak `219.45000000000002`).
+    expect(deposits.pending.orders).toBe(8);
+    // 7 × 31.35 HELD (the waived one counts 0), rounded to cents (float addition would otherwise
+    // leak `219.45000000000002`).
     expect(deposits.pending.amount).toBe(219.45);
     expect(deposits.pending.items.map((item) => item.id)).toEqual([100, 101, 102, 103, 104]);
     // Real list items — the same projection as the agenda, flag included.

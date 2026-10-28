@@ -41,7 +41,12 @@ import {
   type CreateOrderEvidenceUploadsRequestModel,
   type OrderEvidenceUploadsResponseModel,
 } from "./advance.models.js";
-import { AdvanceOrderError, planStatusPath } from "./advance.service.js";
+import {
+  AdvanceOrderError,
+  confirmsDelivery,
+  planStatusPath,
+} from "./advance.service.js";
+import { applyDeliveryDepositCollection } from "../deposit-collection/depositCollection.service.js";
 
 /** The HTTP answer per failure kind — see {@link AdvanceOrderError}. */
 const FAILURE_STATUS: Record<string, HttpEnum> = {
@@ -271,6 +276,16 @@ export const advanceOrder = async (
         });
         fromStatusId = step.to.id;
       }
+
+      // The deposit asked at the door — applied only on a delivery of a still-pending deposit,
+      // silently ignored otherwise (never blocks, never overwrites).
+      await applyDeliveryDepositCollection(tx, {
+        order,
+        input: body.depositCollection,
+        confirmsDelivery: confirmsDelivery(steps),
+        byUserId: actor.userId,
+        now,
+      });
 
       return tx.service.findUniqueOrThrow({
         where: { id },

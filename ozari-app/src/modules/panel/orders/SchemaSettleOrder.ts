@@ -200,21 +200,22 @@ export function previewSettlement(
 
 /**
  * The CURRENT form values as an unsaved {@link OrderDepositSettlement} — what the "Reportar daños"
- * page hands the damage-report document so the admin can give the client a quote BEFORE saving.
+ * page hands the damage-report document so the admin can give it to the client BEFORE saving.
  *
  * Same formula as {@link previewSettlement} (it is built on it), shaped like the API's record: each
  * lost/broken line priced at its replacement snapshot (`unitAmount`), `amount` rounded to cents, the
  * note trimmed (blank ⇒ absent), the reason only alongside something retained, and `settledAt` = the
- * moment the draft was drawn. A value that is not valid counts as 0 here, exactly like the preview —
- * the page additionally offers the draft only while the whole form validates, so a typo never prints.
+ * moment the page was opened. A value that is not valid counts as 0 here, exactly like the preview —
+ * the page additionally offers the report only while the whole form validates, so a typo never prints.
+ * The deposit is `held` (0 when it was handed over WITHOUT collecting it), never the nominal total.
  * Once saved, the document is built from the API's own numbers instead.
  */
-export function buildDraftSettlement(
+export function buildUnsavedSettlement(
   order: OrderDetail,
   values: SettlementFormValues,
   now: Date,
 ): OrderDepositSettlement {
-  const depositTotal = order.securityDeposit?.total ?? 0;
+  const depositTotal = order.securityDeposit?.held ?? 0;
   const lines = damageableLines(order.lines);
   const byId = new Map(lines.map((line) => [line.id, line]));
   const damages = values.damages.flatMap((row): OrderDamage[] => {

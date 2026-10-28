@@ -86,7 +86,8 @@ export interface DashboardDepositsModel {
    *  capped at `PENDING_DEPOSITS_LIMIT`; `orders`/`amount` count them all. */
   pending: {
     orders: number;
-    /** Σ of their deposits — money in hand that is not the business's yet. */
+    /** Σ of their HELD deposits (`heldDeposit` — a waived one counts 0) — money in hand that is not
+     *  the business's yet. */
     amount: number;
     items: OrderListItemResponseModel[];
   };

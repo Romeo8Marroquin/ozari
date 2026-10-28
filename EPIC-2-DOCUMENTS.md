@@ -33,8 +33,8 @@ been received. Once paid it carries the PAGADO mark and reads as a receipt. If t
 
 **A third document, the `REPORTE DE DAÑOS`** (2026-10-27), answers one question the comprobante only
 summarises: *what happened to the client's deposit, line by line.* It comes from the deposit
-settlement — saved (`OrderDepositCard`) or, as a draft, from the settlement form's unsaved values —
-and shares the template, theme and letterhead. Its full definition is §2c.
+settlement the admin entered — always THE report, never a draft — and ends on the same squared
+result as the comprobante. It shares the template, theme and letterhead. Its full definition is §2c.
 
 ---
 
@@ -79,26 +79,27 @@ is settled; the reasoning matters more than the individual strings, because it g
 rule.
 
 A rental product may carry a refundable deposit per unit; an order snapshots it per rental line and
-`OrderDetail.securityDeposit` carries the total plus, after the pickup, the admin's **settlement**
-(a retention for partial damage and/or lost/broken units billed at the line's replacement value).
-Owner's words: *"once not refunded, we have to take it as cost in the document perfectly. But if it
-follows the normal happy path it should still be considered as deposit."*
+`OrderDetail.securityDeposit` carries the total, its **collection** (`PENDING` / `RECEIVED` /
+`WAIVED`) and, after the pickup, the admin's **settlement** (a retention for partial damage and/or
+lost/broken units billed at the line's replacement value). Owner's words: *"once not refunded, we
+have to take it as cost in the document perfectly. But if it follows the normal happy path it should
+still be considered as deposit."*
 
 | # | Decision |
 |---|---|
-| 21 | **The deposit is NEVER a cost unless the settlement retained money or billed a replacement.** It is collected on top of the order and refunded at pickup, so it never enters `totals` (TOTAL, saldo) on either document. `documentModel` decides which of three states applies (`DocumentSecurityDeposit.status`) and the template only lays it out — the rule is tested, not drawn. |
-| 22 | **`held`** (cotización, or a comprobante not settled yet) and **`refunded`** (settled, nothing claimed) print ONE line under the saldo chip, inside the totals panel: `Depósito (reembolsable)` + amount + *"Aparte del total; se devuelve al recoger, previa revisión."* — or `(devuelto)` + the refund + *"Revisión sin cargos: se devolvió completo."* Nothing at all when the deposit is 0 and nothing was claimed. |
-| 23 | **`settled`** (anything claimed) is its own panel AFTER the totals, titled **`DEPÓSITO Y DAÑOS`**: the charges as COSTS (`Retención del depósito` with the damage description as its sub-line; `Reposición: <producto>` with `<cant.> × <valor> c/u` plus the line's note), then `Total por daños`, `Cubierto con el depósito (-)`, **`Saldo pendiente por daños`** (bold, only when > 0) and `Depósito devuelto` with *"De un depósito de Q…"* — printed even at Q0.00 once something was claimed, because the client handed money over and "nothing came back" is an answer owed in writing. With no deposit at all (replacement values only) the two deposit lines are omitted, and so is `Total por daños` when it equals the saldo. |
-| 24 | **Every figure is the API's** (`claimsTotal`, `appliedFromDeposit`, `refundAmount`, `balanceDue` …), copied verbatim — the document selects and formats, it never adds or subtracts. The one estimate is the cotización's deposit, Σ rental line `product.securityDeposit × quantity`, which mirrors the server's own rule exactly like the prices beside it. |
-| 25 | **No "total a pagar (pedido + depósito)" line.** It would be a sum the document invents, and it assumes WHEN the deposit is collected; the caption says it is apart from the total, which is the fact the client needs. **The damages balance never joins the gradient SALDO chip** (#17): a paid order with damages shows `PAGADO`, a saldo of Q0.00 and a bold `Saldo pendiente por daños` — two different debts, two different lines. Damaged units are not marked in the lines table; the `DEPÓSITO Y DAÑOS` panel names them, and the REPORTE DE DAÑOS (§2c) itemises them. |
+| 21 | **The deposit is NEVER a cost.** It never enters the TOTAL on any document. It is money the client HANDS OVER (before the review), money we HOLD (received, before the review) or a CREDIT (after it); only what a recorded report charged — a retention, a replacement — is a cost, and those are itemised as damages. |
+| 22 | **The money box is SQUARED, and ends on ONE result** (owner, 2026-10-27, superseding the first build's "saldo pendiente" chip + a separate damages balance — "two competing balances, and neither is what to actually do with the money"). Under the unchanged cost rows and TOTAL, signed rows appear only when not zero: `Anticipo -`, `Pagado -` (a paid order: what the payment covered after the anticipo, so the column adds up instead of a saldo silently dropping to 0), `Depósito (reembolsable) +` with *"Se devuelve al recoger, previa revisión."* (before the review, a deposit still to be handed over — the client must PAY it to get the service), `Daños +` with *"Detalle a continuación."* (after the review), `Depósito recibido -` (after the review, the deposit credited back). Then the result: **`Monto a pagar`** (the client pays us) in the gradient chip; **`Monto a devolver al cliente`** (we pay back) in the SAME chip INVERTED — charcoal, white type — unmistakably not the band a client looks for to pay; or, at zero, NO highlight: a plain bold row `Sin saldo pendiente  Q 0.00`. A deposit already RECEIVED before the review is information under the result, outside the sum (`Depósito recibido Q… — se devuelve al recoger, previa revisión.`). The PAGADO mark is unchanged. |
+| 23 | **The arithmetic is `squareOrderBalance`** (`orders/orderBalance.ts`), the ONE balancing rule the order page also uses, so a document and the screen can never show two outcomes. `orderBalanceInput(order, claimsTotal)` (documentModel) builds its input — `advance` is `depositAmount` (the ANTICIPO, despite the name), `paid` is `paidAt` set, `deposit` is `{ total, collection.status }` when there is a collection, `claimsTotal` the report's. The cotización feeds it its estimate with the deposit `PENDING` and no claims. An anticipo above the service cost is credited, not clamped, paid or not (`advanceCredit`, coordinator 2026-10-27 — usually the deposit sent along with it, so once that deposit counts as IN HAND — received, or credited back by the report — the excess is read as it and only what is left over is credited; crediting both would hand the deposit back twice): the box prints `Saldo a favor del cliente -` right under the `Anticipo` row, and the `Anticipo` row then stops at the TOTAL with the amount actually received as its caption (*"Aplicado de un anticipo de Q…"*, `advanceRows`) — printing the whole anticipo AND the credit would subtract the excess twice. The damage report prints the same credit row in place of `Saldo del servicio`. |
+| 24 | **Every figure is the API's** (`totalAmount`, `depositAmount`, `securityDeposit.total`, `claimsTotal` …) — the document never prices; the squared rows are the rule's output over those figures. The one estimate is the cotización's deposit, Σ rental line `product.securityDeposit × quantity`, which mirrors the server's own rule exactly like the prices beside it. |
+| 25 | **A recorded report's charges are an itemised section AFTER the summary** — `DEPÓSITO Y DAÑOS` (or `DAÑOS` when there was no deposit): `Retención del depósito` with the damage description as its sub-line; `Reposición: <producto>` with `<cant.> × <valor> c/u` plus the line's note; then `Total por daños`. NOTHING else — the old `Cubierto con el depósito`, `Saldo pendiente por daños` and `Depósito devuelto` lines are gone, because the squared box carries the outcome. Damaged units are not marked in the lines table. |
+| 26 | **WAIVED = the order never had a deposit** (delivered without one on purpose): no deposit row anywhere, no deposit table on the report, and damages billed whole. The waive reason is an INTERNAL note and never reaches a document — the model has no field that could carry it. |
 
-**Why the deposit line sits INSIDE the totals panel (measured, not preferred).** The first build gave
-it its own panel; that made the summary ~47pt taller, and the ordinary two-bank order
+**Why the deposit sits INSIDE the totals panel (measured, not preferred).** The first build gave it
+its own panel; that made the summary ~47pt taller, and the ordinary two-bank order
 (`doc:preview:free`) has ~19pt to spare, so every order with a deposit went to two pages (#15). As a
-line under the chip the free fixture with a deposit still ends on page one — with about 7pt left. ⚠️
-**That budget is now nearly spent**: re-run `pnpm doc:preview:free -- --deposit=held` after any change
-to the summary (measured 2026-10-27 after the vocabulary pass: page one ends at the same 722pt as
-before it).
+row of the squared box the free fixture with a deposit still ends on page one — at 722pt, the same as
+without one, because the bank column beside it is the taller side. ⚠️ Re-run
+`pnpm doc:preview:free -- --deposit=held` after any change to the summary.
 
 **The `DEPÓSITO Y DAÑOS` panel is its OWN block after the summary, and moves WHOLE** (owner,
 2026-10-27; supersedes the first build, which nested it inside the summary's `wrap={false}`). Nested,
@@ -127,24 +128,24 @@ oversized case (a panel taller than a page) and the margin rule are §8a rule 5.
 
 ### 2c. The REPORTE DE DAÑOS (owner, 2026-10-27)
 
-The client-facing account of a deposit settlement: what was received, what was kept and why, what
-was lost or broken, and what they still owe. `DamageReportButton` (`{ order, settlement, draft? }`,
-a soft `sm` button) builds `DamageReportModel` with `fromDamageReport` and renders
+The client-facing account of the pickup review: what was received, what was kept and why, what was
+lost or broken, and how the order squares with it. `DamageReportButton` (`{ order, settlement }`, a
+soft `sm` button) builds `DamageReportModel` with `fromDamageReport` and renders
 `DamageReportDocument` through the same lazy renderer; failure is the same toast as the comprobante.
 
 | # | Decision |
 |---|---|
-| 26 | **Two sources, one document.** From the saved settlement it prints the review date (`Revisado …`) under the issue date. With `draft` (the settlement form's unsaved values) it prints **`BORRADOR — SUJETO A REVISIÓN`** in the mark slot where PAGADO rides on the comprobante, states NO review date (nothing has been recorded), and its file name gains `-borrador`. File: `reporte-danos-ped-00042.pdf`. |
-| 27 | **Content, in reading order:** the client and event cards; **`Depósito recibido`** — per rental line with a deposit: product · quantity · deposit c/u · subtotal; **`Retención del depósito`** — only when `retainedAmount > 0`, its FULL description wrapped (never truncated: a PDF has no hover) and its amount; **`Piezas perdidas o rotas`** — product · units · replacement c/u · subtotal, the line's note as a caption; then the summary. No claims at all prints one sentence saying the deposit comes back whole. |
-| 28 | **The totals** are the API's figures verbatim (#24): `Total por daños` (with a `Retención Q… + piezas Q…` caption when both kinds exist), `Cubierto con el depósito (-)`, `Se devuelve al cliente` (caption: `De un depósito de Q…`; bold when nothing is owed), and **`Saldo por cobrar al cliente`** only when `balanceDue > 0`. |
-| 29 | **The balance wears the gradient chip here.** #17 allows the gradient on "the one number the client must act on"; on this document that number is the damages balance (on the comprobante it is the order saldo, which is why the comprobante's damages line stays bold text — #25). One chip per document either way. |
-| 30 | **The banks print only when there is a balance** (`balanceDue > 0`), titled `Cómo pagar el saldo` with a one-line lead. A report that refunds money owes the client nothing to pay with. |
-| 31 | **One page for the common case** (two banks, a retention, two replacements): ~34pt spare final, ~25pt draft. It was bought with three choices, not by tightening spacing (#20): the retention is a HEADERLESS one-row table (its title already names it; ~24pt), the claims subtotals became the one-line caption on `Total por daños`, and the deposit total rides as the refund's caption instead of its own line. Three banks + draft goes to two pages, with the summary moving whole — accepted, the same trade as #20. |
+| 27 | **It is THE damage report, never a draft** (owner, 2026-10-27: "it is generated from what the admin entered — it is the damage report, not a sketch"). The settlement it is given — the saved one, or the report form's values before saving — prints the same way: no BORRADOR mark, no review date, no `-borrador` file name. Its one date is the issue date, the download moment. File: `reporte-danos-ped-00042.pdf`. |
+| 28 | **Content, in reading order:** the client and event cards; **`Depósito recibido`** — per rental line with a deposit: product · quantity · deposit c/u · subtotal (absent when there was none or it was WAIVED, #26); **`Retención del depósito`** — only when `retainedAmount > 0`, its FULL description wrapped (never truncated: a PDF has no hover) and its amount; **`Piezas perdidas o rotas`** — product · units · replacement c/u · subtotal, the line's note as a caption; then the summary. No claims prints one sentence instead (with a deposit: *"…no hay cargos contra el depósito."*; without: *"La revisión al recoger no encontró daños."*). |
+| 29 | **The totals end on the comprobante's result, by construction**: `Total por daños` (with a `Retención Q… + piezas Q…` caption when both kinds exist), then the squared rows (#22) — `Saldo del servicio +` when the service is still unpaid (so the number reconciles), `Depósito recibido -` — and the same result chip (`Monto a pagar` / inverted `Monto a devolver al cliente` / plain `Sin saldo pendiente`). Same `squareOrderBalance`, same order, same claims: the two documents cannot end on different amounts. |
+| 30 | **One result chip per document, in the #17 sense.** The gradient marks "the one number the client must act on"; on BOTH documents that is now the squared result, and only when the client pays. A refund wears the inverted chip — the outcome, but not a request for money. |
+| 31 | **The banks print only when the client pays** (`direction === 'collect'`), titled `Cómo pagar el saldo` with a one-line lead. A report that ends in a refund or at zero asks for nothing. |
+| 32 | **One page for the common case** (two banks, a retention, two replacements): ~67pt spare. It was bought with choices, not by tightening spacing (#20): the retention is a HEADERLESS one-row table (its title already names it; ~24pt), and the claims subtotals are the one-line caption on `Total por daños`. Three banks still fit (~10pt); the 500-character reason goes to two pages, the summary moving whole. |
 
 It is the same template file and the same furniture (`DocumentFrame`, `LineTable`, `BankList`,
-`BalanceChip`), not a fork: a change to the letterhead, the table or the pagination rules lands on
-all three documents at once. It prints no standing notes (it is not an offer to accept), so its
-foot reserves no note lines.
+`SquaredBalance`, `ResultChip`), not a fork: a change to the letterhead, the table, the result or the
+pagination rules lands on all three documents at once. It prints no standing notes (it is not an
+offer to accept), so its foot reserves no note lines.
 
 ---
 
@@ -268,12 +269,17 @@ details qualify the very figures beside them, so a page break must not come betw
   column exists because the space was already there and because the information belongs there: the
   client reads what they owe and finds where to pay it without moving their eyes.
 - *Right* — `Subtotal Alquiler` · `Subtotal Venta` · `Subtotal Extras` · `Servicio a domicilio`
-  (with `Incluye entrega y recolección`, or "Gratis" when 0) · `Descuento (−)` · **`TOTAL`** ·
-  `Anticipo (−)` · **`SALDO PENDIENTE`**. The **PAGADO** mark rides in the header when `paidAt` is
-  set, and the saldo is then zero. Under the chip, the security deposit line when there is one.
+  (with `Incluye entrega y recolección`, or "Gratis" when 0) · `Descuento (−)` · **`TOTAL`**, then
+  the SQUARED rows, each only when not zero (§2b #22–#23): `Anticipo -` · `Pagado -` ·
+  `Saldo a favor del cliente -` (an anticipo above the TOTAL, net of a deposit in hand) ·
+  `Depósito (reembolsable) +` (before the review) · `Daños +` and `Depósito recibido -` (after it),
+  ending on ONE result — `Monto a pagar` (gradient chip), `Monto a devolver al cliente` (inverted
+  chip) or a plain `Sin saldo pendiente` row. A deposit received before the review is an info line
+  under the result, outside the sum. The **PAGADO** mark rides in the header when `paidAt` is set.
 
-**After the closing block**, as its own atomic block, the `DEPÓSITO Y DAÑOS` panel when a settlement
-claimed anything (§2b, §8a rule 5): charges on the left, the deposit arithmetic on the right.
+**After the closing block**, as its own atomic block, the `DEPÓSITO Y DAÑOS` panel (`DAÑOS` without a
+deposit) when a settlement claimed anything (§2b #25, §8a rule 5): the itemised charges and
+`Total por daños` — nothing else; the outcome is the squared box above.
 
 **Page furniture, `fixed` on every page:** the acceptance line (and, on a quote, the "sujeta a
 cambios" notice) sit in the bottom padding above the **page number**. They are absolutely positioned
@@ -490,19 +496,14 @@ title; the 30-line `--long` reproduces the stranded rule.
    panel PESSIMISTICALLY (0.6em per glyph, 90% of the page's content height, the letterhead at its
    tallest) and, only when it would not fit, renders the SPLITTABLE form instead: the heading
    becomes a page-level sibling with `minPresenceAhead={SETTLEMENT_HEAD_AHEAD}` (rule 2's mechanism,
-   so it keeps its first charge), the charges stack full width as atomic rows, and the arithmetic is
-   one atomic block at the end, right-aligned. It then breaks only BETWEEN charges and never loses a
+   so it keeps its first charge), the charges stack full width as atomic rows, and Total por daños`r
+   is one atomic row at the end, right-aligned (the panel is single-column in both forms since the
+   squared box took the outcome, §2b #25). It then breaks only BETWEEN charges and never loses a
    line. Pessimism errs toward the splittable form, whose only cost is that it does not move whole —
    the safe direction.
    ⚠️ **The gap above it is the SUMMARY's `marginBottom` (`SETTLEMENT_GAP`), never the panel's
    `marginTop`.** A margin travels with its node, so a top margin on a block that moves to a new
-   page re-appears there and pushes it ~18pt below the letterhead gap every other page starts at
-   (seen in a render; the same trap as rule 1).
-
-   Verified 2026-10-27 with `--deposit=damages`: `--rows=1…26` — rows 1–2 keep the summary on page
-   one and move the panel whole to page two; rows 3–21 put summary + panel together on page two
-   (row 21 ends at 724.7pt); row 22 moves the panel whole to page three. Oversized, with
-   `--damages=8|11|12|16|30|50` (+ `--long-reason`): 2/3/3/3/4/8 pages, the heading always beside
+   page re-appears there and pushes it ~18pt below the   Re-verified 2026-10-27 after the squared box (taller summary) with `--deposit=damages`: `--rows=1`,`2`,`10` put summary + panel together on page two; `--rows=18`,`20`,`22`,`24` keep the summary on page two and move the panel whole to page three, heading included. Oversized, `--damages=12|30` and `--damages=50 --long-reason`: 3/4/8 pages, the heading always beside its first charge, breaks only between charges, `Total por daños` intact at the end.ays beside
    its first charge, breaks only between charges, the arithmetic intact at the end.
 
 `overflow: 'hidden'` + the atomic `SolidFill` on `tableHead` stay as a **backstop**, not the fix:
@@ -579,7 +580,9 @@ Two rules this phase settled, both owner decisions on 2026-08-05:
 - **A paid order zeroes the BALANCE, never the TOTAL.** A receipt claiming a total of `Q0.00` would
   be evidence that nothing was ever charged, which is the opposite of what a paid order should prove.
   The balance is also clamped at zero, the same stance the dashboard's outstanding figure takes: a
-  deposit larger than the total is a slip, not the business owing the client money.
+  deposit larger than the total is a slip, not the business owing the client money. *(Superseded
+  2026-10-27: the excess anticipo is now credited — `Saldo a favor del
+  cliente`, §2b #23.)*
 
 **Phase 1b — the legibility + layout pass. ✅ BUILT 2026-08-25**, from the owner reading a generated
 comprobante beside the template it replaces. The copy and structure decisions are §2a; two settings
@@ -637,21 +640,41 @@ test:
 order form's footer: the "sujeta a cambios" notice, a validity date and no order number. Same
 template, same vocabulary, unsaved figures. `pnpm doc:preview:quote` renders it.
 
-**Security deposit (§2b) — ✅ BUILT 2026-10-27.** Previews: `pnpm doc:preview:deposit` (held),
-`:refunded` (happy path), `:damages` (retention + two replacements, more than the deposit covers, on
-a paid order). The flag behind them, `--deposit=held|refunded|damages|uncovered`, composes with
-`--free`, `--quote`, `--long` and `--rows=N`; `uncovered` = replacements on lines with no deposit.
-`--damages=N` adds N filler replacements and `--long-reason` makes the retention reason and every
-note 500 characters — together they reach the oversized panel (§8a rule 5).
+**Security deposit (§2b) — ✅ BUILT 2026-10-27, squared the same day.** Previews: `pnpm doc:preview:deposit`
+(pending, before the review), `:refunded` (clean review), `:damages` (retention + two replacements,
+more than the deposit covers, on a paid order). The flag behind them,
+`--deposit=held|refunded|retention|damages|uncovered`, composes with `--free`, `--quote`, `--long`
+and `--rows=N`; `retention` = a retention alone (`--retention=N`, default 200), `uncovered` =
+replacements on lines with no deposit. `--collection=pending|received|waived` sets the deposit's
+collection, `--paid` / `--unpaid` the payment, `--advance=N` the anticipo. `--damages=N` adds N filler
+replacements and `--long-reason` makes the retention reason and every note 500 characters — together
+they reach the oversized panel (§8a rule 5). Every run prints `squared: <direction> <amount> (…)`, the
+`squareOrderBalance` result, so the PDF's chip can be checked against the rule.
+
+Inspected 2026-10-27, one render each: the cotización with a deposit and an unpaid order with it
+pending (collect, `Depósito (reembolsable) +`); paid with the deposit received before the review
+(`Sin saldo pendiente`, the deposit as the info line); a clean review (refund 900, inverted chip); a
+small retention on an unpaid service (refund 872); damages above the deposit (collect 130); exactly
+zero (`--retention=900`, plain row); waived + damages (collect 880, no deposit rows, panel `DAÑOS`);
+no deposit (collect 45). An anticipo above the total (`--advance=5000`) is CREDITED (§2b #23):
+`Anticipo -Q 2,893.00` (caption: applied from Q 5,000.00), `Saldo a favor del cliente -Q 2,107.00`,
+`Depósito (reembolsable) +Q 900.00` ⇒ `Monto a devolver al cliente Q 1,207.00` — the same on the
+cotización, and on the damage report (`--damage-report --unpaid --advance=5000`) `Total por daños
+Q 1,030.00`, `Saldo a favor -Q 2,107.00`, `Depósito recibido -Q 900.00` ⇒ devolver Q 1,977.00 *(superseded the same day: that credited the deposit twice — the report now prints `Saldo a favor -Q 1,207.00` ⇒ devolver Q 1,077.00 = 5,000 − 2,893 − 1,030)*. An
+anticipo of exactly total + deposit (`--advance=3793`) ends on `Sin saldo pendiente`. A PAID
+order credits the excess the same way (the first render asked a client who sent Q 5,000 for the
+deposit again; fixed 2026-10-27). The two extra rows cost ~40pt: `--free --deposit=held --advance=5000` goes to two
+pages, the closing block moving whole (#20's accepted trade, for a rare case).
 
 **REPORTE DE DAÑOS (§2c) — ✅ BUILT 2026-10-27.** `pnpm doc:preview:damage-report` renders the
-final report (two banks, a retention, two replacements, a balance due); `--draft` the unsaved
-version, `--covered` a settlement the deposit covers (no banks, the refund in bold), `--banks=3`
-the third account, and `--damages=N` / `--long-reason` the many-line and long-description cases.
-Rendered and inspected: final and draft one page each; `--covered` one page; `--long-reason` two;
-`--damages=20 --long-reason` five, the repeating table header on each page and the summary moving
-whole to the last.
-
+common report (two banks, a retention, two replacements, damages above the deposit: collect 130);
+`--covered` a settlement the deposit covers (refund), `--clean` no claims (refund of the whole
+deposit), `--banks=3` the third account, `--damages=N` / `--long-reason` the many-line and
+long-description cases; `--deposit=retention`, `--collection`, `--unpaid` and `--advance` compose as
+on the comprobante. Rendered and inspected: default, `--covered`, `--clean`, `--banks=3`, the waived,
+zero and unpaid-service cases one page each (`Saldo del servicio +` when the service is unpaid);
+`--long-reason` two; `--damages=20 --long-reason` four, the repeating table header on each page and
+the summary moving whole to the last.
 What it settled:
 
 - **The valid-form gate is a CHECK ON CLICK, not a disabled button.** Decision #2 ("no document from

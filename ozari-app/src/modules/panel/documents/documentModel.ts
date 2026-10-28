@@ -6,7 +6,13 @@ import {
 } from '../orders/orderEstimate';
 import { parseDateTime, parseLineQuantity, parseMoney } from '../orders/SchemaCreateOrder';
 import type { CreateOrderFormType } from '../orders/SchemaCreateOrder';
-import type { OrderDepositSettlement, OrderDetail } from '../orders/order.types';
+import { squareOrderBalance } from '../orders/orderBalance';
+import type { OrderBalance, OrderBalanceInput } from '../orders/orderBalance';
+import type {
+  OrderDepositSettlement,
+  OrderDetail,
+  OrderSecurityDeposit,
+} from '../orders/order.types';
 import type { Product } from '../products/product.types';
 import type { PreferenceSetting } from '../preferences/preference.types';
 
@@ -90,15 +96,31 @@ export interface DocumentTotals {
   /** Absent when there is no delivery charge at all; 0 renders as "Gratis", which is a real answer. */
   delivery?: number;
   discount?: number;
+  /** The service COST — never includes the deposit, and never zeroed: a receipt claiming a total of
+   *  Q0.00 would be evidence that nothing was ever charged. */
   total: number;
-  deposit?: number;
+  /** The part of the ANTICIPO (`OrderDetail.depositAmount` — the advance, NOT the security deposit)
+   *  that went to the service: the whole anticipo, or the TOTAL when it was larger. Absent when none
+   *  was taken. */
+  advance?: number;
   /**
-   * What the client still owes. **Zero when the order is paid** — that is the whole point of being
-   * able to hand this document over at any step: it goes out as a request for payment, and comes
-   * back as proof of one. The TOTAL is never zeroed: a receipt claiming a total of Q0.00 would be
-   * evidence that nothing was ever charged, which is the opposite of what a paid order should show.
+   * The anticipo as RECEIVED, present only when it exceeded the TOTAL — the caption under the
+   * `Anticipo` row. Its excess is the squared box's `Saldo a favor del cliente` (`advanceCredit`) on
+   * an unpaid order; printing the whole anticipo AND that row would subtract the excess twice.
    */
-  balance: number;
+  advanceReceived?: number;
+  /**
+   * A PAID order: what the payment settled after the anticipo — the row that lets `TOTAL − anticipo
+   * − pagado` reach the result on paper, instead of a saldo that silently drops to zero. Absent when
+   * unpaid, or when the anticipo already covered the total.
+   */
+  paid?: number;
+  /**
+   * The order SQUARED (`squareOrderBalance`, EPIC-2-DOCUMENTS §2b): the deposit due or credited, the
+   * damages, and the ONE amount that has to change hands and which way. The same function the order
+   * page uses, so a document and the screen can never show two different outcomes.
+   */
+  balance: OrderBalance;
 }
 
 /**
@@ -117,35 +139,22 @@ export type DocumentDepositClaim =
     };
 
 /**
- * The refundable security deposit — printed simply as **"Depósito"**, the owner's own word with
- * clients (never "garantía" or "liquidación" on a document, 2026-10-27) — collected ON TOP of the order and
- * refunded at pickup, so it is **never** part of {@link DocumentTotals} and never a cost.
+ * The damages a recorded report CHARGED, itemised — the "DEPÓSITO Y DAÑOS" section after the
+ * summary. Only the charges and their total: what they DO to the money (credited against the
+ * deposit, added to what is owed) is the squared result in the totals panel, so the section never
+ * states a competing balance of its own (owner, 2026-10-27).
  *
- * The one exception is the reason this is a discriminated union rather than an amount: once a
- * settlement RETAINED money or billed a replacement, those charges are costs the client bears and
- * the document must say so plainly (owner, 2026-10-27: "once not refunded, we have to take it as
- * cost in the document perfectly. But if it follows the normal happy path it should still be
- * considered as deposit"). Which of the three it is gets decided HERE, where it is tested — the
- * template only picks a layout per `status`.
- *
- * - `held` — a quote, or a comprobante not settled yet: the amount to collect, refundable.
- * - `refunded` — settled with nothing claimed: still a deposit, now returned.
- * - `settled` — settled with at least one claim: the claims as costs, then how the deposit covered
- *   them, what came back, and what is still owed.
+ * The security deposit itself — printed simply as **"Depósito"**, the owner's word with clients
+ * (never "garantía" or "liquidación") — is never a cost: it lives in {@link DocumentTotals.balance}
+ * as money to hand over, money on hand, or a credit. A WAIVED deposit does not appear at all.
  */
-export type DocumentSecurityDeposit =
-  | { status: 'held'; amount: number }
-  | { status: 'refunded'; amount: number; refund: number }
-  | {
-      status: 'settled';
-      /** The deposit the order carried; 0 when the lines had replacement values but no deposit. */
-      amount: number;
-      claims: DocumentDepositClaim[];
-      claimsTotal: number;
-      applied: number;
-      refund: number;
-      balanceDue: number;
-    };
+export interface DocumentDamages {
+  /** The order carried a deposit (held, not waived) — the section is then "Depósito y daños"
+   *  rather than "Daños", since a retention comes out of it. */
+  withDeposit: boolean;
+  claims: DocumentDepositClaim[];
+  total: number;
+}
 
 export interface DocumentModel {
   kind: DocumentKind;
@@ -170,8 +179,8 @@ export interface DocumentModel {
   };
   groups: DocumentGroup[];
   totals: DocumentTotals;
-  /** Absent when there is nothing to say: no deposit to collect and nothing claimed. */
-  securityDeposit?: DocumentSecurityDeposit;
+  /** Absent unless a recorded damage report charged something. */
+  damages?: DocumentDamages;
   currencySymbol: string;
 }
 
@@ -259,27 +268,36 @@ const daysExplain = (unitPrice: number, quantity: number, days: number, total: n
   Math.abs(unitPrice * quantity * days - total) < 0.005;
 
 /**
- * A saved order's security deposit → what the comprobante states about it.
+ * A saved order → the input of THE balancing rule (`squareOrderBalance`). One builder, used by the
+ * comprobante and the damage report alike, so the two documents square the same order the same way.
  *
- * Every amount is the API's (`OrderSecurityDeposit` and its settlement compute claims, coverage,
- * refund and balance server-side); this only SELECTS which story the figures tell:
- *
- * - nothing settled yet → the deposit is `held` — refundable, outside the total;
- * - settled and nothing claimed → `refunded` — the happy path is still a deposit, never a cost;
- * - settled with a retention or a replacement → `settled` — those charges are COSTS.
- *
- * A deposit of zero with nothing claimed says nothing at all (absent): a line can carry a
- * replacement value without a deposit, and "Depósito (reembolsable) Q0.00" would announce a deposit
- * nobody asked the client for.
+ * - `advance` is the ANTICIPO (`depositAmount` — the field's name predates the security deposit);
+ * - `deposit` exists only when the order has a deposit COLLECTION to speak of (absent when the lines
+ *   carry none), with its status: a WAIVED one then counts as no deposit at all, inside the rule;
+ * - `claimsTotal` is the damage report's — the caller's, because the damage report may be built from
+ *   the report form's values rather than the saved settlement.
  */
-function depositFromOrder(order: OrderDetail): DocumentSecurityDeposit | undefined {
+export function orderBalanceInput(
+  order: OrderDetail,
+  claimsTotal: number | undefined,
+): OrderBalanceInput {
   const deposit = order.securityDeposit;
-  if (deposit === undefined) return undefined;
-  const { settlement } = deposit;
-  if (settlement === undefined) {
-    return deposit.total > 0 ? { status: 'held', amount: deposit.total } : undefined;
-  }
-  const claims: DocumentDepositClaim[] = [
+  const status = deposit?.collection?.status;
+  return {
+    total: order.totalAmount,
+    advance: order.depositAmount ?? 0,
+    paid: order.paidAt !== undefined,
+    ...(deposit !== undefined && status !== undefined && { deposit: { amount: deposit.total, status } }),
+    ...(claimsTotal !== undefined && { claimsTotal }),
+  };
+}
+
+/**
+ * A recorded settlement → the charges it made, itemised (a retention, then each replacement), every
+ * figure the API's own. Empty when the report was clean.
+ */
+function claimsOf(settlement: OrderDepositSettlement): DocumentDepositClaim[] {
+  return [
     ...(settlement.retainedAmount > 0
       ? [
           {
@@ -298,20 +316,44 @@ function depositFromOrder(order: OrderDetail): DocumentSecurityDeposit | undefin
       ...(damage.note !== undefined && { note: damage.note }),
     })),
   ];
-  if (claims.length === 0) {
-    return deposit.total > 0
-      ? { status: 'refunded', amount: deposit.total, refund: settlement.refundAmount }
-      : undefined;
-  }
+}
+
+/** The itemised damages section, or nothing when there is no report or it charged nothing. `held`
+ *  is the deposit the report counts — 0 when WAIVED, which then reads as no deposit at all. */
+function damagesOf(deposit: OrderSecurityDeposit | undefined): DocumentDamages | undefined {
+  const settlement = deposit?.settlement;
+  if (deposit === undefined || settlement === undefined) return undefined;
+  const claims = claimsOf(settlement);
+  if (claims.length === 0) return undefined;
   return {
-    status: 'settled',
-    amount: deposit.total,
+    withDeposit: deposit.held > 0,
     claims,
-    claimsTotal: settlement.claimsTotal,
-    applied: settlement.appliedFromDeposit,
-    refund: settlement.refundAmount,
-    balanceDue: settlement.balanceDue,
+    total: settlement.claimsTotal,
   };
+}
+
+/**
+ * The squared result's companion rows for a PAID order: what the payment settled after the
+ * anticipo. Read through the same rule as an UNPAID order's `serviceDue`, so "what was left to pay"
+ * and "what the payment covered" can never be two different sums.
+ */
+function paidRemainder(input: OrderBalanceInput): number {
+  return input.paid ? squareOrderBalance({ ...input, paid: false }).serviceDue : 0;
+}
+
+/**
+ * The `Anticipo` row (and its caption) so the column ADDS UP. An anticipo larger than the TOTAL
+ * prints only the part that went to the service; the rest is the squared box's own `Saldo a favor
+ * del cliente` row (`advanceCredit`, net of a deposit in hand that the excess already is), and the
+ * caption keeps the amount actually received on paper. Paid or not, the same. Exported for
+ * `scripts/preview-document.tsx`, so the preview's hand-built model cannot drift from this rule.
+ */
+export function advanceRows(
+  advance: number | undefined,
+  total: number,
+): Pick<DocumentTotals, 'advance' | 'advanceReceived'> {
+  if (advance === undefined || advance <= 0) return {};
+  return advance > total ? { advance: total, advanceReceived: advance } : { advance };
 }
 
 /**
@@ -360,11 +402,11 @@ export function fromOrderDetail(
     // A group nobody ordered from does not exist — never an empty table with a heading.
     .filter((group) => group.lines.length > 0);
 
-  const deposit = order.depositAmount;
-  // Clamped at zero, like the dashboard's outstanding figure: a deposit larger than the total is a
-  // slip, and printing a NEGATIVE balance would read as the business owing the client money.
-  const balance = order.isPaid ? 0 : Math.max(0, cents(order.totalAmount - (deposit ?? 0)));
-  const securityDeposit = depositFromOrder(order);
+  const advance = order.depositAmount;
+  const settlement = order.securityDeposit?.settlement;
+  const input = orderBalanceInput(order, settlement?.claimsTotal);
+  const paid = paidRemainder(input);
+  const damages = damagesOf(order.securityDeposit);
 
   return {
     kind: 'receipt',
@@ -389,10 +431,11 @@ export function fromOrderDetail(
       ...(order.deliveryAmount !== undefined && { delivery: order.deliveryAmount }),
       ...(order.discountAmount !== undefined && { discount: order.discountAmount }),
       total: order.totalAmount,
-      ...(deposit !== undefined && { deposit }),
-      balance,
+      ...advanceRows(advance, order.totalAmount),
+      ...(paid > 0 && { paid }),
+      balance: squareOrderBalance(input),
     },
-    ...(securityDeposit !== undefined && { securityDeposit }),
+    ...(damages !== undefined && { damages }),
     currencySymbol: order.currency.symbol,
   };
 }
@@ -485,7 +528,8 @@ export function fromOrderForm(
   // than promising "Gratis". An explicit `0` DOES print as Gratis. (`null` is unparseable, which the
   // resolver already rejected; treated as absent here for the same reason.)
   const delivery = parseMoney(values.deliveryAmount) ?? undefined;
-  const deposit = parseMoney(values.depositAmount) ?? undefined;
+  // The ANTICIPO (the form's `depositAmount`), not the security deposit below.
+  const advance = parseMoney(values.depositAmount) ?? undefined;
   const linesTotal = groups.reduce((sum, group) => sum + group.subtotal, 0);
   const total = cents(linesTotal + (delivery ?? 0));
   // The security deposit the order WOULD carry — the server's own rule (Σ rental line's per-unit
@@ -520,15 +564,18 @@ export function fromOrderForm(
       groups: groups.map((group) => ({ kind: group.kind, subtotal: group.subtotal })),
       ...(delivery !== undefined && { delivery }),
       total,
-      ...(deposit !== undefined && { deposit }),
-      // Clamped like the comprobante's: a deposit above the total is a slip, and a negative balance
-      // would read as the business owing the client money before anything has been agreed.
-      balance: Math.max(0, cents(total - (deposit ?? 0))),
+      ...advanceRows(advance, total),
+      // Squared by the same rule as a saved order. A quote's deposit is always still to be handed
+      // over (PENDING) and nothing can have been claimed — nothing has been delivered yet.
+      balance: squareOrderBalance({
+        total,
+        advance: advance ?? 0,
+        paid: false,
+        ...(securityDeposit > 0 && {
+          deposit: { amount: securityDeposit, status: 'PENDING' as const },
+        }),
+      }),
     },
-    // A quote can only ever HOLD a deposit: nothing has been delivered, so nothing can be claimed.
-    ...(securityDeposit > 0 && {
-      securityDeposit: { status: 'held' as const, amount: securityDeposit },
-    }),
     currencySymbol: firstPriced.product.currency.symbol,
   };
 }
@@ -566,17 +613,15 @@ export interface DamageReportModel {
   letterhead: DocumentLetterhead;
   /** The order's id — the report is always ABOUT a saved order. */
   reference: number;
+  /** The download moment — the report's only date. */
   issuedAt: Date;
-  /** Built from the report-damages FORM's unsaved values: the document says so on its face. */
-  draft: boolean;
-  /** When the settlement was recorded. Absent on a draft — nothing has been recorded yet. */
-  settledAt?: Date;
   client: DocumentModel['client'];
   event: { type: string; deliveryAt: Date; pickupAt?: Date };
   deposit: {
-    /** The API's total (`OrderSecurityDeposit.total`); 0 when the lines carried none. */
+    /** The deposit the report counts (`OrderSecurityDeposit.held`): 0 when the lines carried none,
+     *  and 0 when it was WAIVED — the document then shows no deposit at all. */
     total: number;
-    /** Each rental line that carried a deposit — the breakdown of `total`. */
+    /** Each rental line that carried a deposit — the breakdown of `total`; empty when it is 0. */
     lines: DamageReportDepositLine[];
   };
   /** Present only when money was retained from the deposit for partial damage. */
@@ -586,37 +631,37 @@ export interface DamageReportModel {
     retained: number;
     damages: number;
     claims: number;
-    applied: number;
-    refund: number;
-    balanceDue: number;
   };
+  /** The order SQUARED with this report's claims — the same rule and the same result as the
+   *  comprobante's, so the two documents can never end on different amounts. */
+  balance: OrderBalance;
   currencySymbol: string;
 }
 
 /**
- * A saved order + a settlement (saved, or a DRAFT from the report-damages form) → the damage report.
+ * A saved order + the settlement the admin entered → the damage report.
+ *
+ * It is THE damage report whether the settlement comes from the saved record or from the report
+ * form's values before saving (owner, 2026-10-27: it is generated from what the admin entered, not
+ * a sketch) — so it carries no draft mark and no second date: it is issued at the download.
  *
  * Every figure in `totals`, every replacement and the deposit total are the settlement's / the API's
- * own, copied verbatim — the document selects and formats, it never adds or subtracts (§2b #24). The
+ * own, copied verbatim; the outcome is `squareOrderBalance` over the order with these claims. The
  * one product here is the per-line deposit BREAKDOWN (`unitAmount × quantity`), which is the server's
  * own rule for that total, the same way the comprobante's lines show `price × qty`.
- *
- * `settledAt` is printed only on a FINAL report: a draft has recorded nothing, and an unparseable
- * date is dropped rather than printed as "Invalid Date".
  */
 export function fromDamageReport(
   order: OrderDetail,
   settlement: OrderDepositSettlement,
   letterhead: DocumentLetterhead,
   issuedAt: Date,
-  draft: boolean,
 ): DamageReportModel {
   const deliveryAt = new Date(order.serviceStart);
   const pickupAt = order.pickupAt === undefined ? undefined : new Date(order.serviceEnd);
-  const settledAt = draft ? undefined : new Date(settlement.settledAt);
+  const held = order.securityDeposit?.held ?? 0;
   const depositLines = order.lines.flatMap<DamageReportDepositLine>((line) => {
     const unitAmount = line.securityDeposit ?? 0;
-    return line.isRental && unitAmount > 0
+    return held > 0 && line.isRental && unitAmount > 0
       ? [
           {
             description: line.productName,
@@ -631,8 +676,6 @@ export function fromDamageReport(
     letterhead,
     reference: order.id,
     issuedAt,
-    draft,
-    ...(settledAt !== undefined && !Number.isNaN(settledAt.getTime()) && { settledAt }),
     client: {
       name: order.clientName,
       contact: order.deliveryContact,
@@ -643,7 +686,7 @@ export function fromDamageReport(
       deliveryAt,
       ...(pickupAt !== undefined && { pickupAt }),
     },
-    deposit: { total: order.securityDeposit?.total ?? 0, lines: depositLines },
+    deposit: { total: held, lines: depositLines },
     ...(settlement.retainedAmount > 0 && {
       retention: {
         amount: settlement.retainedAmount,
@@ -661,10 +704,8 @@ export function fromDamageReport(
       retained: settlement.retainedAmount,
       damages: settlement.damagesTotal,
       claims: settlement.claimsTotal,
-      applied: settlement.appliedFromDeposit,
-      refund: settlement.refundAmount,
-      balanceDue: settlement.balanceDue,
     },
+    balance: squareOrderBalance(orderBalanceInput(order, settlement.claimsTotal)),
     currencySymbol: order.currency.symbol,
   };
 }
@@ -677,14 +718,10 @@ export function documentReference(model: Pick<DocumentModel, 'reference'>): stri
   return model.reference === undefined ? undefined : formatReference(model.reference);
 }
 
-/**
- * The damage report's file name — the comprobante's convention (`ped-00042.pdf`) with what the
- * document IS in front, and `-borrador` on a draft, so a provisional figure can never be mistaken
- * for the recorded one sitting beside it in a downloads folder or an email thread.
- */
-export function damageReportFileName(model: DamageReportModel): string {
-  const stem = `reporte-danos-${formatReference(model.reference).toLowerCase()}`;
-  return `${stem}${model.draft ? '-borrador' : ''}.pdf`;
+/** The damage report's file name — the comprobante's convention (`ped-00042.pdf`) with what the
+ *  document IS in front: `reporte-danos-ped-00042.pdf`. */
+export function damageReportFileName(model: Pick<DamageReportModel, 'reference'>): string {
+  return `reporte-danos-${formatReference(model.reference).toLowerCase()}.pdf`;
 }
 
 /**

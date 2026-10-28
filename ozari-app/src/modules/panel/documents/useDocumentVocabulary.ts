@@ -28,6 +28,20 @@ function chromeCopy(t: Translate, title: string): DocumentChromeCopy {
     columnLineTotal: t(`${KEY}.columns.lineTotal`),
     banks: t(`${KEY}.fields.banks`),
     page: (page, total) => t(`${KEY}.fields.page`, { page, total }),
+    balance: {
+      depositDue: t(`${KEY}.balance.depositDue`),
+      depositDueNote: t(`${KEY}.balance.depositDueNote`),
+      claims: t(`${KEY}.balance.claims`),
+      claimsNote: t(`${KEY}.balance.claimsNote`),
+      depositCredit: t(`${KEY}.balance.depositCredit`),
+      serviceDue: t(`${KEY}.balance.serviceDue`),
+      advanceCredit: t(`${KEY}.balance.advanceCredit`),
+      collect: t(`${KEY}.balance.collect`),
+      refund: t(`${KEY}.balance.refund`),
+      none: t(`${KEY}.balance.none`),
+      depositOnHand: t(`${KEY}.balance.depositOnHand`),
+      depositOnHandNote: t(`${KEY}.balance.depositOnHandNote`),
+    },
   };
 }
 
@@ -68,22 +82,16 @@ export function useDocumentCopy(kind: DocumentKind): DocumentCopy {
     free: t(`${KEY}.totals.free`),
     discount: t(`${KEY}.totals.discount`),
     total: t(`${KEY}.totals.total`),
-    deposit: t(`${KEY}.totals.deposit`),
-    balance: t(`${KEY}.totals.balance`),
-    depositHeld: t(`${KEY}.securityDeposit.held`),
-    depositHeldNote: t(`${KEY}.securityDeposit.heldNote`),
-    depositRefunded: t(`${KEY}.securityDeposit.refunded`),
-    depositRefundedNote: t(`${KEY}.securityDeposit.refundedNote`),
+    advance: t(`${KEY}.totals.advance`),
+    advanceReceived: (amount) => t(`${KEY}.totals.advanceReceived`, { amount }),
+    paidAmount: t(`${KEY}.totals.paid`),
     settlementTitle: t(`${KEY}.securityDeposit.settlementTitle`),
+    damagesTitle: t(`${KEY}.securityDeposit.damagesTitle`),
     settlementRetention: t(`${KEY}.securityDeposit.retention`),
     settlementReplacement: (product) => t(`${KEY}.securityDeposit.replacement`, { product }),
     settlementReplacementDetail: (quantity, unitAmount) =>
       t(`${KEY}.securityDeposit.replacementDetail`, { quantity, unitAmount }),
     settlementClaimsTotal: t(`${KEY}.securityDeposit.claimsTotal`),
-    settlementApplied: t(`${KEY}.securityDeposit.applied`),
-    settlementBalanceDue: t(`${KEY}.securityDeposit.balanceDue`),
-    settlementRefund: t(`${KEY}.securityDeposit.refund`),
-    settlementRefundNote: (amount) => t(`${KEY}.securityDeposit.refundNote`, { amount }),
     conditions: t(`${KEY}.fields.conditions`),
   };
 }
@@ -97,8 +105,6 @@ export function useDamageReportCopy(): DamageReportCopy {
   const report = `${KEY}.damageReport`;
   return {
     ...chromeCopy(t, t(`${report}.title`)),
-    draftMark: t(`${report}.draftMark`),
-    settledAt: t(`${report}.settledAt`),
     depositTitle: t(`${report}.depositTitle`),
     columnProduct: t(`${report}.columns.product`),
     columnDepositEach: t(`${report}.columns.depositEach`),
@@ -108,13 +114,10 @@ export function useDamageReportCopy(): DamageReportCopy {
     columnUnits: t(`${report}.columns.units`),
     columnReplacementEach: t(`${report}.columns.replacementEach`),
     noClaims: t(`${report}.noClaims`),
+    noClaimsNoDeposit: t(`${report}.noClaimsNoDeposit`),
     claimsTotal: t(`${report}.totals.claims`),
     claimsBreakdown: (retained, damages) =>
       t(`${report}.totals.claimsBreakdown`, { retained, damages }),
-    refundNote: (amount) => t(`${report}.totals.refundNote`, { amount }),
-    applied: t(`${report}.totals.applied`),
-    refund: t(`${report}.totals.refund`),
-    balanceDue: t(`${report}.totals.balanceDue`),
     payTitle: t(`${report}.payTitle`),
     payLead: t(`${report}.payLead`),
   };

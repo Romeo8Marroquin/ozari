@@ -37,6 +37,14 @@ import {
   validateSettleOrder,
   validateUndoSettlement,
 } from "./settlement/settlement.validator.js";
+import {
+  clearDepositCollection,
+  recordDepositCollection,
+} from "./deposit-collection/depositCollection.controller.js";
+import {
+  validateClearDepositCollection,
+  validateRecordDepositCollection,
+} from "./deposit-collection/depositCollection.validator.js";
 
 const router: RouterType = Router();
 
@@ -155,6 +163,24 @@ router.delete(
   isGrantedRoles([RolesEnum.Admin]),
   validateUndoSettlement,
   undoOrderSettlement,
+);
+
+// Region: the deposit's COLLECTION — **STRICTLY Admin**, its own door too: was the deposit actually
+// received, or waived (with a reason)? Normally answered at the delivery step through the advance;
+// this records or corrects it any time. PUT is declarative; DELETE returns it to pending.
+router.put(
+  "/:id/deposit-collection",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  validateRecordDepositCollection,
+  recordDepositCollection,
+);
+router.delete(
+  "/:id/deposit-collection",
+  verifyJwt,
+  isGrantedRoles([RolesEnum.Admin]),
+  validateClearDepositCollection,
+  clearDepositCollection,
 );
 
 export default router;

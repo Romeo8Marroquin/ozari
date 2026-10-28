@@ -788,6 +788,16 @@ model Service {
   depositRetainedAmount Decimal?  @map("deposit_retained_amount") @db.Decimal(15, 2)
   depositRetainedReason String?   @map("deposit_retained_reason")
 
+  // Was the deposit actually COLLECTED (owner 2026-10-27, EPIC-2-ORDERS §12)? Asked at the delivery
+  // step (never blocking it) or recorded any time from the deposit card. Neither set = PENDING;
+  // `depositReceivedAt` = RECEIVED; `depositWaivedAt` = WAIVED — handed over without a deposit on
+  // purpose, with its REQUIRED reason (internal, never printed). Mutually exclusive: every write
+  // clears the other. A WAIVED deposit counts as 0 for the settlement (no refund, no retention);
+  // replacement billing is independent of it.
+  depositReceivedAt   DateTime? @map("deposit_received_at")
+  depositWaivedAt     DateTime? @map("deposit_waived_at")
+  depositWaivedReason String?   @map("deposit_waived_reason")
+
   currencyId       Int       @map("currency_id")
   serviceStatusId  Int       @map("service_status_id")
   paymentStatusId  Int       @map("payment_status_id")
@@ -899,17 +909,24 @@ model ServiceStatusHistory {
 // one row per settlement write — RECORDED (first), CORRECTED (a later edit), UNDONE (the record was
 // deleted). The money is a SNAPSHOT of the outcome at that moment (NULL on UNDONE), so the order's
 // history keeps reading true after the settlement is corrected or undone. The current settlement
-// itself still lives on `services` + the lines; this is only its trail.
+// itself still lives on `services` + the lines; this is only its trail. The COLLECTION of the
+// deposit leaves rows here too: RECEIVED, WAIVED (`note` = its internal reason) and
+// COLLECTION_CLEARED (back to pending) — `depositTotal` = the nominal deposit at that moment.
 enum DepositEventKind {
   RECORDED
   CORRECTED
   UNDONE
+  RECEIVED
+  WAIVED
+  COLLECTION_CLEARED
 }
 
 model ServiceDepositHistory {
   id           Int              @id @default(autoincrement())
   serviceId    Int              @map("service_id")
   kind         DepositEventKind
+  // The waive reason on a WAIVED row (internal, never printed); NULL otherwise.
+  note         String?
   depositTotal Decimal?         @map("deposit_total") @db.Decimal(15, 2)
   claimsTotal  Decimal?         @map("claims_total") @db.Decimal(15, 2)
   refundAmount Decimal?         @map("refund_amount") @db.Decimal(15, 2)

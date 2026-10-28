@@ -528,6 +528,33 @@ export const schemas: Record<string, Schema> = {
         description: "Why the order is being cancelled — recorded on a disruptive move.",
         example: "El cliente canceló la fiesta",
       },
+      depositCollection: {
+        allOf: [schemaRef("DepositCollectionRequest")],
+        description:
+          "Optional — the delivery dialog's \"¿Se recibió el depósito?\" answer (offered by the " +
+          "action's `depositToCollect`), validated like `PUT /orders/{id}/deposit-collection`. " +
+          "Applied ONLY when the move enters a DELIVERY-tracking step of an order whose deposit is " +
+          "> 0, still PENDING, not cancelled and with no damage report — otherwise silently IGNORED " +
+          "(a stale screen never 400s a delivery, and an existing record is never overwritten). Its " +
+          "absence never blocks the move.",
+      },
+    },
+  },
+  DepositCollectionRequest: {
+    type: "object",
+    required: ["received"],
+    description:
+      "Was the security deposit collected? `received: false` WAIVES it and requires a `reason` " +
+      "(trimmed, 1–500 chars — internal, never printed); with `received: true` any reason is dropped.",
+    properties: {
+      received: { type: "boolean", example: false },
+      reason: {
+        type: "string",
+        nullable: true,
+        minLength: 1,
+        maxLength: 500,
+        example: "Entregado a un familiar del cliente",
+      },
     },
   },
   OrderEvidenceUploadsRequest: {
@@ -656,6 +683,17 @@ export const schemas: Record<string, Schema> = {
           "without knowing any status ids. `null` on every non-travel step and on every `backward`/" +
           "`disruptive` move (undoing a tap is desk work, not a journey).",
         example: "DELIVERY",
+      },
+      depositToCollect: {
+        type: "number",
+        nullable: true,
+        description:
+          "Present ONLY on the `forward` move into a DELIVERY-tracking step of an order whose " +
+          "security deposit is still to be confirmed (deposit > 0, collection PENDING, not " +
+          "cancelled, no damage report): the NOMINAL deposit to ask about. The dialog then asks " +
+          "\"¿Se recibió el depósito?\" and sends `depositCollection` with the advance — it never " +
+          "blocks the move.",
+        example: 200,
       },
     },
   },
@@ -897,8 +935,22 @@ export const schemas: Record<string, Schema> = {
     properties: {
       total: {
         type: "number",
-        description: "Σ rental lines' deposit × quantity — collected on top of the order, never in its total.",
+        description:
+          "Σ rental lines' deposit × quantity — collected on top of the order, never in its total. " +
+          "The NOMINAL deposit, whatever was collected.",
         example: 200,
+      },
+      held: {
+        type: "number",
+        description:
+          "The deposit the settlement counts: `total`, or 0 when the collection was WAIVED. Every " +
+          "settlement figure (refund, retention ceiling, balance due) is computed from THIS.",
+        example: 200,
+      },
+      collection: {
+        allOf: [schemaRef("OrderDepositCollection")],
+        nullable: true,
+        description: "Absent when `total` is 0 (replacement values only — nothing to collect).",
       },
       canSettle: {
         type: "boolean",
@@ -906,6 +958,35 @@ export const schemas: Record<string, Schema> = {
         example: true,
       },
       settlement: { allOf: [schemaRef("OrderDepositSettlement")], nullable: true },
+    },
+  },
+  OrderDepositCollection: {
+    type: "object",
+    description:
+      "Was the deposit actually COLLECTED? PENDING until recorded — at the delivery step (the " +
+      "advance's `depositCollection`) or any time via `PUT /orders/{id}/deposit-collection`. WAIVED " +
+      "= handed over without a deposit on purpose: it then counts as 0 for the settlement (no " +
+      "refund, no retention), while lost/broken units can still be billed at replacement value.",
+    properties: {
+      status: { type: "string", enum: ["PENDING", "RECEIVED", "WAIVED"], example: "RECEIVED" },
+      at: {
+        type: "string",
+        format: "date-time",
+        nullable: true,
+        description: "When it was received / waived; absent while PENDING.",
+      },
+      reason: {
+        type: "string",
+        nullable: true,
+        description: "WAIVED only — an internal note, never printed on a client document.",
+      },
+      canRecord: {
+        type: "boolean",
+        description:
+          "May it be recorded / changed / cleared now: not cancelled and no damage report recorded " +
+          "(undo the report first — its money was computed from it).",
+        example: true,
+      },
     },
   },
   SettleOrderRequest: {
@@ -962,12 +1043,23 @@ export const schemas: Record<string, Schema> = {
   OrderDepositHistoryEntry: {
     type: "object",
     description:
-      "One entry of the security deposit's append-only trail: RECORDED (first settlement), " +
-      "CORRECTED (a later edit) or UNDONE. The money is the outcome as recorded at that moment " +
-      "(absent on UNDONE). Deleted together with the order.",
+      "One entry of the security deposit's append-only trail. The damage report: RECORDED (first " +
+      "settlement), CORRECTED (a later edit) or UNDONE — its money is the outcome as recorded at " +
+      "that moment, counted on the HELD deposit (absent on UNDONE). The collection: RECEIVED, " +
+      "WAIVED (`note` = the internal reason) or COLLECTION_CLEARED — `depositTotal` = the nominal " +
+      "deposit then. Deleted together with the order.",
     properties: {
       id: { type: "integer", example: 1 },
-      kind: { type: "string", enum: ["RECORDED", "CORRECTED", "UNDONE"], example: "RECORDED" },
+      kind: {
+        type: "string",
+        enum: ["RECORDED", "CORRECTED", "UNDONE", "RECEIVED", "WAIVED", "COLLECTION_CLEARED"],
+        example: "RECORDED",
+      },
+      note: {
+        type: "string",
+        nullable: true,
+        description: "The waive reason on a WAIVED entry (internal, never printed); absent otherwise.",
+      },
       depositTotal: { type: "number", nullable: true, example: 200 },
       claimsTotal: { type: "number", nullable: true, example: 0 },
       refundAmount: { type: "number", nullable: true, example: 200 },

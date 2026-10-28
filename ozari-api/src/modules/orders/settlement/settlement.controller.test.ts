@@ -45,6 +45,10 @@ const lockedState = (overrides: Record<string, unknown> = {}) => ({
   deliveredAt: DELIVERED,
   cancelledAt: null,
   depositSettledAt: null,
+  // Received at the door — the ordinary case; the PENDING/WAIVED cases override it.
+  depositReceivedAt: DELIVERED,
+  depositWaivedAt: null,
+  depositWaivedReason: null,
   serviceDetails: [
     { id: 31, isRental: true, quantity: 5, securityDeposit: dec("40"), replacementPrice: dec("120"), damagedQuantity: 0 },
     { id: 32, isRental: false, quantity: 2, securityDeposit: null, replacementPrice: null, damagedQuantity: 0 },
@@ -84,6 +88,9 @@ const richOrder = () => ({
   depositSettledAt: DELIVERED,
   depositRetainedAmount: dec("50"),
   depositRetainedReason: "Manchas",
+  depositReceivedAt: DELIVERED,
+  depositWaivedAt: null,
+  depositWaivedReason: null,
   currencyId: 1,
   serviceStatusId: 3,
   paymentStatusId: 1,
@@ -259,6 +266,79 @@ describe("settleOrder", () => {
       {} as Response,
     );
     expect(trailRow(tx).data).toMatchObject({ kind: "RECORDED", byUserId: 0 });
+  });
+
+  it("a report on a still-PENDING collection confirms the deposit was received, first", async () => {
+    const tx = mockTx(lockedState({ depositReceivedAt: null }));
+    await settle({ retainedAmount: 0, retainedReason: undefined, damages: [] });
+
+    // The collection write precedes the settlement's own.
+    expect(tx.service.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 12 },
+      data: { depositReceivedAt: expect.any(Date), depositWaivedAt: null, depositWaivedReason: null },
+    });
+    const kinds = (tx.serviceDepositHistory.create as Mock).mock.calls.map(
+      (call) => (call[0] as { data: { kind: string } }).data,
+    );
+    expect(kinds).toEqual([
+      { serviceId: 12, kind: "RECEIVED", note: null, depositTotal: 200, byUserId: 1 },
+      expect.objectContaining({ kind: "RECORDED", depositTotal: 200, refundAmount: 200 }),
+    ]);
+  });
+
+  it("does not stamp a collection when there is no deposit to collect (replacements only)", async () => {
+    const tx = mockTx(
+      lockedState({
+        depositReceivedAt: null,
+        serviceDetails: [
+          { id: 31, isRental: true, quantity: 5, securityDeposit: null, replacementPrice: dec("120"), damagedQuantity: 0 },
+        ],
+      }),
+    );
+    await settle({ retainedAmount: 0, retainedReason: undefined, damages: [{ lineId: 31, quantity: 1, note: undefined }] });
+    expect(trailRow(tx).data).toMatchObject({ kind: "RECORDED", depositTotal: 0, balanceDue: 120 });
+  });
+
+  describe("on a WAIVED deposit (it counts 0)", () => {
+    const waived = () =>
+      lockedState({
+        depositReceivedAt: null,
+        depositWaivedAt: DELIVERED,
+        depositWaivedReason: "Un familiar",
+      });
+
+    it("refuses ANY retention as above the deposit", async () => {
+      const tx = mockTx(waived());
+      await settle({ retainedAmount: 0.01, retainedReason: "Manchas", damages: [] });
+      expect(tx.service.update).not.toHaveBeenCalled();
+      expect(sendOzariError).toHaveBeenCalledWith(
+        expect.anything(),
+        HttpEnum.BAD_REQUEST,
+        "orders.settlement.retainedAboveDeposit",
+      );
+    });
+
+    it("bills every replacement in full, refunds nothing, and leaves the waive alone", async () => {
+      const tx = mockTx(waived());
+      await settle({
+        retainedAmount: 0,
+        retainedReason: undefined,
+        damages: [{ lineId: 31, quantity: 1, note: undefined }],
+      });
+      // No collection write: only the settlement's own update, and ONE trail row.
+      expect(tx.service.update).toHaveBeenCalledTimes(1);
+      expect(trailRow(tx)).toEqual({
+        data: {
+          serviceId: 12,
+          kind: "RECORDED",
+          depositTotal: 0,
+          claimsTotal: 120,
+          refundAmount: 0,
+          balanceDue: 120,
+          byUserId: 1,
+        },
+      });
+    });
   });
 
   it("writes no trail row when the settlement is refused", async () => {

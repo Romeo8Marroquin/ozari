@@ -589,6 +589,37 @@
         "undoError": "Error al deshacer la liquidación de garantía."
       }
     },
+    "depositCollection": {
+      "recorded": "Cobro del depósito registrado exitosamente.",
+      "cleared": "El depósito vuelve a estar pendiente de cobro.",
+      "notFound": "El pedido no existe o ya no está disponible.",
+      "notApplicable": "Este pedido no tiene un depósito que cobrar, o está cancelado.",
+      "settled": "Este pedido ya tiene un reporte de daños; deshaz el reporte de daños primero.",
+      "notRecorded": "Este pedido no tiene registrado el cobro de su depósito.",
+      "errorRecording": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "errorClearing": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidId": "El identificador del pedido no es válido.",
+        "invalidReceived": "Indica si se recibió el depósito.",
+        "invalidReason": "El motivo por el que no se recibió el depósito no es válido.",
+        "reasonRequired": "Indica por qué no se recibió el depósito.",
+        "logs": {
+          "invalidId": "Identificador de pedido inválido al registrar el cobro del depósito.",
+          "invalidReceived": "Valor de recibido inválido al registrar el cobro del depósito.",
+          "invalidReason": "Motivo inválido al registrar el cobro del depósito.",
+          "reasonRequired": "Depósito no recibido sin motivo."
+        }
+      },
+      "logs": {
+        "recorded": "Cobro del depósito registrado para el pedido {{id}}.",
+        "cleared": "Cobro del depósito vuelto a pendiente para el pedido {{id}}.",
+        "notApplicable": "El pedido {{id}} no tiene depósito que cobrar o está cancelado.",
+        "settled": "El pedido {{id}} ya tiene un reporte de daños; no se cambia el cobro del depósito.",
+        "notRecorded": "El pedido {{id}} no tenía registrado el cobro del depósito.",
+        "error": "Error al registrar el cobro del depósito.",
+        "clearError": "Error al volver a pendiente el cobro del depósito."
+      }
+    },
     "undoPayment": {
       "undone": "Registro de pago deshecho exitosamente.",
       "notFound": "El pedido no existe o ya no está disponible.",
@@ -625,11 +656,13 @@
         "invalidToStatusId": "El estado destino del pedido no es válido.",
         "invalidEvidenceKeys": "Las fotos de evidencia enviadas no son válidas.",
         "invalidReason": "El motivo no es válido.",
+        "invalidDepositCollection": "Indica si se recibió el depósito y, si no, por qué.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
           "invalidToStatusId": "Estado destino inválido <{{-toStatusId}}> al avanzar el pedido.",
           "invalidEvidenceKeys": "Claves de evidencia inválidas (<{{-count}}>) al avanzar el pedido.",
           "invalidReason": "Motivo de cancelación inválido al avanzar el pedido.",
+          "invalidDepositCollection": "Cobro del depósito inválido (<{{-error}}>) al avanzar el pedido.",
           "validationError": "Error validando el avance del pedido: {{-error}}."
         }
       },

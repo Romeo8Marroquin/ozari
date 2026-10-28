@@ -3,8 +3,8 @@ import { decryptKms } from "@helpers/encryption.js";
 import { pendingLogisticsEvents } from "../orders/logistics/logistics.service.js";
 import type { LogisticsEventModel } from "../orders/logistics/logistics.models.js";
 import {
-  computeDepositTotal,
   computeSettlementMoney,
+  heldDeposit,
   orderListInclude,
   projectOrderListItem,
   type DepositLineModel,
@@ -221,6 +221,8 @@ export const PENDING_DEPOSITS_LIMIT = 5;
 /** The `select` for a settled order: exactly what `summarizeSettlements` re-derives the outcome from. */
 export const settledDepositSelect = {
   depositRetainedAmount: true,
+  // A waived collection holds no deposit (`heldDeposit`) — the summary must know it.
+  depositWaivedAt: true,
   serviceDetails: {
     where: { isActive: true },
     select: {
@@ -236,6 +238,7 @@ export const settledDepositSelect = {
 /** A settled order as the month summary reads it: the retention + its lines' snapshots and damage. */
 export interface SettledDepositRowModel {
   depositRetainedAmount: Prisma.Decimal | null;
+  depositWaivedAt: Date | null;
   serviceDetails: readonly (DepositLineModel & { damagedQuantity: number })[];
 }
 
@@ -251,9 +254,8 @@ export function projectDeposits(
   return {
     pending: {
       orders: pendingRows.length,
-      amount: round2(
-        pendingRows.reduce((sum, row) => sum + computeDepositTotal(row.serviceDetails), 0),
-      ),
+      // The HELD deposits — a waived one is money that never came in, so it is not "in hand".
+      amount: round2(pendingRows.reduce((sum, row) => sum + heldDeposit(row), 0)),
       items: pendingRows
         .slice(0, PENDING_DEPOSITS_LIMIT)
         .map((row) => projectOrderListItem(row, context)),
@@ -278,11 +280,7 @@ export function summarizeSettlements(
         0,
       ),
     );
-    const money = computeSettlementMoney(
-      computeDepositTotal(row.serviceDetails),
-      retained,
-      replacements,
-    );
+    const money = computeSettlementMoney(heldDeposit(row), retained, replacements);
     month.refunded = round2(month.refunded + money.refundAmount);
     month.retained = round2(month.retained + retained);
     month.replacements = round2(month.replacements + replacements);

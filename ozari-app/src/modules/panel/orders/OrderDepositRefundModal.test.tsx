@@ -29,7 +29,7 @@ const order = (overrides: Record<string, unknown> = {}): OrderDetail =>
     id: 12,
     clientName: 'María López',
     currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
-    securityDeposit: { total: 500, canSettle: true },
+    securityDeposit: { total: 500, held: 500, canSettle: true },
     ...overrides,
   }) as OrderDetail;
 
@@ -70,12 +70,17 @@ describe('OrderDepositRefundModal', () => {
   });
 
   it('with no deposit (replacement values only) it is the "Sin daños" confirmation', () => {
-    renderModal(order({ securityDeposit: { total: 0, canSettle: true } }));
+    renderModal(order({ securityDeposit: { total: 0, held: 0, canSettle: true } }));
     expect(screen.getByText(`${KEY}.titleNoDeposit`)).toBeInTheDocument();
     expect(screen.getByText(`${KEY}.descriptionNoDeposit`)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: `${KEY}.confirmNoDeposit` })).toBeInTheDocument();
   });
 
+  it('a deposit handed over WITHOUT collecting it (held 0) is "Sin daños", never a refund', () => {
+    renderModal(order({ securityDeposit: { total: 500, held: 0, canSettle: true } }));
+    expect(screen.getByText(`${KEY}.titleNoDeposit`)).toBeInTheDocument();
+    expect(screen.queryByText(`${KEY}.description`)).not.toBeInTheDocument();
+  });
   it('an order without a deposit block reads as "Sin daños" too', () => {
     renderModal(order({ securityDeposit: undefined }));
     expect(screen.getByText(`${KEY}.titleNoDeposit`)).toBeInTheDocument();
@@ -103,7 +108,7 @@ describe('OrderDepositRefundModal', () => {
   it('the "Sin daños" variant words its toast accordingly; a bare 2xx still closes', async () => {
     const onClose = vi.fn();
     const setData = vi.spyOn(client, 'setQueryData');
-    renderModal(order({ securityDeposit: { total: 0, canSettle: true } }), onClose);
+    renderModal(order({ securityDeposit: { total: 0, held: 0, canSettle: true } }), onClose);
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.confirmNoDeposit` }));
     act(() => handlers().onSuccess({ data: {} }));
     expect(setData).not.toHaveBeenCalled();

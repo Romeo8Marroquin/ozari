@@ -219,6 +219,16 @@ export function planStatusPath({
   return steps;
 }
 
+/**
+ * Does this walk CONFIRM the delivery — a forward step into a DELIVERY-tracking status (the step that
+ * stamps `deliveredAt`)? Only such a move may carry the deposit's collection answer; an admin jump
+ * that walks through the delivery step confirms it as much as the ordinary tap does.
+ */
+export const confirmsDelivery = (steps: readonly PlannedStepModel[]): boolean =>
+  steps.some(
+    (step) => step.kind === "forward" && step.to.tracksEvent === TrackedEventEnum.DELIVERY,
+  );
+
 const kindOfStep = (
   from: StatusDefinitionModel | undefined,
   to: StatusDefinitionModel,

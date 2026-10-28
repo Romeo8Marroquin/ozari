@@ -15,11 +15,11 @@ vi.mock('./useSettleOrder', () => ({
 const { success, error } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock('@components/notifications/notify', () => ({ notify: { success, error } }));
 
-// The damage report download is the documents' component (and suite); a marker records the DRAFT
+// The damage report download is the documents' component (and suite); a marker records the UNSAVED
 // settlement the form built from its current values.
 const { reportProps } = vi.hoisted(() => ({ reportProps: vi.fn() }));
 vi.mock('../documents/DamageReportButton', () => ({
-  default: (props: { settlement: { claimsTotal: number }; draft?: boolean }) => {
+  default: (props: { settlement: { claimsTotal: number } }) => {
     reportProps(props);
     return <span data-testid="damage-report">{props.settlement.claimsTotal}</span>;
   },
@@ -48,6 +48,7 @@ const line = (over: Partial<OrderLine> = {}): OrderLine => ({
 
 const deposit = (over: Partial<OrderSecurityDeposit> = {}): OrderSecurityDeposit => ({
   total: 200,
+  held: 200,
   canSettle: true,
   ...over,
 });
@@ -181,25 +182,27 @@ describe('OrderSettlementForm', () => {
     });
   });
 
-  it('offers the DRAFT damage report only while something is claimed AND the form is valid', async () => {
+  it('offers the damage report before saving only while something is claimed AND the form is valid', async () => {
     renderForm();
-    const slot = screen.getByTestId('settlement-draft-report');
+    const slot = screen.getByTestId('settlement-damage-report');
     // Nothing claimed yet — collapsed and inert, so a blank report can never be printed.
     expect(slot).toHaveAttribute('aria-hidden', 'true');
     expect(slot).toHaveAttribute('inert');
 
-    // 2 × Q120 lost: a valid claim ⇒ the draft opens, built from the CURRENT values.
+    // 2 × Q120 lost: a valid claim ⇒ the report opens, built from the CURRENT values.
     await userEvent.type(damaged(), '2');
     expect(slot).toHaveAttribute('aria-hidden', 'false');
     expect(slot).not.toHaveAttribute('inert');
     expect(reportProps).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        draft: true,
         settlement: expect.objectContaining({ claimsTotal: 240, refundAmount: 0, balanceDue: 40 }),
       }),
     );
+    // A REPORT, not a sketch: the documents' component is never told it is a draft.
+    expect(reportProps.mock.lastCall?.[0]).not.toHaveProperty('draft');
+    expect(screen.getByText(`${K}.reportNote`)).toBeInTheDocument();
 
-    // A retention without its description makes the form invalid ⇒ the draft closes again…
+    // A retention without its description makes the form invalid ⇒ the report closes again…
     await userEvent.type(retained(), '50');
     expect(slot).toHaveAttribute('aria-hidden', 'true');
     // …and comes back once the form is whole.
@@ -236,11 +239,28 @@ describe('OrderSettlementForm', () => {
   });
 
   it('hides the retention when there is no deposit to retain from (replacement value only)', () => {
-    const none = deposit({ total: 0 });
+    const none = deposit({ total: 0, held: 0 });
     renderForm(order({ lines: [line({ securityDeposit: undefined })], securityDeposit: none }), none);
     expect(screen.queryByLabelText(new RegExp(`${K}.fields.retainedLabel`))).not.toBeInTheDocument();
     expect(screen.queryByText(`${K}.preview.retained`)).not.toBeInTheDocument();
     expect(damaged()).toBeInTheDocument();
+  });
+
+  it('a deposit handed over WITHOUT collecting it (held 0) leaves only lost/broken pieces', async () => {
+    const waived = deposit({
+      held: 0,
+      collection: { status: 'WAIVED', reason: 'Familiar', canRecord: true },
+    });
+    renderForm(order({ securityDeposit: waived }), waived);
+    expect(screen.getByText(`${K}.noDepositHeld`)).toBeInTheDocument();
+    expect(screen.queryByLabelText(new RegExp(`${K}.fields.retainedLabel`))).not.toBeInTheDocument();
+    // Against a held deposit of 0, one lost unit is owed whole (Q120), nothing comes back.
+    await userEvent.type(damaged(), '1');
+    expect(reportProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        settlement: expect.objectContaining({ claimsTotal: 120, refundAmount: 0, balanceDue: 120 }),
+      }),
+    );
   });
 
   it('hides the damages when no line has a replacement value (deposit only)', () => {

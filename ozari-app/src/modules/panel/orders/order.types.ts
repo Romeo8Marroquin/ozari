@@ -48,6 +48,13 @@ export interface OrderAction {
    *  step is somebody DRIVING somewhere, which is exactly when a navigation button belongs beside
    *  it. `null` on every desk-work move (rewind, cancel) and on steps nobody travels for. */
   tracksEvent?: 'DELIVERY' | 'COLLECTION' | null;
+  /**
+   * Present ONLY on the forward DELIVERY move of an order whose security deposit is still to be
+   * confirmed (deposit > 0, collection `PENDING`, no damage report): the amount to ask about. The
+   * dialog then asks "¿Se recibió el depósito?" (checked by default; unchecked needs a reason) and
+   * sends `depositCollection` with the advance — it never blocks the move.
+   */
+  depositToCollect?: number;
 }
 
 /** @see OrderAction.inventoryEffect */
@@ -249,7 +256,10 @@ export interface OrderLine {
  */
 export interface OrderDepositHistoryEntry {
   id: number;
-  kind: 'RECORDED' | 'CORRECTED' | 'UNDONE';
+  /** RECORDED / CORRECTED / UNDONE = the damage report; RECEIVED / WAIVED / COLLECTION_CLEARED =
+   *  whether the deposit itself was collected (`note` = the waive reason, INTERNAL — never printed). */
+  kind: 'RECORDED' | 'CORRECTED' | 'UNDONE' | 'RECEIVED' | 'WAIVED' | 'COLLECTION_CLEARED';
+  note?: string;
   depositTotal?: number;
   claimsTotal?: number;
   refundAmount?: number;
@@ -284,12 +294,42 @@ export interface OrderDepositSettlement {
 }
 
 /** The order's refundable security deposit — absent when no line can carry a deposit or damage. */
+export type OrderDepositCollectionStatus = 'PENDING' | 'RECEIVED' | 'WAIVED';
+
+/**
+ * Was the deposit actually COLLECTED from the client? `PENDING` until recorded — at the delivery
+ * step (the advance dialog) or any time from the deposit card. `WAIVED` = handed over without a
+ * deposit on purpose (a relative, a trusted client…): the deposit then counts as 0 everywhere — no
+ * refund, no retention, documents show no deposit — while lost/broken units can still be billed.
+ */
+export interface OrderDepositCollection {
+  status: OrderDepositCollectionStatus;
+  /** When it was received / waived; absent while PENDING. */
+  at?: string;
+  /** WAIVED only — an INTERNAL note, never printed on a client document. */
+  reason?: string;
+  /** May it be recorded/changed/cleared now: not cancelled and no damage report recorded (undo the
+   *  report first — the report's money was computed from it). */
+  canRecord: boolean;
+}
+
 export interface OrderSecurityDeposit {
   /** Σ rental lines' deposit × quantity — collected ON TOP of the order, never in `totalAmount`. */
   total: number;
+  /** The deposit the damage report counts: `total`, or 0 when WAIVED. Server-computed. */
+  held: number;
+  /** Absent when `total` is 0 (replacement values only — there is no deposit to collect). */
+  collection?: OrderDepositCollection;
   /** May a settlement be recorded/changed now (delivered, not cancelled). Undo is always possible. */
   canSettle: boolean;
   settlement?: OrderDepositSettlement;
+}
+
+/** `PUT /orders/:id/deposit-collection` (and `depositCollection` on the delivery advance). */
+export interface DepositCollectionBody {
+  received: boolean;
+  /** Required (1–500 chars) when `received` is false; ignored otherwise. */
+  reason?: string;
 }
 
 /** `PUT /orders/:id/settlement` — the settlement's FINAL state (declarative). */

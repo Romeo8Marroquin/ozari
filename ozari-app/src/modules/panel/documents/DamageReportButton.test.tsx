@@ -31,7 +31,14 @@ const order = {
   serviceStart: '2026-07-29T17:50:00Z',
   serviceEnd: '2026-07-31T22:50:00Z',
   pickupAt: '2026-07-31T22:50:00Z',
-  securityDeposit: { total: 100, canSettle: true },
+  totalAmount: 60,
+  depositAmount: 40,
+  securityDeposit: {
+    total: 100,
+    held: 100,
+    collection: { status: 'RECEIVED', canRecord: false },
+    canSettle: true,
+  },
   lines: [
     {
       id: 1,
@@ -86,26 +93,20 @@ beforeEach(() => {
 });
 
 describe('DamageReportButton', () => {
-  it('builds the FINAL report from the saved settlement', async () => {
+  it('builds the report from the settlement it is given, squared with the order', async () => {
     render(<DamageReportButton order={order} settlement={settlement} />);
     await userEvent.click(screen.getByRole('button', { name: LABEL }));
     await waitFor(() => expect(downloadDamageReport).toHaveBeenCalled());
     const { model } = lastInput();
-    expect(model.draft).toBe(false);
     expect(model.reference).toBe(42);
-    expect(model.settledAt).toEqual(new Date('2026-08-01T10:00:00Z'));
-    expect(model.totals.balanceDue).toBe(220);
-    // The banks travel with the letterhead — the template prints them only when a balance is due.
+    expect(model.totals.claims).toBe(320);
+    // Service 60 − anticipo 40 = 20 still due, + 320 claims − the 100 deposit = 240 to collect.
+    expect(model.balance).toMatchObject({ serviceDue: 20, depositCredit: 100, amount: 240 });
+    expect(model.balance.direction).toBe('collect');
+    // Issued at the download — the report's only date.
+    expect(model.issuedAt).toBeInstanceOf(Date);
+    // The banks travel with the letterhead — the template prints them only when the client pays.
     expect(model.letterhead.banks).toHaveLength(1);
-  });
-
-  it('marks a report built from unsaved form values as a DRAFT', async () => {
-    render(<DamageReportButton order={order} settlement={settlement} draft />);
-    await userEvent.click(screen.getByRole('button', { name: LABEL }));
-    await waitFor(() => expect(downloadDamageReport).toHaveBeenCalled());
-    expect(lastInput().model.draft).toBe(true);
-    // A draft has recorded nothing, so it states no settlement date.
-    expect(lastInput().model.settledAt).toBeUndefined();
   });
 
   it('hands the template the order’s currency and the shared formatters', async () => {
@@ -121,15 +122,16 @@ describe('DamageReportButton', () => {
     // The vocabulary is the report's own, on top of the shared frame words — and every leaf is
     // contract-checked by the global `t` mock (the key must exist in es.json).
     expect(input.copy.title).toBe(`${KEY}.damageReport.title`);
-    expect(input.copy.draftMark).toBe(`${KEY}.damageReport.draftMark`);
-    expect(input.copy.balanceDue).toBe(`${KEY}.damageReport.totals.balanceDue`);
+    expect(input.copy.noClaimsNoDeposit).toBe(`${KEY}.damageReport.noClaimsNoDeposit`);
     expect(input.copy.reference).toBe(`${KEY}.fields.reference`);
+    // The squared balance's words are the frame's, shared with the comprobante.
+    expect(input.copy.balance.collect).toBe(`${KEY}.balance.collect`);
+    expect(input.copy.balance.refund).toBe(`${KEY}.balance.refund`);
     expect(input.copy.page(1, 2)).toBe(`${KEY}.fields.page`);
     // Interpolated by i18next — the contract mock throws if a placeholder is left unfilled.
     expect(input.copy.claimsBreakdown('$ 20.00', '$ 300.00')).toBe(
       `${KEY}.damageReport.totals.claimsBreakdown`,
     );
-    expect(input.copy.refundNote('$ 100.00')).toBe(`${KEY}.damageReport.totals.refundNote`);
   });
 
   it('is BUSY while the document is being produced, and comes back afterwards', async () => {
@@ -158,8 +160,8 @@ describe('DamageReportButton', () => {
     await waitFor(() => expect(button).not.toBeDisabled());
   });
 
-  it('is never a SUBMIT button — it lives inside the report-damages form', () => {
-    render(<DamageReportButton order={order} settlement={settlement} draft />);
+  it('is never a SUBMIT button — it can live inside the report-damages form', () => {
+    render(<DamageReportButton order={order} settlement={settlement} />);
     expect(screen.getByRole('button', { name: LABEL })).toHaveAttribute('type', 'button');
   });
 });

@@ -222,6 +222,70 @@ describe('OrderAdvanceModal', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:a.webp');
   });
 
+  describe('the deposit question on a delivery that offers it', () => {
+    const withCurrency = {
+      ...order,
+      currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
+    } as OrderListItem;
+    const delivery = () => action({ depositToCollect: 300 });
+    const received = () => screen.getByLabelText(`${KEY}.depositReceived`);
+    const reasonField = () => screen.getByLabelText(`${KEY}.depositReasonLabel`);
+
+    it('is checked by default and, untouched, sends { received: true } with the move', async () => {
+      render(<OrderAdvanceModal order={withCurrency} action={delivery()} onClose={vi.fn()} />);
+      expect(received()).toBeChecked();
+      // The reason waits collapsed and out of the tab order until the box is unchecked.
+      expect(screen.getByTestId('advance-deposit-reason')).toHaveAttribute('aria-hidden', 'true');
+      await userEvent.click(confirmButton());
+      await waitFor(() => expect(advanceOrder).toHaveBeenCalled());
+      expect(advanceOrder.mock.calls[0][0]).toEqual({
+        orderId: 12,
+        toStatusId: 5,
+        depositCollection: { received: true },
+      });
+    });
+
+    it('unchecked, it holds the move until a reason is given — then sends it trimmed', async () => {
+      render(<OrderAdvanceModal order={withCurrency} action={delivery()} onClose={vi.fn()} />);
+      await userEvent.click(received());
+      expect(screen.getByTestId('advance-deposit-reason')).toHaveAttribute('aria-hidden', 'false');
+      expect(screen.getByText(`${KEY}.depositHint`)).toBeInTheDocument();
+      expect(confirmButton()).toBeDisabled();
+      // "Required" is the disabled button's job — no red text on an untouched field.
+      expect(
+        screen.queryByText('modules.panel.orders.depositCollection.errors.reasonRequired'),
+      ).not.toBeInTheDocument();
+
+      await userEvent.type(reasonField(), '  Cliente de confianza ');
+      expect(confirmButton()).toBeEnabled();
+      await userEvent.click(confirmButton());
+      await waitFor(() => expect(advanceOrder).toHaveBeenCalled());
+      expect(advanceOrder.mock.calls[0][0]).toEqual({
+        orderId: 12,
+        toStatusId: 5,
+        depositCollection: { received: false, reason: 'Cliente de confianza' },
+      });
+    });
+
+    it('a reason over the ceiling speaks under the field', async () => {
+      render(<OrderAdvanceModal order={withCurrency} action={delivery()} onClose={vi.fn()} />);
+      await userEvent.click(received());
+      fireEvent.change(reasonField(), { target: { value: 'a'.repeat(501) } });
+      expect(
+        screen.getByText('modules.panel.orders.depositCollection.errors.reasonTooLong'),
+      ).toBeInTheDocument();
+      expect(confirmButton()).toBeDisabled();
+    });
+
+    it('a move that does not offer it never asks, and sends no depositCollection', async () => {
+      render(<OrderAdvanceModal order={withCurrency} action={action()} onClose={vi.fn()} />);
+      expect(screen.queryByLabelText(`${KEY}.depositReceived`)).not.toBeInTheDocument();
+      await userEvent.click(confirmButton());
+      await waitFor(() => expect(advanceOrder).toHaveBeenCalled());
+      expect(advanceOrder.mock.calls[0][0]).not.toHaveProperty('depositCollection');
+    });
+  });
+
   it('asks for a reason on a cancel and refuses to submit without one', async () => {
     render(
       <OrderAdvanceModal
