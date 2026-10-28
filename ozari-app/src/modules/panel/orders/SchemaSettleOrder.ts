@@ -57,7 +57,9 @@ export interface SettlementFormValues {
 
 /** What the per-order rules are measured against. */
 export interface SettlementSchemaContext {
-  /** The order's deposit total — the ceiling of what can be RETAINED. */
+  /** The order's NOMINAL deposit (`securityDeposit.total`) — the ceiling of what can be RETAINED,
+   *  received or not: a retention not received is charged whole, "that part of the deposit"
+   *  (owner, 2026-10-28). */
   depositTotal: number;
   currencySymbol: string;
   /** Each damageable line's ordered quantity — the ceiling of its lost/broken units. */
@@ -168,13 +170,14 @@ export interface SettlementPreview {
 
 /**
  * A LIVE ESTIMATE of the outcome while the admin types — the API's own formula (claims = retained +
- * lost/broken units at their replacement value; the deposit covers what it can, the rest of it is
- * refunded, and what it cannot cover is owed). Labelled as an estimate on screen: the saved
+ * lost/broken units at their replacement value; the HELD deposit — `securityDeposit.held`, 0 unless
+ * it was received — covers what it can, the rest of it is refunded, and what it cannot cover is
+ * owed). Labelled as an estimate on screen: the saved
  * settlement's numbers come back from the API, and the detail page shows only those. A value that is
  * not valid yet counts as 0, so the preview never shows a number built from a typo.
  */
 export function previewSettlement(
-  depositTotal: number,
+  held: number,
   values: SettlementFormValues,
   lines: ReadonlyMap<number, { quantity: number; unitAmount: number }>,
 ): SettlementPreview {
@@ -188,13 +191,13 @@ export function previewSettlement(
     }, 0),
   );
   const claimsTotal = roundMoney(retainedAmount + damagesTotal);
-  const applied = Math.min(depositTotal, claimsTotal);
+  const applied = Math.min(held, claimsTotal);
   return {
     retainedAmount,
     damagesTotal,
     claimsTotal,
-    refundAmount: roundMoney(depositTotal - applied),
-    balanceDue: roundMoney(Math.max(0, claimsTotal - depositTotal)),
+    refundAmount: roundMoney(held - applied),
+    balanceDue: roundMoney(Math.max(0, claimsTotal - held)),
   };
 }
 
@@ -207,15 +210,17 @@ export function previewSettlement(
  * note trimmed (blank ⇒ absent), the reason only alongside something retained, and `settledAt` = the
  * moment the page was opened. A value that is not valid counts as 0 here, exactly like the preview —
  * the page additionally offers the report only while the whole form validates, so a typo never prints.
- * The deposit is `held` (0 when it was handed over WITHOUT collecting it), never the nominal total.
- * Once saved, the document is built from the API's own numbers instead.
+ * The deposit is `held` — the API's figure, 0 unless the deposit was actually RECEIVED (owner,
+ * 2026-10-28) — never the nominal total: only money in hand is refunded or applied, so a deposit
+ * not received leaves every claim owed whole. Once saved, the document is built from the API's own
+ * numbers instead.
  */
 export function buildUnsavedSettlement(
   order: OrderDetail,
   values: SettlementFormValues,
   now: Date,
 ): OrderDepositSettlement {
-  const depositTotal = order.securityDeposit?.held ?? 0;
+  const held = order.securityDeposit?.held ?? 0;
   const lines = damageableLines(order.lines);
   const byId = new Map(lines.map((line) => [line.id, line]));
   const damages = values.damages.flatMap((row): OrderDamage[] => {
@@ -236,7 +241,7 @@ export function buildUnsavedSettlement(
     ];
   });
   const preview = previewSettlement(
-    depositTotal,
+    held,
     values,
     new Map(lines.map((line) => [line.id, { quantity: line.quantity, unitAmount: line.replacementPrice }])),
   );
@@ -248,7 +253,7 @@ export function buildUnsavedSettlement(
     damages,
     damagesTotal: preview.damagesTotal,
     claimsTotal: preview.claimsTotal,
-    appliedFromDeposit: roundMoney(Math.min(depositTotal, preview.claimsTotal)),
+    appliedFromDeposit: roundMoney(Math.min(held, preview.claimsTotal)),
     refundAmount: preview.refundAmount,
     balanceDue: preview.balanceDue,
   };

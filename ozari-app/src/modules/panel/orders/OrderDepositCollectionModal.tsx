@@ -20,23 +20,26 @@ const FORM_ID = 'order-deposit-collection-form';
 const SECONDARY_COLOR = '#262626';
 const DANGER_COLOR = '#dc2626';
 
-/** What the dialog records: the deposit was received, goods go out without it, or the record is
- *  cleared back to PENDING ("Corregir"). */
+/** What the dialog records: the deposit was received, it was NOT received (with why), or the record
+ *  is cleared back to PENDING ("Corregir"). */
 export type DepositCollectionMode = 'receive' | 'waive' | 'clear';
 
 /**
- * The Depósito card's "Cobro del depósito" dialogs — one component, three acts, because they share
- * everything but their copy and their body:
+ * The deposit's "¿Se recibió el depósito?" dialogs — one component, three acts, because they share
+ * everything but their copy and their body. Opened from the Depósito card, and from the "Reportar
+ * daños" page when the deposit is not received (only a RECEIVED deposit is money we have — owner,
+ * 2026-10-28 — so recording it there recomputes the report in place):
  *
- * - `receive` → a quick confirm, `PUT { received: true }`;
- * - `waive` → the REQUIRED reason (an internal note, never printed for the client), mirrored by
- *   `SchemaDepositCollection`, `PUT { received: false, reason }`;
+ * - `receive` → a quick confirm, `PUT { received: true }` (also from WAIVED: it may arrive later);
+ * - `waive` → "no recibido" — the REQUIRED reason (an internal note, never printed for the client),
+ *   mirrored by `SchemaDepositCollection`, `PUT { received: false, reason }`. It never means the
+ *   deposit was forgiven: it is simply not in our hands;
  * - `clear` → a confirm of the "Corregir", `DELETE` (back to pending; it moves no money).
  *
  * Confirm FIRST (FRONTEND-DOCTRINE §7): the dialog holds (`locked`) until the server answers; the
  * response's order is seeded into the detail and the hooks re-read every view. Errors follow the
- * form doctrine (`skipErrorNotification` + `toFormError`): a 409 — a damage report exists, or the
- * screen was stale — lands inline. The reason is a `<textarea>`, so it is submitted by its button
+ * form doctrine (`skipErrorNotification` + `toFormError`): a 409 — a cancelled order, or a stale
+ * screen — lands inline. The reason is a `<textarea>`, so it is submitted by its button
  * (Enter inserts a newline — FRONTEND-DOCTRINE §8), inside a real `noValidate` form.
  */
 const OrderDepositCollectionModal: React.FC<{

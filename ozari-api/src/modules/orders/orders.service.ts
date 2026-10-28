@@ -244,27 +244,29 @@ export const depositCollectionStatus = (
 };
 
 /**
- * THE deposit a settlement counts — the one rule, in one place: the nominal deposit, or 0 when its
- * collection was WAIVED (there is no deposit to refund or retain from; replacement billing still
- * applies in full). Every settlement figure, the retention ceiling, the history snapshot, the order
- * edit's re-check and the dashboard read it through here.
+ * THE deposit a settlement counts — the one rule, in one place (owner 2026-10-28: only a deposit
+ * actually RECEIVED is money we have): the nominal deposit when its collection is RECEIVED, 0 while
+ * it is PENDING or WAIVED (there is nothing in hand to refund or apply; every claim is owed on top).
+ * Every settlement figure, the history snapshot and the dashboard read it through here. The
+ * retention CEILING is not this — it is the nominal `computeDepositTotal` (a retention is "that part
+ * of the deposit", billed even when the deposit never reached us).
  */
 export const heldDeposit = (
-  order: Pick<DepositCollectionStampsModel, "depositWaivedAt"> & {
+  order: Pick<DepositCollectionStampsModel, "depositReceivedAt"> & {
     serviceDetails: readonly DepositLineModel[];
   },
-): number => (order.depositWaivedAt !== null ? 0 : computeDepositTotal(order.serviceDetails));
+): number => (order.depositReceivedAt === null ? 0 : computeDepositTotal(order.serviceDetails));
 
-/** May the collection be recorded / changed / cleared now: not cancelled, and no damage report (its
- *  money was computed from the collection — the report is undone first). */
-export const canRecordDepositCollection = (order: {
-  cancelledAt: Date | null;
-  depositSettledAt: Date | null;
-}): boolean => order.cancelledAt === null && order.depositSettledAt === null;
+/** May the collection be recorded / changed / cleared now: whenever the order is not cancelled —
+ *  before OR after the damage report (owner 2026-10-28: a deposit received late is recorded on the
+ *  detail; the report's money is computed live, so it simply follows). */
+export const canRecordDepositCollection = (order: { cancelledAt: Date | null }): boolean =>
+  order.cancelledAt === null;
 
 /**
  * The nominal deposit still to be asked about at the delivery — or `undefined` when there is nothing
- * to ask: no deposit, already received/waived, cancelled, or a damage report already recorded. The
+ * to ask: no deposit, already received/waived, cancelled, or a damage report already recorded (the
+ * delivery dialog is a PRE-report question; after it, the collection is changed on the detail). The
  * delivery action's `depositToCollect` AND the advance's acceptance of `depositCollection` both read
  * it, so the dialog is offered exactly when the write would be applied.
  */
@@ -278,6 +280,7 @@ export const pendingDepositToCollect = (
   const total = computeDepositTotal(order.serviceDetails);
   return total > 0 &&
     depositCollectionStatus(order) === "PENDING" &&
+    order.depositSettledAt === null &&
     canRecordDepositCollection(order)
     ? total
     : undefined;
@@ -384,7 +387,6 @@ export function assertSettlementSurvivesEdit(
   order: {
     depositSettledAt: Date | null;
     depositRetainedAmount: Prisma.Decimal | null;
-    depositWaivedAt: Date | null;
     serviceDetails: ReadonlyArray<{ productId: number; damagedQuantity: number }>;
   },
   next: readonly PricedOrderLineModel[],
@@ -403,10 +405,9 @@ export function assertSettlementSurvivesEdit(
   if (order.depositSettledAt === null) {
     return;
   }
-  // The NEW lines' deposit through the same rule as everywhere (`heldDeposit`): a waived collection
-  // holds nothing, so any recorded retention conflicts with it.
-  const nextHeld = heldDeposit({ depositWaivedAt: order.depositWaivedAt, serviceDetails: next });
-  if (Number(order.depositRetainedAmount ?? 0) > nextHeld) {
+  // The retention ceiling is the NEW lines' NOMINAL deposit — the same ceiling the report itself
+  // enforces (whether the deposit was received only decides what is refunded vs owed, live).
+  if (Number(order.depositRetainedAmount ?? 0) > computeDepositTotal(next)) {
     throw new OrderSettlementConflictError();
   }
 }

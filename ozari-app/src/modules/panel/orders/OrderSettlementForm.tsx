@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { FormProvider, useForm, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
+import { HiOutlineBanknotes } from 'react-icons/hi2';
 import Button from '@components/Button';
 import CustomInputForm from '@components/CustomInputForm';
 import CustomTextareaForm from '@components/CustomTextareaForm';
@@ -15,6 +16,7 @@ import DamageReportButton from '../documents/DamageReportButton';
 import { usePanelNavigate } from '../PanelNavContext';
 import { FormSection } from '../products/ProductFormChrome';
 import { formatMoney } from './orderEstimate';
+import OrderDepositCollectionModal from './OrderDepositCollectionModal';
 import {
   buildUnsavedSettlement,
   createSettlementSchema,
@@ -64,6 +66,12 @@ const PreviewLine: React.FC<{ label: string; amount: string; className?: string 
  * offered only while something is claimed AND the whole form validates against the very schema the
  * resolver uses — a typo never prints. Always mounted inside a `grid-rows` collapse (`inert` while
  * closed), so it eases in and out with the numbers instead of popping.
+ *
+ * **Only a deposit actually RECEIVED is money we have** (owner, 2026-10-28). The retention's ceiling
+ * is the NOMINAL deposit (`total`) — it is charged even when the deposit never arrived — while the
+ * outcome counts the API's `held` (0 unless received): with nothing in hand, nothing comes back and
+ * every claim is owed whole. That case gets an amber notice with "Registrar depósito recibido",
+ * which opens the deposit card's own collection dialog in place.
  */
 const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurityDeposit }> = ({
   order,
@@ -83,13 +91,24 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
   );
   const [schema] = useState(() =>
     createSettlementSchema({
-      // `held`, not `total`: a deposit handed over WITHOUT collecting it (WAIVED) holds nothing.
-      depositTotal: deposit.held,
+      // The NOMINAL deposit, received or not (owner, 2026-10-28): a retention is "that part of the
+      // deposit", asked for even when the deposit itself never arrived. It cannot change while the
+      // page is open — recording the collection moves `held`, never `total`.
+      depositTotal: deposit.total,
       currencySymbol: order.currency.symbol,
       maxByLine: new Map(lines.map((line) => [line.id, line.quantity])),
     }),
   );
-  const hasDeposit = deposit.held > 0;
+  // The order carries a deposit at all — a retention can be charged.
+  const hasDeposit = deposit.total > 0;
+  // …and it is actually IN HAND (the API's `held`: 0 unless RECEIVED) — only then does anything
+  // come back, or get applied against the claims.
+  const inHand = deposit.held > 0;
+  // A deposit the order carries but nobody has recorded as received (PENDING or WAIVED — a legacy
+  // order without a collection reads PENDING): the claims are billed whole, so the page says so and
+  // lets the admin record it in place if it did arrive.
+  const notReceived = hasDeposit && deposit.collection?.status !== 'RECEIVED';
+  const [recordingCollection, setRecordingCollection] = useState(false);
   // The unsaved report's date — when this page was opened. Captured once (render stays pure).
   const [openedAt] = useState(() => new Date());
 
@@ -136,12 +155,36 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
     <FormProvider {...methods}>
       {/* `noValidate`: our mirrored messages speak, never the browser's untranslated bubble. */}
       <form id={FORM_ID} noValidate onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6">
-        {/* Nothing held (handed over without a deposit, or replacement values only): there is
-            nothing to retain from, so the retention section is gone and this line says why. */}
+        {/* No deposit on the order at all (replacement values only): there is nothing to retain,
+            so the retention section is gone and this line says why. */}
         {!hasDeposit && (
           <p className="reveal-block rounded-control bg-charcoal/[0.04] px-4 py-3 text-sm text-charcoal/70">
-            {t(`${KEY}.noDepositHeld`)}
+            {t(`${KEY}.noDeposit`)}
           </p>
+        )}
+        {/* A deposit NOT received: the retention and the pieces are charged whole, nothing comes
+            back. The label/control row rule — the sentence carries the `basis-56` floor and the
+            row wraps, so the action folds under it on a narrow page. */}
+        {notReceived && (
+          <div
+            role="note"
+            className="reveal-block flex flex-wrap items-center gap-x-4 gap-y-2 rounded-control bg-amber-50 px-4 py-3"
+          >
+            <p className="min-w-0 grow basis-56 text-sm text-amber-900">
+              {t(`${KEY}.notReceived.text`)}
+            </p>
+            {deposit.collection?.canRecord && (
+              <Button
+                variant="soft"
+                size="sm"
+                color={SECONDARY_COLOR}
+                startIcon={<HiOutlineBanknotes className="size-4" />}
+                onClick={() => setRecordingCollection(true)}
+              >
+                {t(`${KEY}.notReceived.action`)}
+              </Button>
+            )}
+          </div>
         )}
         {hasDeposit && (
           <FormSection
@@ -156,7 +199,7 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
                 label={t(`${KEY}.fields.retainedLabel`)}
                 placeholder={t(`${KEY}.fields.moneyPlaceholder`)}
                 aria-label={t(`${KEY}.fields.retainedLabel`)}
-                instructions={t(`${KEY}.fields.retainedHint`, { deposit: money(deposit.held) })}
+                instructions={t(`${KEY}.fields.retainedHint`, { deposit: money(deposit.total) })}
                 // Whether the reason is required follows this amount.
                 deps={['retainedReason']}
               />
@@ -242,27 +285,39 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
               />
             )}
             <div aria-live="polite" className="flex flex-col gap-2 border-t border-charcoal/10 pt-2">
-              <PreviewLine
-                label={t(`${KEY}.preview.refund`)}
-                amount={money(preview.refundAmount)}
-                className="font-semibold text-charcoal"
-              />
-              {/* Always mounted, collapsed by `grid-rows` — a line that appears mid-typing must
-                  ease in, never pop and shove the card. */}
-              <div
-                aria-hidden={preview.balanceDue <= 0}
-                className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
-                  preview.balanceDue > 0 ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
-                }`}
-              >
-                <div className="min-h-0 overflow-hidden">
+              {inHand ? (
+                <>
                   <PreviewLine
-                    label={t(`${KEY}.preview.balanceDue`)}
-                    amount={money(preview.balanceDue)}
-                    className="font-semibold text-red-600"
+                    label={t(`${KEY}.preview.refund`)}
+                    amount={money(preview.refundAmount)}
+                    className="font-semibold text-charcoal"
                   />
-                </div>
-              </div>
+                  {/* Always mounted, collapsed by `grid-rows` — a line that appears mid-typing
+                      must ease in, never pop and shove the card. */}
+                  <div
+                    aria-hidden={preview.balanceDue <= 0}
+                    className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
+                      preview.balanceDue > 0 ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                    }`}
+                  >
+                    <div className="min-h-0 overflow-hidden">
+                      <PreviewLine
+                        label={t(`${KEY}.preview.balanceDue`)}
+                        amount={money(preview.balanceDue)}
+                        className="font-semibold text-red-600"
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                // Nothing in hand: nothing comes back, so the one result is what is owed — every
+                // claim, whole.
+                <PreviewLine
+                  label={t(`${KEY}.preview.balanceDue`)}
+                  amount={money(preview.balanceDue)}
+                  className={`font-semibold ${preview.balanceDue > 0 ? 'text-red-600' : 'text-charcoal'}`}
+                />
+              )}
             </div>
           </div>
           <p className="mt-2 text-xs text-charcoal/45">{t(`${KEY}.preview.note`)}</p>
@@ -315,6 +370,15 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
           </div>
         </div>
       </form>
+      {/* OUTSIDE the form: the dialog is portaled in the DOM, but React's synthetic `submit` still
+          bubbles through the component tree — nested, its confirm would also submit the report.
+          Its success seeds the order query, so this page re-renders with the new `held` and every
+          figure above recomputes in place; the typed values are untouched. */}
+      <OrderDepositCollectionModal
+        order={recordingCollection ? order : undefined}
+        mode={recordingCollection ? 'receive' : undefined}
+        onClose={() => setRecordingCollection(false)}
+      />
     </FormProvider>
   );
 };

@@ -221,8 +221,8 @@ export const PENDING_DEPOSITS_LIMIT = 5;
 /** The `select` for a settled order: exactly what `summarizeSettlements` re-derives the outcome from. */
 export const settledDepositSelect = {
   depositRetainedAmount: true,
-  // A waived collection holds no deposit (`heldDeposit`) — the summary must know it.
-  depositWaivedAt: true,
+  // Only a RECEIVED collection holds the deposit (`heldDeposit`) — the summary must know it.
+  depositReceivedAt: true,
   serviceDetails: {
     where: { isActive: true },
     select: {
@@ -238,7 +238,7 @@ export const settledDepositSelect = {
 /** A settled order as the month summary reads it: the retention + its lines' snapshots and damage. */
 export interface SettledDepositRowModel {
   depositRetainedAmount: Prisma.Decimal | null;
-  depositWaivedAt: Date | null;
+  depositReceivedAt: Date | null;
   serviceDetails: readonly (DepositLineModel & { damagedQuantity: number })[];
 }
 
@@ -254,7 +254,7 @@ export function projectDeposits(
   return {
     pending: {
       orders: pendingRows.length,
-      // The HELD deposits — a waived one is money that never came in, so it is not "in hand".
+      // The HELD deposits — only a RECEIVED one is "in hand"; a pending or waived one counts 0.
       amount: round2(pendingRows.reduce((sum, row) => sum + heldDeposit(row), 0)),
       items: pendingRows
         .slice(0, PENDING_DEPOSITS_LIMIT)

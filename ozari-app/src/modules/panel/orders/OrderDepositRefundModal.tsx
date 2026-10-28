@@ -15,8 +15,8 @@ const KEY = 'modules.panel.orders.depositRefund';
 const SECONDARY_COLOR = '#262626';
 
 /**
- * The deposit's HAPPY PATH — "Devolver depósito" (or "Sin daños" when the order carries only
- * replacement values and no deposit): one confirm that records the settlement with nothing claimed,
+ * The deposit's HAPPY PATH — "Devolver depósito" (or "Registrar sin daños" when no deposit is in
+ * hand: the order carries only replacement values, or its deposit was not received): one confirm that records the settlement with nothing claimed,
  * `{ retainedAmount: 0, damages: [] }`, through the same `PUT /orders/:id/settlement` the
  * "Reportar daños" page uses. The common case should cost one tap and one confirmation, not a form.
  *
@@ -48,9 +48,14 @@ const OrderDepositRefundModal: React.FC<{
   }
   if (order && order !== shown) setShown(order);
 
-  // What goes back is what was HELD — 0 when the goods left without collecting the deposit, which
-  // makes this the "Sin daños" confirmation even though the order states a deposit.
-  const total = shown?.securityDeposit?.held ?? 0;
+  // What goes back is what is HELD — the API's figure, 0 unless the deposit was actually RECEIVED
+  // (owner, 2026-10-28). Nothing in hand makes this the "Registrar sin daños" confirmation, never a
+  // "Devolver Q…", even though the order states a deposit; and when it states one that was not
+  // received (pending or recorded as not received), the description says why nothing goes back.
+  const deposit = shown?.securityDeposit;
+  const total = deposit?.held ?? 0;
+  const notReceived =
+    deposit !== undefined && deposit.total > 0 && deposit.collection?.status !== 'RECEIVED';
   const symbol = shown?.currency.symbol ?? '';
   const client = shown?.clientName ?? '';
   const variant = total > 0 ? '' : 'NoDeposit';
@@ -90,7 +95,7 @@ const OrderDepositRefundModal: React.FC<{
       description={
         total > 0
           ? t(`${KEY}.description`, { amount: formatMoney(symbol, total) })
-          : t(`${KEY}.descriptionNoDeposit`)
+          : t(`${KEY}.${notReceived ? 'descriptionNotReceived' : 'descriptionNoDeposit'}`)
       }
       footer={
         <>

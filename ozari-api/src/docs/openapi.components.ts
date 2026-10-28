@@ -943,8 +943,10 @@ export const schemas: Record<string, Schema> = {
       held: {
         type: "number",
         description:
-          "The deposit the settlement counts: `total`, or 0 when the collection was WAIVED. Every " +
-          "settlement figure (refund, retention ceiling, balance due) is computed from THIS.",
+          "The deposit the settlement counts: `total` only when the collection is RECEIVED, 0 while " +
+          "PENDING or WAIVED (only money actually received is in hand). The refund, the amount " +
+          "applied from the deposit and the balance due are computed from THIS; the retention " +
+          "ceiling is the nominal `total`.",
         example: 200,
       },
       collection: {
@@ -964,9 +966,10 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     description:
       "Was the deposit actually COLLECTED? PENDING until recorded — at the delivery step (the " +
-      "advance's `depositCollection`) or any time via `PUT /orders/{id}/deposit-collection`. WAIVED " +
-      "= handed over without a deposit on purpose: it then counts as 0 for the settlement (no " +
-      "refund, no retention), while lost/broken units can still be billed at replacement value.",
+      "advance's `depositCollection`) or any time via `PUT /orders/{id}/deposit-collection`, before " +
+      "or after the damage report. WAIVED = not received (the reason says why). Only RECEIVED " +
+      "counts as held: while PENDING or WAIVED the settlement refunds nothing and every claim " +
+      "(retention and replacements) is owed as `balanceDue`.",
     properties: {
       status: { type: "string", enum: ["PENDING", "RECEIVED", "WAIVED"], example: "RECEIVED" },
       at: {
@@ -983,8 +986,8 @@ export const schemas: Record<string, Schema> = {
       canRecord: {
         type: "boolean",
         description:
-          "May it be recorded / changed / cleared now: not cancelled and no damage report recorded " +
-          "(undo the report first — its money was computed from it).",
+          "May it be recorded / changed / cleared now: whenever the order is not cancelled — also " +
+          "after the damage report (its money recomputes live from the collection).",
         example: true,
       },
     },
@@ -1792,7 +1795,11 @@ export const schemas: Record<string, Schema> = {
                 type: "object",
                 properties: {
                   orders: { type: "integer", example: 2 },
-                  amount: { type: "number", example: 400 },
+                  amount: {
+                    type: "number",
+                    description: "Σ their HELD deposits — only RECEIVED ones count (money in hand).",
+                    example: 400,
+                  },
                   items: { type: "array", items: schemaRef("OrderListItem") },
                 },
               },

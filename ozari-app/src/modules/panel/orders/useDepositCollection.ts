@@ -19,11 +19,12 @@ async function rereadAfterWrite(queryClient: QueryClient, orderId: number): Prom
 }
 
 /**
- * Records whether the deposit was COLLECTED (`PUT /orders/:id/deposit-collection`, Admin-only):
- * `{ received: true }`, or `{ received: false, reason }` for goods handed over without it. Its own
- * axis like payment and the damage report — never a lifecycle step. `skipErrorNotification` because
- * the dialog owns its errors (`toFormError`: the 400 contract and the 409 "a damage report exists /
- * cancelled" land inline).
+ * Records whether the deposit was RECEIVED (`PUT /orders/:id/deposit-collection`, Admin-only):
+ * `{ received: true }`, or `{ received: false, reason }` — not received (yet). Its own axis like
+ * payment and the damage report — never a lifecycle step — and recordable after a damage report too:
+ * the report's money then recomputes server-side (owner, 2026-10-28). `skipErrorNotification`
+ * because the dialog owns its errors (`toFormError`: the 400 contract and the 409 "cancelled" land
+ * inline).
  */
 export function useRecordDepositCollection() {
   const queryClient = useQueryClient();
@@ -42,8 +43,8 @@ export function useRecordDepositCollection() {
 
 /**
  * Clears the recorded collection back to PENDING (`DELETE /orders/:id/deposit-collection`) — the
- * "Corregir" of a mis-tap. The API refuses (409) while a damage report exists (its money was computed
- * from it — undo the report first) or when nothing is recorded; the dialog shows that inline.
+ * "Corregir" of a mis-tap. The API refuses (409) on a cancelled order or when nothing is recorded;
+ * the dialog shows that inline.
  */
 export function useClearDepositCollection() {
   const queryClient = useQueryClient();

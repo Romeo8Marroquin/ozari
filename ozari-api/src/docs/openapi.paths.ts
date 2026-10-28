@@ -2109,11 +2109,13 @@ export const paths: OpenAPIV3.PathsObject = {
         "**Trail:** every successful write appends a `depositHistory` row — `RECORDED` the first " +
         "time, `CORRECTED` on a re-send — with the outcome's money as it stands at that moment. The " +
         "one-tap \"Devolver depósito\" is this same call with `retainedAmount: 0` and no damages.\n\n" +
-        "**Counts the HELD deposit** (`securityDeposit.held`): 0 when its collection was WAIVED — " +
-        "nothing is refunded, any retention is a `400 retainedAboveDeposit`, and replacements are " +
-        "billed in full as `balanceDue`. **A report on a still-PENDING collection** (deposit > 0) " +
-        "also stamps it RECEIVED and appends a `RECEIVED` trail row first — recording what came back " +
-        "confirms the deposit was in hand. Undoing the report does not revert that.",
+        "**Counts the HELD deposit** (`securityDeposit.held`): the deposit only when its collection " +
+        "is RECEIVED, 0 while PENDING or WAIVED — then nothing is refunded and every claim " +
+        "(retention and replacements) is owed as `balanceDue`. **The retention is capped by the " +
+        "NOMINAL deposit** (`securityDeposit.total`, else `400 retainedAboveDeposit`), whatever was " +
+        "collected. Recording a report **never changes the collection** — that is its own door " +
+        "(`PUT /orders/{id}/deposit-collection`), open before or after the report; the money " +
+        "recomputes live.",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 }, example: 12 },
@@ -2136,7 +2138,7 @@ export const paths: OpenAPIV3.PathsObject = {
                 collection: {
                   status: "RECEIVED",
                   at: "2026-08-01T15:00:00.000Z",
-                  canRecord: false,
+                  canRecord: true,
                 },
                 canSettle: true,
               },
@@ -2218,15 +2220,16 @@ export const paths: OpenAPIV3.PathsObject = {
       operationId: "recordDepositCollection",
       description:
         "**STRICTLY Admin.** `received: true` stamps the deposit RECEIVED; `received: false` WAIVES " +
-        "it (with a required reason) — the goods went out without a deposit on purpose, so it counts " +
-        "as 0 for the damage report (no refund, no retention, the documents show no deposit) while " +
-        "lost/broken units can still be billed at their replacement value. The two are mutually " +
-        "exclusive: each write clears the other.\n\n" +
+        "it (with a required reason) — the deposit was not received. The two are mutually " +
+        "exclusive: each write clears the other. **Only a RECEIVED deposit is held**: while PENDING " +
+        "or WAIVED the damage report refunds nothing and owes every claim (the retention, capped by " +
+        "the nominal deposit, and the replacements) as `balanceDue`.\n\n" +
         "Normally answered at the delivery step (the advance's `depositCollection`); this door " +
-        "records or corrects it any time — clients often transfer the deposit with the advance " +
-        "payment. **Declarative:** re-sending the same answer keeps the original timestamp and " +
-        "appends nothing; a change appends a `RECEIVED`/`WAIVED` row to `depositHistory` " +
-        "(`depositTotal` = the nominal deposit, `note` = the waive reason).",
+        "records, corrects or clears it any time the order is not cancelled — **before or after " +
+        "the damage report** (a deposit received late is recorded here; the report's money " +
+        "recomputes live). **Declarative:** re-sending the same answer keeps the original " +
+        "timestamp and appends nothing; a change appends a `RECEIVED`/`WAIVED` row to " +
+        "`depositHistory` (`depositTotal` = the nominal deposit, `note` = the waive reason).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 }, example: 12 },
@@ -2266,10 +2269,9 @@ export const paths: OpenAPIV3.PathsObject = {
         "403": adminOnly(),
         "404": errorResponse(NO_SUCH_ORDER, 404, ORDER_MISSING_MESSAGE),
         "409": errorResponse(
-          "`notApplicable` — cancelled, or the order carries no deposit; `settled` — a damage " +
-            "report exists (undo it first: its money was computed from the collection).",
+          "`notApplicable` — cancelled, or the order carries no deposit.",
           409,
-          "This order already has a damage report; undo it first",
+          "This order has no deposit to collect, or it is cancelled",
         ),
         "429": rateLimited,
         "500": serverError,
@@ -2282,8 +2284,8 @@ export const paths: OpenAPIV3.PathsObject = {
       description:
         "**STRICTLY Admin.** Clears the received/waived stamps and the reason — the deposit reads " +
         "PENDING again (it moves no money) — and appends a `COLLECTION_CLEARED` row to " +
-        "`depositHistory`. `409` when nothing is recorded, while a damage report exists, or on a " +
-        "cancelled order (the detail's `collection.canRecord`).",
+        "`depositHistory`. Allowed after a damage report too (its money recomputes live). `409` " +
+        "when nothing is recorded or on a cancelled order (the detail's `collection.canRecord`).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 }, example: 12 },
@@ -2310,8 +2312,7 @@ export const paths: OpenAPIV3.PathsObject = {
         "403": adminOnly(),
         "404": errorResponse(NO_SUCH_ORDER, 404, ORDER_MISSING_MESSAGE),
         "409": errorResponse(
-          "`notRecorded` — nothing to clear; `settled` — a damage report exists; `notApplicable` — " +
-            "the order is cancelled.",
+          "`notRecorded` — nothing to clear; `notApplicable` — the order is cancelled.",
           409,
           "This order has no deposit collection recorded",
         ),

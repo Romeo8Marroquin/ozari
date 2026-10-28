@@ -612,8 +612,29 @@ describe('OrderDetailPage', () => {
           },
           // A correction back to nothing claimed, with the money fields absent.
           { id: 7, kind: 'CORRECTED', byUserName: 'Romeo', at: at('2026-08-07T10:00:00') },
-          // A first record that carried no figures reads as a clean return.
+          // A first record with nothing HELD then (no figures — the deposit not received) gave
+          // nothing back: it reads "Registrado sin daños", never "Depósito devuelto".
           { id: 8, kind: 'RECORDED', byUserName: 'Romeo', at: at('2026-08-08T10:00:00') },
+          // Damages against a deposit NOT received (held 0): billed whole, no "se devuelve".
+          {
+            id: 13,
+            kind: 'RECORDED',
+            depositTotal: 0,
+            claimsTotal: 90,
+            refundAmount: 0,
+            balanceDue: 90,
+            byUserName: 'Romeo',
+            at: at('2026-08-09T10:00:00'),
+          },
+          // A correction with a deposit held but no refund figure reads "se devuelve Q0.00".
+          {
+            id: 14,
+            kind: 'CORRECTED',
+            depositTotal: 500,
+            claimsTotal: 500,
+            byUserName: 'Romeo',
+            at: at('2026-08-10T10:00:00'),
+          },
         ],
       }),
     });
@@ -630,13 +651,17 @@ describe('OrderDetailPage', () => {
       `${KEY}.history.depositUndone`,
       `${KEY}.history.depositDamaged`,
       `${KEY}.history.depositCorrected`,
-      `${KEY}.history.depositRefunded`,
+      `${KEY}.history.depositNoDamage`,
+      `${KEY}.history.depositDamaged`,
+      `${KEY}.history.depositCorrected`,
     ]);
     // Corrections and damages carry the money as it stood then; the balance only when one is owed.
-    expect(screen.getAllByText(new RegExp(`${KEY}.history.depositSummary`))).toHaveLength(3);
+    // With a deposit held then, "Daños · se devuelve"; with none held, only the damages.
+    expect(screen.getAllByText(new RegExp(`${KEY}.history.depositSummary(?!NoDeposit)`))).toHaveLength(3);
+    expect(screen.getAllByText(new RegExp(`${KEY}.history.depositSummaryNoDeposit`))).toHaveLength(2);
     expect(
       screen.getAllByText(new RegExp(`${KEY}.history.depositBalance`)),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
 
   it('the deposit COLLECTION joins the trail: received (with its amount), waived (with its note), cleared', () => {

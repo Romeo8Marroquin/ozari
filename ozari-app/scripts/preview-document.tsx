@@ -31,9 +31,11 @@
  *       `retention`  a retention only (`--retention=N` sets it; 150 by default);
  *       `uncovered`  a replacement on a line that carried NO deposit at all.
  *       (`pnpm doc:preview:deposit` / `:refunded` / `:damages` are the named shortcuts.)
- *   `--collection=pending|received|waived` — was the deposit handed over? Defaults: `pending` while
- *       held, `received` once reviewed. `waived` = delivered without a deposit on purpose: the
- *       document then shows none at all, and damages are billed whole.
+ *   `--collection=pending|received|waived` — was the deposit received? Defaults: `pending` while
+ *       held, `received` once reviewed. Only a RECEIVED deposit is money we have (owner, 2026-10-28):
+ *       after the review, `pending` and `waived` ("no recibido") credit nothing, the damages are
+ *       billed whole (the retention included), the report prints no "Depósito recibido" table, and
+ *       the box says "Depósito no recibido" under its result. Works with `--damage-report` too.
  *   `--paid` / `--unpaid` — the order's payment. Default: unpaid while held, paid once reviewed.
  *   `--advance=N` — the anticipo (500 by default, none with `--free`).
  *   `--retention=N` — the retained amount.
@@ -133,13 +135,16 @@ const collection: OrderDepositCollectionStatus | undefined = !carriesDeposit
           : reviewed
             ? 'RECEIVED'
             : 'PENDING';
-const waived = collection === 'WAIVED';
+/** Only a RECEIVED deposit is money in hand; any other status on a deposit-carrying order is not. */
+const received = collection === 'RECEIVED';
+const notReceived = collection !== undefined && !received;
 // The realistic case AFTER the pickup is a long-paid order; before it, an open one.
 const isPaid = !quote && (flag('--paid') || (reviewed && !flag('--unpaid')));
 
 // 120 chairs × Q5 + 12 tables × Q25 — the per-unit deposits the default rental lines carry.
 const DEPOSIT_TOTAL = 900;
-const RETAINED = waived || clean ? 0 : (retentionOption ?? 150);
+// A retention is charged up to the NOMINAL deposit, received or not (owner, 2026-10-28).
+const RETAINED = clean ? 0 : (retentionOption ?? 150);
 
 /** The fixture's two replacements, or N filler ones (`--damages=N`). */
 const replacementClaims: Extract<DocumentDepositClaim, { kind: 'replacement' }>[] =
@@ -332,9 +337,15 @@ const model: DocumentModel = {
     ...advanceRows(advance, total),
     ...(paidRemainder > 0 && { paid: paidRemainder }),
     balance,
+    ...(reviewed && notReceived && { depositNotReceived: true as const }),
   },
   ...(claims.length > 0 && {
-    damages: { withDeposit: carriesDeposit && !waived, claims, total: claimsTotal },
+    damages: {
+      withDeposit: received || retainedTotal > 0,
+      depositNotReceived: notReceived,
+      claims,
+      total: claimsTotal,
+    },
   }),
   currencySymbol: 'Q',
 };
@@ -364,7 +375,9 @@ const balanceCopy: BalanceCopy = {
   none: 'Sin saldo pendiente',
   depositOnHand: 'Depósito recibido',
   depositOnHandNote: 'Se devuelve al recoger, previa revisión.',
+  depositNotReceived: 'Depósito no recibido: los daños se cobran completos.',
 };
+const RETENTION_NOT_RECEIVED = 'El depósito no se recibió: este monto se cobra aparte.';
 
 const chrome: Omit<DocumentChromeCopy, 'title'> = {
   reference: 'No.',
@@ -416,6 +429,7 @@ const copy: DocumentCopy = {
   settlementTitle: 'Depósito y daños',
   damagesTitle: 'Daños',
   settlementRetention: 'Retención del depósito',
+  settlementRetentionNotReceived: RETENTION_NOT_RECEIVED,
   settlementReplacement: (product) => `Reposición: ${product}`,
   settlementReplacementDetail: (quantity, unitAmount) => `${quantity} × ${unitAmount} c/u`,
   settlementClaimsTotal: 'Total por daños',
@@ -434,6 +448,7 @@ const reportCopy: DamageReportCopy = {
   columnDepositEach: 'Depósito c/u',
   retentionTitle: 'Retención del depósito',
   retentionNoReason: 'Daño parcial sin descripción registrada.',
+  retentionNotReceived: RETENTION_NOT_RECEIVED,
   replacementsTitle: 'Piezas perdidas o rotas',
   columnUnits: 'Unidades',
   columnReplacementEach: 'Reposición c/u',
@@ -471,16 +486,17 @@ const reportModel: DamageReportModel = {
     deliveryAt: model.event.deliveryAt,
     ...(model.event.pickupAt !== undefined && { pickupAt: model.event.pickupAt }),
   },
-  // A waived deposit is no deposit: no table, no credit.
-  deposit: waived
-    ? { total: 0, lines: [] }
-    : {
+  // Only a RECEIVED deposit is printed as received: otherwise no table, no credit.
+  deposit: received
+    ? {
         total: DEPOSIT_TOTAL,
         lines: [
           { description: 'Sillas plásticas blancas', quantity: 120, unitAmount: 5, total: 600 },
           { description: 'Mesas rectangulares de 8 personas', quantity: 12, unitAmount: 25, total: 300 },
         ],
-      },
+      }
+    : { total: 0, lines: [] },
+  depositNotReceived: notReceived,
   ...(retainedTotal > 0 && { retention: { amount: retainedTotal, reason: RETENTION_REASON } }),
   replacements: reportReplacements,
   totals: {

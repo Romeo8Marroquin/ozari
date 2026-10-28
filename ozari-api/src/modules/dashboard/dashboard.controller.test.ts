@@ -177,12 +177,13 @@ describe("getDashboard", () => {
   it("counts EVERY open deposit but lists only the oldest few, as projected list items", async () => {
     const dec = (value: string) => new Prisma.Decimal(value);
     const delivered = new Date("2026-07-31T10:00:00.000Z");
-    // Seven open deposits of Q31.35 each (3 × Q10.45; the replacement-only line adds no deposit and
-    // the sold line's snapshot never counts).
+    // Seven open deposits of Q31.35 each, RECEIVED at the door (3 × Q10.45; the replacement-only
+    // line adds no deposit and the sold line's snapshot never counts).
     const pendingDeposits = Array.from({ length: 7 }, (_, index) =>
       rawOrder({
         id: 100 + index,
         deliveredAt: delivered,
+        depositReceivedAt: delivered,
         serviceDetails: [
           { quantity: 3, isRental: true, securityDeposit: dec("10.45"), replacementPrice: null },
           { quantity: 1, isRental: true, securityDeposit: null, replacementPrice: dec("80") },
@@ -190,8 +191,9 @@ describe("getDashboard", () => {
         ],
       }),
     );
-    // An eighth, WAIVED at the door: still awaiting its damage report (it has replacement values),
-    // but it holds no money — it counts as an order and adds nothing to the amount in hand.
+    // An eighth WAIVED at the door and a ninth still PENDING: both still await their damage report
+    // (they have replacement values), but neither holds money — each counts as an order and adds
+    // nothing to the amount in hand (owner 2026-10-28: only a RECEIVED deposit is in hand).
     pendingDeposits.push(
       rawOrder({
         id: 200,
@@ -202,13 +204,20 @@ describe("getDashboard", () => {
           { quantity: 3, isRental: true, securityDeposit: dec("10.45"), replacementPrice: dec("80") },
         ],
       }),
+      rawOrder({
+        id: 201,
+        deliveredAt: delivered,
+        serviceDetails: [
+          { quantity: 3, isRental: true, securityDeposit: dec("10.45"), replacementPrice: dec("80") },
+        ],
+      }),
     );
     const client = mockPrisma({
       pendingDeposits,
       settledDeposits: [
         {
           depositRetainedAmount: dec("50"),
-          depositWaivedAt: null,
+          depositReceivedAt: delivered,
           serviceDetails: [
             {
               isRental: true,
@@ -224,8 +233,8 @@ describe("getDashboard", () => {
     await getDashboard(req, res);
 
     const { deposits } = sentDashboard();
-    expect(deposits.pending.orders).toBe(8);
-    // 7 × 31.35 HELD (the waived one counts 0), rounded to cents (float addition would otherwise
+    expect(deposits.pending.orders).toBe(9);
+    // 7 × 31.35 HELD (the waived and the pending one count 0), rounded to cents (float addition would otherwise
     // leak `219.45000000000002`).
     expect(deposits.pending.amount).toBe(219.45);
     expect(deposits.pending.items.map((item) => item.id)).toEqual([100, 101, 102, 103, 104]);

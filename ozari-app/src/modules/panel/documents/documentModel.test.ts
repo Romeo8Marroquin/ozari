@@ -436,6 +436,7 @@ describe('fromOrderDetail — the security deposit, squared', () => {
     );
     expect(model.damages).toEqual({
       withDeposit: true,
+      depositNotReceived: false,
       claims: [
         { kind: 'retention', amount: 150, reason: 'Mantelería con daño físico' },
         {
@@ -485,10 +486,67 @@ describe('fromOrderDetail — the security deposit, squared', () => {
       { paidAt: '2026-08-01T00:00:00Z', isPaid: true },
     );
     expect(model.damages?.withDeposit).toBe(false);
+    expect(model.damages?.depositNotReceived).toBe(true);
+    expect(model.totals.depositNotReceived).toBe(true);
     expect(model.totals.balance).toMatchObject({
       depositCredit: 0,
       amount: 45,
       direction: 'collect',
+    });
+  });
+
+  // The owner's rule (2026-10-28): only a deposit actually RECEIVED is money we have.
+  it('a PENDING deposit after the report is never credited: retention + pieces billed whole', () => {
+    const model = withDeposit(
+      deposit('PENDING', {
+        held: 0,
+        settlement: settlement({
+          retainedAmount: 150,
+          retainedReason: 'Mantel manchado',
+          damages: [{ lineId: 1, productName: 'Silla', quantity: 2, unitAmount: 45, amount: 90 }],
+          damagesTotal: 90,
+          claimsTotal: 240,
+          refundAmount: 0,
+          balanceDue: 240,
+        }),
+      }),
+      { paidAt: '2026-08-01T00:00:00Z', isPaid: true },
+    );
+    // No "Depósito recibido −" credit, no deposit still asked for — the claims, whole.
+    expect(model.totals.balance).toMatchObject({
+      depositDue: 0,
+      depositCredit: 0,
+      claims: 240,
+      amount: 240,
+      direction: 'collect',
+    });
+    expect(model.totals.depositNotReceived).toBe(true);
+    // The retention is still "of the deposit" — the section keeps that title, with the caption flag.
+    expect(model.damages).toMatchObject({ withDeposit: true, depositNotReceived: true, total: 240 });
+  });
+
+  it('a RECEIVED deposit after the report carries no "no recibido" flag', () => {
+    const model = withDeposit(deposit('RECEIVED', { settlement: settlement() }));
+    expect(model.totals.depositNotReceived).toBeUndefined();
+  });
+
+  it('before the report there is no "no recibido" flag — the deposit is still asked for', () => {
+    const model = withDeposit(deposit('PENDING'));
+    expect(model.totals.depositNotReceived).toBeUndefined();
+  });
+
+  it('a legacy deposit with no collection reads PENDING', () => {
+    const legacy = withDeposit({ total: 500, held: 500, canSettle: false });
+    expect(legacy.totals.balance).toMatchObject({ depositDue: 500, amount: 650 });
+    const reported = withDeposit({
+      total: 500,
+      held: 0,
+      canSettle: true,
+      settlement: settlement({ claimsTotal: 45, damagesTotal: 45, refundAmount: 0 }),
+    });
+    expect(reported.totals).toMatchObject({
+      depositNotReceived: true,
+      balance: { depositCredit: 0, claims: 45 },
     });
   });
 });
@@ -846,9 +904,41 @@ describe('fromDamageReport', () => {
     });
     const model = fromDamageReport(waived, settlement({ retainedAmount: 0 }), letterhead, ISSUED_AT);
     expect(model.deposit).toEqual({ total: 0, lines: [] });
+    expect(model.depositNotReceived).toBe(true);
     expect(model.balance).toMatchObject({ depositCredit: 0, amount: 795.01, direction: 'collect' });
     // The waive reason is an internal note: nothing in the model can carry it to the page.
     expect(JSON.stringify(model)).not.toContain('Cliente frecuente');
+  });
+
+  it('a PENDING deposit is not money we have: no "Depósito recibido" section, claims whole', () => {
+    // Even if a stale projection still reported it held, the collection decides what is printed.
+    const pending = depositOrder({
+      securityDeposit: {
+        total: 500,
+        held: 500,
+        collection: { status: 'PENDING', canRecord: true },
+        canSettle: true,
+      },
+      paidAt: '2026-08-01T00:00:00Z',
+      isPaid: true,
+    });
+    const model = fromDamageReport(pending, settlement(), letterhead, ISSUED_AT);
+    expect(model.deposit).toEqual({ total: 0, lines: [] });
+    expect(model.depositNotReceived).toBe(true);
+    // The retention is still charged — up to the nominal deposit — and the pieces at full price.
+    expect(model.retention).toMatchObject({ amount: 150 });
+    expect(model.balance).toMatchObject({
+      depositDue: 0,
+      depositCredit: 0,
+      amount: 795.01,
+      direction: 'collect',
+    });
+  });
+
+  it('a RECEIVED deposit is printed and credited, with no "no recibido" flag', () => {
+    const model = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT);
+    expect(model.depositNotReceived).toBe(false);
+    expect(model.balance.depositCredit).toBe(500);
   });
 
   it('reports an order with no deposit at all as a zero deposit with no breakdown', () => {
@@ -929,6 +1019,16 @@ describe('orderBalanceInput', () => {
 
   it('leaves out what the order does not have — no anticipo is 0, no report is no claims', () => {
     expect(orderBalanceInput(order(), undefined)).toEqual({ total: 150, advance: 0, paid: false });
+    // Replacement values only (a zero deposit): no deposit to square.
+    expect(
+      orderBalanceInput(order({ securityDeposit: { total: 0, held: 0, canSettle: true } }), undefined),
+    ).toEqual({ total: 150, advance: 0, paid: false });
+  });
+
+  it('reads a deposit without a collection (legacy) as PENDING', () => {
+    expect(
+      orderBalanceInput(order({ securityDeposit: { total: 80, held: 80, canSettle: false } }), undefined),
+    ).toMatchObject({ deposit: { amount: 80, status: 'PENDING' } });
   });
 });
 

@@ -934,18 +934,28 @@ const OrderDetailPage: React.FC = () => {
                       }
                     } else {
                       dot = claims > 0 ? 'bg-red-500/70' : 'bg-emerald-500/70';
+                      // `depositTotal` is the deposit HELD then — 0 unless it had been received
+                      // (owner, 2026-10-28): a clean record with nothing in hand gave nothing
+                      // back, so it never claims "Depósito devuelto".
+                      const heldThen = (deposit.depositTotal ?? 0) > 0;
                       label =
                         deposit.kind === 'CORRECTED'
                           ? t(`${KEY}.history.depositCorrected`)
-                          : t(`${KEY}.history.${claims > 0 ? 'depositDamaged' : 'depositRefunded'}`);
+                          : t(
+                              `${KEY}.history.${claims > 0 ? 'depositDamaged' : heldThen ? 'depositRefunded' : 'depositNoDamage'}`,
+                            );
                       // A clean first record says everything in its label; a damage or a
                       // correction carries the money as it stood THEN.
                       if (deposit.kind === 'CORRECTED' || claims > 0) {
                         detail = [
-                          t(`${KEY}.history.depositSummary`, {
-                            claims: money(order.currency.symbol, claims),
-                            refund: money(order.currency.symbol, deposit.refundAmount ?? 0),
-                          }),
+                          heldThen
+                            ? t(`${KEY}.history.depositSummary`, {
+                                claims: money(order.currency.symbol, claims),
+                                refund: money(order.currency.symbol, deposit.refundAmount ?? 0),
+                              })
+                            : t(`${KEY}.history.depositSummaryNoDeposit`, {
+                                claims: money(order.currency.symbol, claims),
+                              }),
                           ...(balance > 0
                             ? [
                                 t(`${KEY}.history.depositBalance`, {

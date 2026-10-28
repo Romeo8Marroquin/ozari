@@ -161,8 +161,9 @@ export interface OrderSecurityDepositResponseModel {
   /** Σ rental lines' deposit snapshot × quantity — collected on top of the order, never part of its
    *  total. 0 when only replacement values exist. The NOMINAL deposit, whatever was collected. */
   total: number;
-  /** The deposit the settlement counts (`heldDeposit`): `total`, or 0 when the collection was WAIVED
-   *  — every settlement figure is computed from THIS, never from `total`. */
+  /** The deposit the settlement counts (`heldDeposit`): `total` only when the collection is RECEIVED,
+   *  0 while PENDING or WAIVED — every settlement figure is computed from THIS, never from `total`
+   *  (only the retention ceiling reads `total`). */
   held: number;
   /** Was the deposit actually collected? Absent when `total` is 0 (nothing to collect). */
   collection: OrderDepositCollectionResponseModel | undefined;
@@ -195,7 +196,7 @@ export interface OrderStatusHistoryResponseModel {
 }
 
 /** Whether the deposit was collected: neither stamp = PENDING, `depositReceivedAt` = RECEIVED,
- *  `depositWaivedAt` = WAIVED (handed over without a deposit on purpose). */
+ *  `depositWaivedAt` = WAIVED (the deposit was not received — the reason says why). */
 export type OrderDepositCollectionStatusModel = "PENDING" | "RECEIVED" | "WAIVED";
 
 /** `OrderSecurityDepositResponseModel.collection` — the deposit's COLLECTION, beside its settlement. */
@@ -205,8 +206,8 @@ export interface OrderDepositCollectionResponseModel {
   at: Date | undefined;
   /** WAIVED only — an internal note, never printed on a client document. */
   reason: string | undefined;
-  /** May it be recorded / changed / cleared now: not cancelled and no damage report recorded (the
-   *  report's money was computed from it — undo the report first). */
+  /** May it be recorded / changed / cleared now: whenever the order is not cancelled — also after
+   *  the damage report (its money is computed live, so it follows the collection). */
   canRecord: boolean;
 }
 

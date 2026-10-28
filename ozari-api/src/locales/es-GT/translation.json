@@ -594,7 +594,6 @@
       "cleared": "El depósito vuelve a estar pendiente de cobro.",
       "notFound": "El pedido no existe o ya no está disponible.",
       "notApplicable": "Este pedido no tiene un depósito que cobrar, o está cancelado.",
-      "settled": "Este pedido ya tiene un reporte de daños; deshaz el reporte de daños primero.",
       "notRecorded": "Este pedido no tiene registrado el cobro de su depósito.",
       "errorRecording": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "errorClearing": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
@@ -614,7 +613,6 @@
         "recorded": "Cobro del depósito registrado para el pedido {{id}}.",
         "cleared": "Cobro del depósito vuelto a pendiente para el pedido {{id}}.",
         "notApplicable": "El pedido {{id}} no tiene depósito que cobrar o está cancelado.",
-        "settled": "El pedido {{id}} ya tiene un reporte de daños; no se cambia el cobro del depósito.",
         "notRecorded": "El pedido {{id}} no tenía registrado el cobro del depósito.",
         "error": "Error al registrar el cobro del depósito.",
         "clearError": "Error al volver a pendiente el cobro del depósito."

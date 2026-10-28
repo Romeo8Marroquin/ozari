@@ -26,7 +26,6 @@ import { applyDepositCollection } from "./depositCollection.service.js";
 /** The order facts a collection write is decided on, read under the row lock. */
 const collectionStateSelect = {
   cancelledAt: true,
-  depositSettledAt: true,
   depositReceivedAt: true,
   depositWaivedAt: true,
   depositWaivedReason: true,
@@ -77,16 +76,17 @@ const sendRefusal = (res: Response, id: number, kind: string): void => {
 /**
  * `PUT /orders/:id/deposit-collection` — records whether the order's security deposit was actually
  * COLLECTED (EPIC-2-ORDERS §12): `received: true` stamps `depositReceivedAt`; `received: false`
- * WAIVES it (`depositWaivedAt` + the required reason) — the goods went out without a deposit on
- * purpose, so the deposit counts as 0 for the damage report (no refund, no retention) while lost or
- * broken units can still be billed at their replacement value. The two are mutually exclusive.
+ * WAIVES it (`depositWaivedAt` + the required reason) — the deposit was not received. The two are
+ * mutually exclusive. Only a RECEIVED deposit is money we have (`heldDeposit`, owner 2026-10-28):
+ * while PENDING or WAIVED the damage report refunds nothing and owes every claim (retention and
+ * replacements) on top.
  *
- * Normally asked at the delivery step (the advance's `depositCollection`); this door records or
- * corrects it any time (clients often transfer the deposit together with the advance payment).
+ * Normally asked at the delivery step (the advance's `depositCollection`); this door records,
+ * corrects or clears it any time the order is not cancelled — BEFORE or AFTER the damage report (a
+ * deposit received late is recorded here; the report's money is computed live, so it follows).
  * **Declarative**: re-sending the same answer keeps the original timestamp and appends nothing.
  *
- * `409 notApplicable` when the order is cancelled or carries no deposit; `409 settled` once a damage
- * report exists (its money was computed from this — undo the report first).
+ * `409 notApplicable` when the order is cancelled or carries no deposit.
  */
 export const recordDepositCollection = async (
   req: CustomRequest,
@@ -111,9 +111,6 @@ export const recordDepositCollection = async (
       const depositTotal = computeDepositTotal(order.serviceDetails);
       if (order.cancelledAt !== null || depositTotal <= 0) {
         return { kind: "notApplicable" as const };
-      }
-      if (order.depositSettledAt !== null) {
-        return { kind: "settled" as const };
       }
       await applyDepositCollection(tx, {
         serviceId: id,
@@ -149,7 +146,8 @@ export const recordDepositCollection = async (
 /**
  * `DELETE /orders/:id/deposit-collection` — back to PENDING: both stamps and the reason go (a hard
  * clear of our own record; it moves no money) and a `COLLECTION_CLEARED` trail row is appended.
- * `409 notRecorded` when nothing is recorded; `409 settled` while a damage report exists;
+ * Allowed after a damage report too (the report's money recomputes live — clearing a RECEIVED
+ * collection turns its refund into a balance owed). `409 notRecorded` when nothing is recorded;
  * `409 notApplicable` on a cancelled order (the same `canRecord` rule the detail projects).
  */
 export const clearDepositCollection = async (
@@ -176,9 +174,6 @@ export const clearDepositCollection = async (
       }
       if (order.cancelledAt !== null) {
         return { kind: "notApplicable" as const };
-      }
-      if (order.depositSettledAt !== null) {
-        return { kind: "settled" as const };
       }
       await tx.service.update({
         where: { id },
