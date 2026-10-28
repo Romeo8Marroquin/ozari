@@ -12,6 +12,8 @@ import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import {
   canRecordSettlement,
   computeDepositTotal,
+  computeSettlementMoney,
+  heldDeposit,
   isSettleableLine,
   loadOrderProjectionContext,
   projectOrderDetail,
@@ -73,6 +75,13 @@ const auditSettlement = (req: CustomRequest, id: number, operation: string): voi
  * `400` about the request. Stock is deliberately NOT touched: a broken chair is normally replaced
  * with the client's money, so the fleet the business intends to own is unchanged; a unit that will
  * not be replaced is an edit of the product's quantity.
+ *
+ * **The deposit counted is the HELD one** (`heldDeposit`, owner 2026-10-28): the deposit only when
+ * its collection is RECEIVED, 0 while PENDING or WAIVED — so an order whose deposit never reached us
+ * refunds nothing and owes every claim on top. The retention is capped by the NOMINAL deposit
+ * (`computeDepositTotal`), not the held one: the damaged items are charged "that part of the
+ * deposit" even when it was not received. Recording a report NEVER changes the collection status —
+ * that is its own door, editable before or after the report (the money recomputes live).
  */
 export const settleOrder = async (
   req: CustomRequest,
@@ -97,6 +106,7 @@ export const settleOrder = async (
           deliveredAt: true,
           cancelledAt: true,
           depositSettledAt: true,
+          depositReceivedAt: true,
           serviceDetails: {
             where: { isActive: true },
             select: {
@@ -127,9 +137,14 @@ export const settleOrder = async (
       if (!damageable) {
         return { kind: "invalidDamage" as const };
       }
+      // The retention is capped by the NOMINAL deposit (it is charged even when the deposit was not
+      // received); every money figure below counts the HELD one (0 unless RECEIVED).
       if (body.retainedAmount > computeDepositTotal(order.serviceDetails)) {
         return { kind: "retainedAboveDeposit" as const };
       }
+      const held = heldDeposit(order);
+
+      const now = new Date();
 
       // Every line whose damage CHANGES — newly damaged, corrected, or no longer damaged.
       const damageByLine = new Map(body.damages.map((damage) => [damage.lineId, damage]));
@@ -150,9 +165,30 @@ export const settleOrder = async (
       await tx.service.update({
         where: { id },
         data: {
-          depositSettledAt: order.depositSettledAt ?? new Date(),
+          depositSettledAt: order.depositSettledAt ?? now,
           depositRetainedAmount: body.retainedAmount,
           depositRetainedReason: body.retainedReason ?? null,
+        },
+      });
+      // The trail row: the outcome AS RECORDED NOW, so the order's history stays true after a later
+      // correction or undo. Same formula as the projection — damages at the lines' replacement value.
+      // Walked over the LINES (every damaged one was validated above to carry a replacement value).
+      const damagesTotal = order.serviceDetails.reduce(
+        (sum, line) =>
+          sum +
+          Number(line.replacementPrice ?? 0) * (damageByLine.get(line.id)?.quantity ?? 0),
+        0,
+      );
+      const money = computeSettlementMoney(held, body.retainedAmount, damagesTotal);
+      await tx.serviceDepositHistory.create({
+        data: {
+          serviceId: id,
+          kind: order.depositSettledAt === null ? "RECORDED" : "CORRECTED",
+          depositTotal: held,
+          claimsTotal: money.claimsTotal,
+          refundAmount: money.refundAmount,
+          balanceDue: money.balanceDue,
+          byUserId: req.user?.userId ?? 0,
         },
       });
       return {
@@ -228,6 +264,9 @@ export const undoOrderSettlement = async (
           depositRetainedAmount: null,
           depositRetainedReason: null,
         },
+      });
+      await tx.serviceDepositHistory.create({
+        data: { serviceId: id, kind: "UNDONE", byUserId: req.user?.userId ?? 0 },
       });
       return {
         kind: "ok" as const,

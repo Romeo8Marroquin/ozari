@@ -266,15 +266,19 @@ export const DIVIDER_INSET = (CONTENT_WIDTH - DIVIDER_WIDTH) / 2;
 export const DIVIDER_GAP_TABLE = { above: 15, below: 10 };
 export const DIVIDER_GAP_SECTION = { above: 21, below: 16 };
 
-/** What is left for the description once the numeric columns have taken their share. */
-export const descriptionWidth = (withDays: boolean): number =>
+/**
+ * What is left for a table's FIRST (description) column once its fixed columns have taken their
+ * share — the one rule every table on every document sizes its free column by.
+ */
+export const fillWidth = (fixedColumns: readonly number[]): number =>
   CONTENT_WIDTH -
-  COL_QUANTITY -
-  COL_PRICE -
-  COL_TOTAL -
-  (withDays ? COL_DAYS : 0) -
+  fixedColumns.reduce((sum, width) => sum + width, 0) -
   // The row's own horizontal padding, both sides.
   ROW_PADDING * 2;
+
+/** What is left for the description once the numeric columns have taken their share. */
+export const descriptionWidth = (withDays: boolean): number =>
+  fillWidth([COL_QUANTITY, COL_PRICE, COL_TOTAL, ...(withDays ? [COL_DAYS] : [])]);
 
 /**
  * The totals panel, right-aligned beside the conditions.
@@ -291,14 +295,104 @@ export const TOTALS_PADDING = 12;
  *  because it is an SVG, and an SVG cannot be told to fill its parent. */
 export const TOTALS_INNER_WIDTH = TOTALS_WIDTH - TOTALS_PADDING * 2;
 
+/** The height of the RESULT chip under the totals — "Monto a pagar" on the brand gradient, or
+ *  "Monto a devolver al cliente" inverted (charcoal, white type). One shape, two tones. */
+export const RESULT_CHIP_HEIGHT = 30;
+
+// ── The damages section (comprobante, 2026-10-27) ─────────────────────────────────────────────
+
 /**
- * The security deposit (2026-10-27). `GUARANTEE_GAP` is the air above the still-a-deposit line under
- * the saldo chip AND between the totals panel and a settlement panel; `GUARANTEE_PADDING` is the
- * settlement panel's own vertical padding — tighter than the totals', it is a second statement
- * under the first, not a rival to it.
+ * The damages section is its OWN block after the summary — a heading, then a full-width tinted
+ * panel: the itemised charges, then their total. It carries no arithmetic of its own (owner,
+ * 2026-10-27): what the damages DO to the money — credited against the deposit, added to what is
+ * owed — is the squared result in the totals panel, the one outcome on the page.
+ *
+ * `SETTLEMENT_PADDING` is the panel's vertical padding — tighter than the totals', it is a detail
+ * under the summary, not a rival to it. The total's row is the totals panel's INNER width at the
+ * right edge, which puts its figure on the same vertical line as the TOTAL above it.
  */
-export const GUARANTEE_GAP = 8;
-export const GUARANTEE_PADDING = 9;
+export const SETTLEMENT_PADDING = 9;
+export const SETTLEMENT_COLUMN_WIDTH = TOTALS_INNER_WIDTH;
+/** The air between the summary and the section's heading. */
+export const SETTLEMENT_GAP = 18;
+
+// ── Will a block fit on ONE page? (the oversized-panel rule) ──────────────────────────────────
+//
+// react-pdf's `wrap={false}` moves a block WHOLE to the next page when it does not fit — but a
+// block taller than a whole page is the one case it cannot move: `splitNodes` then keeps it on the
+// current page and lets it run past the bottom edge (`warnUnavailableSpace`), and everything below
+// the edge is simply not printed. A settlement can list up to `maxOrderLines` (50) charges with a
+// 500-character note each, so "it never gets that tall" is not a rule anyone could keep.
+//
+// There is no way to MEASURE a block before react-pdf lays it out, so the decision is made from a
+// deliberately PESSIMISTIC estimate: wider glyphs than Helvetica really has, the tallest letterhead
+// the document can print, and a further 10% of headroom. Over-estimating costs nothing in the
+// ordinary case (a panel of a few charges is a fraction of a page either way) and, at the boundary,
+// only means a very tall panel is allowed to continue onto the next page between two charges — the
+// sane degradation. Under-estimating would silently lose charges off the bottom of a page, which is
+// why every constant below errs the same way.
+
+/** The letterhead at its tallest: title, reference, issue date, a validity date and the PAGADO
+ *  pill. Measured ~61pt in a render; 64 is the ceiling the estimate assumes. */
+const LETTERHEAD_MAX_HEIGHT = 64;
+/** Average glyph width as a fraction of the font size. Helvetica's lowercase averages ~0.5em; 0.6
+ *  also covers digits, capitals and the waste of breaking at word boundaries. */
+const ESTIMATE_GLYPH_EM = 0.6;
+/** Only this share of a page counts as available — the headroom the estimate keeps for itself. */
+const ESTIMATE_PAGE_SHARE = 0.9;
+
+/** The height a page offers its CONTENT, between the letterhead's gap and the footer's padding. */
+export const pageContentHeight = (noteCount: number): number =>
+  PAGE_HEIGHT - MARGIN - LETTERHEAD_MAX_HEIGHT - HEADER_GAP - footerPadding(noteCount);
+
+/** How many lines a text will wrap to at a width — pessimistically (see `ESTIMATE_GLYPH_EM`). */
+export const estimateLines = (text: string, width: number, fontSize: number): number =>
+  Math.max(1, Math.ceil(text.length / Math.floor(width / (fontSize * ESTIMATE_GLYPH_EM))));
+
+/** One charge in the settlement panel, as printed: its label and the caption lines under it. */
+export interface SettlementRowText {
+  label: string;
+  notes: readonly string[];
+}
+
+/** The label's share of a charge row: the panel's inner width, minus the gap before the figure and
+ *  the figure. */
+const SETTLEMENT_LABEL_WIDTH = CONTENT_WIDTH - TOTALS_PADDING * 2 - 12 - 64;
+/** The section heading (8pt × 1.3 + 6 below), and the total's row under its hairline (rule, padding
+ *  and a 9.5pt line). */
+const SETTLEMENT_HEADING_HEIGHT = 8 * 1.3 + 6;
+const SETTLEMENT_TOTAL_HEIGHT = 24;
+
+/** The estimated height of the whole section — heading, padding, the charges and their total. */
+export const estimateSettlementHeight = (rows: readonly SettlementRowText[]): number => {
+  const charges = rows.reduce(
+    (sum, row) =>
+      sum +
+      6 +
+      estimateLines(row.label, SETTLEMENT_LABEL_WIDTH, 9) * 9 * 1.35 +
+      row.notes.reduce(
+        (notes, note) => notes + estimateLines(note, SETTLEMENT_LABEL_WIDTH, 7) * 7 * 1.4,
+        0,
+      ),
+    0,
+  );
+  return SETTLEMENT_HEADING_HEIGHT + SETTLEMENT_PADDING * 2 + charges + SETTLEMENT_TOTAL_HEIGHT;
+};
+
+/**
+ * Can the damages section travel WHOLE (`wrap={false}`)? Only when it fits on a page by the
+ * pessimistic estimate. Otherwise it is the oversized case: the template lets the panel continue
+ * onto the next page — between two charges, never through one, and never leaving the heading
+ * behind (EPIC-2-DOCUMENTS §8a rule 5).
+ */
+export const settlementFitsOnePage = (
+  rows: readonly SettlementRowText[],
+  noteCount: number,
+): boolean => estimateSettlementHeight(rows) <= pageContentHeight(noteCount) * ESTIMATE_PAGE_SHARE;
+
+/** What the heading of an OVERSIZED panel reserves after itself — the panel's padding plus a
+ *  two-line charge — so it can never end a page alone. */
+export const SETTLEMENT_HEAD_AHEAD = SETTLEMENT_PADDING + 6 + 9 * 1.35 * 2 + 7 * 1.4;
 
 // ── Bank details ──────────────────────────────────────────────────────────────────────────────
 

@@ -45,6 +45,10 @@ const lockedState = (overrides: Record<string, unknown> = {}) => ({
   deliveredAt: DELIVERED,
   cancelledAt: null,
   depositSettledAt: null,
+  // Received at the door — the ordinary case; the PENDING/WAIVED cases override it.
+  depositReceivedAt: DELIVERED,
+  depositWaivedAt: null,
+  depositWaivedReason: null,
   serviceDetails: [
     { id: 31, isRental: true, quantity: 5, securityDeposit: dec("40"), replacementPrice: dec("120"), damagedQuantity: 0 },
     { id: 32, isRental: false, quantity: 2, securityDeposit: null, replacementPrice: null, damagedQuantity: 0 },
@@ -84,6 +88,9 @@ const richOrder = () => ({
   depositSettledAt: DELIVERED,
   depositRetainedAmount: dec("50"),
   depositRetainedReason: "Manchas",
+  depositReceivedAt: DELIVERED,
+  depositWaivedAt: null,
+  depositWaivedReason: null,
   currencyId: 1,
   serviceStatusId: 3,
   paymentStatusId: 1,
@@ -116,6 +123,7 @@ const richOrder = () => ({
   ],
   serviceExtras: [],
   statusHistory: [],
+  depositHistory: [],
   evidences: [],
 });
 
@@ -135,6 +143,7 @@ function mockTx(state: Record<string, unknown> | null, settledAt: Date | null = 
       update: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    serviceDepositHistory: { create: vi.fn().mockResolvedValue({}) },
   };
   (getPrismaClient as Mock).mockResolvedValue({
     $transaction: vi.fn(async (callback: (t: typeof tx) => unknown) => callback(tx)),
@@ -146,6 +155,14 @@ const req = (body: SettleOrderRequestModel | undefined = undefined, id = "12") =
   ({ body, params: { id }, user: { userId: 1, userRole: 2 }, ip: "127.0.0.1" }) as unknown as CustomRequest;
 
 const settle = (body: SettleOrderRequestModel) => settleOrder(req(body), {} as Response);
+
+/** The single trail row the transaction appended. */
+const trailRow = (tx: ReturnType<typeof mockTx>) => {
+  expect(tx.serviceDepositHistory.create).toHaveBeenCalledTimes(1);
+  return (tx.serviceDepositHistory.create as Mock).mock.calls[0]?.[0] as {
+    data: Record<string, unknown>;
+  };
+};
 
 describe("settleOrder", () => {
   it("records the settlement: damages per line (clearing a stale one), retention, first-settled stamp", async () => {
@@ -170,6 +187,19 @@ describe("settleOrder", () => {
     const write = (tx.service.update as Mock).mock.calls[0]?.[0] as { data: Record<string, unknown> };
     expect(write.data["depositSettledAt"]).toBeInstanceOf(Date);
     expect(write.data).toMatchObject({ depositRetainedAmount: 50, depositRetainedReason: "Manchas" });
+    // The FIRST settlement leaves a RECORDED trail row with the outcome as it stands now — damages
+    // beyond the deposit: claims 50 + 2 × 120 = 290 against Q200 ⇒ nothing back, Q90 owed.
+    expect(trailRow(tx)).toEqual({
+      data: {
+        serviceId: 12,
+        kind: "RECORDED",
+        depositTotal: 200,
+        claimsTotal: 290,
+        refundAmount: 0,
+        balanceDue: 90,
+        byUserId: 1,
+      },
+    });
     expect(logAudit).toHaveBeenCalledWith(
       expect.objectContaining({ metadata: { operation: "ORDER_DEPOSIT_SETTLED" } }),
     );
@@ -198,6 +228,109 @@ describe("settleOrder", () => {
       where: { id: 12 },
       data: { depositSettledAt: firstSettled, depositRetainedAmount: 0, depositRetainedReason: null },
     });
+    // A re-settle is a CORRECTION in the trail; here it became the one-tap "Devolver depósito".
+    expect(trailRow(tx)).toEqual({
+      data: {
+        serviceId: 12,
+        kind: "CORRECTED",
+        depositTotal: 200,
+        claimsTotal: 0,
+        refundAmount: 200,
+        balanceDue: 0,
+        byUserId: 1,
+      },
+    });
+  });
+
+  it("records a retention + replacement still inside the deposit as a partial refund", async () => {
+    const tx = mockTx(lockedState());
+    await settle({
+      retainedAmount: 20,
+      retainedReason: "Manchas",
+      damages: [{ lineId: 31, quantity: 1, note: undefined }],
+    });
+    // 20 + 1 × 120 = 140 taken from Q200 ⇒ Q60 back, nothing owed.
+    expect(trailRow(tx).data).toMatchObject({
+      kind: "RECORDED",
+      depositTotal: 200,
+      claimsTotal: 140,
+      refundAmount: 60,
+      balanceDue: 0,
+    });
+  });
+
+  it("attributes the trail row to user 0 when the request somehow carries no user", async () => {
+    const tx = mockTx(lockedState());
+    await settleOrder(
+      { body: { retainedAmount: 0, retainedReason: undefined, damages: [] }, params: { id: "12" } } as unknown as CustomRequest,
+      {} as Response,
+    );
+    expect(trailRow(tx).data).toMatchObject({ kind: "RECORDED", byUserId: 0 });
+  });
+
+  it("replacements only (no deposit to collect): everything owed, nothing held", async () => {
+    const tx = mockTx(
+      lockedState({
+        depositReceivedAt: null,
+        serviceDetails: [
+          { id: 31, isRental: true, quantity: 5, securityDeposit: null, replacementPrice: dec("120"), damagedQuantity: 0 },
+        ],
+      }),
+    );
+    await settle({ retainedAmount: 0, retainedReason: undefined, damages: [{ lineId: 31, quantity: 1, note: undefined }] });
+    expect(trailRow(tx).data).toMatchObject({ kind: "RECORDED", depositTotal: 0, balanceDue: 120 });
+  });
+
+  // Owner 2026-10-28: only a RECEIVED deposit is money we have. PENDING and WAIVED both hold 0 —
+  // nothing is refunded, every claim is owed — but the retention is still charged, capped by the
+  // NOMINAL deposit, and the report never touches the collection.
+  describe.each([
+    ["PENDING", { depositReceivedAt: null }],
+    ["WAIVED", { depositReceivedAt: null, depositWaivedAt: DELIVERED, depositWaivedReason: "Un familiar" }],
+  ])("on a %s deposit (it holds 0)", (_label, collection) => {
+    it("charges a retention up to the NOMINAL deposit, owing every claim, without touching the collection", async () => {
+      const tx = mockTx(lockedState(collection));
+      await settle({
+        retainedAmount: 200,
+        retainedReason: "Manchas",
+        damages: [{ lineId: 31, quantity: 1, note: undefined }],
+      });
+      // Only the settlement's own update — no collection stamp, ONE trail row.
+      expect(tx.service.update).toHaveBeenCalledTimes(1);
+      expect(tx.service.update).toHaveBeenCalledWith({
+        where: { id: 12 },
+        data: { depositSettledAt: expect.any(Date), depositRetainedAmount: 200, depositRetainedReason: "Manchas" },
+      });
+      // 200 retained + 1 × 120 = 320 claimed against Q0 in hand ⇒ nothing back, all of it owed.
+      expect(trailRow(tx)).toEqual({
+        data: {
+          serviceId: 12,
+          kind: "RECORDED",
+          depositTotal: 0,
+          claimsTotal: 320,
+          refundAmount: 0,
+          balanceDue: 320,
+          byUserId: 1,
+        },
+      });
+    });
+
+    it("still refuses a retention above the nominal deposit", async () => {
+      const tx = mockTx(lockedState(collection));
+      await settle({ retainedAmount: 200.01, retainedReason: "Todo", damages: [] });
+      expect(tx.service.update).not.toHaveBeenCalled();
+      expect(sendOzariError).toHaveBeenCalledWith(
+        expect.anything(),
+        HttpEnum.BAD_REQUEST,
+        "orders.settlement.retainedAboveDeposit",
+      );
+    });
+  });
+
+  it("writes no trail row when the settlement is refused", async () => {
+    const tx = mockTx(lockedState());
+    await settle({ retainedAmount: 200.01, retainedReason: "Todo", damages: [] });
+    expect(tx.serviceDepositHistory.create).not.toHaveBeenCalled();
   });
 
   it("404s a missing order", async () => {
@@ -287,6 +420,8 @@ describe("undoOrderSettlement", () => {
       where: { id: 12 },
       data: { depositSettledAt: null, depositRetainedAmount: null, depositRetainedReason: null },
     });
+    // The undo is itself a trail event — with no money: nothing was recorded any more.
+    expect(trailRow(tx)).toEqual({ data: { serviceId: 12, kind: "UNDONE", byUserId: 1 } });
     expect(logAudit).toHaveBeenCalledWith(
       expect.objectContaining({ metadata: { operation: "ORDER_DEPOSIT_SETTLEMENT_UNDONE" } }),
     );
@@ -310,11 +445,19 @@ describe("undoOrderSettlement", () => {
     const tx = mockTx({}, null);
     await undo();
     expect(tx.service.update).not.toHaveBeenCalled();
+    expect(tx.serviceDepositHistory.create).not.toHaveBeenCalled();
     expect(sendOzariError).toHaveBeenCalledWith(
       expect.anything(),
       HttpEnum.CONFLICT,
       "orders.settlement.notSettled",
     );
+  });
+
+  it("attributes the UNDONE row to user 0 when the request somehow carries no user", async () => {
+    const tx = mockTx({}, DELIVERED);
+    tx.service.findUniqueOrThrow.mockReset().mockResolvedValue(richOrder());
+    await undoOrderSettlement({ params: { id: "12" } } as unknown as CustomRequest, {} as Response);
+    expect(trailRow(tx)).toEqual({ data: { serviceId: 12, kind: "UNDONE", byUserId: 0 } });
   });
 
   it("500s when the transaction fails", async () => {

@@ -84,7 +84,23 @@ export interface Dashboard {
   revenueTrend: RevenuePoint[];
   topProducts: TopProduct[];
   statusSplit: StatusSlice[];
+  /** The security-deposit corner — occasional by nature, so a small block, never a headline. */
+  deposits: DashboardDeposits;
   currency: OrderCurrency;
+}
+
+export interface DashboardDeposits {
+  /** Delivered orders whose deposit is still open (the agenda's `depositSettlementPending`).
+   *  `items` = the oldest deliveries, capped at 5; `orders`/`amount` count them all. */
+  pending: { orders: number; amount: number; items: OrderListItem[] };
+  /** Settlements first recorded this month, as they stand now. */
+  month: {
+    settled: number;
+    refunded: number;
+    retained: number;
+    replacements: number;
+    balanceDue: number;
+  };
 }
 
 export interface DashboardEnvelope {

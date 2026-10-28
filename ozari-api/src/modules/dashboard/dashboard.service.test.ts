@@ -17,8 +17,10 @@ import {
   projectUpNextItem,
   round2,
   selectUpNext,
+  summarizeSettlements,
   trailingMonthKeys,
   type DashboardOrderRow,
+  type SettledDepositRowModel,
 } from "./dashboard.service.js";
 
 const VALID_ENCRYPTION_KEY =
@@ -346,6 +348,123 @@ describe("outstandingFrom", () => {
 
   it("is zero for no rows", () => {
     expect(outstandingFrom([])).toEqual({ amount: 0, orders: 0 });
+  });
+});
+
+describe("summarizeSettlements", () => {
+  const dec = (value: string) => new Prisma.Decimal(value);
+  const RECEIVED_AT = new Date("2026-08-01T15:00:00Z");
+  /** 5 chairs: a Q40 deposit and a Q120 replacement each (Q200 deposit, RECEIVED), `damaged` of
+   *  them broken. */
+  const settled = (
+    retained: string | null,
+    damaged = 0,
+    overrides: Partial<SettledDepositRowModel["serviceDetails"][number]> = {},
+  ): SettledDepositRowModel => ({
+    depositRetainedAmount: retained === null ? null : dec(retained),
+    depositReceivedAt: RECEIVED_AT,
+    serviceDetails: [
+      {
+        isRental: true,
+        quantity: 5,
+        securityDeposit: dec("40"),
+        replacementPrice: dec("120"),
+        damagedQuantity: damaged,
+        ...overrides,
+      },
+      // A sold line: its snapshot never counts toward the deposit, and it carries no damage.
+      { isRental: false, quantity: 3, securityDeposit: null, replacementPrice: null, damagedQuantity: 0 },
+    ],
+  });
+
+  it("is all zeros for a month with no settlements", () => {
+    expect(summarizeSettlements([])).toEqual({
+      settled: 0,
+      refunded: 0,
+      retained: 0,
+      replacements: 0,
+      balanceDue: 0,
+    });
+  });
+
+  it("a refund in full gives the whole deposit back", () => {
+    expect(summarizeSettlements([settled("0")])).toEqual({
+      settled: 1,
+      refunded: 200,
+      retained: 0,
+      replacements: 0,
+      balanceDue: 0,
+    });
+  });
+
+  it("reads a NULL retained amount as nothing retained", () => {
+    expect(summarizeSettlements([settled(null)])).toMatchObject({ refunded: 200, retained: 0 });
+  });
+
+  it("a retention keeps part of the deposit and refunds the rest", () => {
+    expect(summarizeSettlements([settled("75.50")])).toEqual({
+      settled: 1,
+      refunded: 124.5,
+      retained: 75.5,
+      replacements: 0,
+      balanceDue: 0,
+    });
+  });
+
+  it("replacements beyond the deposit leave a balance due on top", () => {
+    // 2 × Q120 = Q240 against a Q200 deposit ⇒ nothing back, Q40 owed.
+    expect(summarizeSettlements([settled("0", 2)])).toEqual({
+      settled: 1,
+      refunded: 0,
+      retained: 0,
+      replacements: 240,
+      balanceDue: 40,
+    });
+  });
+
+  it("a deposit NOT received (pending or waived) counts 0: nothing refunded, every claim owed", () => {
+    // The row carries no waive column: only `depositReceivedAt` decides — null is nothing in hand.
+    const notReceived = { ...settled("30", 1), depositReceivedAt: null };
+    expect(summarizeSettlements([notReceived])).toEqual({
+      settled: 1,
+      refunded: 0,
+      // The retention is still charged (capped by the nominal deposit) — on top, as balance due.
+      retained: 30,
+      replacements: 120,
+      balanceDue: 150,
+    });
+  });
+
+  it("a damaged line without a replacement value prices at zero", () => {
+    expect(
+      summarizeSettlements([settled("0", 1, { replacementPrice: null })]).replacements,
+    ).toBe(0);
+  });
+
+  it("totals several settlements, rounded to cents", () => {
+    // Prices that float addition cannot represent exactly: 0.1 + 0.2 territory.
+    const awkward = (retained: string): SettledDepositRowModel => ({
+      depositRetainedAmount: dec(retained),
+      depositReceivedAt: RECEIVED_AT,
+      serviceDetails: [
+        {
+          isRental: true,
+          quantity: 1,
+          securityDeposit: dec("0.30"),
+          replacementPrice: dec("0.10"),
+          damagedQuantity: 1,
+        },
+      ],
+    });
+    const month = summarizeSettlements([awkward("0.10"), awkward("0.20"), settled("0", 2)]);
+    expect(month).toEqual({
+      settled: 3,
+      // 0.30 − (0.10 + 0.10) = 0.10, 0.30 − (0.20 + 0.10) = 0, then the Q200 lost to damage.
+      refunded: 0.1,
+      retained: 0.3,
+      replacements: 240.2,
+      balanceDue: 40,
+    });
   });
 });
 

@@ -1,4 +1,4 @@
-﻿import { useParams } from '@tanstack/react-router';
+import { useParams } from '@tanstack/react-router';
 import type { AxiosError } from 'axios';
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -9,6 +9,7 @@ import {
   HiOutlineArrowRight,
   HiOutlinePencilSquare,
   HiOutlineBanknotes,
+  HiOutlineShieldExclamation,
   HiOutlineTrash,
   HiOutlineXMark,
 } from 'react-icons/hi2';
@@ -20,7 +21,13 @@ import { orderDestination } from '@utils/mapLinks';
 import { Role } from '@constants/Roles';
 import { useHasRole } from '@hooks/useRole';
 import { getStatus } from '@utils/apiError';
-import { growCardIn, SECTION_REVEAL_STEP, staggerIn, staggerOut } from '../pageMotion';
+import {
+  bringIntoPanelView,
+  growCardIn,
+  SECTION_REVEAL_STEP,
+  staggerIn,
+  staggerOut,
+} from '../pageMotion';
 import ActionRow from '../ActionRow';
 import { usePanelNavigate } from '../PanelNavContext';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
@@ -32,7 +39,10 @@ import { formatMoment } from './orderDayGroups';
 import OrderAdvanceModal from './OrderAdvanceModal';
 import OrderDeleteModal from './OrderDeleteModal';
 import OrderPaymentModal from './OrderPaymentModal';
+import OrderBalanceSummary from './OrderBalanceSummary';
 import OrderDepositCard from './OrderDepositCard';
+import OrderDepositCollectionModal, { type DepositCollectionMode } from './OrderDepositCollectionModal';
+import OrderDepositRefundModal from './OrderDepositRefundModal';
 import OrderPaymentUndoModal from './OrderPaymentUndoModal';
 import OrderSettlementUndoModal from './OrderSettlementUndoModal';
 import OrderStatusModal from './OrderStatusModal';
@@ -40,11 +50,18 @@ import { statusTone } from './statusTone';
 import { useOrder } from './useOrder';
 import { isTravelStep } from './useOrderLifecycle';
 import { useOrdersCatalog } from './useOrdersCatalog';
-import type { OrderAction, OrderEvidence } from './order.types';
+import type {
+  OrderAction,
+  OrderDepositHistoryEntry,
+  OrderEvidence,
+  OrderStatusChange,
+} from './order.types';
 
 const KEY = 'modules.panel.orders.detail';
 const SECONDARY_COLOR = '#262626';
 const DANGER_COLOR = '#dc2626';
+/** amber-700 — the "pending" tone the deposit chip wears everywhere, as a button colour. */
+const DEPOSIT_COLOR = '#b45309';
 /** The column's `gap-4`, in px — what a card joining it has to swallow while it grows open. */
 const COLUMN_GAP = 16;
 
@@ -100,6 +117,25 @@ const SkeletonFacts: React.FC<{ rows?: number }> = ({ rows = 2 }) => (
     ))}
   </div>
 );
+
+/** One row of the order's history: a status change, or an entry of the deposit's own trail. */
+type TrailEntry =
+  | { key: string; at: string; status: OrderStatusChange }
+  | { key: string; at: string; deposit: OrderDepositHistoryEntry };
+
+/**
+ * The status changes and the deposit's entries as ONE chronological trail. The deposit is its own
+ * door (never a lifecycle step), but "who recorded what, when" is one story to the reader. The sort
+ * is stable over the concatenation, so on an identical instant the status change reads first.
+ */
+const mergeTrail = (
+  statuses: readonly OrderStatusChange[],
+  deposits: readonly OrderDepositHistoryEntry[],
+): TrailEntry[] =>
+  [
+    ...statuses.map((status) => ({ key: `s-${status.id}`, at: status.at, status })),
+    ...deposits.map((deposit) => ({ key: `d-${deposit.id}`, at: deposit.at, deposit })),
+  ].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
 
 /**
  * ONE card of the page — and, on a cold load, the thing that TRANSFORMS into its loaded self.
@@ -174,6 +210,8 @@ const OrderDetailPage: React.FC = () => {
   const [paying, setPaying] = useState(false);
   const [undoingPayment, setUndoingPayment] = useState(false);
   const [undoingSettlement, setUndoingSettlement] = useState(false);
+  const [refundingDeposit, setRefundingDeposit] = useState(false);
+  const [collectionMode, setCollectionMode] = useState<DepositCollectionMode | undefined>(undefined);
   const [changingStatus, setChangingStatus] = useState(false);
   const [deleting, setDeleting] = useState(false);
   /** The evidence set being viewed full-size — ONE step's photos, never the whole order's. */
@@ -196,7 +234,7 @@ const OrderDetailPage: React.FC = () => {
   // still moves only with the status, which is what `itemsKey` is for: the box adapts while the line
   // that did not change stays perfectly still. The buttons are the `ActionRow`'s own business.
   const stateBody = useMorphOnChange<HTMLDivElement>(
-    `${order?.status.id ?? 0}|${order?.isPaid ?? false}`,
+    `${order?.status.id ?? 0}|${order?.isPaid ?? false}|${order?.depositSettlementPending ?? false}`,
     '.state-flip',
     order?.status.id ?? 0,
   );
@@ -204,10 +242,14 @@ const OrderDetailPage: React.FC = () => {
     `${order?.assignee?.id ?? ''}|${order?.deliveredAt ?? ''}|${order?.collectedAt ?? ''}|${order?.readyAt ?? ''}`,
     '.fact-flip',
   );
+  // The trail is the status changes AND the deposit's own entries, so either kind appending a row
+  // re-keys the morph.
   const history = useMorphOnChange<HTMLOListElement>(
-    order?.statusHistory.length ?? 0,
+    `${order?.statusHistory.length ?? 0}|${order?.depositHistory.length ?? 0}`,
     '.history-flip',
   );
+  // The deposit card, so the state card's "Depósito pendiente" can take the admin to it.
+  const depositCard = useRef<HTMLElement>(null);
 
   // The evidence card only exists once a documented step has been taken, so it can APPEAR under a
   // page that is already settled. It grows its space open there instead of popping into the middle
@@ -267,6 +309,19 @@ const OrderDetailPage: React.FC = () => {
   );
   const statusName = (id: number): string =>
     catalog?.serviceStatuses.find((status) => status.id === id)?.name ?? `#${id}`;
+
+  // "Depósito pendiente" in the state card: the deposit's decision lives on its OWN card (it is its
+  // own door, never a lifecycle step), so this only takes the admin there — the card comes into view
+  // the way a named section does, and focus moves to it, so the next Tab is "Devolver depósito".
+  const goToDeposit = (): void => {
+    const card = depositCard.current;
+    /* v8 ignore next -- the button is offered only while the card is rendered (same block, same
+       render); the guard is a type narrowing */
+    if (!card) return;
+    bringIntoPanelView(card, { smooth: true });
+    card.focus({ preventScroll: true });
+  };
+  const trail = order ? mergeTrail(order.statusHistory, order.depositHistory) : [];
 
   /**
    * The state card's action row, in the order it is read.
@@ -343,6 +398,27 @@ const OrderDetailPage: React.FC = () => {
                     onClick={() => setUndoingPayment(true)}
                   >
                     {t(`${KEY}.actions.undoPay`)}
+                  </Button>
+                ),
+              },
+            ]
+          : []),
+        // The deposit is waiting for its decision (delivered, not recorded — the API's flag). Not a
+        // lifecycle step and not an action in itself: it takes the admin to the Depósito card, where
+        // "Devolver depósito" / "Reportar daños" live. Amber, like the agenda's chip for the same fact.
+        ...(isAdmin && order.depositSettlementPending && order.securityDeposit
+          ? [
+              {
+                key: 'deposit',
+                node: (
+                  <Button
+                    variant="soft"
+                    size="sm"
+                    color={DEPOSIT_COLOR}
+                    startIcon={<HiOutlineShieldExclamation className="size-4" />}
+                    onClick={goToDeposit}
+                  >
+                    {t(`${KEY}.actions.depositPending`)}
                   </Button>
                 ),
               },
@@ -709,11 +785,16 @@ const OrderDetailPage: React.FC = () => {
                     {money(order.currency.symbol, order.totalAmount)}
                   </span>
                 </div>
+                {/* The CUADRE — the one amount that changes hands, and which way. The deposit joins
+                    it here, never the cost above. */}
+                <OrderBalanceSummary order={order} />
                 <div className="mt-1 grid gap-4 sm:grid-cols-2">
+                  {/* The anticipo as a fact once the order is paid; while it is not, the cuadre
+                      above already subtracts it, so it is not said twice. */}
                   <Fact
                     label={t(`${KEY}.money.deposit`)}
                     value={
-                      order.depositAmount !== undefined
+                      order.depositAmount !== undefined && order.paidAt !== undefined
                         ? money(order.currency.symbol, order.depositAmount)
                         : undefined
                     }
@@ -729,16 +810,19 @@ const OrderDetailPage: React.FC = () => {
             )}
           </Section>
 
-          {/* GARANTÍA — only for an order that can carry a deposit or a damage (the API omits the
+          {/* DEPÓSITO — only for an order that can carry a deposit or a damage (the API omits the
               block otherwise). Absent from the skeleton for the evidence card's reason: a
               placeholder would promise a section most orders never have. */}
           {order?.securityDeposit && (
             <OrderDepositCard
+              ref={depositCard}
               order={order}
               deposit={order.securityDeposit}
               isAdmin={isAdmin}
-              onSettle={() => panelNavigate(`/panel/pedidos/${order.id}/garantia`)}
+              onRefund={() => setRefundingDeposit(true)}
+              onReport={() => panelNavigate(`/panel/pedidos/${order.id}/danos`)}
               onUndo={() => setUndoingSettlement(true)}
+              onCollection={setCollectionMode}
             />
           )}
 
@@ -812,28 +896,94 @@ const OrderDetailPage: React.FC = () => {
           >
             {order && (
               <ol ref={history} className="card-item flex flex-col">
-                {order.statusHistory.map((entry) => (
-                  <li
-                    key={entry.id}
-                    data-flip-id={entry.id}
-                    className="history-flip flex items-start gap-3 pt-3 first:pt-0"
-                  >
-                    <span
-                      aria-hidden
-                      className="mt-1.5 size-1.5 shrink-0 rounded-full bg-charcoal/25"
-                    />
-                    <div className="min-w-0">
-                      <p className="text-sm text-charcoal">
-                        {entry.from
-                          ? t(`${KEY}.history.moved`, { from: entry.from.name, to: entry.to.name })
-                          : t(`${KEY}.history.created`, { to: entry.to.name })}
-                      </p>
-                      <p className="text-xs text-charcoal/50">
-                        {formatMoment(entry.at)} · {entry.byUserName}
-                      </p>
-                    </div>
-                  </li>
-                ))}
+                {trail.map((row) => {
+                  // A status change keeps the trail's neutral dot; a deposit entry tints it by how
+                  // it ended (emerald = went back whole, red = damages, neutral = undone), the same
+                  // tones its chip wears on the Depósito card.
+                  let label: string;
+                  let detail: string | undefined;
+                  let dot = 'bg-charcoal/25';
+                  let byUserName: string;
+                  if ('status' in row) {
+                    const { status } = row;
+                    byUserName = status.byUserName;
+                    label = status.from
+                      ? t(`${KEY}.history.moved`, { from: status.from.name, to: status.to.name })
+                      : t(`${KEY}.history.created`, { to: status.to.name });
+                  } else {
+                    const { deposit } = row;
+                    byUserName = deposit.byUserName;
+                    const claims = deposit.claimsTotal ?? 0;
+                    const balance = deposit.balanceDue ?? 0;
+                    if (deposit.kind === 'UNDONE') {
+                      label = t(`${KEY}.history.depositUndone`);
+                    } else if (deposit.kind === 'COLLECTION_CLEARED') {
+                      label = t(`${KEY}.history.collectionCleared`);
+                    } else if (deposit.kind === 'RECEIVED') {
+                      dot = 'bg-emerald-500/70';
+                      label = t(`${KEY}.history.depositReceived`);
+                      if (deposit.depositTotal !== undefined) {
+                        detail = money(order.currency.symbol, deposit.depositTotal);
+                      }
+                    } else if (deposit.kind === 'WAIVED') {
+                      dot = 'bg-amber-500/70';
+                      label = t(`${KEY}.history.depositWaived`);
+                      // The waive reason is an INTERNAL note — said as one.
+                      if (deposit.note) {
+                        detail = t(`${KEY}.history.internalNote`, { note: deposit.note });
+                      }
+                    } else {
+                      dot = claims > 0 ? 'bg-red-500/70' : 'bg-emerald-500/70';
+                      // `depositTotal` is the deposit HELD then — 0 unless it had been received
+                      // (owner, 2026-10-28): a clean record with nothing in hand gave nothing
+                      // back, so it never claims "Depósito devuelto".
+                      const heldThen = (deposit.depositTotal ?? 0) > 0;
+                      label =
+                        deposit.kind === 'CORRECTED'
+                          ? t(`${KEY}.history.depositCorrected`)
+                          : t(
+                              `${KEY}.history.${claims > 0 ? 'depositDamaged' : heldThen ? 'depositRefunded' : 'depositNoDamage'}`,
+                            );
+                      // A clean first record says everything in its label; a damage or a
+                      // correction carries the money as it stood THEN.
+                      if (deposit.kind === 'CORRECTED' || claims > 0) {
+                        detail = [
+                          heldThen
+                            ? t(`${KEY}.history.depositSummary`, {
+                                claims: money(order.currency.symbol, claims),
+                                refund: money(order.currency.symbol, deposit.refundAmount ?? 0),
+                              })
+                            : t(`${KEY}.history.depositSummaryNoDeposit`, {
+                                claims: money(order.currency.symbol, claims),
+                              }),
+                          ...(balance > 0
+                            ? [
+                                t(`${KEY}.history.depositBalance`, {
+                                  balance: money(order.currency.symbol, balance),
+                                }),
+                              ]
+                            : []),
+                        ].join(' · ');
+                      }
+                    }
+                  }
+                  return (
+                    <li
+                      key={row.key}
+                      data-flip-id={row.key}
+                      className="history-flip flex items-start gap-3 pt-3 first:pt-0"
+                    >
+                      <span aria-hidden className={`mt-1.5 size-1.5 shrink-0 rounded-full ${dot}`} />
+                      <div className="min-w-0">
+                        <p className="text-sm text-charcoal">{label}</p>
+                        {detail && <p className="text-xs text-charcoal/60">{detail}</p>}
+                        <p className="text-xs text-charcoal/50">
+                          {formatMoment(row.at)} · {byUserName}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
               </ol>
             )}
           </Section>
@@ -888,6 +1038,17 @@ const OrderDetailPage: React.FC = () => {
           <OrderPaymentUndoModal
             order={undoingPayment ? order : undefined}
             onClose={() => setUndoingPayment(false)}
+          />
+          {/* "Cobro del depósito" — received / without deposit / "Corregir". */}
+          <OrderDepositCollectionModal
+            order={collectionMode ? order : undefined}
+            mode={collectionMode}
+            onClose={() => setCollectionMode(undefined)}
+          />
+          {/* The deposit's happy path — one confirm, nothing claimed. */}
+          <OrderDepositRefundModal
+            order={refundingDeposit ? order : undefined}
+            onClose={() => setRefundingDeposit(false)}
           />
           {/* The settlement's way back — a confirm, because it clears a record (never money). */}
           <OrderSettlementUndoModal

@@ -56,7 +56,7 @@ export interface Product {
   rentTimeUnit?: string;
   /** Its lookup id (Alquiler only) — present alongside `rentTimeUnit`. */
   rentTimeUnitId?: number;
-  /** Refundable security deposit per unit ("garantía", Alquiler only) — a public commercial
+  /** Refundable security deposit per unit ("Depósito", Alquiler only) — a public commercial
    *  condition like the price, so every role receives it. Never part of a price. */
   securityDeposit?: number;
   images: ProductImage[];

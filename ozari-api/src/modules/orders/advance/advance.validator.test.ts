@@ -39,7 +39,38 @@ describe("validateAdvanceOrder", () => {
   it("passes a bare advance (just the target status)", () => {
     const { req, next } = run({ toStatusId: 5 });
     expect(next).toHaveBeenCalled();
-    expect(req.body).toEqual({ toStatusId: 5, evidence: [], reason: undefined });
+    expect(req.body).toEqual({
+      toStatusId: 5,
+      evidence: [],
+      reason: undefined,
+      depositCollection: undefined,
+    });
+  });
+
+  it("carries the delivery dialog's deposit answer, held to the deposit door's own rules", () => {
+    const received = run({ toStatusId: 3, depositCollection: { received: true, reason: "x" } });
+    expect(received.next).toHaveBeenCalled();
+    expect((received.req.body as Record<string, unknown>)["depositCollection"]).toEqual({
+      received: true,
+      reason: undefined,
+    });
+    const waived = run({ toStatusId: 3, depositCollection: { received: false, reason: " Un familiar " } });
+    expect((waived.req.body as Record<string, unknown>)["depositCollection"]).toEqual({
+      received: false,
+      reason: "Un familiar",
+    });
+    // Absent or null ⇒ simply not asked.
+    const absent = run({ toStatusId: 3, depositCollection: null });
+    expect((absent.req.body as Record<string, unknown>)["depositCollection"]).toBeUndefined();
+  });
+
+  it("rejects a malformed deposit answer (a waive without a reason, a non-boolean)", () => {
+    for (const depositCollection of [{ received: false }, { received: "yes" }, "true"]) {
+      vi.clearAllMocks();
+      const { next } = run({ toStatusId: 3, depositCollection });
+      expect(next).not.toHaveBeenCalled();
+      rejectedWith("invalidDepositCollection");
+    }
   });
 
   it("rejects a missing or malformed target status", () => {

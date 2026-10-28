@@ -159,8 +159,14 @@ export interface OrderDepositSettlementResponseModel {
  */
 export interface OrderSecurityDepositResponseModel {
   /** Σ rental lines' deposit snapshot × quantity — collected on top of the order, never part of its
-   *  total. 0 when only replacement values exist. */
+   *  total. 0 when only replacement values exist. The NOMINAL deposit, whatever was collected. */
   total: number;
+  /** The deposit the settlement counts (`heldDeposit`): `total` only when the collection is RECEIVED,
+   *  0 while PENDING or WAIVED — every settlement figure is computed from THIS, never from `total`
+   *  (only the retention ceiling reads `total`). */
+  held: number;
+  /** Was the deposit actually collected? Absent when `total` is 0 (nothing to collect). */
+  collection: OrderDepositCollectionResponseModel | undefined;
   /** May a settlement be RECORDED (or changed) right now: delivered and not cancelled. Deleting an
    *  existing one is always possible. */
   canSettle: boolean;
@@ -185,6 +191,58 @@ export interface OrderStatusHistoryResponseModel {
   from: OrderLookupModel | undefined;
   to: OrderLookupModel;
   /** Decrypted full name of the user who moved the order. */
+  byUserName: string;
+  at: Date;
+}
+
+/** Whether the deposit was collected: neither stamp = PENDING, `depositReceivedAt` = RECEIVED,
+ *  `depositWaivedAt` = WAIVED (the deposit was not received — the reason says why). */
+export type OrderDepositCollectionStatusModel = "PENDING" | "RECEIVED" | "WAIVED";
+
+/** `OrderSecurityDepositResponseModel.collection` — the deposit's COLLECTION, beside its settlement. */
+export interface OrderDepositCollectionResponseModel {
+  status: OrderDepositCollectionStatusModel;
+  /** When it was received / waived; absent while PENDING. */
+  at: Date | undefined;
+  /** WAIVED only — an internal note, never printed on a client document. */
+  reason: string | undefined;
+  /** May it be recorded / changed / cleared now: whenever the order is not cancelled — also after
+   *  the damage report (its money is computed live, so it follows the collection). */
+  canRecord: boolean;
+}
+
+/** `PUT /orders/:id/deposit-collection` (and `depositCollection` on the delivery advance). */
+export interface DepositCollectionRequestModel {
+  received: boolean;
+  /** Required when `received` is false (why no deposit was taken); dropped when true. */
+  reason: string | undefined;
+}
+
+/** What a deposit-history row records: the damage report (first settlement, a later correction, its
+ *  undo) or the deposit's collection (received, waived, back to pending). */
+export type OrderDepositEventKindModel =
+  | "RECORDED"
+  | "CORRECTED"
+  | "UNDONE"
+  | "RECEIVED"
+  | "WAIVED"
+  | "COLLECTION_CLEARED";
+
+/**
+ * One entry of the deposit's append-only trail (`service_deposit_history`) — shown beside the status
+ * history so "daños reportados" / "depósito devuelto" appear in the order's timeline. The money is the
+ * outcome AS RECORDED THEN (absent on `UNDONE`), so the entry stays true after later corrections.
+ */
+export interface OrderDepositHistoryEntryResponseModel {
+  id: number;
+  kind: OrderDepositEventKindModel;
+  /** The waive reason on a WAIVED entry (internal, never printed); absent otherwise. */
+  note: string | undefined;
+  depositTotal: number | undefined;
+  claimsTotal: number | undefined;
+  refundAmount: number | undefined;
+  balanceDue: number | undefined;
+  /** Decrypted full name of the user who recorded it. */
   byUserName: string;
   at: Date;
 }
@@ -235,6 +293,9 @@ export interface OrderDetailResponseModel extends OrderListItemResponseModel {
   /** The refundable deposit + damage settlement; absent when no line can carry either. */
   securityDeposit: OrderSecurityDepositResponseModel | undefined;
   statusHistory: OrderStatusHistoryResponseModel[];
+  /** The deposit's trail, chronological — top-level (not inside `securityDeposit`) because an undone
+   *  settlement on an order later edited out of qualifying still has history worth showing. */
+  depositHistory: OrderDepositHistoryEntryResponseModel[];
   /** Tracking photos, each tagged with the step it documents (the detail page groups by `statusId`).
    *  Absent entries are normal: a rewound step drops its photos, and old evidence is purged by the
    *  retention policy — the step is still proven by its history row. */

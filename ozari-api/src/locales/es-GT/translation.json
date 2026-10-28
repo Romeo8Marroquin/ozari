@@ -555,20 +555,20 @@
       }
     },
     "settlement": {
-      "settled": "Liquidación de garantía registrada exitosamente.",
-      "undone": "Liquidación de garantía deshecha exitosamente.",
+      "settled": "Depósito registrado exitosamente.",
+      "undone": "Registro del depósito deshecho exitosamente.",
       "notFound": "El pedido no existe o ya no está disponible.",
-      "notSettleable": "Este pedido no admite liquidación de garantía: debe estar entregado, no cancelado, y tener productos con depósito o precio de reposición.",
-      "notSettled": "Este pedido no tiene una liquidación de garantía registrada.",
+      "notSettleable": "Este pedido no admite registrar el depósito ni daños: debe estar entregado, no cancelado, y tener productos con depósito o precio de reposición.",
+      "notSettled": "Este pedido no tiene registrado qué pasó con su depósito.",
       "invalidDamage": "Un producto marcado como dañado no admite reposición o excede la cantidad del pedido.",
-      "retainedAboveDeposit": "El monto retenido no puede ser mayor que el depósito en garantía.",
+      "retainedAboveDeposit": "El monto retenido no puede ser mayor que el depósito.",
       "errorSettling": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "errorUndoing": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "validators": {
         "invalidId": "El identificador del pedido no es válido.",
         "invalidRetainedAmount": "El monto retenido no es válido.",
-        "invalidRetainedReason": "El motivo de la retención no es válido.",
-        "retainedReasonRequired": "Indica el motivo por el que se retiene parte del depósito.",
+        "invalidRetainedReason": "La descripción del daño no es válida.",
+        "retainedReasonRequired": "Describe el daño por el que se retiene el depósito.",
         "invalidDamages": "La lista de productos dañados no es válida.",
         "logs": {
           "invalidId": "Identificador de pedido inválido en la liquidación de garantía.",
@@ -587,6 +587,35 @@
         "retainedAboveDeposit": "Retención mayor que el depósito en el pedido {{id}}.",
         "error": "Error al registrar la liquidación de garantía.",
         "undoError": "Error al deshacer la liquidación de garantía."
+      }
+    },
+    "depositCollection": {
+      "recorded": "Cobro del depósito registrado exitosamente.",
+      "cleared": "El depósito vuelve a estar pendiente de cobro.",
+      "notFound": "El pedido no existe o ya no está disponible.",
+      "notApplicable": "Este pedido no tiene un depósito que cobrar, o está cancelado.",
+      "notRecorded": "Este pedido no tiene registrado el cobro de su depósito.",
+      "errorRecording": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "errorClearing": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "invalidId": "El identificador del pedido no es válido.",
+        "invalidReceived": "Indica si se recibió el depósito.",
+        "invalidReason": "El motivo por el que no se recibió el depósito no es válido.",
+        "reasonRequired": "Indica por qué no se recibió el depósito.",
+        "logs": {
+          "invalidId": "Identificador de pedido inválido al registrar el cobro del depósito.",
+          "invalidReceived": "Valor de recibido inválido al registrar el cobro del depósito.",
+          "invalidReason": "Motivo inválido al registrar el cobro del depósito.",
+          "reasonRequired": "Depósito no recibido sin motivo."
+        }
+      },
+      "logs": {
+        "recorded": "Cobro del depósito registrado para el pedido {{id}}.",
+        "cleared": "Cobro del depósito vuelto a pendiente para el pedido {{id}}.",
+        "notApplicable": "El pedido {{id}} no tiene depósito que cobrar o está cancelado.",
+        "notRecorded": "El pedido {{id}} no tenía registrado el cobro del depósito.",
+        "error": "Error al registrar el cobro del depósito.",
+        "clearError": "Error al volver a pendiente el cobro del depósito."
       }
     },
     "undoPayment": {
@@ -625,11 +654,13 @@
         "invalidToStatusId": "El estado destino del pedido no es válido.",
         "invalidEvidenceKeys": "Las fotos de evidencia enviadas no son válidas.",
         "invalidReason": "El motivo no es válido.",
+        "invalidDepositCollection": "Indica si se recibió el depósito y, si no, por qué.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
           "invalidToStatusId": "Estado destino inválido <{{-toStatusId}}> al avanzar el pedido.",
           "invalidEvidenceKeys": "Claves de evidencia inválidas (<{{-count}}>) al avanzar el pedido.",
           "invalidReason": "Motivo de cancelación inválido al avanzar el pedido.",
+          "invalidDepositCollection": "Cobro del depósito inválido (<{{-error}}>) al avanzar el pedido.",
           "validationError": "Error validando el avance del pedido: {{-error}}."
         }
       },
@@ -734,7 +765,7 @@
       "stockConflict": "Algunos productos no tienen disponibilidad para las fechas solicitadas.",
       "driverConflict": "El responsable asignado ya tiene un evento demasiado cerca de ese horario.",
       "selfOverlap": "La entrega y la recolección de este pedido están demasiado cerca entre sí.",
-      "settlementConflict": "Este cambio contradice la liquidación de garantía registrada (un producto dañado o el monto retenido). Deshaz la liquidación primero.",
+      "settlementConflict": "Este cambio contradice el reporte de daños registrado (un producto dañado o el monto retenido del depósito). Deshaz ese registro primero.",
       "errorUpdatingOrder": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "validators": {
         "invalidClientRegistryId": "El cliente del pedido es requerido y debe ser válido.",

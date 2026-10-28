@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { OrderDetail, OrderLine } from './order.types';
 import {
+  buildUnsavedSettlement,
   createSettlementSchema,
   damageableLines,
   parseDamagedQuantity,
@@ -133,7 +134,7 @@ describe('settlementToFormValues', () => {
   const order = (over: Partial<OrderDetail> = {}): OrderDetail =>
     ({
       lines: [line(), line({ id: 32, isRental: false, replacementPrice: undefined })],
-      securityDeposit: { total: 200, canSettle: true },
+      securityDeposit: { total: 200, held: 200, canSettle: true },
       ...over,
     }) as OrderDetail;
 
@@ -146,6 +147,7 @@ describe('settlementToFormValues', () => {
       lines: [line({ damagedQuantity: 2, damageNote: 'Quemados' })],
       securityDeposit: {
         total: 200,
+        held: 200,
         canSettle: true,
         settlement: {
           settledAt: '2026-08-03T10:00:00.000Z',
@@ -171,6 +173,7 @@ describe('settlementToFormValues', () => {
     const settled = order({
       securityDeposit: {
         total: 200,
+        held: 200,
         canSettle: true,
         settlement: {
           settledAt: '2026-08-03T10:00:00.000Z',
@@ -259,5 +262,86 @@ describe('previewSettlement (the API formula, as a labelled estimate)', () => {
         lines,
       ),
     ).toEqual({ retainedAmount: 0, damagesTotal: 0, claimsTotal: 0, refundAmount: 200, balanceDue: 0 });
+  });
+});
+
+describe('buildUnsavedSettlement', () => {
+  const now = new Date('2026-10-27T15:00:00.000Z');
+  const order = (over: Partial<OrderDetail> = {}): OrderDetail =>
+    ({
+      id: 12,
+      lines: [
+        line(),
+        line({ id: 32, productName: 'Silla', replacementPrice: 33.33, quantity: 4 }),
+        line({ id: 33, productName: 'Vasos', isRental: false, replacementPrice: undefined }),
+      ],
+      securityDeposit: { total: 200, held: 200, canSettle: true },
+      ...over,
+    }) as OrderDetail;
+
+  it('shapes the CURRENT values like the API record: priced lines, cents, notes, the same formula', () => {
+    const unsaved = buildUnsavedSettlement(
+      order(),
+      values({
+        retainedAmount: '50',
+        retainedReason: '  Golpe en la esquina ',
+        damages: [
+          { lineId: 31, quantity: '1', note: ' Roto ' },
+          { lineId: 32, quantity: '3', note: '   ' },
+        ],
+      }),
+      now,
+    );
+    expect(unsaved).toEqual({
+      settledAt: '2026-10-27T15:00:00.000Z',
+      retainedAmount: 50,
+      retainedReason: 'Golpe en la esquina',
+      damages: [
+        { lineId: 31, productName: 'Mantel blanco', quantity: 1, unitAmount: 120, amount: 120, note: 'Roto' },
+        // A blank note is absent.
+        { lineId: 32, productName: 'Silla', quantity: 3, unitAmount: 33.33, amount: 99.99 },
+      ],
+      damagesTotal: 219.99,
+      claimsTotal: 269.99,
+      appliedFromDeposit: 200,
+      refundAmount: 0,
+      balanceDue: 69.99,
+    });
+  });
+
+  it('a clean form claims nothing; unknown lines, zero and invalid counts are dropped', () => {
+    const unsaved = buildUnsavedSettlement(
+      order(),
+      values({
+        retainedReason: 'sin retención no viaja',
+        damages: [
+          { lineId: 31, quantity: '', note: 'x' },
+          { lineId: 32, quantity: '99', note: '' },
+          { lineId: 99, quantity: '1', note: '' },
+        ],
+      }),
+      now,
+    );
+    expect(unsaved.damages).toEqual([]);
+    expect(unsaved.retainedReason).toBeUndefined();
+    expect(unsaved).toMatchObject({ claimsTotal: 0, appliedFromDeposit: 0, refundAmount: 200, balanceDue: 0 });
+  });
+
+  it('an order without a deposit block counts the deposit as 0 (everything claimed is owed)', () => {
+    const unsaved = buildUnsavedSettlement(
+      order({ securityDeposit: undefined }),
+      values({ damages: [{ lineId: 31, quantity: '1', note: '' }] }),
+      now,
+    );
+    expect(unsaved).toMatchObject({ claimsTotal: 120, appliedFromDeposit: 0, refundAmount: 0, balanceDue: 120 });
+  });
+
+  it('counts what is HELD: a deposit handed over without collecting it covers nothing', () => {
+    const unsaved = buildUnsavedSettlement(
+      order({ securityDeposit: { total: 200, held: 0, canSettle: true } }),
+      values({ damages: [{ lineId: 31, quantity: '1', note: '' }] }),
+      now,
+    );
+    expect(unsaved).toMatchObject({ claimsTotal: 120, appliedFromDeposit: 0, refundAmount: 0, balanceDue: 120 });
   });
 });

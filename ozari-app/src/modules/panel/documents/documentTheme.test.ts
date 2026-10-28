@@ -7,11 +7,21 @@ import {
   CONTENT_WIDTH,
   cornerWedgePath,
   descriptionWidth,
+  estimateLines,
+  estimateSettlementHeight,
+  fillWidth,
   FOOTER_CLEARANCE,
   footerPadding,
   GROUP_HEAD_AHEAD,
   HAIRLINE,
+  MARGIN,
   opticalCenterPad,
+  PAGE_HEIGHT,
+  pageContentHeight,
+  SETTLEMENT_COLUMN_WIDTH,
+  SETTLEMENT_HEAD_AHEAD,
+  settlementFitsOnePage,
+  type SettlementRowText,
   roundedTopPath,
   ROW_ALT,
   ROW_BASE,
@@ -23,6 +33,80 @@ import {
   TOTALS_PADDING,
   TOTALS_WIDTH,
 } from './documentTheme';
+
+describe('fillWidth', () => {
+  it('gives the first column exactly what the fixed columns and the padding leave', () => {
+    // Every table on every document sizes its free column by this one rule, so a damage report's
+    // table lines up with a comprobante's to the point.
+    expect(fillWidth([COL_TOTAL]) + COL_TOTAL + ROW_PADDING * 2).toBe(CONTENT_WIDTH);
+    expect(fillWidth([])).toBe(CONTENT_WIDTH - ROW_PADDING * 2);
+    expect(descriptionWidth(false)).toBe(fillWidth([COL_QUANTITY, COL_PRICE, COL_TOTAL]));
+  });
+});
+
+describe('the damages section geometry', () => {
+  it('puts the damages total under the totals’ figures', () => {
+    // The total's row is the totals panel's inner width at the right edge of a full-width panel
+    // with the same padding — so its figure sits on the TOTAL's vertical line.
+    expect(SETTLEMENT_COLUMN_WIDTH).toBe(TOTALS_INNER_WIDTH);
+    expect(TOTALS_WIDTH).toBeLessThan(CONTENT_WIDTH);
+  });
+});
+
+describe('the oversized-panel rule', () => {
+  const charge = (label: string, notes: string[] = []): SettlementRowText => ({ label, notes });
+  const LONGEST = 'x'.repeat(500);
+
+  it('measures a page’s content room from the furniture it actually prints', () => {
+    // More standing notes ⇒ more bottom padding ⇒ less room, never more.
+    expect(pageContentHeight(2)).toBeLessThan(pageContentHeight(1));
+    expect(pageContentHeight(1)).toBeLessThan(PAGE_HEIGHT - MARGIN * 2);
+    expect(pageContentHeight(0) - pageContentHeight(1)).toBe(footerPadding(1) - footerPadding(0));
+  });
+
+  it('counts wrapped lines pessimistically, and never fewer than one', () => {
+    expect(estimateLines('', 100, 9)).toBe(1);
+    expect(estimateLines('corto', 164, 9)).toBe(1);
+    // 0.6em per glyph at 9pt over 164pt ⇒ 30 glyphs a line.
+    expect(estimateLines('x'.repeat(30), 164, 9)).toBe(1);
+    expect(estimateLines('x'.repeat(31), 164, 9)).toBe(2);
+    expect(estimateLines(LONGEST, 164, 7)).toBe(13);
+  });
+
+  it('grows with every charge and every caption line', () => {
+    // One column of charges, then the total: each row adds its own height.
+    const none = estimateSettlementHeight([]);
+    const one = estimateSettlementHeight([charge('Retención del depósito')]);
+    expect(one).toBeGreaterThan(none);
+    expect(estimateSettlementHeight([charge('a', [LONGEST])])).toBeGreaterThan(one);
+  });
+
+  it('lets the ordinary settlement travel WHOLE', () => {
+    // The fixture's case — a retention with a reason and two replacements — is a fraction of a page.
+    const rows = [
+      charge('Retención del depósito', ['Daño físico en la mantelería: manchas persistentes tras el lavado.']),
+      charge('Reposición: Mantelería de lino con cubremantel a juego', ['2 × Q 350.00 c/u', 'Quemaduras.']),
+      charge('Reposición: Sillas plásticas blancas', ['4 × Q 45.00 c/u']),
+    ];
+    expect(settlementFitsOnePage(rows, 1)).toBe(true);
+  });
+
+  it('switches to the splittable arrangement once the panel could exceed a page', () => {
+    // react-pdf cannot move a `wrap={false}` block taller than a page — it leaves it running off the
+    // bottom edge. The API allows 50 charges of 500 characters each, so this case is real.
+    const many = Array.from({ length: 50 }, (_, index) =>
+      charge(`Reposición: Producto ${index}`, ['1 × Q 50.00 c/u', LONGEST]),
+    );
+    expect(settlementFitsOnePage(many, 1)).toBe(false);
+    // And the boundary is pessimistic: anything the estimate admits leaves headroom on the page.
+    const fitting = Array.from({ length: 12 }, () => charge('Reposición: Silla', ['1 × Q 45.00 c/u']));
+    expect(estimateSettlementHeight(fitting)).toBeLessThan(pageContentHeight(1));
+  });
+
+  it('keeps an oversized panel’s heading with at least a panel edge and a two-line charge', () => {
+    expect(SETTLEMENT_HEAD_AHEAD).toBeGreaterThan(9 * 1.35 * 2);
+  });
+});
 
 describe('descriptionWidth', () => {
   it('gives the description whatever the numeric columns and the padding leave', () => {

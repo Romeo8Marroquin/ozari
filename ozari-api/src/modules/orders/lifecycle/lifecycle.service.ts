@@ -580,6 +580,8 @@ export function describeActions(
       // Forward only: rewinding or cancelling is desk work, and a "navigate there" button on either
       // would be offering a trip nobody is about to make.
       tracksEvent: kind === "forward" ? status.tracksEvent : null,
+      // An order fact (its deposit), not a machine one — the order projection fills it in.
+      depositToCollect: undefined,
     };
   };
   return [

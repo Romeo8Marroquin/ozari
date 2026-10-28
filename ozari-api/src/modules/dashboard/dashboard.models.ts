@@ -75,6 +75,36 @@ export interface StatusSliceModel {
   count: number;
 }
 
+/**
+ * The security-deposit corner (EPIC-2-ORDERS §12). Deposits and damages are OCCASIONAL, so this is a
+ * small block, not a headline: what must not be forgotten (delivered orders whose deposit is still
+ * open) and what the month's settlements came to.
+ */
+export interface DashboardDepositsModel {
+  /** Delivered, not cancelled, carrying a deposit or replacement value, and not settled yet — the
+   *  same predicate as the list's `depositSettlementPending`. `items` are the oldest deliveries first,
+   *  capped at `PENDING_DEPOSITS_LIMIT`; `orders`/`amount` count them all. */
+  pending: {
+    orders: number;
+    /** Σ of their HELD deposits (`heldDeposit` — only a RECEIVED one counts; pending/waived count 0)
+     *  — money in hand that is not the business's yet. */
+    amount: number;
+    items: OrderListItemResponseModel[];
+  };
+  /** Settlements FIRST recorded this month (scoped by `depositSettledAt`), as they stand now. */
+  month: {
+    settled: number;
+    /** Σ deposit given back to clients. */
+    refunded: number;
+    /** Σ deposit kept for partial damage. */
+    retained: number;
+    /** Σ lost/broken units at their replacement value. */
+    replacements: number;
+    /** Σ what the deposits could not cover — billed to clients on top. */
+    balanceDue: number;
+  };
+}
+
 export interface DashboardCurrencyModel {
   id: number;
   iso4217Code: string;
@@ -132,6 +162,7 @@ export interface DashboardResponseModel {
   revenueTrend: RevenuePointModel[];
   topProducts: TopProductModel[];
   statusSplit: StatusSliceModel[];
+  deposits: DashboardDepositsModel;
   currency: DashboardCurrencyModel;
 }
 

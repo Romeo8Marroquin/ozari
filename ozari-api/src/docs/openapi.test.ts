@@ -44,6 +44,8 @@ const EXPECTED_OPERATIONS: ReadonlyArray<readonly [string, string]> = [
   ["/orders/{id}/payment", "delete"],
   ["/orders/{id}/settlement", "put"],
   ["/orders/{id}/settlement", "delete"],
+  ["/orders/{id}/deposit-collection", "put"],
+  ["/orders/{id}/deposit-collection", "delete"],
   ["/calendar", "get"],
   ["/calendar/google/authorize", "get"],
   ["/calendar/google/callback", "get"],

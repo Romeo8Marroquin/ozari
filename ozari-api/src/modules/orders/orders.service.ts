@@ -5,6 +5,7 @@ import { decodeCoords } from "@helpers/geo.js";
 import { BusinessTypeEnum } from "@models/enums/businessTypeEnum.js";
 import { RentTimeUnitEnum } from "@models/enums/rentTimeUnitEnum.js";
 import { RolesEnum } from "@models/enums/rolesEnum.js";
+import { TrackedEventEnum } from "@models/enums/serviceLifecycleEnum.js";
 import {
   currentHoldings,
   describeActions,
@@ -17,9 +18,12 @@ import type {
   ActorContextModel,
   EvidenceBoundsModel,
   LifecycleOrderModel,
+  OrderActionModel,
   StatusDefinitionModel,
 } from "./lifecycle/lifecycle.models.js";
 import {
+  type OrderDepositCollectionResponseModel,
+  type OrderDepositCollectionStatusModel,
   type OrderDepositSettlementResponseModel,
   type OrderDetailResponseModel,
   type OrderListItemResponseModel,
@@ -46,8 +50,9 @@ export const orderListInclude = {
   assignedUser: { select: { id: true, fullNameKms: true } },
   // `isRental` rides along with the quantities: it is the order's MODE (any rental line ⇒ a rental
   // order), which decides which pipeline steps apply — the lifecycle projection needs it per row.
-  // The deposit snapshots ride along for `depositSettlementPending` — the agenda's "garantía por
-  // liquidar" flag (two small columns, no extra query).
+  // The deposit snapshots ride along for `depositSettlementPending` — the agenda's pending-deposit
+  // flag — and for the delivery action's `depositToCollect` (two small columns, no extra query; the
+  // collection stamps are plain `services` columns and arrive with the row).
   serviceDetails: {
     where: { isActive: true },
     select: { quantity: true, isRental: true, securityDeposit: true, replacementPrice: true },
@@ -111,6 +116,20 @@ export const richOrderInclude = {
       byUser: { select: { fullNameKms: true } },
     },
   },
+  depositHistory: {
+    orderBy: { id: "asc" },
+    select: {
+      id: true,
+      kind: true,
+      note: true,
+      depositTotal: true,
+      claimsTotal: true,
+      refundAmount: true,
+      balanceDue: true,
+      createdAt: true,
+      byUser: { select: { fullNameKms: true } },
+    },
+  },
   // The tracking photos, each tagged with the STEP it documents — the detail page groups them under
   // that step. (Rewinding a step deletes its photos; a retention purge deletes old ones. Both simply
   // leave fewer rows here, which is why the page renders from what exists rather than a count.)
@@ -134,12 +153,13 @@ const roundMoney = (value: number): number => Math.round(value * 100) / 100;
 
 // ── Security deposit & damage settlement (EPIC-2-ORDERS §12) ─────────────────────────────────────
 
-/** A line as the deposit rules read it — both the lean list row and the rich row satisfy it. */
+/** A line as the deposit rules read it — the lean list row, the rich row and a freshly PRICED line
+ *  (plain numbers, the order edit's re-check) all satisfy it. */
 export interface DepositLineModel {
   isRental: boolean;
   quantity: number;
-  securityDeposit: Prisma.Decimal | null;
-  replacementPrice: Prisma.Decimal | null;
+  securityDeposit: Prisma.Decimal | number | null;
+  replacementPrice: Prisma.Decimal | number | null;
 }
 
 /**
@@ -205,6 +225,102 @@ export const isDepositSettlementPending = (
   canRecordSettlement(order) &&
   order.serviceDetails.some(isSettleableLine);
 
+// ── Deposit COLLECTION (was it actually received?) ───────────────────────────────────────────────
+
+/** The two stamps that say whether the deposit was collected (mutually exclusive by construction). */
+export interface DepositCollectionStampsModel {
+  depositReceivedAt: Date | null;
+  depositWaivedAt: Date | null;
+}
+
+/** PENDING until recorded; RECEIVED / WAIVED from whichever stamp is set. */
+export const depositCollectionStatus = (
+  order: DepositCollectionStampsModel,
+): OrderDepositCollectionStatusModel => {
+  if (order.depositReceivedAt !== null) {
+    return "RECEIVED";
+  }
+  return order.depositWaivedAt !== null ? "WAIVED" : "PENDING";
+};
+
+/**
+ * THE deposit a settlement counts — the one rule, in one place (owner 2026-10-28: only a deposit
+ * actually RECEIVED is money we have): the nominal deposit when its collection is RECEIVED, 0 while
+ * it is PENDING or WAIVED (there is nothing in hand to refund or apply; every claim is owed on top).
+ * Every settlement figure, the history snapshot and the dashboard read it through here. The
+ * retention CEILING is not this — it is the nominal `computeDepositTotal` (a retention is "that part
+ * of the deposit", billed even when the deposit never reached us).
+ */
+export const heldDeposit = (
+  order: Pick<DepositCollectionStampsModel, "depositReceivedAt"> & {
+    serviceDetails: readonly DepositLineModel[];
+  },
+): number => (order.depositReceivedAt === null ? 0 : computeDepositTotal(order.serviceDetails));
+
+/** May the collection be recorded / changed / cleared now: whenever the order is not cancelled —
+ *  before OR after the damage report (owner 2026-10-28: a deposit received late is recorded on the
+ *  detail; the report's money is computed live, so it simply follows). */
+export const canRecordDepositCollection = (order: { cancelledAt: Date | null }): boolean =>
+  order.cancelledAt === null;
+
+/**
+ * The nominal deposit still to be asked about at the delivery — or `undefined` when there is nothing
+ * to ask: no deposit, already received/waived, cancelled, or a damage report already recorded (the
+ * delivery dialog is a PRE-report question; after it, the collection is changed on the detail). The
+ * delivery action's `depositToCollect` AND the advance's acceptance of `depositCollection` both read
+ * it, so the dialog is offered exactly when the write would be applied.
+ */
+export const pendingDepositToCollect = (
+  order: DepositCollectionStampsModel & {
+    cancelledAt: Date | null;
+    depositSettledAt: Date | null;
+    serviceDetails: readonly DepositLineModel[];
+  },
+): number | undefined => {
+  const total = computeDepositTotal(order.serviceDetails);
+  return total > 0 &&
+    depositCollectionStatus(order) === "PENDING" &&
+    order.depositSettledAt === null &&
+    canRecordDepositCollection(order)
+    ? total
+    : undefined;
+};
+
+/** Stamps `depositToCollect` on the forward move INTO a DELIVERY-tracking step when the order still
+ *  has a deposit to confirm; every other action passes through untouched. */
+export const withDepositToCollect = (
+  actions: OrderActionModel[],
+  toCollect: number | undefined,
+): OrderActionModel[] =>
+  toCollect === undefined
+    ? actions
+    : actions.map((action) =>
+        action.kind === "forward" && action.tracksEvent === TrackedEventEnum.DELIVERY
+          ? { ...action, depositToCollect: toCollect }
+          : action,
+      );
+
+/** The detail's `collection` block — absent when there is no deposit to collect at all. */
+export function projectDepositCollection(
+  order: DepositCollectionStampsModel & {
+    depositWaivedReason: string | null;
+    cancelledAt: Date | null;
+    depositSettledAt: Date | null;
+  },
+  total: number,
+): OrderDepositCollectionResponseModel | undefined {
+  if (total <= 0) {
+    return undefined;
+  }
+  const status = depositCollectionStatus(order);
+  return {
+    status,
+    at: order.depositReceivedAt ?? order.depositWaivedAt ?? undefined,
+    reason: status === "WAIVED" ? (order.depositWaivedReason ?? undefined) : undefined,
+    canRecord: canRecordDepositCollection(order),
+  };
+}
+
 /**
  * Projects the detail's `securityDeposit` block, or `undefined` when no line can carry a deposit or
  * a damage (the section simply does not exist for that order).
@@ -214,6 +330,7 @@ export function projectSecurityDeposit(order: RichOrder): OrderSecurityDepositRe
     return undefined;
   }
   const total = computeDepositTotal(order.serviceDetails);
+  const held = heldDeposit(order);
   let settlement: OrderDepositSettlementResponseModel | undefined;
   if (order.depositSettledAt !== null) {
     const damages = order.serviceDetails
@@ -237,10 +354,16 @@ export function projectSecurityDeposit(order: RichOrder): OrderSecurityDepositRe
       retainedReason: order.depositRetainedReason ?? undefined,
       damages,
       damagesTotal,
-      ...computeSettlementMoney(total, retainedAmount, damagesTotal),
+      ...computeSettlementMoney(held, retainedAmount, damagesTotal),
     };
   }
-  return { total, canSettle: canRecordSettlement(order), settlement };
+  return {
+    total,
+    held,
+    collection: projectDepositCollection(order, total),
+    canSettle: canRecordSettlement(order),
+    settlement,
+  };
 }
 
 /**
@@ -282,10 +405,9 @@ export function assertSettlementSurvivesEdit(
   if (order.depositSettledAt === null) {
     return;
   }
-  const nextDeposit = roundMoney(
-    next.reduce((sum, line) => sum + (line.securityDeposit ?? 0) * line.quantity, 0),
-  );
-  if (Number(order.depositRetainedAmount ?? 0) > nextDeposit) {
+  // The retention ceiling is the NEW lines' NOMINAL deposit — the same ceiling the report itself
+  // enforces (whether the deposit was received only decides what is refunded vs owed, live).
+  if (Number(order.depositRetainedAmount ?? 0) > computeDepositTotal(next)) {
     throw new OrderSettlementConflictError();
   }
 }
@@ -498,11 +620,11 @@ export function projectOrderListItem(
         undefined,
     },
     nextStatus: next ? { id: next.id, name: next.name } : undefined,
-    actions: describeActions(
-      context.catalog,
-      lifecycleOrder,
-      context.actor,
-      context.evidence,
+    // The engine's moves, plus the one ORDER fact the delivery dialog needs: the deposit still to
+    // confirm ("¿Se recibió el depósito?") rides on the forward DELIVERY move only.
+    actions: withDepositToCollect(
+      describeActions(context.catalog, lifecycleOrder, context.actor, context.evidence),
+      pendingDepositToCollect(order),
     ),
     // Does this order reserve anything at all right now? The delete dialog states the consequence
     // from THIS, never from a guess: a finished or cancelled order gave its goods back long ago, so
@@ -614,6 +736,17 @@ export function projectOrderDetail(
       id: entry.id,
       from: entry.fromStatus ?? undefined,
       to: entry.toStatus,
+      byUserName: decryptKms(entry.byUser.fullNameKms),
+      at: entry.createdAt,
+    })),
+    depositHistory: order.depositHistory.map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      note: entry.note ?? undefined,
+      depositTotal: toMoney(entry.depositTotal),
+      claimsTotal: toMoney(entry.claimsTotal),
+      refundAmount: toMoney(entry.refundAmount),
+      balanceDue: toMoney(entry.balanceDue),
       byUserName: decryptKms(entry.byUser.fullNameKms),
       at: entry.createdAt,
     })),

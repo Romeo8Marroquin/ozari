@@ -1,4 +1,4 @@
-﻿{
+{
   "app": {
     "localStorageSaveError": "Error al almacenar el item {{key}} en el almacenamiento local.",
     "localStorageReadError": "Error al leer el item {{key}} del almacenamiento local."
@@ -364,12 +364,32 @@
           "units_one": "{{count}} unidad",
           "units_other": "{{count}} unidades",
           "empty": "Aún no hay salidas registradas este mes."
+        },
+        "deposits": {
+          "title": "Depósitos",
+          "description": "Los que aún esperan devolverse y lo registrado este mes.",
+          "empty": "No hay depósitos pendientes ni registrados este mes.",
+          "pending_one": "{{count}} pendiente · {{amount}} en depósitos",
+          "pending_other": "{{count}} pendientes · {{amount}} en depósitos",
+          "nonePending": "Ningún depósito pendiente.",
+          "openAria": "Ver el pedido de {{client}}",
+          "chip": "Depósito pendiente",
+          "more_one": "y {{count}} más",
+          "more_other": "y {{count}} más",
+          "month_one": "Este mes · {{count}} registrado",
+          "month_other": "Este mes · {{count}} registrados",
+          "monthNone": "Este mes no se ha registrado ninguno.",
+          "refunded": "Devuelto",
+          "retained": "Retenido",
+          "replacements": "Reposiciones",
+          "balanceDue": "Saldo por cobrar"
         }
       },
       "documents": {
         "actions": {
           "download": "Descargar comprobante",
-          "quote": "Descargar cotización"
+          "quote": "Descargar cotización",
+          "damageReport": "Descargar reporte de daños"
         },
         "receipt": {
           "title": "Comprobante de pedido"
@@ -419,23 +439,54 @@
           "free": "Gratis",
           "discount": "Descuento",
           "total": "TOTAL",
-          "deposit": "Anticipo",
-          "balance": "Saldo pendiente"
+          "advance": "Anticipo",
+          "advanceReceived": "Aplicado de un anticipo de {{amount}}.",
+          "paid": "Pagado"
+        },
+        "balance": {
+          "depositDue": "Depósito (reembolsable)",
+          "depositDueNote": "Se devuelve al recoger, previa revisión.",
+          "claims": "Daños",
+          "claimsNote": "Detalle a continuación.",
+          "depositCredit": "Depósito recibido",
+          "serviceDue": "Saldo del servicio",
+          "advanceCredit": "Saldo a favor del cliente",
+          "collect": "Monto a pagar",
+          "refund": "Monto a devolver al cliente",
+          "none": "Sin saldo pendiente",
+          "depositOnHand": "Depósito recibido",
+          "depositOnHandNote": "Se devuelve al recoger, previa revisión.",
+          "depositNotReceived": "Depósito no recibido: los daños se cobran completos."
         },
         "securityDeposit": {
-          "held": "Depósito en garantía (reembolsable)",
-          "heldNote": "Aparte del total; se devuelve al recoger, previa revisión.",
-          "refunded": "Depósito en garantía (devuelto)",
-          "refundedNote": "Revisión sin cargos: se devolvió completo.",
-          "settlementTitle": "Liquidación de garantía",
-          "retention": "Retención por daños",
+          "settlementTitle": "Depósito y daños",
+          "damagesTitle": "Daños",
+          "retention": "Retención del depósito",
+          "retentionNotReceived": "El depósito no se recibió: este monto se cobra aparte.",
           "replacement": "Reposición: {{product}}",
-          "replacementDetail": "{{quantity}} × {{unitAmount}}",
-          "claimsTotal": "Total por daños",
-          "applied": "Cubierto con la garantía",
-          "balanceDue": "Saldo pendiente por daños",
-          "refund": "Garantía devuelta",
-          "refundNote": "De un depósito de {{amount}}"
+          "replacementDetail": "{{quantity}} × {{unitAmount}} c/u",
+          "claimsTotal": "Total por daños"
+        },
+        "damageReport": {
+          "title": "Reporte de daños",
+          "depositTitle": "Depósito recibido",
+          "retentionTitle": "Retención del depósito",
+          "retentionNoReason": "Daño parcial sin descripción registrada.",
+          "replacementsTitle": "Piezas perdidas o rotas",
+          "noClaims": "La revisión al recoger no encontró daños: no hay cargos contra el depósito.",
+          "noClaimsNoDeposit": "La revisión al recoger no encontró daños.",
+          "payTitle": "Cómo pagar el saldo",
+          "payLead": "Al depositar, indica el número de pedido.",
+          "columns": {
+            "product": "Producto",
+            "depositEach": "Depósito c/u",
+            "units": "Unidades",
+            "replacementEach": "Reposición c/u"
+          },
+          "totals": {
+            "claims": "Total por daños",
+            "claimsBreakdown": "Retención {{retained}} + piezas {{damages}}"
+          }
         },
         "notices": {
           "quote": "Cotización sujeta a cambios y a la disponibilidad de los artículos en las fechas indicadas.",
@@ -687,7 +738,7 @@
           "nextStep": "Marcar “{{status}}”",
           "pay": "Registrar pago",
           "payAria": "Registrar el pago del pedido de {{client}}",
-          "depositPending": "Garantía por liquidar"
+          "depositPending": "Depósito pendiente"
         },
         "detail": {
           "back": "Volver a pedidos",
@@ -718,7 +769,8 @@
             "reopen": "Reactivar pedido",
             "edit": "Editar pedido",
             "pay": "Registrar pago",
-            "undoPay": "Deshacer pago"
+            "undoPay": "Deshacer pago",
+            "depositPending": "Depósito pendiente"
           },
           "client": {
             "title": "Cliente y entrega",
@@ -752,25 +804,46 @@
             "damaged_other": "{{count}} perdidas o rotas"
           },
           "deposit": {
-            "title": "Garantía",
-            "total": "Depósito en garantía",
-            "totalNote": "Se cobra aparte del total del pedido y se devuelve al recoger.",
-            "chipPending": "Por liquidar",
-            "chipSettled": "Liquidada",
-            "notYet": "La garantía se liquida después de la entrega.",
-            "due": "Cuando el pedido vuelva, registra si la garantía se devuelve completa o si se retiene una parte.",
-            "settle": "Liquidar garantía",
-            "edit": "Editar liquidación",
-            "undo": "Deshacer liquidación",
-            "noClaims": "Sin daños: el depósito se devuelve completo.",
-            "retained": "Retenido por daños",
-            "reason": "Motivo: {{reason}}",
+            "title": "Depósito",
+            "total": "Depósito",
+            "totalNote": "Se cobra aparte del total del pedido y se devuelve al recoger si todo vuelve en buen estado.",
+            "chipPending": "Pendiente",
+            "chipRefunded": "Devuelto",
+            "chipNoDamage": "Sin daños",
+            "chipDamaged": "Con daños",
+            "notYet": "Después de la entrega podrás devolver el depósito o reportar daños.",
+            "due": "Cuando el pedido vuelva: si todo está en buen estado, devuelve el depósito; si algo volvió dañado o no volvió, reporta los daños.",
+            "dueNoDeposit": "Cuando el pedido vuelva: confirma que todo volvió en buen estado o reporta las piezas perdidas o rotas.",
+            "dueNotReceived": "Cuando el pedido vuelva: confirma que todo volvió en buen estado o reporta los daños. El depósito no se ha recibido, así que no hay nada que devolver y los daños se cobrarían completos.",
+            "refundAction": "Devolver depósito",
+            "noDamageAction": "Registrar sin daños",
+            "report": "Reportar daños",
+            "editReport": "Editar reporte de daños",
+            "undo": "Deshacer",
+            "noClaims": "Sin daños: el depósito se devolvió completo.",
+            "noClaimsNoDeposit": "Sin daños: todo volvió en buen estado.",
+            "noClaimsNotReceived": "Sin daños: todo volvió en buen estado. El depósito no se recibió, así que no hay nada que devolver.",
+            "retained": "Retención del depósito",
+            "reason": "Daño: {{reason}}",
             "damage": "{{product}}: {{quantity}} × {{unit}}",
             "note": "Nota: {{note}}",
             "refund": "Se devuelve al cliente",
-            "balanceDue": "Saldo por cobrar",
+            "balanceDue": "Saldo por cobrar al cliente",
             "balanceDueNote": "Los daños superan el depósito: esta diferencia se cobra aparte.",
-            "settledAt": "Liquidada el"
+            "balanceDueNotReceived": "El depósito no se recibió: los daños se cobran completos.",
+            "settledAt": "Registrado el",
+            "collection": {
+              "title": "¿Se recibió el depósito?",
+              "pending": "Pendiente",
+              "received": "Recibido el {{date}}",
+              "receivedNoDate": "Recibido",
+              "waived": "No recibido: {{reason}}",
+              "internalNote": "Nota interna: no aparece en los documentos del cliente.",
+              "notReceivedAfterReport": "Mientras no se reciba, los daños se cobran completos y no hay nada que devolver. Si ya lo recibiste, regístralo: el resultado se recalcula.",
+              "markReceived": "Registrar depósito recibido",
+              "waive": "Marcar como no recibido",
+              "correct": "Corregir"
+            }
           },
           "money": {
             "title": "Cobro",
@@ -781,7 +854,20 @@
             "deposit": "Anticipo",
             "method": "Método de pago",
             "status": "Estado del pago",
-            "paidAt": "Pagado el"
+            "paidAt": "Pagado el",
+            "balance": {
+              "advance": "Anticipo",
+              "serviceDue": "Saldo del servicio",
+              "advanceCredit": "Saldo a favor del cliente",
+              "depositDue": "Depósito (reembolsable)",
+              "depositOnHand": "Depósito recibido · se devuelve al recoger",
+              "claims": "Daños",
+              "depositCredit": "Depósito recibido",
+              "collect": "Monto a pagar",
+              "refund": "Monto a devolver al cliente",
+              "none": "Sin saldo pendiente",
+              "depositNotReceived": "Depósito no recibido: los daños se cobran completos."
+            }
           },
           "evidence": {
             "title": "Evidencia",
@@ -791,7 +877,19 @@
           "history": {
             "title": "Historial",
             "created": "Pedido creado en “{{to}}”",
-            "moved": "De “{{from}}” a “{{to}}”"
+            "moved": "De “{{from}}” a “{{to}}”",
+            "depositRefunded": "Depósito devuelto completo",
+            "depositNoDamage": "Registrado sin daños",
+            "depositDamaged": "Daños reportados",
+            "depositCorrected": "Reporte de daños corregido",
+            "depositUndone": "Registro del depósito deshecho",
+            "depositSummary": "Daños {{claims}} · se devuelve {{refund}}",
+            "depositSummaryNoDeposit": "Daños {{claims}}",
+            "depositBalance": "saldo por cobrar {{balance}}",
+            "depositReceived": "Depósito recibido",
+            "depositWaived": "Depósito no recibido",
+            "collectionCleared": "Registro del depósito deshecho (vuelve a pendiente)",
+            "internalNote": "Nota interna: {{note}}"
           },
           "danger": {
             "title": "Zona de riesgo",
@@ -868,6 +966,10 @@
           "description": "El pedido de {{client}} pasará de “{{from}}” a “{{status}}”.",
           "rewindTitle": "Regresar pedido a “{{status}}”",
           "rewindDescription": "El pedido de {{client}} regresará de “{{from}}” a “{{status}}”. Se borrará la hora que quedó registrada en el paso que estás deshaciendo.",
+          "depositReceived": "Depósito recibido ({{amount}})",
+          "depositReasonLabel": "¿Por qué no se recibió el depósito?",
+          "depositReasonPlaceholder": "Ej. Es un familiar; lo entregará más adelante.",
+          "depositHint": "Mientras no se reciba no hay nada que devolver al recoger, y los daños se cobran completos. Si llega después, regístralo como recibido en el pedido.",
           "cancelTitle": "Cancelar pedido",
           "cancelDescription": "El pedido de {{client}} se cancelará y sus productos volverán a estar disponibles para otras fechas.",
           "cancelDescriptionSettled": "El pedido de {{client}} quedará registrado como cancelado. El inventario no cambiará: sus productos ya no están apartados.",
@@ -1008,8 +1110,8 @@
             "deliveryFee": "Envío",
             "label": "Total estimado",
             "note": "Estimado según los precios y las fechas. El total definitivo se confirma al crear el pedido.",
-            "securityDeposit": "Depósito en garantía",
-            "securityDepositNote": "Se cobra aparte y se devuelve al recoger; no está incluido en el total."
+            "securityDeposit": "Depósito",
+            "securityDepositNote": "Se cobra aparte y se devuelve al recoger si todo vuelve en buen estado; no está incluido en el total."
           },
           "availability": {
             "count": "{{count}} disponibles",
@@ -1089,23 +1191,77 @@
             "fallback": "No se pudo deshacer el pago. Intenta de nuevo."
           }
         },
+        "depositCollection": {
+          "cancel": "Cancelar",
+          "reasonLabel": "¿Por qué no se recibió el depósito?",
+          "reasonPlaceholder": "Ej. Es un familiar; lo entregará más adelante.",
+          "internalNote": "Nota interna: no aparece en los documentos del cliente.",
+          "receive": {
+            "title": "Registrar depósito recibido",
+            "description": "Se registrará que recibiste el depósito de {{amount}} del pedido de {{client}}.",
+            "note": "Se devuelve al recoger si todo vuelve en buen estado; si hay daños, se descuentan de él.",
+            "confirm": "Registrar como recibido",
+            "successTitle": "Depósito recibido",
+            "successToast": "Se registró el depósito del pedido de {{client}}."
+          },
+          "waive": {
+            "title": "Marcar el depósito como no recibido",
+            "description": "Se registrará que el depósito de {{amount}} del pedido de {{client}} no se recibió.",
+            "note": "Mientras no se reciba no hay nada que devolver al recoger, y los daños se cobran completos. Si llega después, regístralo como recibido.",
+            "confirm": "Marcar como no recibido",
+            "successTitle": "Depósito no recibido",
+            "successToast": "Se registró que el depósito del pedido de {{client}} no se recibió."
+          },
+          "clear": {
+            "title": "Corregir el registro del depósito",
+            "description": "¿Quieres borrar lo registrado sobre si se recibió el depósito del pedido de {{client}}?",
+            "note": "El depósito volverá a quedar pendiente. Esto solo cambia tus registros: no mueve dinero.",
+            "confirm": "Corregir",
+            "successTitle": "Registro del depósito deshecho",
+            "successToast": "El depósito del pedido de {{client}} volvió a quedar pendiente."
+          },
+          "errors": {
+            "reasonRequired": "Escribe por qué no se recibió el depósito.",
+            "reasonTooLong": "Usa como máximo 500 caracteres.",
+            "fallback": "No se pudo registrar el cobro del depósito. Intenta de nuevo."
+          }
+        },
+        "depositRefund": {
+          "title": "Devolver depósito",
+          "titleNoDeposit": "Registrar sin daños",
+          "description": "Se registrará que el depósito de {{amount}} se devolvió completo al cliente.",
+          "descriptionNoDeposit": "Se registrará que todo volvió en buen estado.",
+          "descriptionNotReceived": "Se registrará que todo volvió en buen estado. El depósito no se recibió, así que no hay nada que devolver.",
+          "client": "Pedido de {{client}}",
+          "hint": "Si después aparece un daño, regístralo con «Reportar daños».",
+          "confirm": "Devolver depósito",
+          "confirmNoDeposit": "Registrar sin daños",
+          "cancel": "Cancelar",
+          "successTitle": "Depósito devuelto",
+          "successTitleNoDeposit": "Registrado sin daños",
+          "successToast": "Se registró que el depósito del pedido de {{client}} se devolvió completo.",
+          "successToastNoDeposit": "Se registró que el pedido de {{client}} volvió sin daños.",
+          "errors": {
+            "fallback": "No se pudo registrar. Intenta de nuevo."
+          }
+        },
         "settlement": {
-          "title": "Liquidar garantía",
-          "editTitle": "Editar liquidación",
-          "lead": "Registra cómo vuelve la garantía: completa, con una parte retenida por daños o con piezas perdidas o rotas.",
+          "title": "Reportar daños",
+          "editTitle": "Editar reporte de daños",
+          "lead": "Registra lo que volvió con daños: una retención del depósito, total o parcial, y las piezas perdidas o rotas, que se cobran a su precio de reposición.",
           "back": "Volver al pedido",
           "loading": "Cargando el pedido",
           "client": "Pedido de {{client}}",
           "inventoryNote": "El inventario no cambia; si una pieza no se repondrá, ajusta la cantidad del producto.",
           "unavailable": {
-            "title": "Esta garantía no se puede liquidar ahora",
-            "description": "La garantía se liquida cuando el pedido ya se entregó y no está cancelado.",
+            "title": "Aún no se pueden reportar daños en este pedido",
+            "description": "Los daños se reportan cuando el pedido ya se entregó y no está cancelado.",
             "action": "Volver al pedido"
           },
           "sections": {
             "retention": {
-              "title": "Retención",
-              "description": "Si algo volvió con un daño parcial, retén una parte del depósito y explica por qué."
+              "title": "Retención del depósito",
+              "description": "Si algo volvió con un daño parcial, retén todo o parte del depósito y describe el daño."
             },
             "damages": {
               "title": "Piezas perdidas o rotas",
@@ -1113,15 +1269,21 @@
             },
             "outcome": {
               "title": "Resultado",
-              "description": "Cómo quedaría la garantía con lo que llevas registrado."
+              "description": "Cómo queda el depósito con lo que llevas registrado."
             }
+          },
+          "reportNote": "Puedes descargar el reporte de daños para entregárselo al cliente antes de guardarlo.",
+          "noDeposit": "Este pedido no lleva depósito: solo se pueden cobrar piezas perdidas o rotas.",
+          "notReceived": {
+            "text": "El depósito no se ha recibido: la retención y las piezas se cobran completas. Si ya lo recibiste, regístralo antes.",
+            "action": "Registrar depósito recibido"
           },
           "fields": {
             "retainedLabel": "Monto retenido",
-            "retainedHint": "Déjalo vacío para devolver el depósito completo ({{deposit}}).",
-            "reasonLabel": "Motivo",
-            "reasonPlaceholder": "Ej. mantel con una mancha de vino",
-            "reasonHint": "Requerido cuando se retiene algo.",
+            "retainedHint": "Total o parcial, hasta {{deposit}}. Déjalo vacío si no se retiene nada.",
+            "reasonLabel": "Descripción del daño",
+            "reasonPlaceholder": "Describe el daño que presenta el equipo: golpes, rayones, manchas, piezas faltantes…",
+            "reasonHint": "Requerida cuando se retiene algo.",
             "damagedLabel": "Unidades perdidas o rotas",
             "damagedHint": "De 0 a {{max}} · {{unit}} c/u",
             "damagedAria": "Unidades perdidas o rotas de {{product}}",
@@ -1132,39 +1294,39 @@
             "quantityPlaceholder": "0"
           },
           "preview": {
-            "deposit": "Depósito en garantía",
-            "retained": "Retenido",
+            "deposit": "Depósito recibido",
+            "retained": "Retención del depósito",
             "damages": "Piezas perdidas o rotas",
-            "refund": "Se devuelve",
-            "balanceDue": "Saldo por cobrar",
+            "refund": "Se devuelve al cliente",
+            "balanceDue": "Saldo por cobrar al cliente",
             "note": "Estimado. Al guardar, el sistema calcula el resultado definitivo."
           },
           "actions": {
             "cancel": "Cancelar",
-            "submit": "Guardar liquidación"
+            "submit": "Guardar reporte"
           },
-          "successTitle": "Garantía liquidada",
-          "successToast": "Se registró la liquidación de la garantía del pedido de {{client}}.",
+          "successTitle": "Reporte de daños guardado",
+          "successToast": "Se guardó el reporte de daños del pedido de {{client}}.",
           "errors": {
             "invalidRetained": "Ingresa un monto válido.",
             "retainedAboveDeposit": "No puedes retener más que el depósito ({{deposit}}).",
-            "reasonRequired": "Explica por qué se retiene.",
+            "reasonRequired": "Describe el daño para retener el depósito.",
             "textTooLong": "Usa como máximo 500 caracteres.",
             "invalidDamaged": "Ingresa un número entero entre 0 y {{max}}.",
-            "submitFallback": "No pudimos guardar la liquidación. Revisa los datos e intenta de nuevo."
+            "submitFallback": "No pudimos guardar el reporte de daños. Revisa los datos e intenta de nuevo."
           }
         },
         "settlementUndo": {
-          "title": "Deshacer la liquidación",
-          "description": "¿Quieres borrar la liquidación de la garantía del pedido de {{client}}?",
-          "note": "Se borrará lo registrado: el monto retenido y su motivo, y las piezas marcadas como perdidas o rotas. Esto solo cambia tus registros: no mueve dinero ni devuelve nada al cliente.",
-          "hint": "La garantía volverá a quedar por liquidar.",
-          "confirm": "Deshacer liquidación",
+          "title": "Deshacer el registro del depósito",
+          "description": "¿Quieres borrar lo registrado sobre el depósito del pedido de {{client}}?",
+          "note": "Se borrará la retención del depósito, la descripción del daño y las piezas marcadas como perdidas o rotas. Esto solo cambia tus registros: no mueve dinero ni devuelve nada al cliente.",
+          "hint": "El depósito volverá a quedar pendiente.",
+          "confirm": "Deshacer",
           "cancel": "Cancelar",
-          "successTitle": "Liquidación deshecha",
-          "successToast": "La garantía del pedido de {{client}} volvió a quedar por liquidar.",
+          "successTitle": "Registro del depósito deshecho",
+          "successToast": "El depósito del pedido de {{client}} volvió a quedar pendiente.",
           "errors": {
-            "fallback": "No se pudo deshacer la liquidación. Intenta de nuevo."
+            "fallback": "No se pudo deshacer el registro del depósito. Intenta de nuevo."
           }
         },
         "registry": {
@@ -1353,9 +1515,9 @@
           "thumbAlt": "Foto {{index}} de {{name}}",
           "descriptionTitle": "Descripción",
           "detailsTitle": "Detalles",
-          "replacementPrice": "Precio de reposición",
-          "securityDeposit": "Depósito en garantía",
-          "securityDepositNote": "por unidad, reembolsable",
+          "replacementPrice": "Precio de reposición (por unidad)",
+          "securityDeposit": "Depósito (por unidad)",
+          "securityDepositNote": "se devuelve al recoger",
           "lightbox": {
             "open": "Ver fotos en tamaño completo"
           },
@@ -1444,9 +1606,9 @@
             "rentTimeUnitLabel": "Unidad de tiempo",
             "sellPriceLabel": "Precio de venta",
             "replacementPriceLabel": "Precio de reposición",
-            "replacementPriceHint": "Lo que se cobra si el producto se pierde o daña.",
-            "securityDepositLabel": "Depósito en garantía",
-            "securityDepositHint": "Por unidad. Se cobra aparte y se devuelve al recoger; no se suma al precio.",
+            "replacementPriceHint": "Por unidad. Es lo que se cobra por cada unidad perdida o rota.",
+            "securityDepositLabel": "Depósito",
+            "securityDepositHint": "Por unidad. Se cobra aparte del pedido y se devuelve al recoger si todo vuelve en buen estado.",
             "pricePlaceholder": "0.00",
             "quantityLabel": "Cantidad",
             "quantityPlaceholder": "0",
@@ -1497,7 +1659,7 @@
             "invalidSellPrice": "Ingresa un precio válido entre 0 y 1,000,000.",
             "invalidReplacementPrice": "Ingresa un precio válido entre 0 y 1,000,000.",
             "invalidSecurityDeposit": "Ingresa un monto válido entre 0 y 1,000,000.",
-            "forbiddenSecurityDeposit": "Un producto de venta no lleva depósito en garantía.",
+            "forbiddenSecurityDeposit": "Un producto de venta no lleva depósito.",
             "securityDepositAboveReplacement": "El depósito no puede ser mayor que el precio de reposición.",
             "requiredRentPrice": "Un producto de alquiler requiere precio de renta.",
             "requiredRentTimeUnit": "Selecciona la unidad de tiempo de la renta.",

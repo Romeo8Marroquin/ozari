@@ -27,6 +27,7 @@ import type { OrderAction } from '../orders/order.types';
 import type { UpNextItem } from './dashboard.types';
 import { formatMonthLabel, formatMoney, freshnessLabel, secondsSince } from './dashboardFormat';
 import { ChartSkeleton, ListSkeleton, StatsSkeleton, UpNextSkeleton } from './DashboardSkeleton';
+import DepositsCard from './DepositsCard';
 import StatCard from './StatCard';
 import UpNextCard from './UpNextCard';
 import { useDashboard } from './useDashboard';
@@ -62,6 +63,9 @@ const sliceColor = (colorKey: string | undefined): string => {
  * 2. **How is today?** Deliveries, collections, what is late, what is open.
  * 3. **How is the business?** This month against last, what is still owed, a year of revenue, what
  *    is actually going out of the warehouse, and where the live orders are sitting.
+ *
+ * Then, last and small, the security-deposit corner (`DepositsCard`) — rare by nature, so it never
+ * competes with the three questions above.
  *
  * It is ONE request (`useDashboard`) — every figure is a snapshot of the same instant, so the screen
  * can never show a total from one moment beside a counter from another.
@@ -406,6 +410,28 @@ const DashboardPage: React.FC = () => {
             ) : (
               <p className="card-item text-sm text-charcoal/45">{t(`${KEY}.topProducts.empty`)}</p>
             ))}
+        </SectionReveal>
+      </section>
+
+      {/* ── Deposits — LAST on purpose: an occasional edge case, never a headline. `@container` so
+          the month figures answer to the card, not the window. ── */}
+      <section className="reveal-block @container flex min-w-0 flex-col gap-3 rounded-card bg-white p-4 ring-1 ring-black/[0.04] sm:p-5">
+        <div>
+          <h2 className="text-base font-bold text-charcoal">{t(`${KEY}.deposits.title`)}</h2>
+          <p className="text-xs text-charcoal/55">{t(`${KEY}.deposits.description`)}</p>
+        </div>
+        <SectionReveal
+          loading={loading}
+          skeleton={<ListSkeleton rows={3} />}
+          delaySeconds={SECTION_REVEAL_STEP * 5}
+        >
+          {data && (
+            <DepositsCard
+              deposits={data.deposits}
+              currencySymbol={currency}
+              onOpen={(orderId) => panelNavigate(`/panel/pedidos/${orderId}`)}
+            />
+          )}
         </SectionReveal>
       </section>
 

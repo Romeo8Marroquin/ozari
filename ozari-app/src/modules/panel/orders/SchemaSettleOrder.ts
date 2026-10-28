@@ -2,7 +2,13 @@ import { PRODUCT_MAX_AMOUNT, SETTLEMENT_TEXT_MAX_LENGTH } from '@constants/Regex
 import { t } from 'i18next';
 import { z } from 'zod';
 import { formatMoney } from './orderEstimate';
-import type { OrderDetail, OrderLine, SettleOrderBody } from './order.types';
+import type {
+  OrderDamage,
+  OrderDepositSettlement,
+  OrderDetail,
+  OrderLine,
+  SettleOrderBody,
+} from './order.types';
 
 const KEY = 'modules.panel.orders.settlement.errors';
 
@@ -51,7 +57,9 @@ export interface SettlementFormValues {
 
 /** What the per-order rules are measured against. */
 export interface SettlementSchemaContext {
-  /** The order's deposit total — the ceiling of what can be RETAINED. */
+  /** The order's NOMINAL deposit (`securityDeposit.total`) — the ceiling of what can be RETAINED,
+   *  received or not: a retention not received is charged whole, "that part of the deposit"
+   *  (owner, 2026-10-28). */
   depositTotal: number;
   currencySymbol: string;
   /** Each damageable line's ordered quantity — the ceiling of its lost/broken units. */
@@ -162,13 +170,14 @@ export interface SettlementPreview {
 
 /**
  * A LIVE ESTIMATE of the outcome while the admin types — the API's own formula (claims = retained +
- * lost/broken units at their replacement value; the deposit covers what it can, the rest of it is
- * refunded, and what it cannot cover is owed). Labelled as an estimate on screen: the saved
+ * lost/broken units at their replacement value; the HELD deposit — `securityDeposit.held`, 0 unless
+ * it was received — covers what it can, the rest of it is refunded, and what it cannot cover is
+ * owed). Labelled as an estimate on screen: the saved
  * settlement's numbers come back from the API, and the detail page shows only those. A value that is
  * not valid yet counts as 0, so the preview never shows a number built from a typo.
  */
 export function previewSettlement(
-  depositTotal: number,
+  held: number,
   values: SettlementFormValues,
   lines: ReadonlyMap<number, { quantity: number; unitAmount: number }>,
 ): SettlementPreview {
@@ -182,12 +191,70 @@ export function previewSettlement(
     }, 0),
   );
   const claimsTotal = roundMoney(retainedAmount + damagesTotal);
-  const applied = Math.min(depositTotal, claimsTotal);
+  const applied = Math.min(held, claimsTotal);
   return {
     retainedAmount,
     damagesTotal,
     claimsTotal,
-    refundAmount: roundMoney(depositTotal - applied),
-    balanceDue: roundMoney(Math.max(0, claimsTotal - depositTotal)),
+    refundAmount: roundMoney(held - applied),
+    balanceDue: roundMoney(Math.max(0, claimsTotal - held)),
+  };
+}
+
+/**
+ * The CURRENT form values as an unsaved {@link OrderDepositSettlement} — what the "Reportar daños"
+ * page hands the damage-report document so the admin can give it to the client BEFORE saving.
+ *
+ * Same formula as {@link previewSettlement} (it is built on it), shaped like the API's record: each
+ * lost/broken line priced at its replacement snapshot (`unitAmount`), `amount` rounded to cents, the
+ * note trimmed (blank ⇒ absent), the reason only alongside something retained, and `settledAt` = the
+ * moment the page was opened. A value that is not valid counts as 0 here, exactly like the preview —
+ * the page additionally offers the report only while the whole form validates, so a typo never prints.
+ * The deposit is `held` — the API's figure, 0 unless the deposit was actually RECEIVED (owner,
+ * 2026-10-28) — never the nominal total: only money in hand is refunded or applied, so a deposit
+ * not received leaves every claim owed whole. Once saved, the document is built from the API's own
+ * numbers instead.
+ */
+export function buildUnsavedSettlement(
+  order: OrderDetail,
+  values: SettlementFormValues,
+  now: Date,
+): OrderDepositSettlement {
+  const held = order.securityDeposit?.held ?? 0;
+  const lines = damageableLines(order.lines);
+  const byId = new Map(lines.map((line) => [line.id, line]));
+  const damages = values.damages.flatMap((row): OrderDamage[] => {
+    const line = byId.get(row.lineId);
+    if (!line) return [];
+    const quantity = parseDamagedQuantity(row.quantity, line.quantity) ?? 0;
+    if (quantity < 1) return [];
+    const note = row.note.trim();
+    return [
+      {
+        lineId: line.id,
+        productName: line.productName,
+        quantity,
+        unitAmount: line.replacementPrice,
+        amount: roundMoney(quantity * line.replacementPrice),
+        ...(note !== '' && { note }),
+      },
+    ];
+  });
+  const preview = previewSettlement(
+    held,
+    values,
+    new Map(lines.map((line) => [line.id, { quantity: line.quantity, unitAmount: line.replacementPrice }])),
+  );
+  const reason = values.retainedReason.trim();
+  return {
+    settledAt: now.toISOString(),
+    retainedAmount: preview.retainedAmount,
+    ...(preview.retainedAmount > 0 && reason !== '' && { retainedReason: reason }),
+    damages,
+    damagesTotal: preview.damagesTotal,
+    claimsTotal: preview.claimsTotal,
+    appliedFromDeposit: roundMoney(Math.min(held, preview.claimsTotal)),
+    refundAmount: preview.refundAmount,
+    balanceDue: preview.balanceDue,
   };
 }

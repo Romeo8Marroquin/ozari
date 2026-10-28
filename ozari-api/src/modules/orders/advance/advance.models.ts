@@ -1,3 +1,5 @@
+import type { DepositCollectionRequestModel } from "../orders.models.js";
+
 /**
  * `POST /orders/:id/advance` — ONE endpoint for every lifecycle move (forward, rewind, cancel). The
  * client never says WHICH kind it wants: it names the target status and the engine decides what that
@@ -21,6 +23,10 @@ export interface AdvanceOrderRequestModel {
   evidence: AdvanceEvidenceModel[];
   /** Why the order is being cancelled — required on a disruptive move, absent otherwise. */
   reason: string | undefined;
+  /** "¿Se recibió el depósito?" — answered in the delivery dialog (offered by the action's
+   *  `depositToCollect`). Applied ONLY when the move enters a DELIVERY-tracking step of an order whose
+   *  deposit is still PENDING; otherwise silently ignored — it never blocks, and never overwrites. */
+  depositCollection: DepositCollectionRequestModel | undefined;
 }
 
 /** `POST /orders/evidence/upload-url` — one entry per photo the client wants to upload. */

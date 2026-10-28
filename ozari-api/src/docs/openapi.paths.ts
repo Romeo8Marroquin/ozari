@@ -12,6 +12,10 @@ import {
 
 // Obviously-fake example passwords reused across request-body examples (both meet the policy).
 const STALE_TOKEN_401 = "Missing, invalid, or revoked access token.";
+// The order money/state doors (payment, settlement, deposit collection) all answer alike.
+const UPDATED_ORDER_DETAIL = "The updated order, in the detail shape.";
+const NO_SUCH_ORDER = "No order with that id.";
+const ORDER_MISSING_MESSAGE = "The order does not exist";
 const EXAMPLE_PASSWORD = "Ex4mple!Secret";
 const EXAMPLE_NEW_PASSWORD = "N3w!Passw0rd";
 const EXAMPLE_EMAIL = "ana.garcia@example.com";
@@ -1222,6 +1226,7 @@ export const paths: OpenAPIV3.PathsObject = {
               },
             ],
             extras: [],
+            depositHistory: [],
             statusHistory: [
               {
                 id: 1,
@@ -1409,6 +1414,7 @@ export const paths: OpenAPIV3.PathsObject = {
               },
             ],
             extras: [],
+            depositHistory: [],
             statusHistory: [
               {
                 id: 1,
@@ -1513,6 +1519,7 @@ export const paths: OpenAPIV3.PathsObject = {
                 },
               ],
               extras: [],
+              depositHistory: [],
               statusHistory: [
                 {
                   id: 1,
@@ -1613,6 +1620,11 @@ export const paths: OpenAPIV3.PathsObject = {
         "tracked actuals (`deliveredAt`/`collectedAt`/`readyAt`/`cancelledAt`) are stamped from " +
         "the status FLAGS. Rental availability needs no write — holds are derived from " +
         "`inventoryHold`, so the status change alone returns (or keeps) the units.\n\n" +
+        "**The deposit at the door:** an optional `depositCollection` (offered by the forward " +
+        "DELIVERY action's `depositToCollect`) is recorded in the same transaction — exactly like " +
+        "`PUT /orders/{id}/deposit-collection` — when the walk enters a DELIVERY-tracking step and " +
+        "the order's deposit is still PENDING; otherwise it is silently ignored. It never blocks the " +
+        "move.\n\n" +
         "Returns the same `{ order }` envelope as `GET /orders/{id}`. Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
@@ -1633,6 +1645,7 @@ export const paths: OpenAPIV3.PathsObject = {
             keys: ["orders/evidence/a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7.jpg"],
           },
         ],
+        depositCollection: { received: true },
       }),
       responses: {
         "200": dataResponse(
@@ -2005,7 +2018,7 @@ export const paths: OpenAPIV3.PathsObject = {
       },
       responses: {
         "200": dataResponse(
-          "The updated order, in the detail shape.",
+          UPDATED_ORDER_DETAIL,
           "OrderDetailResponse",
           { order: { id: 12, isPaid: true } },
           "Payment recorded",
@@ -2017,7 +2030,7 @@ export const paths: OpenAPIV3.PathsObject = {
         ),
         "401": unauthorized(STALE_TOKEN_401),
         "403": adminOnly(),
-        "404": errorResponse("No order with that id.", 404, "The order does not exist"),
+        "404": errorResponse(NO_SUCH_ORDER, 404, ORDER_MISSING_MESSAGE),
         "409": errorResponse(
           "The order already has a payment recorded.",
           409,
@@ -2056,7 +2069,7 @@ export const paths: OpenAPIV3.PathsObject = {
       ],
       responses: {
         "200": dataResponse(
-          "The updated order, in the detail shape.",
+          UPDATED_ORDER_DETAIL,
           "OrderDetailResponse",
           { order: { id: 12, isPaid: false } },
           "Payment record undone",
@@ -2064,7 +2077,7 @@ export const paths: OpenAPIV3.PathsObject = {
         "400": errorResponse("The id is malformed.", 400, "The order id is not valid"),
         "401": unauthorized(STALE_TOKEN_401),
         "403": adminOnly(),
-        "404": errorResponse("No order with that id.", 404, "The order does not exist"),
+        "404": errorResponse(NO_SUCH_ORDER, 404, ORDER_MISSING_MESSAGE),
         "409": errorResponse(
           "The order has no payment to undo.",
           409,
@@ -2092,7 +2105,17 @@ export const paths: OpenAPIV3.PathsObject = {
         "**Declarative:** the body is the settlement's FINAL state; re-sending corrects it without " +
         "re-stamping `settledAt`. Allowed once the order was delivered, while it is not cancelled, " +
         "and only when a rental line carries a deposit or a replacement value (`409` otherwise). " +
-        "Stock is never touched.",
+        "Stock is never touched.\n\n" +
+        "**Trail:** every successful write appends a `depositHistory` row — `RECORDED` the first " +
+        "time, `CORRECTED` on a re-send — with the outcome's money as it stands at that moment. The " +
+        "one-tap \"Devolver depósito\" is this same call with `retainedAmount: 0` and no damages.\n\n" +
+        "**Counts the HELD deposit** (`securityDeposit.held`): the deposit only when its collection " +
+        "is RECEIVED, 0 while PENDING or WAIVED — then nothing is refunded and every claim " +
+        "(retention and replacements) is owed as `balanceDue`. **The retention is capped by the " +
+        "NOMINAL deposit** (`securityDeposit.total`, else `400 retainedAboveDeposit`), whatever was " +
+        "collected. Recording a report **never changes the collection** — that is its own door " +
+        "(`PUT /orders/{id}/deposit-collection`), open before or after the report; the money " +
+        "recomputes live.",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 }, example: 12 },
@@ -2104,9 +2127,23 @@ export const paths: OpenAPIV3.PathsObject = {
       }),
       responses: {
         "200": dataResponse(
-          "The updated order, in the detail shape.",
+          UPDATED_ORDER_DETAIL,
           "OrderDetailResponse",
-          { order: { id: 12, securityDeposit: { total: 200, canSettle: true } } },
+          {
+            order: {
+              id: 12,
+              securityDeposit: {
+                total: 200,
+                held: 200,
+                collection: {
+                  status: "RECEIVED",
+                  at: "2026-08-01T15:00:00.000Z",
+                  canRecord: true,
+                },
+                canSettle: true,
+              },
+            },
+          },
           "Settlement recorded",
         ),
         "400": errorResponse(
@@ -2117,7 +2154,7 @@ export const paths: OpenAPIV3.PathsObject = {
         ),
         "401": unauthorized(STALE_TOKEN_401),
         "403": adminOnly(),
-        "404": errorResponse("No order with that id.", 404, "The order does not exist"),
+        "404": errorResponse(NO_SUCH_ORDER, 404, ORDER_MISSING_MESSAGE),
         "409": errorResponse(
           "Not delivered yet, cancelled, or nothing on the order can carry a deposit or a damage.",
           409,
@@ -2134,26 +2171,150 @@ export const paths: OpenAPIV3.PathsObject = {
       description:
         "**STRICTLY Admin.** Clears the retention, its reason and every line's damage — the deposit " +
         "reads as not settled again. A hard delete (nothing references a settlement), allowed in any " +
-        "order state, and it moves no money. An order without a settlement answers `409`.",
+        "order state, and it moves no money. An order without a settlement answers `409`. The undo " +
+        "itself appends an `UNDONE` row (no money) to the order's `depositHistory`.",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 }, example: 12 },
       ],
       responses: {
         "200": dataResponse(
-          "The updated order, in the detail shape.",
+          UPDATED_ORDER_DETAIL,
           "OrderDetailResponse",
-          { order: { id: 12, securityDeposit: { total: 200, canSettle: true } } },
+          {
+            order: {
+              id: 12,
+              securityDeposit: {
+                total: 200,
+                held: 200,
+                collection: {
+                  status: "RECEIVED",
+                  at: "2026-08-01T15:00:00.000Z",
+                  canRecord: true,
+                },
+                canSettle: true,
+              },
+            },
+          },
           "Settlement undone",
         ),
         "400": errorResponse("The id is malformed.", 400, "The order id is not valid"),
         "401": unauthorized(STALE_TOKEN_401),
         "403": adminOnly(),
-        "404": errorResponse("No order with that id.", 404, "The order does not exist"),
+        "404": errorResponse(NO_SUCH_ORDER, 404, ORDER_MISSING_MESSAGE),
         "409": errorResponse(
           "The order has no settlement to undo.",
           409,
           "This order has no settlement recorded",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+
+  "/orders/{id}/deposit-collection": {
+    put: {
+      tags: ["Orders"],
+      summary: "Record or correct whether the security deposit was collected (admin)",
+      operationId: "recordDepositCollection",
+      description:
+        "**STRICTLY Admin.** `received: true` stamps the deposit RECEIVED; `received: false` WAIVES " +
+        "it (with a required reason) — the deposit was not received. The two are mutually " +
+        "exclusive: each write clears the other. **Only a RECEIVED deposit is held**: while PENDING " +
+        "or WAIVED the damage report refunds nothing and owes every claim (the retention, capped by " +
+        "the nominal deposit, and the replacements) as `balanceDue`.\n\n" +
+        "Normally answered at the delivery step (the advance's `depositCollection`); this door " +
+        "records, corrects or clears it any time the order is not cancelled — **before or after " +
+        "the damage report** (a deposit received late is recorded here; the report's money " +
+        "recomputes live). **Declarative:** re-sending the same answer keeps the original " +
+        "timestamp and appends nothing; a change appends a `RECEIVED`/`WAIVED` row to " +
+        "`depositHistory` (`depositTotal` = the nominal deposit, `note` = the waive reason).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 }, example: 12 },
+      ],
+      requestBody: bodyRef("DepositCollectionRequest", {
+        received: false,
+        reason: "Entregado a un familiar del cliente",
+      }),
+      responses: {
+        "200": dataResponse(
+          UPDATED_ORDER_DETAIL,
+          "OrderDetailResponse",
+          {
+            order: {
+              id: 12,
+              securityDeposit: {
+                total: 200,
+                held: 0,
+                collection: {
+                  status: "WAIVED",
+                  at: "2026-08-01T15:00:00.000Z",
+                  reason: "Entregado a un familiar del cliente",
+                  canRecord: true,
+                },
+                canSettle: true,
+              },
+            },
+          },
+          "Deposit collection recorded",
+        ),
+        "400": errorResponse(
+          "Malformed id or body: `received` is not a boolean, or a waive without a usable reason.",
+          400,
+          "Say why the deposit was not received",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse(NO_SUCH_ORDER, 404, ORDER_MISSING_MESSAGE),
+        "409": errorResponse(
+          "`notApplicable` — cancelled, or the order carries no deposit.",
+          409,
+          "This order has no deposit to collect, or it is cancelled",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    delete: {
+      tags: ["Orders"],
+      summary: "Return the security deposit's collection to pending (admin)",
+      operationId: "clearDepositCollection",
+      description:
+        "**STRICTLY Admin.** Clears the received/waived stamps and the reason — the deposit reads " +
+        "PENDING again (it moves no money) — and appends a `COLLECTION_CLEARED` row to " +
+        "`depositHistory`. Allowed after a damage report too (its money recomputes live). `409` " +
+        "when nothing is recorded or on a cancelled order (the detail's `collection.canRecord`).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 }, example: 12 },
+      ],
+      responses: {
+        "200": dataResponse(
+          UPDATED_ORDER_DETAIL,
+          "OrderDetailResponse",
+          {
+            order: {
+              id: 12,
+              securityDeposit: {
+                total: 200,
+                held: 200,
+                collection: { status: "PENDING", canRecord: true },
+                canSettle: true,
+              },
+            },
+          },
+          "Deposit collection cleared",
+        ),
+        "400": errorResponse("The id is malformed.", 400, "The order id is not valid"),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse(NO_SUCH_ORDER, 404, ORDER_MISSING_MESSAGE),
+        "409": errorResponse(
+          "`notRecorded` — nothing to clear; `notApplicable` — the order is cancelled.",
+          409,
+          "This order has no deposit collection recorded",
         ),
         "429": rateLimited,
         "500": serverError,
@@ -2498,6 +2659,10 @@ export const paths: OpenAPIV3.PathsObject = {
                 { statusId: 1, name: "Pendiente", colorKey: "amber", count: 6 },
                 { statusId: 3, name: "Entregado", colorKey: "emerald", count: 3 },
               ],
+              deposits: {
+                pending: { orders: 0, amount: 0, items: [] },
+                month: { settled: 4, refunded: 520, retained: 30, replacements: 120, balanceDue: 40 },
+              },
               currency: { id: 1, iso4217Code: "GTQ", name: EXAMPLE_CURRENCY_NAME, symbol: "Q" },
             },
           },

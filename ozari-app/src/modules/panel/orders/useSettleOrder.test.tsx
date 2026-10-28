@@ -36,7 +36,7 @@ describe('useSettleOrder', () => {
     await waitFor(() =>
       expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: [QueryKeys.ORDER, 12] }),
     );
-    // The agenda's "garantía por liquidar" chip is derived from this record.
+    // The agenda's "Depósito pendiente" chip is derived from this record.
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: [QueryKeys.ORDERS] });
     // The polling dashboard is cancelled BEFORE it is invalidated (the payment hooks' race).
     expect(cancelQueries).toHaveBeenCalledWith({ queryKey: [QueryKeys.DASHBOARD] });

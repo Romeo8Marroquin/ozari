@@ -781,7 +781,7 @@ availability endpoints — no rewrite of what exists.
 
 ---
 
-## 12. Security deposit ("garantía") & damage settlement (✅ BUILT, owner 2026-10-27)
+## 12. Security deposit ("Depósito") & damage settlement (✅ BUILT, owner 2026-10-27)
 
 **The business.** Some expensive rental items ask the client for a refundable deposit on top of the
 order. After the pickup (photos taken), the admin either gives it back whole, or keeps part of it for
@@ -799,35 +799,126 @@ than a replacement (enforced on the product).
 | A separate "damage order"? | **No.** Damage lives ON the order lines (`damagedQuantity`, `damageNote`); the money is DERIVED. | One order = one document; no second order to reconcile, delete or invoice. |
 | Deposit per order or per product? | **Per product (per unit), snapshotted per line** (`service_details.security_deposit`, `.replacement_price`), re-derived on every order save like the prices. | The owner thinks of "the expensive items" asking it. A per-order override is a documented door, not built. |
 | Does a broken unit leave the fleet? | **No automatic stock change.** | A broken chair is normally replaced with the client's money, so the fleet the business intends to own is unchanged. A unit that will not be replaced is an edit of the product's quantity (the settlement page says so). |
-| Is the deposit's receipt or the balance's payment tracked? | **No (v1).** `paidAt` remains the order total's payment. | Documented door: a deposit-received / balance-paid stamp would be two more columns + the payment-door pattern. |
+| Is the deposit's receipt tracked? | **Yes (owner, 2026-10-27)** — the deposit COLLECTION below: PENDING / RECEIVED / WAIVED. | "Where do we set the deposit?" — at the delivery, asked in the dialog, never blocking it; correctable any time — before OR after the damage report (owner 2026-10-28; clients often transfer it with the anticipo, or late). |
+| What does a WAIVED deposit mean? | **The deposit was not received** (a relative, a trusted client — recorded with its reason). Like PENDING, it holds 0: nothing is refunded and every claim is owed. A retention is still charged (capped by the nominal deposit), and lost/broken units are billed at replacement price (owner 2026-10-28, below). | Only money actually received can be refunded or applied; what the damaged items cost is owed whether or not a deposit ever reached us. |
+| Is the balance's payment (damages owed beyond the deposit) tracked? | **No — still a documented door.** `paidAt` remains the order total's payment. | A balance-paid stamp would be one more column + the payment-door pattern. |
+
+**Vocabulary + flow (✅ owner, 2026-10-27).** User-facing copy (UI, API messages, PDFs) says
+**"Depósito"** — never "garantía" or "liquidación" (those survive only in code identifiers like
+`settlement`). The HAPPY path is a one-tap **"Devolver depósito"**: the same `PUT /orders/:id/settlement`
+with `retainedAmount: 0` and no damages — no page, no form. The DAMAGE path is **"Reportar daños"**, a
+dedicated page (retention + per-line damage), with a downloadable **"Reporte de daños"** PDF. It stays
+**its own door, NOT a lifecycle step**: it applies to few orders (only those carrying a deposit or a
+replacement value), and it must never block the "listo" press — whether the units are back in the fleet
+has nothing to do with a money judgement that may be made days later.
 
 **Product rule** (both mirrors): `securityDeposit` optional money, Alquiler only, `≤ replacementPrice`
 when both are set. Visible to every role (a public commercial condition like the price; unlike
 `replacementPrice`, which stays Admin-only on the product projection).
 
 **Money** (`orders.service.ts` — the only place it is computed):
-- `D` = Σ rental lines' `securityDeposit × quantity` (never inside `totalAmount`).
+- `D` = Σ rental lines' `securityDeposit × quantity` (never inside `totalAmount`) — the NOMINAL deposit.
+- `H` = **`heldDeposit`** = `D` only when the collection is **RECEIVED**; 0 while PENDING or WAIVED. The
+  ONE rule; every money figure below counts `H`, never `D`.
 - claims = `depositRetainedAmount` + Σ damaged units × the line's `replacementPrice`.
-- `appliedFromDeposit = min(D, claims)`, `refundAmount = D − applied`, `balanceDue = max(0, claims − D)`.
-- `retainedAmount ≤ D` (400 otherwise); its reason is required iff `> 0`.
+- `appliedFromDeposit = min(H, claims)`, `refundAmount = H − applied`, `balanceDue = max(0, claims − H)`.
+  Not received ⇒ refund 0, `balanceDue` = every claim.
+- `retainedAmount ≤ D` — the NOMINAL deposit, not `H` (400 `retainedAboveDeposit` otherwise); its reason
+  is required iff `> 0`.
+
+**Owner decision (2026-10-28) — only a deposit actually RECEIVED is money we have.** Supersedes the
+2026-10-27 "pending counts as held" + "a report stamps it received" rules:
+- `heldDeposit` counts the deposit only when RECEIVED; PENDING and WAIVED hold 0 (no refund, all owed).
+- The retention is capped by the NOMINAL deposit and is BILLED even when the deposit was not received ("we
+  ask for that part of the deposit, not all of it").
+- Recording a damage report NEVER changes the collection status (the old auto-RECEIVED stamp is gone).
+- The collection is recordable / changeable / clearable AFTER the report too (`canRecord` = not cancelled);
+  the report's money recomputes live, and the collection write leaves its own trail row. The delivery
+  dialog stays a pre-report question (`pendingDepositToCollect` still requires no report).
+- **No backfill:** orders settled before this rule that still read PENDING now show refund 0 / all owed;
+  the admin marks them received by hand (one tap on the order).
+
+**Deposit collection** (owner 2026-10-27, migration `20261027300000_order_deposit_collection`) — was the
+deposit actually received? Three `services` columns: `depositReceivedAt`, `depositWaivedAt`,
+`depositWaivedReason` (internal, never printed). Neither = **PENDING**, received = **RECEIVED**, waived =
+**WAIVED**; mutually exclusive (every write clears the other).
+- **At the delivery:** the forward action INTO a DELIVERY-tracking step carries `depositToCollect` (the
+  nominal `D`) when `D > 0`, the collection is PENDING, the order is not cancelled and has no damage
+  report (`pendingDepositToCollect` — the "no report" check is its OWN, not `canRecord`'s; stamped by `withDepositToCollect` in the order projection — the
+  lifecycle engine stays deposit-agnostic). The dialog asks "¿Se recibió el depósito?" (checked by default;
+  unchecked needs a reason) and sends `depositCollection { received, reason? }` with the advance. Inside the
+  advance transaction it is applied ONLY when the walk confirms the delivery (`confirmsDelivery` — an admin
+  jump through Entregado counts) and that same rule holds on the pre-move state; otherwise it is silently
+  ignored (a stale screen never 400s a delivery, an existing record is never overwritten). Its absence
+  never blocks the move.
+- **Any time:** `PUT /orders/:id/deposit-collection` `{ received, reason? }` (reason required, 1–500,
+  when `received` is false; dropped when true). Locked; `404` missing; `409 notApplicable` when cancelled
+  or `D = 0`. Allowed before AND after a damage report (2026-10-28 — the report's money recomputes live).
+  Declarative: re-sending the same answer keeps the original timestamp and appends nothing; a waive
+  re-sent with a new reason updates it under the same timestamp. `DELETE` returns it to PENDING (`409`
+  when nothing is recorded or the order is cancelled).
+- **A damage report never writes the collection** (2026-10-28; it used to stamp a PENDING one RECEIVED).
+- **Projection:** `securityDeposit.held` (= `H`) and `securityDeposit.collection { status, at?, reason?,
+  canRecord }` — absent when `D = 0`; `at` = the stamp; `reason` only when WAIVED; `canRecord` = not
+  cancelled. `depositSettlementPending` is unchanged (a waived or pending order with replacement values
+  still awaits its report).
+- **Decision:** the deposit RECEIPT is now tracked; the balance payment of damages is still a documented
+  door.
 
 **Settlement writes** — declarative (the body is the FINAL state: a line absent from `damages` has none);
 re-sending corrects it WITHOUT re-stamping `depositSettledAt` (first settled = the fact worth keeping).
 DELETE clears the three service columns and every line's damage (NO-TRASH: nothing references it).
 
+**The deposit trail** (`service_deposit_history`, model `ServiceDepositHistory`, migration
+`20261027200000_order_deposit_history`) — append-only, one row per settlement write, inside the same
+transaction: **`RECORDED`** (the first settle — the order had no `depositSettledAt`), **`CORRECTED`** (any
+later re-send), **`UNDONE`** (the DELETE). Each `RECORDED`/`CORRECTED` row snapshots the outcome AS
+RECORDED THEN — `depositTotal` (= the HELD deposit: the received amount, 0 if not received), `claimsTotal`, `refundAmount`, `balanceDue`, through
+the same `computeSettlementMoney` — so the history stays true after a later correction or undo; `UNDONE`
+carries no money. The collection writes its own kinds — **`RECEIVED`**, **`WAIVED`** (`note` = the waive
+reason) and **`COLLECTION_CLEARED`**, with `depositTotal` = the nominal deposit — only when something
+actually changed. `byUserId` = the admin. The detail projects it as a top-level `depositHistory[]` (chronological,
+`byUserName` decrypted, money absent when NULL) beside `statusHistory`, so "depósito devuelto" / "daños
+reportados" appear in the order's timeline — top-level rather than inside `securityDeposit` because an
+order edited out of qualifying still has history worth showing. The current settlement still lives on
+`services` + the lines; the trail is only its record. Order delete removes the trail rows with the order
+(the FK is RESTRICT, so they go before the order row).
+
 **Interaction with the order edit** (`PUT /orders/:id`): the edit re-derives the line snapshots, then
 `assertSettlementSurvivesEdit` refuses (409 `settlementConflict`) a damaged line dropped, reduced below its
-damaged units, left without a replacement value or turned into a sale, and a deposit shrunk below what was
-retained. The admin undoes the settlement first. The edit never writes the damage columns. Order delete
+damaged units, left without a replacement value or turned into a sale, and a NOMINAL deposit shrunk below
+what was retained (the same ceiling the report enforces; the collection plays no part). The admin undoes the settlement
+first. The edit never writes the damage columns. Order delete
 removes the lines (and with them the damage) in its transaction.
 
 **Projections:** list items carry `depositSettlementPending` (delivered + settleable + not cancelled + not
-settled — the agenda's "Garantía por liquidar" chip); the detail carries per-line snapshots + damage and a
-`securityDeposit { total, canSettle, settlement? }` block with every derived figure. The UI and the PDF
-render those numbers; they never re-derive them.
+settled — the agenda's pending-deposit chip); the detail carries per-line snapshots + damage, a
+`securityDeposit { total, held, collection?, canSettle, settlement? }` block with every derived figure, and
+`depositHistory`; the forward DELIVERY action carries `depositToCollect`.
+The UI and the PDF render those numbers; they never re-derive them.
 
-**Documents:** a deposit is NEVER a cost on the happy path (shown as "depósito en garantía", refunded); only
-what was retained or billed for replacement becomes a cost (EPIC-2-DOCUMENTS).
+**Dashboard** (`GET /dashboard` → `deposits`): `pending { orders, amount, items }` — the
+`depositSettlementPending` predicate pushed into SQL (live, delivered, unsettled, an active rental line with
+a deposit > 0 or a replacement value); ALL of them are fetched so `orders`/`amount` (Σ HELD deposit — only
+a RECEIVED one adds; pending/waived add 0 — money in hand) are exact,
+and `items` lists the oldest deliveries first, capped at `PENDING_DEPOSITS_LIMIT` (5), as ordinary list
+items (`projectOrderListItem`). `month { settled, refunded, retained, replacements, balanceDue }` totals
+the settlements FIRST recorded this month (scoped by `depositSettledAt`, as they stand now) through
+`summarizeSettlements` → the same `heldDeposit` + `computeSettlementMoney`, so the card can never disagree
+with an order.
 
-**Migrations:** `20261027100000_order_security_deposit` (engine-written). No backfill: every column is
-nullable or defaults to 0, and an order with no deposit/replacement lines behaves exactly as before.
+**Documents:** a deposit is NEVER a cost on the happy path (shown as a deposit, refunded); only what was
+retained or billed for replacement becomes a cost (EPIC-2-DOCUMENTS). **Only a RECEIVED deposit is money
+we have (owner, 2026-10-28):** before the report a WAIVED ("no recibido") deposit shows no deposit row (a
+PENDING one is still asked for, a RECEIVED one is information); after the report a deposit not received
+(PENDING or WAIVED) is never credited — no `Depósito recibido −` row, no "Depósito recibido" table on the
+damage report — the damages (a retention up to the nominal deposit + replacements) are billed whole, and
+the squared box says so under its result ("Depósito no recibido: los daños se cobran completos.";
+EPIC-2-DOCUMENTS §2b #33).
+
+**Migrations:** `20261027100000_order_security_deposit`, `20261027200000_order_deposit_history` and
+`20261027300000_order_deposit_collection` (all engine-written; the last adds three enum values in one
+statement each — fine on Postgres 12+). No backfill: every column is nullable or defaults to 0, an order
+with no deposit/replacement lines behaves exactly as before, settlements recorded before the trail existed
+simply have no history rows, and orders delivered before the collection existed read PENDING — they hold 0
+until the admin marks them received by hand (2026-10-28: no backfill, and a report no longer stamps it).

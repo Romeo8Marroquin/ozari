@@ -4,6 +4,7 @@ import { logger } from "@/config/logger.js";
 import { appConfig } from "@/config/app.js";
 import { HttpEnum } from "@models/enums/httpEnum.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
+import { parseDepositCollection } from "../deposit-collection/depositCollection.validator.js";
 import type {
   AdvanceEvidenceModel,
   AdvanceOrderRequestModel,
@@ -124,10 +125,24 @@ export const validateAdvanceOrder = (
       return;
     }
 
+    // Optional — the delivery dialog's deposit answer, held to the SAME rules as its own door. A
+    // malformed one is a 400 about the request; whether it APPLIES is decided under the lock.
+    let depositCollection: AdvanceOrderRequestModel["depositCollection"];
+    const rawCollection = body["depositCollection"];
+    if (rawCollection !== undefined && rawCollection !== null) {
+      const parsed = parseDepositCollection(rawCollection);
+      if ("error" in parsed) {
+        reject(res, "invalidDepositCollection", { error: parsed.error });
+        return;
+      }
+      depositCollection = parsed.body;
+    }
+
     const validated: AdvanceOrderRequestModel = {
       toStatusId,
       evidence,
       reason,
+      depositCollection,
     };
     req.body = validated;
     next();
