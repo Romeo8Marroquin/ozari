@@ -197,6 +197,25 @@ describe("recordDepositCollection", () => {
     });
   });
 
+  it("records a deposit received late, AFTER the damage report (owner 2026-10-28)", async () => {
+    const tx = mockTx(lockedState({ depositSettledAt: DELIVERED }));
+    await record({ received: true, reason: undefined });
+    expect(tx.service.update).toHaveBeenCalledWith({
+      where: { id: 12 },
+      data: { depositReceivedAt: expect.any(Date), depositWaivedAt: null, depositWaivedReason: null },
+    });
+    expect(tx.serviceDepositHistory.create).toHaveBeenCalledWith({
+      data: { serviceId: 12, kind: "RECEIVED", note: null, depositTotal: 200, byUserId: 1 },
+    });
+    expect(sendOzariError).not.toHaveBeenCalled();
+    expect(sendOzariSuccess).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.OK,
+      "orders.depositCollection.recorded",
+      expect.anything(),
+    );
+  });
+
   it("re-sending the same answer keeps the original timestamp and appends nothing", async () => {
     const tx = mockTx(lockedState({ depositReceivedAt: DELIVERED }));
     await record({ received: true, reason: undefined });
@@ -235,7 +254,6 @@ describe("recordDepositCollection", () => {
       }),
       "notApplicable",
     ],
-    ["an order with a damage report", lockedState({ depositSettledAt: DELIVERED }), "settled"],
   ])("409s %s", async (_label, state, key) => {
     const tx = mockTx(state);
     await record({ received: true, reason: undefined });
@@ -286,6 +304,19 @@ describe("clearDepositCollection", () => {
     );
   });
 
+  it("clears it after the damage report too (the report's money recomputes live)", async () => {
+    const tx = mockTx(lockedState({ depositReceivedAt: DELIVERED, depositSettledAt: DELIVERED }));
+    await clear();
+    expect(tx.service.update).toHaveBeenCalledWith({
+      where: { id: 12 },
+      data: { depositReceivedAt: null, depositWaivedAt: null, depositWaivedReason: null },
+    });
+    expect(tx.serviceDepositHistory.create).toHaveBeenCalledWith({
+      data: { serviceId: 12, kind: "COLLECTION_CLEARED", depositTotal: 200, byUserId: 1 },
+    });
+    expect(sendOzariError).not.toHaveBeenCalled();
+  });
+
   it("attributes the row to user 0 when the request somehow carries no user", async () => {
     const tx = mockTx(lockedState({ depositWaivedAt: DELIVERED, depositWaivedReason: "x" }));
     await clear({ params: { id: "12" } } as unknown as CustomRequest);
@@ -296,7 +327,6 @@ describe("clearDepositCollection", () => {
 
   it.each([
     ["nothing is recorded", lockedState(), "notRecorded"],
-    ["a damage report exists", lockedState({ depositReceivedAt: DELIVERED, depositSettledAt: DELIVERED }), "settled"],
     ["the order is cancelled", lockedState({ depositReceivedAt: DELIVERED, cancelledAt: DELIVERED }), "notApplicable"],
   ])("409s when %s", async (_label, state, key) => {
     const tx = mockTx(state);

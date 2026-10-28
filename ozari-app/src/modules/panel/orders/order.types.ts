@@ -297,26 +297,29 @@ export interface OrderDepositSettlement {
 export type OrderDepositCollectionStatus = 'PENDING' | 'RECEIVED' | 'WAIVED';
 
 /**
- * Was the deposit actually COLLECTED from the client? `PENDING` until recorded — at the delivery
- * step (the advance dialog) or any time from the deposit card. `WAIVED` = handed over without a
- * deposit on purpose (a relative, a trusted client…): the deposit then counts as 0 everywhere — no
- * refund, no retention, documents show no deposit — while lost/broken units can still be billed.
+ * Was the deposit actually RECEIVED from the client? `PENDING` until recorded — at the delivery
+ * step (the advance dialog) or any time from the deposit card. `WAIVED` = NOT RECEIVED, with an
+ * internal reason (a relative, a trusted client… — it may still arrive later). Only a RECEIVED
+ * deposit is money we have (owner, 2026-10-28): otherwise nothing is refunded or credited, and the
+ * damages — a retention up to the NOMINAL deposit, plus lost/broken units — are billed whole.
  */
 export interface OrderDepositCollection {
   status: OrderDepositCollectionStatus;
-  /** When it was received / waived; absent while PENDING. */
+  /** When it was received / marked not received; absent while PENDING. */
   at?: string;
   /** WAIVED only — an INTERNAL note, never printed on a client document. */
   reason?: string;
-  /** May it be recorded/changed/cleared now: not cancelled and no damage report recorded (undo the
-   *  report first — the report's money was computed from it). */
+  /** May it be recorded/changed/cleared now: any time but on a cancelled order — after a damage
+   *  report too (the report's money recomputes from it). */
   canRecord: boolean;
 }
 
 export interface OrderSecurityDeposit {
-  /** Σ rental lines' deposit × quantity — collected ON TOP of the order, never in `totalAmount`. */
+  /** Σ rental lines' deposit × quantity — collected ON TOP of the order, never in `totalAmount`.
+   *  The NOMINAL deposit: the ceiling of a retention, received or not. */
   total: number;
-  /** The deposit the damage report counts: `total`, or 0 when WAIVED. Server-computed. */
+  /** The deposit IN HAND that the damage report counts: `total` when RECEIVED, else 0 (pending or
+   *  not received). Server-computed. */
   held: number;
   /** Absent when `total` is 0 (replacement values only — there is no deposit to collect). */
   collection?: OrderDepositCollection;

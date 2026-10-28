@@ -353,14 +353,16 @@ describe("outstandingFrom", () => {
 
 describe("summarizeSettlements", () => {
   const dec = (value: string) => new Prisma.Decimal(value);
-  /** 5 chairs: a Q40 deposit and a Q120 replacement each (Q200 deposit), `damaged` of them broken. */
+  const RECEIVED_AT = new Date("2026-08-01T15:00:00Z");
+  /** 5 chairs: a Q40 deposit and a Q120 replacement each (Q200 deposit, RECEIVED), `damaged` of
+   *  them broken. */
   const settled = (
     retained: string | null,
     damaged = 0,
     overrides: Partial<SettledDepositRowModel["serviceDetails"][number]> = {},
   ): SettledDepositRowModel => ({
     depositRetainedAmount: retained === null ? null : dec(retained),
-    depositWaivedAt: null,
+    depositReceivedAt: RECEIVED_AT,
     serviceDetails: [
       {
         isRental: true,
@@ -420,14 +422,16 @@ describe("summarizeSettlements", () => {
     });
   });
 
-  it("a WAIVED deposit counts 0: nothing refunded, every replacement owed in full", () => {
-    const waived = { ...settled("0", 1), depositWaivedAt: new Date("2026-08-01T15:00:00Z") };
-    expect(summarizeSettlements([waived])).toEqual({
+  it("a deposit NOT received (pending or waived) counts 0: nothing refunded, every claim owed", () => {
+    // The row carries no waive column: only `depositReceivedAt` decides — null is nothing in hand.
+    const notReceived = { ...settled("30", 1), depositReceivedAt: null };
+    expect(summarizeSettlements([notReceived])).toEqual({
       settled: 1,
       refunded: 0,
-      retained: 0,
+      // The retention is still charged (capped by the nominal deposit) — on top, as balance due.
+      retained: 30,
       replacements: 120,
-      balanceDue: 120,
+      balanceDue: 150,
     });
   });
 
@@ -441,7 +445,7 @@ describe("summarizeSettlements", () => {
     // Prices that float addition cannot represent exactly: 0.1 + 0.2 territory.
     const awkward = (retained: string): SettledDepositRowModel => ({
       depositRetainedAmount: dec(retained),
-      depositWaivedAt: null,
+      depositReceivedAt: RECEIVED_AT,
       serviceDetails: [
         {
           isRental: true,

@@ -30,7 +30,8 @@ export interface OrderBalance {
   /** BEFORE the report: a deposit already in our hands — shown for information, NOT in the sum
    *  (it comes back at pickup). 0 otherwise. */
   depositOnHand: number;
-  /** AFTER the report: the deposit credited back against what is owed (0 when waived). */
+  /** AFTER the report: the RECEIVED deposit credited back against what is owed (0 when it was not
+   *  received — pending or waived). */
   depositCredit: number;
   /** AFTER the report: retention + lost/broken units. */
   claims: number;
@@ -49,22 +50,24 @@ const cents = (value: number): number => Math.round(value * 100) / 100;
  * - **Before the damage report** the client owes the rest of the service PLUS a deposit not yet
  *   handed over: the deposit is money they must PAY to get the service, even though it is not a cost
  *   and comes back. A deposit already received is informational (`depositOnHand`), not summed.
- * - **After the report** the deposit is credited back against everything owed — the rest of the
- *   service and the damages — so the result is either a balance to COLLECT or a REFUND to give.
- *   A PENDING collection counts as received here (recording a report confirms it, server-side).
- * - **WAIVED** = no deposit at all: nothing is due, nothing is credited, damages are billed whole.
+ * - **After the report** a RECEIVED deposit is credited back against everything owed — the rest of
+ *   the service and the damages — so the result is either a balance to COLLECT or a REFUND to give.
+ *   A deposit NOT received (PENDING or WAIVED) is money we never had: nothing is credited, and the
+ *   damages (retention + replacements) are billed whole; the full deposit is no longer asked for,
+ *   since the report has priced what it was meant to cover (owner, 2026-10-28).
+ * - **WAIVED** ("no recibido" at delivery, with a reason) is never asked for before the report.
  *
  * Pure arithmetic over figures the API reported — it never decides a server consequence.
  */
 export function squareOrderBalance(input: OrderBalanceInput): OrderBalance {
   const serviceDue = input.paid ? 0 : Math.max(0, cents(input.total - input.advance));
-  const depositAmount =
-    input.deposit !== undefined && input.deposit.status !== 'WAIVED' ? input.deposit.amount : 0;
   const reported = input.claimsTotal !== undefined;
+  // Only a deposit actually RECEIVED is money in hand: it is the only one shown on hand or credited.
+  const received = input.deposit?.status === 'RECEIVED' ? input.deposit.amount : 0;
 
-  const depositDue = !reported && input.deposit?.status === 'PENDING' ? depositAmount : 0;
-  const depositOnHand = !reported && input.deposit?.status === 'RECEIVED' ? depositAmount : 0;
-  const depositCredit = reported ? depositAmount : 0;
+  const depositDue = !reported && input.deposit?.status === 'PENDING' ? input.deposit.amount : 0;
+  const depositOnHand = reported ? 0 : received;
+  const depositCredit = reported ? received : 0;
   // An anticipo above the cost is, in practice, the deposit sent along with it. Once that deposit
   // counts as in hand (received, or credited back by the report) the excess IS it — crediting both
   // would hand it back twice. Only what is left over is a genuine `Saldo a favor`. Paid or not:

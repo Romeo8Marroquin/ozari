@@ -166,6 +166,19 @@ describe('OrderDepositCard', () => {
     expect(screen.getByText(`${K}.noClaimsNoDeposit`)).toBeInTheDocument();
   });
 
+  it('damages on an order with no deposit at all: what is owed, with no deposit wording', () => {
+    renderCard({
+      total: 0,
+      held: 0,
+      canSettle: true,
+      settlement: settlement({ retainedAmount: 0, retainedReason: undefined, claimsTotal: 240, refundAmount: 0, balanceDue: 240 }),
+    });
+    expect(screen.getByText(`${K}.balanceDue`)).toBeInTheDocument();
+    expect(screen.queryByText(`${K}.refund`)).not.toBeInTheDocument();
+    expect(screen.queryByText(`${K}.balanceDueNote`)).not.toBeInTheDocument();
+    expect(screen.queryByText(`${K}.balanceDueNotReceived`)).not.toBeInTheDocument();
+  });
+
   it('a retention without a reason and a loss without a note render no empty sub-lines', () => {
     renderCard({
       total: 200,
@@ -232,8 +245,8 @@ describe('OrderDepositCard', () => {
       expect(screen.getByText(`${C}.receivedNoDate`)).toBeInTheDocument();
     });
 
-    it('WAIVED: the reason as an INTERNAL note, held 0 ⇒ "Sin daños", never "Devolver depósito"', () => {
-      renderCard({
+    it('WAIVED ("no recibido"): the reason as an INTERNAL note, held 0 ⇒ "Registrar sin daños"', async () => {
+      const { onCollection } = renderCard({
         total: 200,
         held: 0,
         canSettle: true,
@@ -243,9 +256,28 @@ describe('OrderDepositCard', () => {
       expect(screen.getByText(`${C}.internalNote`)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: `${K}.noDamageAction` })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: `${K}.refundAction` })).not.toBeInTheDocument();
-      // The amount shown is the API's `held`, not the nominal total.
-      expect(screen.getByText(/^Q\s*0\.00$/)).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: `${C}.correct` })).toBeInTheDocument();
+      // Before the report: what not having it means, in the pending line.
+      expect(screen.getByText(`${K}.dueNotReceived`)).toBeInTheDocument();
+      // The AGREED deposit is still stated — whether it arrived is the row below.
+      expect(screen.getByText(/^Q\s*200\.00$/)).toBeInTheDocument();
+      // It may still arrive: record it received, or clear the record.
+      await userEvent.click(screen.getByRole('button', { name: `${C}.markReceived` }));
+      expect(onCollection).toHaveBeenLastCalledWith('receive');
+      await userEvent.click(screen.getByRole('button', { name: `${C}.correct` }));
+      expect(onCollection).toHaveBeenLastCalledWith('clear');
+      expect(screen.queryByRole('button', { name: `${C}.waive` })).not.toBeInTheDocument();
+    });
+
+    it('PENDING after delivery (held 0): nothing to give back, so the quick action is "Registrar sin daños"', () => {
+      renderCard({
+        total: 200,
+        held: 0,
+        canSettle: true,
+        collection: { status: 'PENDING', canRecord: true },
+      });
+      expect(screen.getByRole('button', { name: `${K}.noDamageAction` })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: `${K}.refundAction` })).not.toBeInTheDocument();
+      expect(screen.getByText(`${K}.dueNotReceived`)).toBeInTheDocument();
     });
 
     it('WAIVED without a reason still renders the line', () => {
@@ -258,26 +290,60 @@ describe('OrderDepositCard', () => {
       expect(screen.getByText(`${C}.waived`)).toBeInTheDocument();
     });
 
-    it('a recorded damage report LOCKS it: no actions, and the hint says how to change it', () => {
+    it('stays recordable AFTER a damage report (the API recomputes the report from it)', () => {
       renderCard({
         total: 200,
         held: 200,
         canSettle: true,
-        collection: { status: 'RECEIVED', at: '2026-08-01T15:00:00.000Z', canRecord: false },
+        collection: { status: 'RECEIVED', at: '2026-08-01T15:00:00.000Z', canRecord: true },
         settlement: settlement(),
       });
-      expect(screen.getByText(`${C}.lockedByReport`)).toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: `${C}.correct` })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: `${C}.correct` })).toBeInTheDocument();
+      // Received: the deposit is applied — refund line and "superan el depósito" note.
+      expect(screen.getByText(`${K}.refund`)).toBeInTheDocument();
+      expect(screen.getByText(`${K}.balanceDueNote`)).toBeInTheDocument();
+      expect(screen.queryByText(`${C}.notReceivedAfterReport`)).not.toBeInTheDocument();
     });
 
-    it('not recordable for another reason (cancelled): no actions and no report hint', () => {
+    it('after a report with the deposit NOT received: damages whole, nothing back, and the way to fix it', async () => {
+      const { onCollection } = renderCard({
+        total: 200,
+        held: 0,
+        canSettle: true,
+        collection: { status: 'PENDING', canRecord: true },
+        settlement: settlement({ appliedFromDeposit: 0, refundAmount: 0, balanceDue: 270 }),
+      });
+      expect(screen.getByText(`${C}.notReceivedAfterReport`)).toBeInTheDocument();
+      // No "Se devuelve Q0.00" — only what is owed, and why it is whole.
+      expect(screen.queryByText(`${K}.refund`)).not.toBeInTheDocument();
+      expect(screen.getByText(`${K}.balanceDue`)).toBeInTheDocument();
+      expect(screen.getByText(`${K}.balanceDueNotReceived`)).toBeInTheDocument();
+      expect(screen.queryByText(`${K}.balanceDueNote`)).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: `${C}.markReceived` }));
+      expect(onCollection).toHaveBeenLastCalledWith('receive');
+    });
+
+    it('a CLEAN report with the deposit not received: "Sin daños", nothing to give back', () => {
+      renderCard({
+        total: 200,
+        held: 0,
+        canSettle: true,
+        collection: { status: 'WAIVED', reason: 'Familiar', canRecord: true },
+        settlement: { ...clean(), refundAmount: 0 },
+      });
+      expect(screen.getByText(`${K}.chipNoDamage`)).toBeInTheDocument();
+      expect(screen.queryByText(`${K}.chipRefunded`)).not.toBeInTheDocument();
+      expect(screen.getByText(`${K}.noClaimsNotReceived`)).toBeInTheDocument();
+      expect(screen.queryByText(`${K}.refund`)).not.toBeInTheDocument();
+    });
+
+    it('not recordable (cancelled): no actions', () => {
       renderCard({
         total: 200,
         held: 200,
         canSettle: false,
         collection: { status: 'PENDING', canRecord: false },
       });
-      expect(screen.queryByText(`${C}.lockedByReport`)).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: `${C}.markReceived` })).not.toBeInTheDocument();
     });
 

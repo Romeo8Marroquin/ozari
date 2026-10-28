@@ -98,10 +98,21 @@ describe('squareOrderBalance', () => {
     ).toMatchObject({ amount: 52, direction: 'refund' });
   });
 
-  it('squares exactly to zero without a direction, and counts a PENDING deposit as received after the report', () => {
+  it('squares exactly to zero without a direction', () => {
     expect(
-      squareOrderBalance({ ...base, paid: true, deposit: { amount: 80, status: 'PENDING' }, claimsTotal: 80 }),
-    ).toMatchObject({ depositDue: 0, depositCredit: 80, amount: 0, direction: 'none' });
+      squareOrderBalance({ ...base, paid: true, deposit: { amount: 80, status: 'RECEIVED' }, claimsTotal: 80 }),
+    ).toMatchObject({ depositCredit: 80, amount: 0, direction: 'none' });
+  });
+
+  it('after the report, never credits a deposit that was not received, and stops asking for it whole', () => {
+    // Pending: the Q80 was never handed over — the Q20 retention and Q90 replacement are billed whole.
+    expect(
+      squareOrderBalance({ ...base, paid: true, deposit: { amount: 80, status: 'PENDING' }, claimsTotal: 110 }),
+    ).toMatchObject({ depositDue: 0, depositOnHand: 0, depositCredit: 0, amount: 110, direction: 'collect' });
+    // A clean report on a deposit never received: nothing to give back.
+    expect(
+      squareOrderBalance({ ...base, paid: true, deposit: { amount: 80, status: 'WAIVED' }, claimsTotal: 0 }),
+    ).toMatchObject({ depositCredit: 0, amount: 0, direction: 'none' });
   });
 
   it('rounds to cents', () => {

@@ -13,7 +13,6 @@ import {
   canRecordSettlement,
   computeDepositTotal,
   computeSettlementMoney,
-  depositCollectionStatus,
   heldDeposit,
   isSettleableLine,
   loadOrderProjectionContext,
@@ -25,7 +24,6 @@ import type {
   OrderDetailEnvelopeModel,
   SettleOrderRequestModel,
 } from "../orders.models.js";
-import { applyDepositCollection } from "../deposit-collection/depositCollection.service.js";
 
 /** Projects the written order into the shared `{ order }` envelope and answers with it. */
 const respondWithOrder = async (
@@ -78,11 +76,12 @@ const auditSettlement = (req: CustomRequest, id: number, operation: string): voi
  * with the client's money, so the fleet the business intends to own is unchanged; a unit that will
  * not be replaced is an edit of the product's quantity.
  *
- * **The deposit counted is the HELD one** (`heldDeposit`): 0 when its collection was WAIVED, so a
- * waived order refunds and retains nothing (any retention is `retainedAboveDeposit`) while its
- * replacements are billed in full. A report recorded while the collection is still PENDING stamps
- * it RECEIVED (with its own trail row) — recording what came back confirms the deposit was in hand;
- * undoing the report does not revert that.
+ * **The deposit counted is the HELD one** (`heldDeposit`, owner 2026-10-28): the deposit only when
+ * its collection is RECEIVED, 0 while PENDING or WAIVED — so an order whose deposit never reached us
+ * refunds nothing and owes every claim on top. The retention is capped by the NOMINAL deposit
+ * (`computeDepositTotal`), not the held one: the damaged items are charged "that part of the
+ * deposit" even when it was not received. Recording a report NEVER changes the collection status —
+ * that is its own door, editable before or after the report (the money recomputes live).
  */
 export const settleOrder = async (
   req: CustomRequest,
@@ -108,8 +107,6 @@ export const settleOrder = async (
           cancelledAt: true,
           depositSettledAt: true,
           depositReceivedAt: true,
-          depositWaivedAt: true,
-          depositWaivedReason: true,
           serviceDetails: {
             where: { isActive: true },
             select: {
@@ -140,28 +137,14 @@ export const settleOrder = async (
       if (!damageable) {
         return { kind: "invalidDamage" as const };
       }
-      // Every settlement figure counts the HELD deposit (0 when its collection was waived), never the
-      // nominal one: a waived deposit cannot be retained from, nor refunded.
-      const depositTotal = computeDepositTotal(order.serviceDetails);
-      const held = heldDeposit(order);
-      if (body.retainedAmount > held) {
+      // The retention is capped by the NOMINAL deposit (it is charged even when the deposit was not
+      // received); every money figure below counts the HELD one (0 unless RECEIVED).
+      if (body.retainedAmount > computeDepositTotal(order.serviceDetails)) {
         return { kind: "retainedAboveDeposit" as const };
       }
+      const held = heldDeposit(order);
 
       const now = new Date();
-      // A damage report on a still-PENDING collection confirms the deposit was in hand (the normal
-      // case) — stamped received, with its own trail row, BEFORE the report's row. Undoing the report
-      // later does not revert it.
-      if (depositTotal > 0 && depositCollectionStatus(order) === "PENDING") {
-        await applyDepositCollection(tx, {
-          serviceId: id,
-          current: order,
-          input: { received: true, reason: undefined },
-          depositTotal,
-          byUserId: req.user?.userId ?? 0,
-          now,
-        });
-      }
 
       // Every line whose damage CHANGES — newly damaged, corrected, or no longer damaged.
       const damageByLine = new Map(body.damages.map((damage) => [damage.lineId, damage]));

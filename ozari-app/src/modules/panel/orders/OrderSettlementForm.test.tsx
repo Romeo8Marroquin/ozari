@@ -25,6 +25,20 @@ vi.mock('../documents/DamageReportButton', () => ({
   },
 }));
 
+// The collection dialog is its own component (and suite); a marker records what it was opened with
+// and hands back its `onClose`.
+const { collectionProps } = vi.hoisted(() => ({ collectionProps: vi.fn() }));
+vi.mock('./OrderDepositCollectionModal', () => ({
+  default: (props: { order?: { id: number }; mode?: string; onClose: () => void }) => {
+    collectionProps(props);
+    return props.mode ? (
+      <button type="button" data-testid="collection-modal" onClick={props.onClose}>
+        {props.mode}
+      </button>
+    ) : null;
+  },
+}));
+
 import { QueryKeys } from '@constants/QueryKeys';
 import { PanelNavContext, type PanelNav } from '../PanelNavContext';
 import type { OrderDetail, OrderLine, OrderSecurityDeposit } from './order.types';
@@ -49,6 +63,7 @@ const line = (over: Partial<OrderLine> = {}): OrderLine => ({
 const deposit = (over: Partial<OrderSecurityDeposit> = {}): OrderSecurityDeposit => ({
   total: 200,
   held: 200,
+  collection: { status: 'RECEIVED', canRecord: true },
   canSettle: true,
   ...over,
 });
@@ -246,21 +261,88 @@ describe('OrderSettlementForm', () => {
     expect(damaged()).toBeInTheDocument();
   });
 
-  it('a deposit handed over WITHOUT collecting it (held 0) leaves only lost/broken pieces', async () => {
-    const waived = deposit({
-      held: 0,
-      collection: { status: 'WAIVED', reason: 'Familiar', canRecord: true },
-    });
-    renderForm(order({ securityDeposit: waived }), waived);
-    expect(screen.getByText(`${K}.noDepositHeld`)).toBeInTheDocument();
-    expect(screen.queryByLabelText(new RegExp(`${K}.fields.retainedLabel`))).not.toBeInTheDocument();
-    // Against a held deposit of 0, one lost unit is owed whole (Q120), nothing comes back.
-    await userEvent.type(damaged(), '1');
-    expect(reportProps).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        settlement: expect.objectContaining({ claimsTotal: 120, refundAmount: 0, balanceDue: 120 }),
-      }),
+  it('says so when the order carries no deposit at all', () => {
+    const none = deposit({ total: 0, held: 0 });
+    renderForm(order({ securityDeposit: none }), none);
+    expect(screen.getByText(`${K}.noDeposit`)).toBeInTheDocument();
+    expect(screen.queryByText(`${K}.notReceived.text`)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['PENDING', { status: 'PENDING' as const, canRecord: true }],
+    ['WAIVED', { status: 'WAIVED' as const, reason: 'Familiar', canRecord: true }],
+  ])(
+    'a deposit NOT received (%s): the retention up to the NOMINAL deposit, every claim billed whole',
+    async (_label, collection) => {
+      const notReceived = deposit({ held: 0, collection });
+      renderForm(order({ securityDeposit: notReceived }), notReceived);
+      expect(screen.getByRole('note')).toHaveTextContent(`${K}.notReceived.text`);
+      expect(screen.queryByText(`${K}.noDeposit`)).not.toBeInTheDocument();
+      // The retention is still offered — "that part of the deposit" — capped at the agreed Q200.
+      expect(retained()).toBeInTheDocument();
+      // Nothing in hand: no "se devuelve" row; the one result is what is owed.
+      expect(screen.queryByText(`${K}.preview.refund`)).not.toBeInTheDocument();
+      expect(screen.getByText(`${K}.preview.balanceDue`)).toBeInTheDocument();
+
+      await userEvent.type(retained(), '150');
+      await userEvent.type(reason(), 'Mantel manchado');
+      await userEvent.type(damaged(), '1');
+      // Q150 retained + 1 × Q120 lost = Q270, all of it owed (held 0 ⇒ nothing applied or back).
+      expect(screen.getByText(/^Q\s*270\.00$/)).toBeInTheDocument();
+      expect(reportProps).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          settlement: expect.objectContaining({
+            claimsTotal: 270,
+            appliedFromDeposit: 0,
+            refundAmount: 0,
+            balanceDue: 270,
+          }),
+        }),
+      );
+      await userEvent.click(submit());
+      await waitFor(() => expect(settleOrder).toHaveBeenCalled());
+      expect(settleOrder.mock.calls[0]?.[0]).toMatchObject({ body: { retainedAmount: 150 } });
+    },
+  );
+
+  it('still refuses a retention above the NOMINAL deposit when it was not received', async () => {
+    const notReceived = deposit({ held: 0, collection: { status: 'PENDING', canRecord: true } });
+    renderForm(order({ securityDeposit: notReceived }), notReceived);
+    await userEvent.type(retained(), '250');
+    await userEvent.click(submit());
+    expect(await screen.findByText(`${K}.errors.retainedAboveDeposit`)).toBeInTheDocument();
+    expect(settleOrder).not.toHaveBeenCalled();
+  });
+
+  it('records the deposit as received IN PLACE: the collection dialog, outside the form', async () => {
+    const notReceived = deposit({ held: 0, collection: { status: 'PENDING', canRecord: true } });
+    const subject = order({ securityDeposit: notReceived });
+    renderForm(subject, notReceived);
+    expect(screen.queryByTestId('collection-modal')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: `${K}.notReceived.action` }));
+    expect(collectionProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ order: subject, mode: 'receive' }),
     );
+    // Its confirm must never submit the report (the dialog is not nested in the form).
+    await userEvent.click(screen.getByTestId('collection-modal'));
+    expect(settleOrder).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('collection-modal')).not.toBeInTheDocument();
+  });
+
+  it('offers no in-place action when the collection cannot be recorded', () => {
+    const locked = deposit({ held: 0, collection: { status: 'PENDING', canRecord: false } });
+    renderForm(order({ securityDeposit: locked }), locked);
+    expect(screen.getByRole('note')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: `${K}.notReceived.action` }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('a RECEIVED deposit shows no notice and is applied before anything is owed', () => {
+    const received = deposit({ collection: { status: 'RECEIVED', canRecord: true } });
+    renderForm(order({ securityDeposit: received }), received);
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    expect(screen.getByText(`${K}.preview.refund`)).toBeInTheDocument();
   });
 
   it('hides the damages when no line has a replacement value (deposit only)', () => {

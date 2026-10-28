@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { isDepositNotReceived, orderBalanceInput } from '../documents/documentModel';
 import { squareOrderBalance } from './orderBalance';
 import { formatMoney } from './orderEstimate';
 import type { OrderDetail } from './order.types';
@@ -29,7 +30,9 @@ const Row: React.FC<{ label: string; amount: string; className?: string }> = ({
  * - before the report: "Anticipo" (−), "Saldo del servicio", "Saldo a favor del cliente" (− an
  *   anticipo above the cost, usually the deposit sent with it), "Depósito (reembolsable)" (+ while
  *   still to be handed over); a deposit already in hand is stated BELOW the result, outside the sum;
- * - after the report: "Daños" (+) and "Depósito recibido" (− credited back).
+ * - after the report: "Daños" (+) and "Depósito recibido" (− credited back) — only a RECEIVED
+ *   deposit is credited (owner, 2026-10-28); one not received leaves the damages whole, and a note
+ *   under the result says so.
  *
  * Exactly one result: "Monto a pagar" (the light highlight), "Monto a devolver al cliente" (the
  * INVERTED highlight — charcoal with white text, so money going OUT never reads like money coming
@@ -38,18 +41,14 @@ const Row: React.FC<{ label: string; amount: string; className?: string }> = ({
 const OrderBalanceSummary: React.FC<{ order: OrderDetail }> = ({ order }) => {
   const { t } = useTranslation();
   const money = (value: number): string => formatMoney(order.currency.symbol, value);
-  const deposit = order.securityDeposit;
+  const settlement = order.securityDeposit?.settlement;
   const advance = order.depositAmount ?? 0;
   const paid = order.paidAt !== undefined;
-  const balance = squareOrderBalance({
-    total: order.totalAmount,
-    advance,
-    paid,
-    deposit: deposit?.collection
-      ? { amount: deposit.total, status: deposit.collection.status }
-      : undefined,
-    claimsTotal: deposit?.settlement?.claimsTotal,
-  });
+  // The documents' own input builder — the screen and the paper feed the rule the same figures.
+  const balance = squareOrderBalance(orderBalanceInput(order, settlement?.claimsTotal));
+  // After the report, a deposit NOT received was never credited: say why the damages are whole.
+  const notReceivedNote =
+    settlement !== undefined && balance.claims > 0 && isDepositNotReceived(order);
   const showAdvance = !paid && advance > 0;
   // The service's own line is only worth a row when something else joins the sum.
   const showService =
@@ -99,6 +98,9 @@ const OrderBalanceSummary: React.FC<{ order: OrderDetail }> = ({ order }) => {
           amount={money(balance.depositOnHand)}
           className="text-xs text-charcoal/50"
         />
+      )}
+      {notReceivedNote && (
+        <p className="text-xs text-charcoal/50">{t(`${KEY}.depositNotReceived`)}</p>
       )}
     </div>
   );

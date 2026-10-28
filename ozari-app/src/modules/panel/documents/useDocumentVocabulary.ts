@@ -41,6 +41,7 @@ function chromeCopy(t: Translate, title: string): DocumentChromeCopy {
       none: t(`${KEY}.balance.none`),
       depositOnHand: t(`${KEY}.balance.depositOnHand`),
       depositOnHandNote: t(`${KEY}.balance.depositOnHandNote`),
+      depositNotReceived: t(`${KEY}.balance.depositNotReceived`),
     },
   };
 }
@@ -88,6 +89,7 @@ export function useDocumentCopy(kind: DocumentKind): DocumentCopy {
     settlementTitle: t(`${KEY}.securityDeposit.settlementTitle`),
     damagesTitle: t(`${KEY}.securityDeposit.damagesTitle`),
     settlementRetention: t(`${KEY}.securityDeposit.retention`),
+    settlementRetentionNotReceived: t(`${KEY}.securityDeposit.retentionNotReceived`),
     settlementReplacement: (product) => t(`${KEY}.securityDeposit.replacement`, { product }),
     settlementReplacementDetail: (quantity, unitAmount) =>
       t(`${KEY}.securityDeposit.replacementDetail`, { quantity, unitAmount }),
@@ -110,6 +112,8 @@ export function useDamageReportCopy(): DamageReportCopy {
     columnDepositEach: t(`${report}.columns.depositEach`),
     retentionTitle: t(`${report}.retentionTitle`),
     retentionNoReason: t(`${report}.retentionNoReason`),
+    // The same sentence as the comprobante's retention caption — one key, so the two never differ.
+    retentionNotReceived: t(`${KEY}.securityDeposit.retentionNotReceived`),
     replacementsTitle: t(`${report}.replacementsTitle`),
     columnUnits: t(`${report}.columns.units`),
     columnReplacementEach: t(`${report}.columns.replacementEach`),

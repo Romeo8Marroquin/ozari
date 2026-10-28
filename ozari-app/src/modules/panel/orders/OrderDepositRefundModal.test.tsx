@@ -76,11 +76,23 @@ describe('OrderDepositRefundModal', () => {
     expect(screen.getByRole('button', { name: `${KEY}.confirmNoDeposit` })).toBeInTheDocument();
   });
 
-  it('a deposit handed over WITHOUT collecting it (held 0) is "Sin daños", never a refund', () => {
-    renderModal(order({ securityDeposit: { total: 500, held: 0, canSettle: true } }));
-    expect(screen.getByText(`${KEY}.titleNoDeposit`)).toBeInTheDocument();
-    expect(screen.queryByText(`${KEY}.description`)).not.toBeInTheDocument();
-  });
+  it.each([
+    ['PENDING', { status: 'PENDING', canRecord: true }],
+    ['WAIVED', { status: 'WAIVED', reason: 'Familiar', canRecord: true }],
+    ['legacy (no collection)', undefined],
+  ])(
+    'a deposit NOT received (%s, held 0) is "Registrar sin daños", never "Devolver Q…"',
+    (_label, collection) => {
+      renderModal(
+        order({ securityDeposit: { total: 500, held: 0, canSettle: true, ...(collection && { collection }) } }),
+      );
+      expect(screen.getByText(`${KEY}.titleNoDeposit`)).toBeInTheDocument();
+      // It says WHY nothing goes back.
+      expect(screen.getByText(`${KEY}.descriptionNotReceived`)).toBeInTheDocument();
+      expect(screen.queryByText(`${KEY}.description`)).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: `${KEY}.confirmNoDeposit` })).toBeInTheDocument();
+    },
+  );
   it('an order without a deposit block reads as "Sin daños" too', () => {
     renderModal(order({ securityDeposit: undefined }));
     expect(screen.getByText(`${KEY}.titleNoDeposit`)).toBeInTheDocument();

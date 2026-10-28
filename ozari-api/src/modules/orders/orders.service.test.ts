@@ -971,7 +971,8 @@ describe("security deposit & damage settlement", () => {
     });
     expect(projectOrderDetail(order, makeProjectionContext()).securityDeposit).toEqual({
       total: 200,
-      held: 200,
+      // Still PENDING — nothing is in hand yet.
+      held: 0,
       collection: { status: "PENDING", at: undefined, reason: undefined, canRecord: true },
       canSettle: false,
       settlement: undefined,
@@ -986,6 +987,7 @@ describe("security deposit & damage settlement", () => {
     const detail = projectOrderDetail(
       makeRichOrder({
         deliveredAt: DELIVERED,
+        depositReceivedAt: DELIVERED,
         depositSettledAt: DELIVERED,
         depositRetainedAmount: dec("60"),
         depositRetainedReason: "Manchas de vino",
@@ -1005,8 +1007,8 @@ describe("security deposit & damage settlement", () => {
     expect(detail.securityDeposit).toEqual({
       total: 200,
       held: 200,
-      // PENDING, and no longer recordable: the report's money was computed from it.
-      collection: { status: "PENDING", at: undefined, reason: undefined, canRecord: false },
+      // RECEIVED, and still recordable after the report (its money recomputes live).
+      collection: { status: "RECEIVED", at: DELIVERED, reason: undefined, canRecord: true },
       canSettle: true,
       settlement: {
         settledAt: DELIVERED,
@@ -1035,6 +1037,7 @@ describe("security deposit & damage settlement", () => {
     const settlement = projectOrderDetail(
       makeRichOrder({
         deliveredAt: DELIVERED,
+        depositReceivedAt: DELIVERED,
         depositSettledAt: DELIVERED,
         serviceDetails: [
           // A damaged line whose replacement value vanished reads as Q0 rather than NaN.
@@ -1064,33 +1067,22 @@ describe("security deposit & damage settlement", () => {
       replacementPrice: 120,
       ...overrides,
     });
-    const settled = (
-      damagedQuantity: number,
-      retained: string | null = null,
-      depositWaivedAt: Date | null = null,
-    ) => ({
+    const settled = (damagedQuantity: number, retained: string | null = null) => ({
       depositSettledAt: DELIVERED,
       depositRetainedAmount: retained === null ? null : dec(retained),
-      depositWaivedAt,
       serviceDetails: [{ productId: 3, damagedQuantity }],
     });
 
     it("passes an unsettled order, and a settled one the edit keeps coherent", () => {
       expect(() =>
         assertSettlementSurvivesEdit(
-          {
-            depositSettledAt: null,
-            depositRetainedAmount: null,
-            depositWaivedAt: null,
-            serviceDetails: [],
-          },
+          { depositSettledAt: null, depositRetainedAmount: null, serviceDetails: [] },
           [],
         ),
       ).not.toThrow();
-      // A waived deposit with nothing retained (replacements only) survives any deposit change.
-      expect(() =>
-        assertSettlementSurvivesEdit(settled(2, "0", DELIVERED), [priced()]),
-      ).not.toThrow();
+      expect(() => assertSettlementSurvivesEdit(settled(2, "0"), [priced()])).not.toThrow();
+      // The ceiling is the NOMINAL deposit (5 × Q40 = Q200), whatever was collected — the order
+      // carries no collection facts here at all.
       expect(() => assertSettlementSurvivesEdit(settled(2, "200"), [priced()])).not.toThrow();
       expect(() => assertSettlementSurvivesEdit(settled(0), [priced({ securityDeposit: null })])).not.toThrow();
     });
@@ -1102,8 +1094,7 @@ describe("security deposit & damage settlement", () => {
       ["it became a sale", settled(2), [priced({ isRental: false })]],
       // 5 × Q40 = Q200 of deposit can no longer back the Q250 that was retained.
       ["the deposit shrank below what was retained", settled(0, "250"), [priced()]],
-      // A WAIVED collection holds nothing — any retention conflicts, whatever the nominal deposit.
-      ["the collection is waived and something was retained", settled(0, "0.01", DELIVERED), [priced()]],
+      ["the deposit was dropped while something was retained", settled(0, "0.01"), [priced({ securityDeposit: null })]],
     ])("refuses when %s", (_label, order, next) => {
       expect(() => assertSettlementSurvivesEdit(order, next)).toThrow(OrderSettlementConflictError);
     });
@@ -1125,22 +1116,27 @@ describe("deposit collection", () => {
     expect(depositCollectionStatus({ ...stamps, depositWaivedAt: AT })).toBe("WAIVED");
   });
 
-  it("holds the nominal deposit, or nothing once WAIVED", () => {
-    expect(heldDeposit({ depositWaivedAt: null, serviceDetails: deposit })).toBe(200);
-    expect(heldDeposit({ depositWaivedAt: AT, serviceDetails: deposit })).toBe(0);
+  it("holds the nominal deposit only once RECEIVED — nothing while PENDING or WAIVED", () => {
+    expect(heldDeposit({ depositReceivedAt: AT, serviceDetails: deposit })).toBe(200);
+    // PENDING: no stamp at all — nothing is in hand yet.
+    expect(heldDeposit({ depositReceivedAt: null, serviceDetails: deposit })).toBe(0);
+    // WAIVED: only the waive stamp — still nothing in hand.
+    expect(heldDeposit({ ...stamps, depositWaivedAt: AT, serviceDetails: deposit })).toBe(0);
     // A freshly priced line (plain numbers) reads through the same rule.
     expect(
       heldDeposit({
-        depositWaivedAt: null,
+        depositReceivedAt: AT,
         serviceDetails: [{ isRental: true, quantity: 2, securityDeposit: 12.5, replacementPrice: null }],
       }),
     ).toBe(25);
   });
 
-  it("may be recorded only while not cancelled and with no damage report", () => {
-    expect(canRecordDepositCollection({ cancelledAt: null, depositSettledAt: null })).toBe(true);
-    expect(canRecordDepositCollection({ cancelledAt: AT, depositSettledAt: null })).toBe(false);
-    expect(canRecordDepositCollection({ cancelledAt: null, depositSettledAt: AT })).toBe(false);
+  it("may be recorded whenever the order is not cancelled — before or after the damage report", () => {
+    expect(canRecordDepositCollection({ cancelledAt: null })).toBe(true);
+    expect(canRecordDepositCollection({ cancelledAt: AT })).toBe(false);
+    // A settled order is still recordable (owner 2026-10-28: a late deposit is recorded on the detail).
+    const settledOrder = { cancelledAt: null, depositSettledAt: AT };
+    expect(canRecordDepositCollection(settledOrder)).toBe(true);
   });
 
   it("asks about the deposit only when there is one, still pending, on a live unsettled order", () => {
@@ -1150,6 +1146,8 @@ describe("deposit collection", () => {
     expect(pendingDepositToCollect({ ...order, depositReceivedAt: AT })).toBeUndefined();
     expect(pendingDepositToCollect({ ...order, depositWaivedAt: AT })).toBeUndefined();
     expect(pendingDepositToCollect({ ...order, cancelledAt: AT })).toBeUndefined();
+    // The delivery dialog stays a PRE-report question even though the collection itself is now
+    // recordable after the report (that happens on the detail, not at the door).
     expect(pendingDepositToCollect({ ...order, depositSettledAt: AT })).toBeUndefined();
   });
 
@@ -1219,7 +1217,8 @@ describe("deposit collection", () => {
     expect(detail.securityDeposit).toMatchObject({
       total: 200,
       held: 0,
-      collection: { status: "WAIVED", reason: "Entregado a un familiar", canRecord: false },
+      // Still recordable after the report — a late deposit is recorded on the detail.
+      collection: { status: "WAIVED", reason: "Entregado a un familiar", canRecord: true },
       settlement: {
         damagesTotal: 120,
         claimsTotal: 120,
@@ -1227,6 +1226,33 @@ describe("deposit collection", () => {
         refundAmount: 0,
         balanceDue: 120,
       },
+    });
+  });
+
+  it("a PENDING deposit counts 0 too, and a late RECEIVED recomputes the same report live", () => {
+    // Q50 retained + 1 chair at Q120 on a Q200 deposit that was never received.
+    const report = {
+      deliveredAt: AT,
+      depositSettledAt: AT,
+      depositRetainedAmount: dec("50"),
+      depositRetainedReason: "Manchas",
+      serviceDetails: [guardedLine({ damagedQuantity: 1 })],
+    };
+    const pending = projectOrderDetail(makeRichOrder(report), makeProjectionContext());
+    expect(pending.securityDeposit).toMatchObject({
+      total: 200,
+      held: 0,
+      collection: { status: "PENDING", canRecord: true },
+      settlement: { claimsTotal: 170, appliedFromDeposit: 0, refundAmount: 0, balanceDue: 170 },
+    });
+    const received = projectOrderDetail(
+      makeRichOrder({ ...report, depositReceivedAt: AT }),
+      makeProjectionContext(),
+    );
+    expect(received.securityDeposit).toMatchObject({
+      held: 200,
+      collection: { status: "RECEIVED", canRecord: true },
+      settlement: { claimsTotal: 170, appliedFromDeposit: 170, refundAmount: 30, balanceDue: 0 },
     });
   });
 

@@ -8,11 +8,7 @@ import { parseDateTime, parseLineQuantity, parseMoney } from '../orders/SchemaCr
 import type { CreateOrderFormType } from '../orders/SchemaCreateOrder';
 import { squareOrderBalance } from '../orders/orderBalance';
 import type { OrderBalance, OrderBalanceInput } from '../orders/orderBalance';
-import type {
-  OrderDepositSettlement,
-  OrderDetail,
-  OrderSecurityDeposit,
-} from '../orders/order.types';
+import type { OrderDepositSettlement, OrderDetail } from '../orders/order.types';
 import type { Product } from '../products/product.types';
 import type { PreferenceSetting } from '../preferences/preference.types';
 
@@ -121,6 +117,12 @@ export interface DocumentTotals {
    * page uses, so a document and the screen can never show two different outcomes.
    */
   balance: OrderBalance;
+  /**
+   * AFTER the damage report, the order's deposit was NOT received (pending, or recorded as not
+   * received): nothing was credited, so the damages are billed whole — and the box says so under
+   * its result (owner, 2026-10-28). Absent before the report and when there is no deposit.
+   */
+  depositNotReceived?: true;
 }
 
 /**
@@ -146,12 +148,15 @@ export type DocumentDepositClaim =
  *
  * The security deposit itself — printed simply as **"Depósito"**, the owner's word with clients
  * (never "garantía" or "liquidación") — is never a cost: it lives in {@link DocumentTotals.balance}
- * as money to hand over, money on hand, or a credit. A WAIVED deposit does not appear at all.
+ * as money to hand over, money on hand, or a credit. A deposit NOT received is never credited.
  */
 export interface DocumentDamages {
-  /** The order carried a deposit (held, not waived) — the section is then "Depósito y daños"
-   *  rather than "Daños", since a retention comes out of it. */
+  /** The deposit figures in this section — it was received (held), or a retention was charged
+   *  "of the deposit" — so the section is "Depósito y daños" rather than "Daños". */
   withDeposit: boolean;
+  /** The deposit was NOT received: a retention is still charged (up to the nominal deposit), and
+   *  its row carries a caption saying it is billed apart rather than taken from money we hold. */
+  depositNotReceived: boolean;
   claims: DocumentDepositClaim[];
   total: number;
 }
@@ -272,24 +277,41 @@ const daysExplain = (unitPrice: number, quantity: number, days: number, total: n
  * comprobante and the damage report alike, so the two documents square the same order the same way.
  *
  * - `advance` is the ANTICIPO (`depositAmount` — the field's name predates the security deposit);
- * - `deposit` exists only when the order has a deposit COLLECTION to speak of (absent when the lines
- *   carry none), with its status: a WAIVED one then counts as no deposit at all, inside the rule;
+ * - `deposit` exists only when the order carries one (`total > 0`), with its collection status — a
+ *   legacy order without a collection reads PENDING. Only a RECEIVED one is ever on hand or credited
+ *   (owner, 2026-10-28); the rule decides what a pending or not-received one means;
  * - `claimsTotal` is the damage report's — the caller's, because the damage report may be built from
  *   the report form's values rather than the saved settlement.
+ *
+ * The order page's cuadre (`OrderBalanceSummary`) builds its input HERE too, so the screen and every
+ * document feed the rule the same figures.
  */
 export function orderBalanceInput(
   order: OrderDetail,
   claimsTotal: number | undefined,
 ): OrderBalanceInput {
   const deposit = order.securityDeposit;
-  const status = deposit?.collection?.status;
   return {
     total: order.totalAmount,
     advance: order.depositAmount ?? 0,
     paid: order.paidAt !== undefined,
-    ...(deposit !== undefined && status !== undefined && { deposit: { amount: deposit.total, status } }),
+    ...(deposit !== undefined &&
+      deposit.total > 0 && {
+        deposit: { amount: deposit.total, status: deposit.collection?.status ?? 'PENDING' },
+      }),
     ...(claimsTotal !== undefined && { claimsTotal }),
   };
+}
+
+/**
+ * The order carries a deposit that was NOT received — pending, or recorded as not received (a
+ * legacy order without a collection reads pending). Only a RECEIVED deposit is money we have
+ * (owner, 2026-10-28), so after the damage report such a deposit is never credited and the damages
+ * are billed whole.
+ */
+export function isDepositNotReceived(order: Pick<OrderDetail, 'securityDeposit'>): boolean {
+  const deposit = order.securityDeposit;
+  return deposit !== undefined && deposit.total > 0 && deposit.collection?.status !== 'RECEIVED';
 }
 
 /**
@@ -319,14 +341,17 @@ function claimsOf(settlement: OrderDepositSettlement): DocumentDepositClaim[] {
 }
 
 /** The itemised damages section, or nothing when there is no report or it charged nothing. `held`
- *  is the deposit the report counts — 0 when WAIVED, which then reads as no deposit at all. */
-function damagesOf(deposit: OrderSecurityDeposit | undefined): DocumentDamages | undefined {
+ *  is the deposit in hand — 0 unless RECEIVED; a retention still names the deposit it is "part of",
+ *  received or not. */
+function damagesOf(order: OrderDetail): DocumentDamages | undefined {
+  const deposit = order.securityDeposit;
   const settlement = deposit?.settlement;
   if (deposit === undefined || settlement === undefined) return undefined;
   const claims = claimsOf(settlement);
   if (claims.length === 0) return undefined;
   return {
-    withDeposit: deposit.held > 0,
+    withDeposit: deposit.held > 0 || settlement.retainedAmount > 0,
+    depositNotReceived: isDepositNotReceived(order),
     claims,
     total: settlement.claimsTotal,
   };
@@ -406,7 +431,7 @@ export function fromOrderDetail(
   const settlement = order.securityDeposit?.settlement;
   const input = orderBalanceInput(order, settlement?.claimsTotal);
   const paid = paidRemainder(input);
-  const damages = damagesOf(order.securityDeposit);
+  const damages = damagesOf(order);
 
   return {
     kind: 'receipt',
@@ -434,6 +459,8 @@ export function fromOrderDetail(
       ...advanceRows(advance, order.totalAmount),
       ...(paid > 0 && { paid }),
       balance: squareOrderBalance(input),
+      ...(settlement !== undefined &&
+        isDepositNotReceived(order) && { depositNotReceived: true as const }),
     },
     ...(damages !== undefined && { damages }),
     currencySymbol: order.currency.symbol,
@@ -618,12 +645,16 @@ export interface DamageReportModel {
   client: DocumentModel['client'];
   event: { type: string; deliveryAt: Date; pickupAt?: Date };
   deposit: {
-    /** The deposit the report counts (`OrderSecurityDeposit.held`): 0 when the lines carried none,
-     *  and 0 when it was WAIVED — the document then shows no deposit at all. */
+    /** The deposit RECEIVED (`OrderSecurityDeposit.held` of a RECEIVED collection): 0 when the
+     *  lines carried none, and 0 when it was not received — the "Depósito recibido" section is then
+     *  absent (owner, 2026-10-28). */
     total: number;
     /** Each rental line that carried a deposit — the breakdown of `total`; empty when it is 0. */
     lines: DamageReportDepositLine[];
   };
+  /** The order carries a deposit that was NOT received: nothing is credited, the damages are
+   *  billed whole — said under the result, and as a caption on the retention. */
+  depositNotReceived: boolean;
   /** Present only when money was retained from the deposit for partial damage. */
   retention?: { amount: number; reason?: string };
   replacements: DamageReportReplacement[];
@@ -658,7 +689,11 @@ export function fromDamageReport(
 ): DamageReportModel {
   const deliveryAt = new Date(order.serviceStart);
   const pickupAt = order.pickupAt === undefined ? undefined : new Date(order.serviceEnd);
-  const held = order.securityDeposit?.held ?? 0;
+  // Only a deposit actually RECEIVED is printed as received (owner, 2026-10-28) — the API's `held`
+  // agrees (0 otherwise); the status is read as well so the section can never claim a receipt the
+  // collection does not record.
+  const deposit = order.securityDeposit;
+  const held = deposit?.collection?.status === 'RECEIVED' ? deposit.held : 0;
   const depositLines = order.lines.flatMap<DamageReportDepositLine>((line) => {
     const unitAmount = line.securityDeposit ?? 0;
     return held > 0 && line.isRental && unitAmount > 0
@@ -687,6 +722,7 @@ export function fromDamageReport(
       ...(pickupAt !== undefined && { pickupAt }),
     },
     deposit: { total: held, lines: depositLines },
+    depositNotReceived: isDepositNotReceived(order),
     ...(settlement.retainedAmount > 0 && {
       retention: {
         amount: settlement.retainedAmount,

@@ -3,10 +3,10 @@ import type { DepositCollectionRequestModel } from "../orders.models.js";
 import { pendingDepositToCollect } from "../orders.service.js";
 
 /**
- * The deposit's COLLECTION write (EPIC-2-ORDERS §12) — ONE implementation shared by the three doors
- * that record it: `PUT /orders/:id/deposit-collection`, the delivery advance (`depositCollection`),
- * and a damage report recorded on a still-pending collection (which confirms the deposit was in
- * hand). Each door decides WHETHER it may write; this decides WHAT changes and leaves the trail row.
+ * The deposit's COLLECTION write (EPIC-2-ORDERS §12) — ONE implementation shared by the two doors
+ * that record it: `PUT /orders/:id/deposit-collection` and the delivery advance
+ * (`depositCollection`). A damage report never writes it (owner 2026-10-28). Each door decides
+ * WHETHER it may write; this decides WHAT changes and leaves the trail row.
  */
 
 /** The collection columns as they stand under the row lock. */

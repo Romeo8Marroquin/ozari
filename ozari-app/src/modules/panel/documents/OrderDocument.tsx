@@ -463,6 +463,8 @@ const styles = StyleSheet.create({
   // A deposit already in our hands before the review: information UNDER the result, outside the
   // sum — it is not owed and not yet credited; it comes back at pickup.
   onHand: { marginTop: 8 },
+  // The "Depósito no recibido" line under the result — the chip's own gap, then one caption line.
+  notReceivedNote: { marginTop: 6 },
   onHandRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   // ── The damages section ("DEPÓSITO Y DAÑOS") ────────────────────────────────────────────────
   // The gap between the summary and the section is the SUMMARY's bottom margin, never the
@@ -606,6 +608,8 @@ export interface BalanceCopy {
   none: string;
   depositOnHand: string;
   depositOnHandNote: string;
+  /** Under the result, after a report whose deposit was NOT received: why the damages are whole. */
+  depositNotReceived: string;
 }
 
 /** The comprobante's and the cotización's vocabulary. */
@@ -646,6 +650,8 @@ export interface DocumentCopy extends DocumentChromeCopy {
   settlementTitle: string;
   damagesTitle: string;
   settlementRetention: string;
+  /** The retention's caption when the deposit was NOT received: billed apart, not kept from it. */
+  settlementRetentionNotReceived: string;
   /** FUNCTIONS where a value is interpolated, for the same reason as `page`: the template never
    *  assembles a sentence out of fragments. */
   settlementReplacement: (product: string) => string;
@@ -662,6 +668,8 @@ export interface DamageReportCopy extends DocumentChromeCopy {
   retentionTitle: string;
   /** Printed in place of a retention's description when the settlement carries none. */
   retentionNoReason: string;
+  /** The retention's caption when the deposit was NOT received (the title stays — owner's word). */
+  retentionNotReceived: string;
   replacementsTitle: string;
   columnUnits: string;
   columnReplacementEach: string;
@@ -1167,7 +1175,10 @@ const PLUS = '+';
  * - `Depósito recibido -` — after the review, the deposit credited back against all of it;
  * - the result: `Monto a pagar` (gradient), `Monto a devolver al cliente` (inverted) or a plain
  *   `Sin saldo pendiente` row — no highlight on a zero;
- * - and, under it and OUTSIDE the sum, a deposit already on hand before the review.
+ * - and, under it and OUTSIDE the sum, a deposit already on hand before the review;
+ * - or, after a review whose deposit was NOT received (`depositNotReceived`) and charged something,
+ *   one line saying so — there is no `Depósito recibido -` row, and the reader should not have to
+ *   guess why (owner, 2026-10-28).
  */
 const SquaredBalance: React.FC<{
   balance: OrderBalance;
@@ -1175,7 +1186,8 @@ const SquaredBalance: React.FC<{
   money: (amount: number) => string;
   serviceRow: boolean;
   claimsRow: boolean;
-}> = ({ balance, copy, money, serviceRow, claimsRow }) => (
+  depositNotReceived: boolean;
+}> = ({ balance, copy, money, serviceRow, claimsRow, depositNotReceived }) => (
   <>
     {serviceRow && balance.serviceDue > 0 && (
       <TotalLine label={copy.serviceDue} value={`${PLUS}${money(balance.serviceDue)}`} />
@@ -1220,6 +1232,9 @@ const SquaredBalance: React.FC<{
         </View>
         <Text style={styles.totalNote}>{copy.depositOnHandNote}</Text>
       </View>
+    )}
+    {depositNotReceived && balance.claims > 0 && (
+      <Text style={[styles.totalNote, styles.notReceivedNote]}>{copy.depositNotReceived}</Text>
     )}
   </>
 );
@@ -1275,8 +1290,12 @@ const DamagesSection: React.FC<{
       ? {
           row: {
             label: copy.settlementRetention,
-            // The DESCRIPTION of the damage is what the retention is for (owner, 2026-10-27).
-            notes: claim.reason === undefined || claim.reason === '' ? [] : [claim.reason],
+            // The DESCRIPTION of the damage is what the retention is for (owner, 2026-10-27); a
+            // deposit not received adds why it is billed rather than kept (2026-10-28).
+            notes: [
+              ...(claim.reason === undefined || claim.reason === '' ? [] : [claim.reason]),
+              ...(damages.depositNotReceived ? [copy.settlementRetentionNotReceived] : []),
+            ],
           },
           value: money(claim.amount),
         }
@@ -1500,6 +1519,7 @@ const OrderDocument: React.FC<OrderDocumentProps> = ({ model, copy, money, date,
             money={money}
             serviceRow={false}
             claimsRow
+            depositNotReceived={model.totals.depositNotReceived === true}
           />
         </View>
       </View>
@@ -1590,6 +1610,9 @@ export const DamageReportDocument: React.FC<DamageReportDocumentProps> = ({
                 // The FULL description of the damage — the reason money was kept is the one thing
                 // a client disputing it needs to read in writing.
                 cells: [model.retention.reason ?? copy.retentionNoReason, money(model.retention.amount)],
+                // The title stays "Retención del depósito" (the owner's word); with the deposit
+                // NOT received, a caption says it is charged apart rather than kept from it.
+                notes: [model.depositNotReceived ? copy.retentionNotReceived : undefined],
               },
             ],
           },
@@ -1700,6 +1723,7 @@ export const DamageReportDocument: React.FC<DamageReportDocumentProps> = ({
             money={money}
             serviceRow
             claimsRow={false}
+            depositNotReceived={model.depositNotReceived}
           />
         </View>
       </View>

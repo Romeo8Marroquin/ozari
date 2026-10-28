@@ -149,6 +149,41 @@ describe('OrderBalanceSummary', () => {
     expect(screen.queryByText(`${KEY}.depositCredit`)).not.toBeInTheDocument();
     expect(screen.queryByText(`${KEY}.depositDue`)).not.toBeInTheDocument();
     expect(amountOf('collect')).toMatch(/Q\s*120\.00/);
+    expect(screen.getByText(`${KEY}.depositNotReceived`)).toBeInTheDocument();
+  });
+
+  it('PENDING after the report (owner, 2026-10-28): no credit, no deposit asked for, claims whole', () => {
+    render(
+      <OrderBalanceSummary
+        order={order({
+          paidAt: '2026-08-01T15:00:00.000Z',
+          securityDeposit: deposit({ held: 0, canSettle: true, settlement: report(450) }),
+        })}
+      />,
+    );
+    expect(amountOf('claims')).toMatch(/^\+Q\s*450\.00$/);
+    expect(screen.queryByText(`${KEY}.depositCredit`)).not.toBeInTheDocument();
+    expect(screen.queryByText(`${KEY}.depositDue`)).not.toBeInTheDocument();
+    expect(amountOf('collect')).toMatch(/Q\s*450\.00/);
+    expect(screen.getByText(`${KEY}.depositNotReceived`)).toBeInTheDocument();
+  });
+
+  it('a clean report with the deposit not received: nothing moves, and no note', () => {
+    render(
+      <OrderBalanceSummary
+        order={order({
+          paidAt: '2026-08-01T15:00:00.000Z',
+          securityDeposit: deposit({ held: 0, canSettle: true, settlement: report(0) }),
+        })}
+      />,
+    );
+    expect(amountOf('none')).toMatch(/Q\s*0\.00/);
+    expect(screen.queryByText(`${KEY}.depositNotReceived`)).not.toBeInTheDocument();
+  });
+
+  it('before the report a pending deposit carries no "no recibido" note', () => {
+    render(<OrderBalanceSummary order={order({ securityDeposit: deposit() })} />);
+    expect(screen.queryByText(`${KEY}.depositNotReceived`)).not.toBeInTheDocument();
   });
 
   it('a deposit block without a collection (replacement values only) adds nothing', () => {

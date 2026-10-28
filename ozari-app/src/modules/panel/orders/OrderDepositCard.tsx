@@ -44,19 +44,24 @@ const MoneyLine: React.FC<{
  * deposit or a damage). The states, all decided by the API's flags:
  *
  * - not recorded, not recordable yet → the total and "después de la entrega…";
- * - not recorded, recordable (Admin) → the HAPPY PATH first: "Devolver depósito" (or "Sin daños"
- *   when the order carries replacement values but no deposit), a one-tap confirm owned by the page;
- *   then the DAMAGE PATH, "Reportar daños" → the dedicated page;
+ * - not recorded, recordable (Admin) → the HAPPY PATH first: "Devolver depósito" when a deposit is
+ *   IN HAND, else "Registrar sin daños" (no deposit on the order, or one not received — nothing to
+ *   give back), a one-tap confirm owned by the page; then the DAMAGE PATH, "Reportar daños" → the
+ *   dedicated page;
  * - recorded → the API's OWN breakdown, a chip that says how it ended ("Devuelto" when nothing was
- *   claimed, "Con daños" otherwise — branched on the API's `claimsTotal`, never recomputed), the
- *   damage report download when something was claimed, "Reportar daños"/"Editar reporte de daños"
- *   (while recordable) and "Deshacer".
+ *   claimed from a deposit in hand, "Sin daños" with none in hand, "Con daños" otherwise — branched
+ *   on the API's `claimsTotal`/`held`, never recomputed), the damage report download when something
+ *   was claimed, "Reportar daños"/"Editar reporte de daños" (while recordable) and "Deshacer".
  *
  * **"Cobro del depósito"** (when the API sent `collection` — a deposit > 0): was the deposit actually
- * handed over? PENDING offers "Marcar como recibido" / "Entregar sin depósito"; RECEIVED shows when;
- * WAIVED shows the reason as an INTERNAL note; "Corregir" clears it while `canRecord`, and a recorded
- * damage report locks it (said in a hint). A WAIVED deposit makes `held` 0, and `held` — never a
- * recomputation — is what turns the quick action into "Sin daños".
+ * RECEIVED? Only a received deposit is money we have (owner, 2026-10-28): the API's `held` is 0
+ * otherwise, and `held` — never a recomputation — decides between "Devolver depósito" and "Registrar
+ * sin daños". In plain words: "Pendiente", "Recibido el …", or "No recibido: <reason>" (an INTERNAL
+ * note — e.g. a relative; it may still arrive). While `canRecord` (any time but a cancelled order,
+ * AFTER a damage report too) a deposit not received offers "Registrar depósito recibido", PENDING
+ * also "Marcar como no recibido", and a recorded answer "Corregir" (back to pending). After a report
+ * with the deposit not received the row says what that means — the damages billed whole, nothing to
+ * give back — since recording it recomputes the outcome.
  *
  * **Every figure is the API's** (`held`, the settlement's numbers). The refund and the balance are
  * rendered, never re-derived here — the "Reportar daños" page may preview them, but this card is
@@ -84,17 +89,23 @@ const OrderDepositCard: React.FC<{
   const { t } = useTranslation();
   const money = (value: number): string => formatMoney(order.currency.symbol, value);
   const { settlement, canSettle, collection } = deposit;
-  // The deposit the report counts — 0 when there is none, or when it was WAIVED (the API's figure).
-  const hasDeposit = deposit.held > 0;
+  // The deposit IN HAND — the API's `held`: 0 unless it was actually RECEIVED (owner, 2026-10-28).
+  // Only this can be refunded or applied against damages.
+  const inHand = deposit.held > 0;
+  // The order carries a deposit nobody has recorded as received (PENDING or WAIVED; a legacy order
+  // without a collection reads PENDING): the damages are then billed whole, nothing comes back.
+  const notReceived = deposit.total > 0 && collection?.status !== 'RECEIVED';
   const claimed = settlement !== undefined && settlement.claimsTotal > 0;
   const body = useMorphOnChange<HTMLDivElement>(
-    `${settlement?.settledAt ?? ''}|${settlement?.claimsTotal ?? ''}|${canSettle}|${collection?.status ?? ''}`,
+    `${settlement?.settledAt ?? ''}|${settlement?.claimsTotal ?? ''}|${canSettle}|${collection?.status ?? ''}|${deposit.held}`,
   );
 
   const chip = settlement
     ? claimed
       ? { label: t(`${KEY}.chipDamaged`), tone: 'bg-red-50 text-red-600' }
-      : { label: t(`${KEY}.chipRefunded`), tone: 'bg-emerald-50 text-emerald-600' }
+      : inHand
+        ? { label: t(`${KEY}.chipRefunded`), tone: 'bg-emerald-50 text-emerald-600' }
+        : { label: t(`${KEY}.chipNoDamage`), tone: 'bg-emerald-50 text-emerald-600' }
     : canSettle
       ? { label: t(`${KEY}.chipPending`), tone: 'bg-amber-50 text-amber-600' }
       : undefined;
@@ -113,7 +124,7 @@ const OrderDepositCard: React.FC<{
                     startIcon={<HiOutlineCheckCircle className="size-4" />}
                     onClick={onRefund}
                   >
-                    {t(`${KEY}.${hasDeposit ? 'refundAction' : 'noDamageAction'}`)}
+                    {t(`${KEY}.${inHand ? 'refundAction' : 'noDamageAction'}`)}
                   </Button>
                 ),
               },
@@ -206,20 +217,23 @@ const OrderDepositCard: React.FC<{
             <p className="font-medium text-charcoal">{t(`${KEY}.total`)}</p>
             <p className="text-xs text-charcoal/50">{t(`${KEY}.totalNote`)}</p>
           </div>
+          {/* The AGREED deposit — what the order asks for. Whether it arrived is the next row. */}
           <span className="shrink-0 font-semibold tabular-nums text-charcoal">
-            {money(deposit.held)}
+            {money(deposit.total)}
           </span>
         </div>
 
-        {/* Was it actually handed over? The label/control row rule: the description carries the
-            `basis-56` floor and the row wraps, so the actions fold under it on a narrow card. */}
+        {/* Was it actually received? The label/control row rule: the description carries the
+            `basis-56` floor and the row wraps, so the actions fold under it on a narrow card.
+            Recordable at ANY time the API allows (`canRecord` — after a damage report too): every
+            amount recomputes from it. */}
         {collection && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-black/[0.06] pt-3">
             <div className="min-w-0 grow basis-56">
               <p className="font-medium text-charcoal">{t(`${KEY}.collection.title`)}</p>
               <p
                 className={`break-words text-xs ${
-                  collection.status === 'PENDING' ? 'text-amber-700' : 'text-charcoal/60'
+                  collection.status === 'RECEIVED' ? 'text-charcoal/60' : 'text-amber-700'
                 }`}
               >
                 {collection.status === 'PENDING'
@@ -233,33 +247,35 @@ const OrderDepositCard: React.FC<{
               {collection.status === 'WAIVED' && (
                 <p className="text-xs text-charcoal/45">{t(`${KEY}.collection.internalNote`)}</p>
               )}
-              {!collection.canRecord && settlement && (
-                <p className="text-xs text-charcoal/45">{t(`${KEY}.collection.lockedByReport`)}</p>
+              {/* After the report, the consequence of a deposit not received — and the way out. */}
+              {notReceived && settlement && (
+                <p className="text-xs text-charcoal/55">{t(`${KEY}.collection.notReceivedAfterReport`)}</p>
               )}
             </div>
             {isAdmin && collection.canRecord && (
               <div className="flex flex-wrap items-center gap-2">
+                {/* Not received yet (pending, or recorded as not received — it may still arrive). */}
+                {collection.status !== 'RECEIVED' && (
+                  <Button
+                    variant="soft"
+                    size="sm"
+                    color={SECONDARY_COLOR}
+                    startIcon={<HiOutlineBanknotes className="size-4" />}
+                    onClick={() => onCollection('receive')}
+                  >
+                    {t(`${KEY}.collection.markReceived`)}
+                  </Button>
+                )}
                 {collection.status === 'PENDING' ? (
-                  <>
-                    <Button
-                      variant="soft"
-                      size="sm"
-                      color={SECONDARY_COLOR}
-                      startIcon={<HiOutlineBanknotes className="size-4" />}
-                      onClick={() => onCollection('receive')}
-                    >
-                      {t(`${KEY}.collection.markReceived`)}
-                    </Button>
-                    <Button
-                      variant="soft"
-                      size="sm"
-                      color={SECONDARY_COLOR}
-                      startIcon={<HiOutlineNoSymbol className="size-4" />}
-                      onClick={() => onCollection('waive')}
-                    >
-                      {t(`${KEY}.collection.waive`)}
-                    </Button>
-                  </>
+                  <Button
+                    variant="soft"
+                    size="sm"
+                    color={SECONDARY_COLOR}
+                    startIcon={<HiOutlineNoSymbol className="size-4" />}
+                    onClick={() => onCollection('waive')}
+                  >
+                    {t(`${KEY}.collection.waive`)}
+                  </Button>
                 ) : (
                   <Button
                     variant="soft"
@@ -280,7 +296,9 @@ const OrderDepositCard: React.FC<{
           <div className="flex flex-col gap-2 border-t border-black/[0.06] pt-3">
             {!claimed && (
               <p className="text-charcoal/60">
-                {t(`${KEY}.${hasDeposit ? 'noClaims' : 'noClaimsNoDeposit'}`)}
+                {t(
+                  `${KEY}.${inHand ? 'noClaims' : notReceived ? 'noClaimsNotReceived' : 'noClaimsNoDeposit'}`,
+                )}
               </p>
             )}
             {settlement.retainedAmount > 0 && (
@@ -306,17 +324,28 @@ const OrderDepositCard: React.FC<{
                 sub={damage.note ? t(`${KEY}.note`, { note: damage.note }) : undefined}
               />
             ))}
-            <MoneyLine
-              label={t(`${KEY}.refund`)}
-              amount={money(settlement.refundAmount)}
-              className="border-t border-black/[0.06] pt-2 font-semibold text-charcoal"
-            />
+            {/* Only a deposit in hand can come back — with none, a "Q0.00 back" line is noise. */}
+            {inHand && (
+              <MoneyLine
+                label={t(`${KEY}.refund`)}
+                amount={money(settlement.refundAmount)}
+                className="border-t border-black/[0.06] pt-2 font-semibold text-charcoal"
+              />
+            )}
             {settlement.balanceDue > 0 && (
               <MoneyLine
                 label={t(`${KEY}.balanceDue`)}
                 amount={money(settlement.balanceDue)}
-                sub={t(`${KEY}.balanceDueNote`)}
-                className="font-semibold text-red-600"
+                sub={
+                  inHand
+                    ? t(`${KEY}.balanceDueNote`)
+                    : notReceived
+                      ? t(`${KEY}.balanceDueNotReceived`)
+                      : undefined
+                }
+                className={`font-semibold text-red-600 ${
+                  inHand ? '' : 'border-t border-black/[0.06] pt-2'
+                }`}
               />
             )}
             <p className="text-xs text-charcoal/50">
@@ -325,7 +354,9 @@ const OrderDepositCard: React.FC<{
           </div>
         ) : (
           <p className="text-charcoal/60">
-            {t(`${KEY}.${canSettle ? (hasDeposit ? 'due' : 'dueNoDeposit') : 'notYet'}`)}
+            {t(
+              `${KEY}.${canSettle ? (inHand ? 'due' : notReceived ? 'dueNotReceived' : 'dueNoDeposit') : 'notYet'}`,
+            )}
           </p>
         )}
 
