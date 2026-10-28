@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  damageReportFileName,
   documentFileName,
   documentReference,
+  formatReference,
+  fromDamageReport,
   fromOrderDetail,
   fromOrderForm,
   printedConditions,
@@ -10,7 +13,11 @@ import {
 } from './documentModel';
 import { createOrderDefaultValues } from '../orders/SchemaCreateOrder';
 import type { CreateOrderFormType } from '../orders/SchemaCreateOrder';
-import type { OrderDetail, OrderSecurityDeposit } from '../orders/order.types';
+import type {
+  OrderDepositSettlement,
+  OrderDetail,
+  OrderSecurityDeposit,
+} from '../orders/order.types';
 import type { Product } from '../products/product.types';
 import type { PreferenceSetting } from '../preferences/preference.types';
 
@@ -281,8 +288,8 @@ describe('fromOrderDetail — the security deposit', () => {
   });
 
   it('stays silent about a zero deposit with nothing settled', () => {
-    // A line can carry a replacement value without a deposit; "Depósito en garantía Q0.00" would
-    // announce a guarantee nobody asked the client for.
+    // A line can carry a replacement value without a deposit; "Depósito (reembolsable) Q0.00" would
+    // announce a deposit nobody asked the client for.
     expect(withDeposit({ total: 0, canSettle: true }).securityDeposit).toBeUndefined();
   });
 
@@ -608,7 +615,159 @@ describe('fromOrderForm', () => {
   });
 });
 
+describe('fromDamageReport', () => {
+  const settlement = (
+    over: Partial<OrderDepositSettlement> = {},
+  ): OrderDepositSettlement => ({
+    settledAt: '2026-08-02T10:00:00Z',
+    retainedAmount: 150,
+    retainedReason: 'Manteles con manchas de vino que no salieron en el lavado.',
+    damages: [
+      {
+        lineId: 1,
+        productName: 'Mesa redonda',
+        quantity: 2,
+        unitAmount: 300,
+        amount: 600,
+        note: 'Patas rotas',
+      },
+      { lineId: 2, productName: 'Silla', quantity: 1, unitAmount: 45, amount: 45 },
+    ],
+    damagesTotal: 645,
+    // Deliberately NOT what the parts add up to — the report copies, it never re-derives.
+    claimsTotal: 795.01,
+    appliedFromDeposit: 500,
+    refundAmount: 0,
+    balanceDue: 295.01,
+    ...over,
+  });
+  const depositOrder = (over: Partial<OrderDetail> = {}) =>
+    order({
+      securityDeposit: { total: 500, canSettle: true },
+      lines: [
+        line({ securityDeposit: 50, quantity: 5 }),
+        line({ id: 2, productName: 'Silla', securityDeposit: 12.5, quantity: 20 }),
+        // A sale, and a rental with no deposit: neither handed any money over.
+        line({ id: 3, productName: 'Piñata', isRental: false, securityDeposit: 99 }),
+        line({ id: 4, productName: 'Toldo' }),
+      ],
+      ...over,
+    });
+
+  it('copies every settlement figure verbatim, never re-deriving one', () => {
+    const model = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, false);
+    expect(model.totals).toEqual({
+      retained: 150,
+      damages: 645,
+      claims: 795.01,
+      applied: 500,
+      refund: 0,
+      balanceDue: 295.01,
+    });
+    expect(model.retention).toEqual({
+      amount: 150,
+      reason: 'Manteles con manchas de vino que no salieron en el lavado.',
+    });
+    expect(model.replacements).toEqual([
+      { description: 'Mesa redonda', quantity: 2, unitAmount: 300, amount: 600, note: 'Patas rotas' },
+      { description: 'Silla', quantity: 1, unitAmount: 45, amount: 45 },
+    ]);
+  });
+
+  it('breaks the deposit down by the rental lines that actually carried one', () => {
+    const model = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, false);
+    // The TOTAL is the API's; the per-line rows are its breakdown (the server's own Σ rule).
+    expect(model.deposit).toEqual({
+      total: 500,
+      lines: [
+        { description: 'Mesa redonda', quantity: 5, unitAmount: 50, total: 250 },
+        { description: 'Silla', quantity: 20, unitAmount: 12.5, total: 250 },
+      ],
+    });
+  });
+
+  it('reports an order with no deposit at all as a zero deposit with no breakdown', () => {
+    const model = fromDamageReport(order(), settlement(), letterhead, ISSUED_AT, false);
+    expect(model.deposit).toEqual({ total: 0, lines: [] });
+  });
+
+  it('omits the retention when nothing was retained, and survives one without a reason', () => {
+    const none = fromDamageReport(
+      depositOrder(),
+      settlement({ retainedAmount: 0, retainedReason: undefined }),
+      letterhead,
+      ISSUED_AT,
+      false,
+    );
+    expect(none.retention).toBeUndefined();
+    const bare = fromDamageReport(
+      depositOrder(),
+      settlement({ retainedReason: undefined }),
+      letterhead,
+      ISSUED_AT,
+      false,
+    );
+    expect(bare.retention).toEqual({ amount: 150 });
+  });
+
+  it('a FINAL report carries the settlement date; a DRAFT never does', () => {
+    const final = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, false);
+    expect(final.draft).toBe(false);
+    expect(final.settledAt).toEqual(new Date('2026-08-02T10:00:00Z'));
+    // A draft has recorded nothing — whatever date the form state carries is not a settlement's.
+    const draft = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, true);
+    expect(draft.draft).toBe(true);
+    expect(draft.settledAt).toBeUndefined();
+  });
+
+  it('drops an unparseable settlement date rather than printing "Invalid Date"', () => {
+    const model = fromDamageReport(
+      depositOrder(),
+      settlement({ settledAt: '' }),
+      letterhead,
+      ISSUED_AT,
+      false,
+    );
+    expect(model.settledAt).toBeUndefined();
+  });
+
+  it('carries the order identity, the client and event snapshots and the currency', () => {
+    const model = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, false);
+    expect(model.reference).toBe(42);
+    expect(model.issuedAt).toBe(ISSUED_AT);
+    expect(model.letterhead).toBe(letterhead);
+    expect(model.client).toEqual({ name: 'Test cliente', contact: '1234-1234', address: 'Test dirección' });
+    expect(model.event).toEqual({
+      type: 'Evento familiar',
+      deliveryAt: new Date('2026-07-29T17:50:00Z'),
+      pickupAt: new Date('2026-07-31T22:50:00Z'),
+    });
+    expect(model.currencySymbol).toBe('Q');
+    // A purchase-only order has no collection to name.
+    const purchase = fromDamageReport(
+      depositOrder({ pickupAt: undefined }),
+      settlement(),
+      letterhead,
+      ISSUED_AT,
+      false,
+    );
+    expect(purchase.event.pickupAt).toBeUndefined();
+  });
+
+  it('is named after the order, and a draft says so in its file name', () => {
+    const final = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, false);
+    expect(damageReportFileName(final)).toBe('reporte-danos-ped-00042.pdf');
+    const draft = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT, true);
+    expect(damageReportFileName(draft)).toBe('reporte-danos-ped-00042-borrador.pdf');
+  });
+});
+
 describe('documentReference / documentFileName', () => {
+  it('formats any order id the same way', () => {
+    expect(formatReference(7)).toBe('PED-00007');
+    expect(formatReference(123456)).toBe('PED-123456');
+  });
+
   it('zero-pads the order id so a stack of documents sorts and scans', () => {
     const model = fromOrderDetail(order(), letterhead, ISSUED_AT);
     expect(documentReference(model)).toBe('PED-00042');

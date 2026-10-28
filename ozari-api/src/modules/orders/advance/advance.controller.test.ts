@@ -102,6 +102,7 @@ const rawOrder = (overrides: Record<string, unknown> = {}) => ({
   ],
   serviceExtras: [],
   statusHistory: [],
+  depositHistory: [],
   evidences: [],
   ...overrides,
 });

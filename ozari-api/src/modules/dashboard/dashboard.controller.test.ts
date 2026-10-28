@@ -58,6 +58,7 @@ const rawOrder = (overrides: Record<string, unknown> = {}) => ({
   depositAmount: null,
   paidAt: null,
   cancelledAt: null,
+  depositSettledAt: null,
   currencyId: 1,
   serviceStatusId: 1,
   paymentStatusId: 1,
@@ -79,6 +80,8 @@ interface DashboardMocks {
   unpaidRows?: unknown[];
   topProducts?: unknown[];
   statusRows?: unknown[];
+  pendingDeposits?: unknown[];
+  settledDeposits?: unknown[];
   latestCurrency?: unknown;
   systemCurrency?: unknown;
 }
@@ -93,11 +96,13 @@ const mockPrisma = (mocks: DashboardMocks = {}) => {
   const findMany = vi
     .fn()
     // Order matters: it mirrors the Promise.all — pending deliveries, pending collections, trend,
-    // unpaid.
+    // unpaid, open deposits, settlements this month.
     .mockResolvedValueOnce(mocks.deliveries ?? [])
     .mockResolvedValueOnce(mocks.collections ?? [])
     .mockResolvedValueOnce(mocks.trendRows ?? [])
-    .mockResolvedValueOnce(mocks.unpaidRows ?? []);
+    .mockResolvedValueOnce(mocks.unpaidRows ?? [])
+    .mockResolvedValueOnce(mocks.pendingDeposits ?? [])
+    .mockResolvedValueOnce(mocks.settledDeposits ?? []);
   const client = {
     service: {
       findMany,
@@ -159,6 +164,86 @@ describe("getDashboard", () => {
     expect(dashboard.generatedAt).toBeInstanceOf(Date);
     expect(dashboard.today).toEqual({ deliveries: 4, collections: 2, overdue: 1, active: 9 });
     expect(dashboard.currency).toEqual(CURRENCY);
+    // Nothing open, nothing settled: the deposit corner is all zeros, never absent.
+    expect(dashboard.deposits).toEqual({
+      pending: { orders: 0, amount: 0, items: [] },
+      month: { settled: 0, refunded: 0, retained: 0, replacements: 0, balanceDue: 0 },
+    });
+  });
+
+  it("counts EVERY open deposit but lists only the oldest few, as projected list items", async () => {
+    const dec = (value: string) => new Prisma.Decimal(value);
+    const delivered = new Date("2026-07-31T10:00:00.000Z");
+    // Seven open deposits of Q31.35 each (3 × Q10.45; the replacement-only line adds no deposit and
+    // the sold line's snapshot never counts).
+    const pendingDeposits = Array.from({ length: 7 }, (_, index) =>
+      rawOrder({
+        id: 100 + index,
+        deliveredAt: delivered,
+        serviceDetails: [
+          { quantity: 3, isRental: true, securityDeposit: dec("10.45"), replacementPrice: null },
+          { quantity: 1, isRental: true, securityDeposit: null, replacementPrice: dec("80") },
+          { quantity: 9, isRental: false, securityDeposit: dec("99"), replacementPrice: null },
+        ],
+      }),
+    );
+    const client = mockPrisma({
+      pendingDeposits,
+      settledDeposits: [
+        {
+          depositRetainedAmount: dec("50"),
+          serviceDetails: [
+            {
+              isRental: true,
+              quantity: 5,
+              securityDeposit: dec("40"),
+              replacementPrice: dec("120"),
+              damagedQuantity: 2,
+            },
+          ],
+        },
+      ],
+    });
+    await getDashboard(req, res);
+
+    const { deposits } = sentDashboard();
+    expect(deposits.pending.orders).toBe(7);
+    // 7 × 31.35, rounded to cents (float addition would otherwise leak `219.45000000000002`).
+    expect(deposits.pending.amount).toBe(219.45);
+    expect(deposits.pending.items.map((item) => item.id)).toEqual([100, 101, 102, 103, 104]);
+    // Real list items — the same projection as the agenda, flag included.
+    expect(deposits.pending.items[0]).toMatchObject({
+      clientName: "María López",
+      depositSettlementPending: true,
+    });
+    // The month block runs the shared formula: 50 + 2 × 120 against Q200 ⇒ Q90 owed.
+    expect(deposits.month).toEqual({
+      settled: 1,
+      refunded: 0,
+      retained: 50,
+      replacements: 240,
+      balanceDue: 90,
+    });
+    // The open-deposit query IS the list's pending predicate, oldest delivery first.
+    expect(client.service.findMany).toHaveBeenNthCalledWith(
+      5,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          deliveredAt: { not: null },
+          depositSettledAt: null,
+          cancelledAt: null,
+        }),
+        orderBy: [{ deliveredAt: "asc" }, { id: "asc" }],
+      }),
+    );
+    expect(client.service.findMany).toHaveBeenNthCalledWith(
+      6,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          depositSettledAt: { gte: expect.any(Date), lt: expect.any(Date) },
+        }),
+      }),
+    );
   });
 
   it("merges the two indexed queries into ONE queue ordered by the next event", async () => {

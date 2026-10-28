@@ -1,4 +1,4 @@
-﻿import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
@@ -1139,9 +1139,9 @@ describe('OrderForm (edit mode)', () => {
     const handlers = updateOrder.mock.calls[0][1] as Handlers;
 
     // A bare 409 (no stock list, no logistics payload): nothing maps onto a line — the banner says
-    // exactly what the API said (deshaz la liquidación primero), never a stock message.
-    act(() => handlers.onError(axiosError(409, 'Deshaz la liquidación de la garantía primero.')));
-    expect(await screen.findByText('Deshaz la liquidación de la garantía primero.')).toBeInTheDocument();
+    // exactly what the API said (deshaz el registro del depósito primero), never a stock message.
+    act(() => handlers.onError(axiosError(409, 'Deshaz el registro del depósito primero.')));
+    expect(await screen.findByText('Deshaz el registro del depósito primero.')).toBeInTheDocument();
     expect(screen.queryByText(`${KEY}.errors.lineUnavailable`)).not.toBeInTheDocument();
   }, 20000);
 

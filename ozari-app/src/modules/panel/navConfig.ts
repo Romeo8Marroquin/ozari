@@ -27,7 +27,7 @@ export type PanelPath =
   | '/panel/pedidos/nuevo'
   | `/panel/pedidos/${number}`
   | `/panel/pedidos/${number}/editar`
-  | `/panel/pedidos/${number}/garantia`
+  | `/panel/pedidos/${number}/danos`
   | '/panel/preferencias'
   | '/panel/ajustes';
 

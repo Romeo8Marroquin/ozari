@@ -107,7 +107,7 @@ export interface OrderListItem {
   totalAmount: number;
   currency: OrderCurrency;
   /** Delivered, settleable (a rental line with a deposit or a replacement value), not cancelled and
-   *  not settled yet — the "garantía por liquidar" flag. Derived server-side (EPIC-2-ORDERS §12). */
+   *  not settled yet — the "Depósito pendiente" flag. Derived server-side (EPIC-2-ORDERS §12). */
   depositSettlementPending: boolean;
 }
 
@@ -243,6 +243,21 @@ export interface OrderLine {
   damageNote?: string;
 }
 
+/**
+ * One entry of the deposit's trail (`service_deposit_history`): the first record, a later
+ * correction, or its undo. The money is the outcome AS RECORDED THEN (absent on `UNDONE`).
+ */
+export interface OrderDepositHistoryEntry {
+  id: number;
+  kind: 'RECORDED' | 'CORRECTED' | 'UNDONE';
+  depositTotal?: number;
+  claimsTotal?: number;
+  refundAmount?: number;
+  balanceDue?: number;
+  byUserName: string;
+  at: string;
+}
+
 /** One lost/broken entry of a settlement, priced by the SERVER from the line's snapshot. */
 export interface OrderDamage {
   lineId: number;
@@ -327,6 +342,9 @@ export interface OrderDetail extends OrderListItem {
   extras: unknown[];
   securityDeposit?: OrderSecurityDeposit;
   statusHistory: OrderStatusChange[];
+  /** The deposit's append-only trail, chronological (shown in the order's history beside the
+   *  status changes). */
+  depositHistory: OrderDepositHistoryEntry[];
   evidence: OrderEvidence[];
   createdAt: string;
 }

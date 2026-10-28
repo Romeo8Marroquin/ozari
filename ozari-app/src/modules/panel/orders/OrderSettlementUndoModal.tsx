@@ -13,10 +13,11 @@ const SECONDARY_COLOR = '#262626';
 const DANGER_COLOR = '#dc2626';
 
 /**
- * The confirm dialog behind "Deshacer liquidación" — clearing an order's deposit settlement. The
- * twin of `OrderPaymentUndoModal`, and it follows the same copy rule: state what the act DOES, never
- * imply WHY. The record is cleared (what was retained, its reason, every lost/broken count) and the
- * deposit is "por liquidar" again — and then the one thing this could be mistaken for: **it moves no
+ * The confirm dialog behind the Depósito card's "Deshacer" ("Deshacer el registro del depósito") —
+ * clearing an order's deposit settlement. The twin of `OrderPaymentUndoModal`, and it follows the
+ * same copy rule: state what the act DOES, never imply WHY. The record is cleared (the retention, the
+ * damage description, every lost/broken count) and the
+ * deposit is "pendiente" again — and then the one thing this could be mistaken for: **it moves no
  * money.** A refund already handed back, or a balance already collected, happened outside this
  * record and stays happened.
  *

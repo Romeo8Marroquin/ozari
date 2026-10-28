@@ -15,6 +15,16 @@ vi.mock('./useSettleOrder', () => ({
 const { success, error } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock('@components/notifications/notify', () => ({ notify: { success, error } }));
 
+// The damage report download is the documents' component (and suite); a marker records the DRAFT
+// settlement the form built from its current values.
+const { reportProps } = vi.hoisted(() => ({ reportProps: vi.fn() }));
+vi.mock('../documents/DamageReportButton', () => ({
+  default: (props: { settlement: { claimsTotal: number }; draft?: boolean }) => {
+    reportProps(props);
+    return <span data-testid="damage-report">{props.settlement.claimsTotal}</span>;
+  },
+}));
+
 import { QueryKeys } from '@constants/QueryKeys';
 import { PanelNavContext, type PanelNav } from '../PanelNavContext';
 import type { OrderDetail, OrderLine, OrderSecurityDeposit } from './order.types';
@@ -169,6 +179,40 @@ describe('OrderSettlementForm', () => {
     expect(settleOrder.mock.calls[0]?.[0]).toMatchObject({
       body: { retainedAmount: 0, damages: [{ lineId: 31, quantity: 2, note: 'Se quemaron' }] },
     });
+  });
+
+  it('offers the DRAFT damage report only while something is claimed AND the form is valid', async () => {
+    renderForm();
+    const slot = screen.getByTestId('settlement-draft-report');
+    // Nothing claimed yet — collapsed and inert, so a blank report can never be printed.
+    expect(slot).toHaveAttribute('aria-hidden', 'true');
+    expect(slot).toHaveAttribute('inert');
+
+    // 2 × Q120 lost: a valid claim ⇒ the draft opens, built from the CURRENT values.
+    await userEvent.type(damaged(), '2');
+    expect(slot).toHaveAttribute('aria-hidden', 'false');
+    expect(slot).not.toHaveAttribute('inert');
+    expect(reportProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        draft: true,
+        settlement: expect.objectContaining({ claimsTotal: 240, refundAmount: 0, balanceDue: 40 }),
+      }),
+    );
+
+    // A retention without its description makes the form invalid ⇒ the draft closes again…
+    await userEvent.type(retained(), '50');
+    expect(slot).toHaveAttribute('aria-hidden', 'true');
+    // …and comes back once the form is whole.
+    await userEvent.type(reason(), 'Golpe en la esquina');
+    expect(slot).toHaveAttribute('aria-hidden', 'false');
+    expect(reportProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        settlement: expect.objectContaining({
+          claimsTotal: 290,
+          retainedReason: 'Golpe en la esquina',
+        }),
+      }),
+    );
   });
 
   it('prefills the recorded settlement (editing corrects it)', () => {

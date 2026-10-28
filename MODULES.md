@@ -106,7 +106,9 @@ public reference data the edit form prefills from).
   reposición", Alquiler-only (switching to Venta clears it, like the rent fields). The Zod mirror
   holds the API's rules — money in [0, 1,000,000], forbidden for Venta, ≤ the replacement price
   (`deps` re-checks it when the replacement changes). The edit form prefills it and sends it back
-  (full-state save); the detail page shows it per unit.
+  (full-state save). Copy (owner 2026-10-27): the label is just **"Depósito"**, and BOTH hints say
+  "Por unidad." first (deposit: given back at pickup if all returns in good shape; replacement: what
+  each lost/broken unit costs); the detail page labels both "(por unidad)".
 - Edit deliberately has **no sessionStorage draft** (server state is the source of truth; a stale
   draft would resurrect old values).
 - Delete is `ProductDeleteModal` (confirm dialog on the detail page; success drops the detail cache,
@@ -281,27 +283,64 @@ nothing: a method must be observed, not guessed.
   what the deposit can't cover. Retained ≤ deposit (400). No stock moves.
 - An order EDIT that would contradict a recorded settlement is a `409 settlementConflict`
   (`assertSettlementSurvivesEdit`); undo the settlement first.
+- **Append-only trail** `service_deposit_history`: every settle/undo writes ONE row in its transaction —
+  `RECORDED` (first), `CORRECTED` (re-send), `UNDONE` — with a money snapshot (`depositTotal`,
+  `claimsTotal`, `refundAmount`, `balanceDue`; NULL on `UNDONE`) and `byUserId`. Projected as the
+  detail's top-level `depositHistory[]`; deleted with the order (before the row — RESTRICT FK).
+- User-facing API messages say **"depósito"**, never "garantía"/"liquidación" (owner 2026-10-27).
 
 ### Security deposit + damage settlement — frontend
 
-- **Order form:** the money summary adds a "Depósito en garantía" line (Σ product deposit × qty,
-  rental lines only — `estimateDepositTotal`) BELOW the total and labelled as not part of it; the
-  line exists only when > 0 (always-mounted `grid-rows` collapse). An edit's `409` settlement
-  conflict lands in the inline banner (the existing `toFormError` route).
-- **Order detail:** `OrderDepositCard` ("Garantía", only when `order.securityDeposit`) renders ONLY
-  the API's numbers in three states — not yet settleable / settleable ("Liquidar garantía") /
-  settled (breakdown + "Editar liquidación" + "Deshacer liquidación"). Lines show their damaged
-  quantity. Undo is `OrderSettlementUndoModal` (+ `useUndoOrderSettlement`, `DELETE
+- **Vocabulary (owner 2026-10-27):** the client-facing word is **"Depósito"** — no app copy says
+  "garantía" or "liquidar/liquidación". The damage path is "Reportar daños"; its record is the
+  "reporte de daños". (Code identifiers keep `settlement` — they are not copy.)
+- **Order form:** the money summary adds a "Depósito" line (Σ product deposit × qty, rental lines
+  only — `estimateDepositTotal`) BELOW the total and labelled as not part of it; the line exists only
+  when > 0 (always-mounted `grid-rows` collapse). An edit's `409` settlement conflict lands in the
+  inline banner (the existing `toFormError` route).
+- **Order detail:** `OrderDepositCard` ("Depósito", only when `order.securityDeposit`) renders ONLY
+  the API's numbers. Chip: "Pendiente" (recordable, not recorded) / "Devuelto" (recorded,
+  `claimsTotal` 0) / "Con daños" (claims > 0) — branched on the API's `claimsTotal`, never
+  recomputed. Pending + `canSettle` (Admin): the HAPPY path leads — **"Devolver depósito"** (or "Sin
+  daños" when `total` is 0, replacement values only) opens `OrderDepositRefundModal`, a confirm that
+  sends `{ retainedAmount: 0, damages: [] }` through `useSettleOrder` (confirm first, seeds the
+  detail cache from the response, then the hook re-reads) — then the DAMAGE path, **"Reportar
+  daños"** → the page. Recorded: "Reportar daños" (clean refund) / "Editar reporte de daños"
+  (claims > 0, same ActionRow key so it morphs), "Descargar reporte de daños" (the documents'
+  `DamageReportButton` with the SAVED settlement, only when claims > 0) and "Deshacer". Lines show
+  their damaged quantity. Undo is `OrderSettlementUndoModal` (+ `useUndoOrderSettlement`, `DELETE
   /orders/:id/settlement`): it clears the record and moves no money — the copy says so.
-- **Settlement editor is a PAGE**, `/panel/pedidos/:id/garantia` (`OrderSettlementPage` →
-  `OrderSettlementForm`, Admin route guard, in `PanelPath`): retained amount + reason (required iff
-  retained > 0), and per damageable line (rental + replacement value — `damageableLines`) damaged
-  units 0..qty + a note. `SchemaSettleOrder.ts` mirrors the API validator plus the two per-order
+- **Discoverable from the top:** while `depositSettlementPending` (Admin), the state card's
+  `ActionRow` carries an amber **"Depósito pendiente"** button (after the payment action) that
+  brings the Depósito card into view (`bringIntoPanelView`) and focuses it — it only takes the admin
+  to the card; the decision stays on the card (its own door, never a lifecycle step).
+- **History:** the "Historial" card merges `order.depositHistory` into `statusHistory`
+  chronologically (`mergeTrail`, stable — a status change reads first on a tie): RECORDED + claims 0
+  "Depósito devuelto completo"; RECORDED + claims "Daños reportados"; CORRECTED "Reporte de daños
+  corregido"; UNDONE "Registro del depósito deshecho". Damages and corrections add "Daños X · se
+  devuelve Y" (+ "saldo por cobrar Z" when owed), from the entry's own snapshot. The dot is tinted
+  emerald / red / neutral.
+- **"Reportar daños" is a PAGE**, `/panel/pedidos/:id/danos` (`OrderSettlementPage` →
+  `OrderSettlementForm`, Admin route guard, in `PanelPath`): "Retención del depósito" (amount,
+  total or partial, + "Descripción del daño", required iff retained > 0), and per damageable line
+  (rental + replacement value — `damageableLines`) lost/broken units 0..qty (hint shows the unit
+  price "c/u") + a note. `SchemaSettleOrder.ts` mirrors the API validator plus the two per-order
   ceilings; the body is the settlement's FINAL state (`PUT /orders/:id/settlement`, `useSettleOrder`)
-  and an edit prefills the recorded one. The outcome card is a live ESTIMATE of the API formula,
-  labelled as such. Blank inputs mean 0.
-- **Agenda/history tickets** carry an amber "Garantía por liquidar" chip on
+  and an edit prefills the recorded one. The "Resultado" card is a live ESTIMATE of the API formula,
+  labelled as such. Blank inputs mean 0. It also offers the damage report as a **DRAFT**:
+  `buildDraftSettlement(order, values, now)` shapes the current values like the API record (same
+  formula as `previewSettlement`) for `<DamageReportButton draft />`, shown (always-mounted
+  `grid-rows` collapse, `inert` while closed) only when claims > 0 AND the values pass the resolver's
+  own schema — a typo never prints.
+- **Agenda/history tickets** carry an amber "Depósito pendiente" chip on
   `depositSettlementPending`.
+- **Dashboard:** a small "Depósitos" card (`dashboard/DepositsCard.tsx`) LAST on `/panel/inicio`,
+  after the top products — rare edge cases never compete with the headline figures. Pending: "N
+  pendientes · Q en depósitos" + up to 5 compact links (client · short delivery date · the ticket's
+  chip) + "y N más"; this month: devuelto / retenido / reposiciones / saldo por cobrar (a 2→4 grid on
+  the card's own `@container`). Nothing on either side ⇒ ONE empty line (the ranking's convention),
+  not a hidden card: the section's skeleton is always shown while loading, so hiding it on load
+  would make a shimmer vanish.
 
 ---
 
@@ -511,6 +550,11 @@ destination, platform)` decides, and `openMapsLink` follows it:
   here, and the month boundaries then obey the same rule as the rest of the screen rather than
   Postgres's timezone handling); **the trigger to move it into a `date_trunc` group-by** is the year's
   order count reaching a few thousand.
+- **`deposits`** (EPIC-2-ORDERS §12): `pending` = EVERY open deposit (the list's
+  `depositSettlementPending` predicate in SQL) counted and summed, the oldest
+  `PENDING_DEPOSITS_LIMIT` (5) listed as order list items; `month` = settlements first recorded this
+  month, totalled by `summarizeSettlements` through the shared `computeSettlementMoney`. Both queries
+  sit in the same `Promise.all`; the shaping is `projectDeposits`.
 - **A delta badge is omitted when the previous period was zero** (`deltaPercent` absent ⇒ "sin
   comparación"): "+100%" on a month that started from nothing is the kind of number that teaches an
   owner to distrust the whole screen. Same stance as `outstandingFrom` clamping a per-order negative

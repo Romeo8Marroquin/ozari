@@ -111,6 +111,19 @@ export const richOrderInclude = {
       byUser: { select: { fullNameKms: true } },
     },
   },
+  depositHistory: {
+    orderBy: { id: "asc" },
+    select: {
+      id: true,
+      kind: true,
+      depositTotal: true,
+      claimsTotal: true,
+      refundAmount: true,
+      balanceDue: true,
+      createdAt: true,
+      byUser: { select: { fullNameKms: true } },
+    },
+  },
   // The tracking photos, each tagged with the STEP it documents — the detail page groups them under
   // that step. (Rewinding a step deletes its photos; a retention purge deletes old ones. Both simply
   // leave fewer rows here, which is why the page renders from what exists rather than a count.)
@@ -614,6 +627,16 @@ export function projectOrderDetail(
       id: entry.id,
       from: entry.fromStatus ?? undefined,
       to: entry.toStatus,
+      byUserName: decryptKms(entry.byUser.fullNameKms),
+      at: entry.createdAt,
+    })),
+    depositHistory: order.depositHistory.map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      depositTotal: toMoney(entry.depositTotal),
+      claimsTotal: toMoney(entry.claimsTotal),
+      refundAmount: toMoney(entry.refundAmount),
+      balanceDue: toMoney(entry.balanceDue),
       byUserName: decryptKms(entry.byUser.fullNameKms),
       at: entry.createdAt,
     })),

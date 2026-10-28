@@ -6,7 +6,7 @@ import type { OrderDetailEnvelope } from './order.types';
 
 /**
  * CLEARS an order's deposit settlement (`DELETE /orders/:id/settlement`, Admin-only) — the retained
- * amount, its reason and every lost/broken count go, and the deposit is "por liquidar" again.
+ * amount, its reason and every lost/broken count go, and the deposit is "pendiente" again.
  *
  * It moves NO money: a refund already handed back, or a balance already collected, is a real event
  * outside this record, and nothing here reverses it. This is the inverse write and nothing more —

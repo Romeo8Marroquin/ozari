@@ -56,12 +56,12 @@ describe('OrderSettlementUndoModal', () => {
   });
 
   it('shows the 409 INLINE — a stale screen belongs where the admin is looking', () => {
-    toFormError.mockReturnValue({ inline: 'no hay una liquidación' });
+    toFormError.mockReturnValue({ inline: 'no hay nada registrado' });
     render(<OrderSettlementUndoModal order={order()} onClose={vi.fn()} />);
     screen.getByRole('button', { name: `${KEY}.confirm` }).click();
 
     act(() => (undoSettlement.mock.calls[0][1] as Handlers).onError({ response: { status: 409 } }));
-    expect(screen.getByText('no hay una liquidación')).toBeInTheDocument();
+    expect(screen.getByText('no hay nada registrado')).toBeInTheDocument();
     expect(error).not.toHaveBeenCalled();
   });
 

@@ -119,6 +119,7 @@ const makeRichOrder = (overrides: Partial<RichOrder> = {}): RichOrder => ({
   serviceDetails: [makeRichLine()],
   serviceExtras: [],
   statusHistory: [],
+  depositHistory: [],
   evidences: [],
   ...overrides,
 });
@@ -669,6 +670,7 @@ describe("projectOrderDetail", () => {
       ],
       extras: [],
       statusHistory: [],
+      depositHistory: [],
     });
     expect(detail.assignee).toBeUndefined();
     expect(detail.isMine).toBe(false);
@@ -816,6 +818,61 @@ describe("projectOrderDetail", () => {
         to: { id: 5, name: "En ruta" },
         byUserName: "Romeo Marroquín",
         at,
+      },
+    ]);
+  });
+
+  it("maps the deposit trail: the money snapshot when recorded, absent on an undo", () => {
+    const recordedAt = new Date("2026-08-03T09:00:00Z");
+    const undoneAt = new Date("2026-08-04T09:00:00Z");
+    const detail = projectOrderDetail(
+      makeRichOrder({
+        depositHistory: [
+          {
+            id: 1,
+            kind: "RECORDED",
+            depositTotal: new Prisma.Decimal("200.00"),
+            claimsTotal: new Prisma.Decimal("290.00"),
+            refundAmount: new Prisma.Decimal("0.00"),
+            balanceDue: new Prisma.Decimal("90.00"),
+            createdAt: recordedAt,
+            byUser: { fullNameKms: encryptKms("Romeo Marroquín") },
+          },
+          {
+            id: 2,
+            kind: "UNDONE",
+            depositTotal: null,
+            claimsTotal: null,
+            refundAmount: null,
+            balanceDue: null,
+            createdAt: undoneAt,
+            byUser: { fullNameKms: encryptKms("Ana Pérez") },
+          },
+        ],
+      }),
+      makeProjectionContext(),
+    );
+    expect(detail.depositHistory).toEqual([
+      {
+        id: 1,
+        kind: "RECORDED",
+        depositTotal: 200,
+        claimsTotal: 290,
+        // A zero refund is a real recorded outcome, never "absent".
+        refundAmount: 0,
+        balanceDue: 90,
+        byUserName: "Romeo Marroquín",
+        at: recordedAt,
+      },
+      {
+        id: 2,
+        kind: "UNDONE",
+        depositTotal: undefined,
+        claimsTotal: undefined,
+        refundAmount: undefined,
+        balanceDue: undefined,
+        byUserName: "Ana Pérez",
+        at: undoneAt,
       },
     ]);
   });
