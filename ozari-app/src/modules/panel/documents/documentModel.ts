@@ -6,7 +6,7 @@ import {
 } from '../orders/orderEstimate';
 import { parseDateTime, parseLineQuantity, parseMoney } from '../orders/SchemaCreateOrder';
 import type { CreateOrderFormType } from '../orders/SchemaCreateOrder';
-import type { OrderDetail } from '../orders/order.types';
+import type { OrderDepositSettlement, OrderDetail } from '../orders/order.types';
 import type { Product } from '../products/product.types';
 import type { PreferenceSetting } from '../preferences/preference.types';
 
@@ -117,7 +117,8 @@ export type DocumentDepositClaim =
     };
 
 /**
- * The refundable security deposit ("depósito en garantía") — collected ON TOP of the order and
+ * The refundable security deposit — printed simply as **"Depósito"**, the owner's own word with
+ * clients (never "garantía" or "liquidación" on a document, 2026-10-27) — collected ON TOP of the order and
  * refunded at pickup, so it is **never** part of {@link DocumentTotals} and never a cost.
  *
  * The one exception is the reason this is a discriminated union rather than an amount: once a
@@ -268,7 +269,7 @@ const daysExplain = (unitPrice: number, quantity: number, days: number, total: n
  * - settled with a retention or a replacement → `settled` — those charges are COSTS.
  *
  * A deposit of zero with nothing claimed says nothing at all (absent): a line can carry a
- * replacement value without a deposit, and "Depósito en garantía Q0.00" would announce a guarantee
+ * replacement value without a deposit, and "Depósito (reembolsable) Q0.00" would announce a deposit
  * nobody asked the client for.
  */
 function depositFromOrder(order: OrderDetail): DocumentSecurityDeposit | undefined {
@@ -532,11 +533,158 @@ export function fromOrderForm(
   };
 }
 
-/** `PED-00042` — a comprobante's reference, zero-padded so a stack of them sorts and scans. */
-export function documentReference(model: DocumentModel): string | undefined {
-  return model.reference === undefined
-    ? undefined
-    : `PED-${String(model.reference).padStart(5, '0')}`;
+// ── The damage report ("REPORTE DE DAÑOS") ───────────────────────────────────────────────────────
+
+/** One rental line that carried a deposit: what the client handed over for it. */
+export interface DamageReportDepositLine {
+  description: string;
+  quantity: number;
+  /** The per-unit deposit the line snapshotted at order time. */
+  unitAmount: number;
+  total: number;
+}
+
+/** One lost/broken entry, billed at the line's replacement value — the API's figures, verbatim. */
+export interface DamageReportReplacement {
+  description: string;
+  quantity: number;
+  unitAmount: number;
+  amount: number;
+  note?: string;
+}
+
+/**
+ * The damage report — a client-facing statement of what the pickup review found and what it costs
+ * (EPIC-2-DOCUMENTS §2c). Its own model rather than a third `kind` of {@link DocumentModel}: it has
+ * no lines to sell, no order totals and no saldo of the order, so squeezing it into that shape would
+ * leave half the fields meaningless. It shares everything that is NOT order-specific — the
+ * letterhead, the client and event snapshots, the reference format and the money rules — and the
+ * template shares the frame, the tables and the bank block, so the two documents cannot drift into
+ * looking like different companies.
+ */
+export interface DamageReportModel {
+  letterhead: DocumentLetterhead;
+  /** The order's id — the report is always ABOUT a saved order. */
+  reference: number;
+  issuedAt: Date;
+  /** Built from the report-damages FORM's unsaved values: the document says so on its face. */
+  draft: boolean;
+  /** When the settlement was recorded. Absent on a draft — nothing has been recorded yet. */
+  settledAt?: Date;
+  client: DocumentModel['client'];
+  event: { type: string; deliveryAt: Date; pickupAt?: Date };
+  deposit: {
+    /** The API's total (`OrderSecurityDeposit.total`); 0 when the lines carried none. */
+    total: number;
+    /** Each rental line that carried a deposit — the breakdown of `total`. */
+    lines: DamageReportDepositLine[];
+  };
+  /** Present only when money was retained from the deposit for partial damage. */
+  retention?: { amount: number; reason?: string };
+  replacements: DamageReportReplacement[];
+  totals: {
+    retained: number;
+    damages: number;
+    claims: number;
+    applied: number;
+    refund: number;
+    balanceDue: number;
+  };
+  currencySymbol: string;
+}
+
+/**
+ * A saved order + a settlement (saved, or a DRAFT from the report-damages form) → the damage report.
+ *
+ * Every figure in `totals`, every replacement and the deposit total are the settlement's / the API's
+ * own, copied verbatim — the document selects and formats, it never adds or subtracts (§2b #24). The
+ * one product here is the per-line deposit BREAKDOWN (`unitAmount × quantity`), which is the server's
+ * own rule for that total, the same way the comprobante's lines show `price × qty`.
+ *
+ * `settledAt` is printed only on a FINAL report: a draft has recorded nothing, and an unparseable
+ * date is dropped rather than printed as "Invalid Date".
+ */
+export function fromDamageReport(
+  order: OrderDetail,
+  settlement: OrderDepositSettlement,
+  letterhead: DocumentLetterhead,
+  issuedAt: Date,
+  draft: boolean,
+): DamageReportModel {
+  const deliveryAt = new Date(order.serviceStart);
+  const pickupAt = order.pickupAt === undefined ? undefined : new Date(order.serviceEnd);
+  const settledAt = draft ? undefined : new Date(settlement.settledAt);
+  const depositLines = order.lines.flatMap<DamageReportDepositLine>((line) => {
+    const unitAmount = line.securityDeposit ?? 0;
+    return line.isRental && unitAmount > 0
+      ? [
+          {
+            description: line.productName,
+            quantity: line.quantity,
+            unitAmount,
+            total: cents(unitAmount * line.quantity),
+          },
+        ]
+      : [];
+  });
+  return {
+    letterhead,
+    reference: order.id,
+    issuedAt,
+    draft,
+    ...(settledAt !== undefined && !Number.isNaN(settledAt.getTime()) && { settledAt }),
+    client: {
+      name: order.clientName,
+      contact: order.deliveryContact,
+      address: order.deliveryAddress,
+    },
+    event: {
+      type: order.eventType.name,
+      deliveryAt,
+      ...(pickupAt !== undefined && { pickupAt }),
+    },
+    deposit: { total: order.securityDeposit?.total ?? 0, lines: depositLines },
+    ...(settlement.retainedAmount > 0 && {
+      retention: {
+        amount: settlement.retainedAmount,
+        ...(settlement.retainedReason !== undefined && { reason: settlement.retainedReason }),
+      },
+    }),
+    replacements: settlement.damages.map((damage) => ({
+      description: damage.productName,
+      quantity: damage.quantity,
+      unitAmount: damage.unitAmount,
+      amount: damage.amount,
+      ...(damage.note !== undefined && { note: damage.note }),
+    })),
+    totals: {
+      retained: settlement.retainedAmount,
+      damages: settlement.damagesTotal,
+      claims: settlement.claimsTotal,
+      applied: settlement.appliedFromDeposit,
+      refund: settlement.refundAmount,
+      balanceDue: settlement.balanceDue,
+    },
+    currencySymbol: order.currency.symbol,
+  };
+}
+
+/** `PED-00042` — an order's reference, zero-padded so a stack of documents sorts and scans. */
+export const formatReference = (id: number): string => `PED-${String(id).padStart(5, '0')}`;
+
+/** A comprobante's reference. Absent on a quote: no order exists yet. */
+export function documentReference(model: Pick<DocumentModel, 'reference'>): string | undefined {
+  return model.reference === undefined ? undefined : formatReference(model.reference);
+}
+
+/**
+ * The damage report's file name — the comprobante's convention (`ped-00042.pdf`) with what the
+ * document IS in front, and `-borrador` on a draft, so a provisional figure can never be mistaken
+ * for the recorded one sitting beside it in a downloads folder or an email thread.
+ */
+export function damageReportFileName(model: DamageReportModel): string {
+  const stem = `reporte-danos-${formatReference(model.reference).toLowerCase()}`;
+  return `${stem}${model.draft ? '-borrador' : ''}.pdf`;
 }
 
 /**

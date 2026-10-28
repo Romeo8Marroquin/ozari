@@ -134,6 +134,7 @@ const makeRawRichOrder = () => ({
       byUser: { fullNameKms: encryptKms("Romeo Marroquín") },
     },
   ],
+  depositHistory: [],
   evidences: [
     {
       id: 9,
@@ -314,6 +315,7 @@ describe("getOrderById", () => {
       statusHistory: [
         { id: 1, from: undefined, to: { id: 1, name: "Pendiente" }, byUserName: "Romeo Marroquín" },
       ],
+      depositHistory: [],
       // The tracking photos ride along, each tagged with the step it documents.
       evidence: [
         { id: 9, statusId: 3, url: "https://cdn.example.com/orders/evidence/a.webp" },
@@ -1195,6 +1197,7 @@ describe("deleteOrder", () => {
       product: { update: vi.fn().mockResolvedValue({}) },
       serviceEvidence: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
       serviceStatusHistory: { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) },
+      serviceDepositHistory: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
       serviceDetail: { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) },
       serviceExtra: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
     };
@@ -1221,10 +1224,15 @@ describe("deleteOrder", () => {
     for (const child of [
       tx.serviceEvidence.deleteMany,
       tx.serviceStatusHistory.deleteMany,
+      tx.serviceDepositHistory.deleteMany,
       tx.serviceDetail.deleteMany,
       tx.serviceExtra.deleteMany,
     ]) {
       expect(child).toHaveBeenCalledWith({ where: { serviceId: 12 } });
+      // Every child goes BEFORE the order row — the FKs are RESTRICT, so the order would refuse.
+      expect((child as Mock).mock.invocationCallOrder[0]).toBeLessThan(
+        (tx.service.delete as Mock).mock.invocationCallOrder[0] as number,
+      );
     }
     expect(tx.service.delete).toHaveBeenCalledWith({ where: { id: 12 } });
     // The R2 objects go only AFTER the commit — a failure there leaves a sweepable orphan.

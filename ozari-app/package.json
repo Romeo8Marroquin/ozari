@@ -20,7 +20,8 @@
     "doc:preview:quote": "pnpm doc:preview -- --quote",
     "doc:preview:deposit": "pnpm doc:preview -- --deposit=held",
     "doc:preview:refunded": "pnpm doc:preview -- --deposit=refunded",
-    "doc:preview:damages": "pnpm doc:preview -- --deposit=damages"
+    "doc:preview:damages": "pnpm doc:preview -- --deposit=damages",
+    "doc:preview:damage-report": "pnpm doc:preview -- --damage-report"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",

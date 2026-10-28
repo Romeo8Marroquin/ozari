@@ -1222,6 +1222,7 @@ export const paths: OpenAPIV3.PathsObject = {
               },
             ],
             extras: [],
+            depositHistory: [],
             statusHistory: [
               {
                 id: 1,
@@ -1409,6 +1410,7 @@ export const paths: OpenAPIV3.PathsObject = {
               },
             ],
             extras: [],
+            depositHistory: [],
             statusHistory: [
               {
                 id: 1,
@@ -1513,6 +1515,7 @@ export const paths: OpenAPIV3.PathsObject = {
                 },
               ],
               extras: [],
+              depositHistory: [],
               statusHistory: [
                 {
                   id: 1,
@@ -2092,7 +2095,10 @@ export const paths: OpenAPIV3.PathsObject = {
         "**Declarative:** the body is the settlement's FINAL state; re-sending corrects it without " +
         "re-stamping `settledAt`. Allowed once the order was delivered, while it is not cancelled, " +
         "and only when a rental line carries a deposit or a replacement value (`409` otherwise). " +
-        "Stock is never touched.",
+        "Stock is never touched.\n\n" +
+        "**Trail:** every successful write appends a `depositHistory` row — `RECORDED` the first " +
+        "time, `CORRECTED` on a re-send — with the outcome's money as it stands at that moment. The " +
+        "one-tap \"Devolver depósito\" is this same call with `retainedAmount: 0` and no damages.",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 }, example: 12 },
@@ -2134,7 +2140,8 @@ export const paths: OpenAPIV3.PathsObject = {
       description:
         "**STRICTLY Admin.** Clears the retention, its reason and every line's damage — the deposit " +
         "reads as not settled again. A hard delete (nothing references a settlement), allowed in any " +
-        "order state, and it moves no money. An order without a settlement answers `409`.",
+        "order state, and it moves no money. An order without a settlement answers `409`. The undo " +
+        "itself appends an `UNDONE` row (no money) to the order's `depositHistory`.",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 }, example: 12 },
@@ -2498,6 +2505,10 @@ export const paths: OpenAPIV3.PathsObject = {
                 { statusId: 1, name: "Pendiente", colorKey: "amber", count: 6 },
                 { statusId: 3, name: "Entregado", colorKey: "emerald", count: 3 },
               ],
+              deposits: {
+                pending: { orders: 0, amount: 0, items: [] },
+                month: { settled: 4, refunded: 520, retained: 30, replacements: 120, balanceDue: 40 },
+              },
               currency: { id: 1, iso4217Code: "GTQ", name: EXAMPLE_CURRENCY_NAME, symbol: "Q" },
             },
           },

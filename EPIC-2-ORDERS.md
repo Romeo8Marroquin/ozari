@@ -781,7 +781,7 @@ availability endpoints — no rewrite of what exists.
 
 ---
 
-## 12. Security deposit ("garantía") & damage settlement (✅ BUILT, owner 2026-10-27)
+## 12. Security deposit ("Depósito") & damage settlement (✅ BUILT, owner 2026-10-27)
 
 **The business.** Some expensive rental items ask the client for a refundable deposit on top of the
 order. After the pickup (photos taken), the admin either gives it back whole, or keeps part of it for
@@ -801,6 +801,15 @@ than a replacement (enforced on the product).
 | Does a broken unit leave the fleet? | **No automatic stock change.** | A broken chair is normally replaced with the client's money, so the fleet the business intends to own is unchanged. A unit that will not be replaced is an edit of the product's quantity (the settlement page says so). |
 | Is the deposit's receipt or the balance's payment tracked? | **No (v1).** `paidAt` remains the order total's payment. | Documented door: a deposit-received / balance-paid stamp would be two more columns + the payment-door pattern. |
 
+**Vocabulary + flow (✅ owner, 2026-10-27).** User-facing copy (UI, API messages, PDFs) says
+**"Depósito"** — never "garantía" or "liquidación" (those survive only in code identifiers like
+`settlement`). The HAPPY path is a one-tap **"Devolver depósito"**: the same `PUT /orders/:id/settlement`
+with `retainedAmount: 0` and no damages — no page, no form. The DAMAGE path is **"Reportar daños"**, a
+dedicated page (retention + per-line damage), with a downloadable **"Reporte de daños"** PDF. It stays
+**its own door, NOT a lifecycle step**: it applies to few orders (only those carrying a deposit or a
+replacement value), and it must never block the "listo" press — whether the units are back in the fleet
+has nothing to do with a money judgement that may be made days later.
+
 **Product rule** (both mirrors): `securityDeposit` optional money, Alquiler only, `≤ replacementPrice`
 when both are set. Visible to every role (a public commercial condition like the price; unlike
 `replacementPrice`, which stays Admin-only on the product projection).
@@ -815,6 +824,19 @@ when both are set. Visible to every role (a public commercial condition like the
 re-sending corrects it WITHOUT re-stamping `depositSettledAt` (first settled = the fact worth keeping).
 DELETE clears the three service columns and every line's damage (NO-TRASH: nothing references it).
 
+**The deposit trail** (`service_deposit_history`, model `ServiceDepositHistory`, migration
+`20261027200000_order_deposit_history`) — append-only, one row per settlement write, inside the same
+transaction: **`RECORDED`** (the first settle — the order had no `depositSettledAt`), **`CORRECTED`** (any
+later re-send), **`UNDONE`** (the DELETE). Each `RECORDED`/`CORRECTED` row snapshots the outcome AS
+RECORDED THEN — `depositTotal`, `claimsTotal`, `refundAmount`, `balanceDue`, through the same
+`computeSettlementMoney` — so the history stays true after a later correction or undo; `UNDONE` carries no
+money. `byUserId` = the admin. The detail projects it as a top-level `depositHistory[]` (chronological,
+`byUserName` decrypted, money absent when NULL) beside `statusHistory`, so "depósito devuelto" / "daños
+reportados" appear in the order's timeline — top-level rather than inside `securityDeposit` because an
+order edited out of qualifying still has history worth showing. The current settlement still lives on
+`services` + the lines; the trail is only its record. Order delete removes the trail rows with the order
+(the FK is RESTRICT, so they go before the order row).
+
 **Interaction with the order edit** (`PUT /orders/:id`): the edit re-derives the line snapshots, then
 `assertSettlementSurvivesEdit` refuses (409 `settlementConflict`) a damaged line dropped, reduced below its
 damaged units, left without a replacement value or turned into a sale, and a deposit shrunk below what was
@@ -822,12 +844,22 @@ retained. The admin undoes the settlement first. The edit never writes the damag
 removes the lines (and with them the damage) in its transaction.
 
 **Projections:** list items carry `depositSettlementPending` (delivered + settleable + not cancelled + not
-settled — the agenda's "Garantía por liquidar" chip); the detail carries per-line snapshots + damage and a
-`securityDeposit { total, canSettle, settlement? }` block with every derived figure. The UI and the PDF
-render those numbers; they never re-derive them.
+settled — the agenda's pending-deposit chip); the detail carries per-line snapshots + damage, a
+`securityDeposit { total, canSettle, settlement? }` block with every derived figure, and `depositHistory`.
+The UI and the PDF render those numbers; they never re-derive them.
 
-**Documents:** a deposit is NEVER a cost on the happy path (shown as "depósito en garantía", refunded); only
-what was retained or billed for replacement becomes a cost (EPIC-2-DOCUMENTS).
+**Dashboard** (`GET /dashboard` → `deposits`): `pending { orders, amount, items }` — the
+`depositSettlementPending` predicate pushed into SQL (live, delivered, unsettled, an active rental line with
+a deposit > 0 or a replacement value); ALL of them are fetched so `orders`/`amount` (Σ deposit) are exact,
+and `items` lists the oldest deliveries first, capped at `PENDING_DEPOSITS_LIMIT` (5), as ordinary list
+items (`projectOrderListItem`). `month { settled, refunded, retained, replacements, balanceDue }` totals
+the settlements FIRST recorded this month (scoped by `depositSettledAt`, as they stand now) through
+`summarizeSettlements` → the same `computeSettlementMoney`, so the card can never disagree with an order.
 
-**Migrations:** `20261027100000_order_security_deposit` (engine-written). No backfill: every column is
-nullable or defaults to 0, and an order with no deposit/replacement lines behaves exactly as before.
+**Documents:** a deposit is NEVER a cost on the happy path (shown as a deposit, refunded); only what was
+retained or billed for replacement becomes a cost (EPIC-2-DOCUMENTS).
+
+**Migrations:** `20261027100000_order_security_deposit` and `20261027200000_order_deposit_history` (both
+engine-written). No backfill: every column is nullable or defaults to 0, an order with no
+deposit/replacement lines behaves exactly as before, and settlements recorded before the trail existed
+simply have no history rows.

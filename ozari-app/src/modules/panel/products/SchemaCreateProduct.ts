@@ -77,7 +77,7 @@ const baseCreateProductSchema = z.object({
   // enforces presence for Alquiler; a bare `.optional()` would reject the sentinel outright.
   rentTimeUnitId: z.number().nullable().optional(),
   replacementPrice: moneyField(t(`${KEY}.invalidReplacementPrice`)).optional(),
-  // Refundable deposit per unit ("garantía") — never a price; Alquiler-only, ≤ replacement price.
+  // Refundable deposit per unit ("Depósito") — never a price; Alquiler-only, ≤ replacement price.
   securityDeposit: moneyField(t(`${KEY}.invalidSecurityDeposit`)).optional(),
   sellPrice: moneyField(t(`${KEY}.invalidSellPrice`)).optional(),
   details: z.array(

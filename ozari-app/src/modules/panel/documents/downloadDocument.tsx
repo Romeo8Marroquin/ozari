@@ -1,6 +1,6 @@
-import { documentFileName } from './documentModel';
-import type { DocumentModel } from './documentModel';
-import type { DocumentCopy } from './OrderDocument';
+import { damageReportFileName, documentFileName } from './documentModel';
+import type { DamageReportModel, DocumentModel } from './documentModel';
+import type { DamageReportCopy, DocumentCopy } from './OrderDocument';
 
 /**
  * Turn a {@link DocumentModel} into a downloaded PDF.
@@ -53,13 +53,14 @@ function saveBlob(blob: Blob, fileName: string): void {
   setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
 }
 
+/** Both halves in ONE dynamic import boundary: the template is useless without the renderer, so
+ *  splitting them would only cost a second round trip on the same click. Every document shares
+ *  the chunk — the damage report is a second component of the same template file. */
+const loadRenderer = () =>
+  Promise.all([import('@react-pdf/renderer'), import('./OrderDocument')]);
+
 export async function downloadDocument(input: DownloadDocumentInput): Promise<void> {
-  // Both halves in ONE dynamic import boundary: the template is useless without the renderer, so
-  // splitting them would only cost a second round trip on the same click.
-  const [{ pdf }, { default: OrderDocument }] = await Promise.all([
-    import('@react-pdf/renderer'),
-    import('./OrderDocument'),
-  ]);
+  const [{ pdf }, { default: OrderDocument }] = await loadRenderer();
   const blob = await pdf(
     <OrderDocument
       model={input.model}
@@ -70,4 +71,24 @@ export async function downloadDocument(input: DownloadDocumentInput): Promise<vo
     />,
   ).toBlob();
   saveBlob(blob, documentFileName(input.model));
+}
+
+export interface DownloadDamageReportInput extends Omit<DownloadDocumentInput, 'model' | 'copy'> {
+  model: DamageReportModel;
+  copy: DamageReportCopy;
+}
+
+/** The damage report (EPIC-2-DOCUMENTS §2c) — same machinery, same lazy chunk, its own file name. */
+export async function downloadDamageReport(input: DownloadDamageReportInput): Promise<void> {
+  const [{ pdf }, { DamageReportDocument }] = await loadRenderer();
+  const blob = await pdf(
+    <DamageReportDocument
+      model={input.model}
+      copy={input.copy}
+      money={input.money}
+      date={input.date}
+      dateTime={input.dateTime}
+    />,
+  ).toBlob();
+  saveBlob(blob, damageReportFileName(input.model));
 }

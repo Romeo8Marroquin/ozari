@@ -26,9 +26,11 @@ import {
   monthRange,
   nextPendingEvent,
   outstandingFrom,
+  projectDeposits,
   projectUpNextItem,
   round2,
   selectUpNext,
+  settledDepositSelect,
 } from "./dashboard.service.js";
 
 /** A cancelled order is not business — it never counts toward revenue, volume or workload. */
@@ -99,6 +101,8 @@ export const getDashboard = async (
       unpaidRows,
       topProductRows,
       statusRows,
+      pendingDepositRows,
+      settledDepositRows,
       latestCurrency,
     ] = await Promise.all([
       // The actor context (lifecycle catalog + evidence bounds) — so `actions` on every up-next card
@@ -192,6 +196,32 @@ export const getDashboard = async (
         by: ["serviceStatusId"],
         where: { ...LIVE, readyAt: null },
         _count: { _all: true },
+      }),
+      // Open deposits — the list's `depositSettlementPending` predicate, pushed into SQL: delivered,
+      // live, unsettled, with a rental line carrying a deposit or a replacement value. Occasional by
+      // nature, so ALL of them come back (the count and the amount must be exact) and the card lists
+      // the oldest few.
+      prismaClient.service.findMany({
+        where: {
+          ...LIVE,
+          deliveredAt: { not: null },
+          depositSettledAt: null,
+          serviceDetails: {
+            some: {
+              isActive: true,
+              isRental: true,
+              OR: [{ securityDeposit: { gt: 0 } }, { replacementPrice: { not: null } }],
+            },
+          },
+        },
+        orderBy: [{ deliveredAt: "asc" }, { id: "asc" }],
+        include: dashboardOrderInclude,
+      }),
+      // Settlements first recorded this month, with what `summarizeSettlements` needs to re-derive
+      // their outcome through the shared formula.
+      prismaClient.service.findMany({
+        where: { ...LIVE, depositSettledAt: inRange(thisMonth.from, thisMonth.to) },
+        select: settledDepositSelect,
       }),
       // The reporting currency: whatever the newest live order was priced in. The business is
       // single-currency, so this is exact; if multi-currency ever lands, every total on this screen
@@ -294,6 +324,7 @@ export const getDashboard = async (
         revenueTrend: bucketRevenueByMonth(trendRows, now, TREND_MONTHS),
         topProducts,
         statusSplit,
+        deposits: projectDeposits(pendingDepositRows, settledDepositRows, context),
         currency,
       },
     };

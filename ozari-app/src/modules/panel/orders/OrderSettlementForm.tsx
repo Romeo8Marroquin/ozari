@@ -11,10 +11,12 @@ import { notify } from '@components/notifications/notify';
 import { QueryKeys } from '@constants/QueryKeys';
 import { toFormError } from '@utils/apiError';
 import { decimalInput, integerInput } from '@utils/numericInput';
+import DamageReportButton from '../documents/DamageReportButton';
 import { usePanelNavigate } from '../PanelNavContext';
 import { FormSection } from '../products/ProductFormChrome';
 import { formatMoney } from './orderEstimate';
 import {
+  buildDraftSettlement,
   createSettlementSchema,
   damageableLines,
   previewSettlement,
@@ -42,7 +44,7 @@ const PreviewLine: React.FC<{ label: string; amount: string; className?: string 
 );
 
 /**
- * The deposit SETTLEMENT form — mounted by `OrderSettlementPage` only once the order is loaded and
+ * The "Reportar daños" form (the deposit SETTLEMENT) — mounted by `OrderSettlementPage` only once the order is loaded and
  * the API says it can be settled (RHF captures its defaults at mount, so a half-order would freeze
  * the wrong values in).
  *
@@ -56,6 +58,12 @@ const PreviewLine: React.FC<{ label: string; amount: string; className?: string 
  * edit prefills the recorded one and re-sends it whole. The outcome card is a LIVE ESTIMATE of the
  * API's formula, labelled as such; the saved numbers come back from the API and the detail page
  * shows only those.
+ *
+ * The outcome card also offers the damage report as a DRAFT (`buildDraftSettlement` → the documents'
+ * `DamageReportButton` with `draft`), so the admin can hand the client a quote before saving. It is
+ * offered only while something is claimed AND the whole form validates against the very schema the
+ * resolver uses — a typo never prints. Always mounted inside a `grid-rows` collapse (`inert` while
+ * closed), so it eases in and out with the numbers instead of popping.
  */
 const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurityDeposit }> = ({
   order,
@@ -81,6 +89,8 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
     }),
   );
   const hasDeposit = deposit.total > 0;
+  // The draft's date — when this report was opened. Captured once (render stays pure).
+  const [draftedAt] = useState(() => new Date());
 
   const methods = useForm<SettlementFormValues>({
     resolver: zodResolver(schema),
@@ -91,6 +101,8 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
   // `useWatch`, never `watch()` (the React Compiler lint) — the preview follows every keystroke.
   const values = useWatch({ control }) as SettlementFormValues;
   const preview = previewSettlement(deposit.total, values, lineById);
+  const draft = buildDraftSettlement(order, values, draftedAt);
+  const showDraft = draft.claimsTotal > 0 && schema.safeParse(values).success;
   const exitPath = `/panel/pedidos/${order.id}` as const;
 
   const onSubmit = (data: SettlementFormValues): void => {
@@ -246,6 +258,27 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
             </div>
           </div>
           <p className="mt-2 text-xs text-charcoal/45">{t(`${KEY}.preview.note`)}</p>
+          {/* The DRAFT damage report — always mounted, collapsed by `grid-rows` and `inert` while
+              there is nothing valid to print, so it eases in with the numbers instead of popping. */}
+          <div
+            aria-hidden={!showDraft}
+            inert={!showDraft}
+            data-testid="settlement-draft-report"
+            className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
+              showDraft ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+            }`}
+          >
+            <div className="min-h-0 overflow-hidden">
+              {/* The label/control row rule: the sentence carries a `basis-56` floor and the row
+                  wraps, so on a narrow card the button folds under it instead of squashing it. */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-3">
+                <p className="min-w-0 grow basis-56 text-xs text-charcoal/55">
+                  {t(`${KEY}.draftReport`)}
+                </p>
+                <DamageReportButton order={order} settlement={draft} draft />
+              </div>
+            </div>
+          </div>
         </FormSection>
 
         <div className="reveal-block flex flex-col">

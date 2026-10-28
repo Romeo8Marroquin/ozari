@@ -96,6 +96,10 @@ const dashboard = (overrides: Partial<Dashboard> = {}): Dashboard =>
     ],
     topProducts: [{ productId: 3, name: 'Silla Tiffany', quantity: 240, revenue: 4800 }],
     statusSplit: [{ statusId: 1, name: 'Pendiente', colorKey: 'amber', count: 6 }],
+    deposits: {
+      pending: { orders: 1, amount: 500, items: [upNextItem({ id: 21, clientName: 'Lucía Gómez' })] },
+      month: { settled: 0, refunded: 0, retained: 0, replacements: 0, balanceDue: 0 },
+    },
     currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
     ...overrides,
   }) as Dashboard;
@@ -262,6 +266,13 @@ describe('DashboardPage', () => {
     render(<DashboardPage />);
     expect(screen.getByText(`${KEY}.statusSplit.empty`)).toBeInTheDocument();
     expect(screen.getByText(`${KEY}.topProducts.empty`)).toBeInTheDocument();
+  });
+
+  it('closes the page with the small Depósitos corner, whose orders open their detail', async () => {
+    render(<DashboardPage />);
+    expect(screen.getByText(`${KEY}.deposits.title`)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.deposits.openAria` }));
+    expect(navigateTo).toHaveBeenCalledWith('/panel/pedidos/21');
   });
 
   it('registers its entrance/exit with the panel transition controller', async () => {

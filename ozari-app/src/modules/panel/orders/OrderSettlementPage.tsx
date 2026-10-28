@@ -36,9 +36,9 @@ const SettlementSkeleton: React.FC = () => (
 );
 
 /**
- * The deposit settlement page (`/panel/pedidos/:id/garantia`) — **Admin only**: the route's
- * `beforeLoad` bounces every other role (and a malformed id) to the agenda; the backend 403 stays
- * the real boundary.
+ * The "Reportar daños" page (`/panel/pedidos/:id/danos`) — the deposit settlement — **Admin
+ * only**: the route's `beforeLoad` bounces every other role (and a malformed id) to the agenda; the
+ * backend 403 stays the real boundary.
  *
  * A dedicated PAGE through the panel transition, never a modal: it is an entity form with several
  * fields per line (the page-vs-modal doctrine). It records, or corrects, how the deposit comes back
@@ -52,7 +52,7 @@ const SettlementSkeleton: React.FC = () => (
 const OrderSettlementPage: React.FC = () => {
   const { t } = useTranslation();
   const panelNavigate = usePanelNavigate();
-  const { orderId } = useParams({ from: '/panel/pedidos_/$orderId_/garantia' });
+  const { orderId } = useParams({ from: '/panel/pedidos_/$orderId_/danos' });
   const id = Number(orderId);
   const { data: order, isLoading, isError, isFetching, refetch, error } = useOrder(id);
   const root = useRef<HTMLDivElement>(null);

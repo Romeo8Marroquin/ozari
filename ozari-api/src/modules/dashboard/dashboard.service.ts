@@ -3,11 +3,15 @@ import { decryptKms } from "@helpers/encryption.js";
 import { pendingLogisticsEvents } from "../orders/logistics/logistics.service.js";
 import type { LogisticsEventModel } from "../orders/logistics/logistics.models.js";
 import {
+  computeDepositTotal,
+  computeSettlementMoney,
   orderListInclude,
   projectOrderListItem,
+  type DepositLineModel,
   type OrderProjectionContextModel,
 } from "../orders/orders.service.js";
 import type {
+  DashboardDepositsModel,
   DateRangeModel,
   RevenuePointModel,
   StatComparisonModel,
@@ -209,6 +213,82 @@ export function bucketRevenueByMonth(
     }
   }
   return [...series.values()];
+}
+
+/** How many open-deposit orders the dashboard lists by name (the count covers them all). */
+export const PENDING_DEPOSITS_LIMIT = 5;
+
+/** The `select` for a settled order: exactly what `summarizeSettlements` re-derives the outcome from. */
+export const settledDepositSelect = {
+  depositRetainedAmount: true,
+  serviceDetails: {
+    where: { isActive: true },
+    select: {
+      isRental: true,
+      quantity: true,
+      securityDeposit: true,
+      replacementPrice: true,
+      damagedQuantity: true,
+    },
+  },
+} satisfies Prisma.ServiceSelect;
+
+/** A settled order as the month summary reads it: the retention + its lines' snapshots and damage. */
+export interface SettledDepositRowModel {
+  depositRetainedAmount: Prisma.Decimal | null;
+  serviceDetails: readonly (DepositLineModel & { damagedQuantity: number })[];
+}
+
+/**
+ * The dashboard's deposit corner: EVERY open deposit counted and summed, the oldest few listed
+ * through the agenda's own projection, and the month's settlements totalled.
+ */
+export function projectDeposits(
+  pendingRows: readonly DashboardOrderRow[],
+  settledRows: readonly SettledDepositRowModel[],
+  context: OrderProjectionContextModel,
+): DashboardDepositsModel {
+  return {
+    pending: {
+      orders: pendingRows.length,
+      amount: round2(
+        pendingRows.reduce((sum, row) => sum + computeDepositTotal(row.serviceDetails), 0),
+      ),
+      items: pendingRows
+        .slice(0, PENDING_DEPOSITS_LIMIT)
+        .map((row) => projectOrderListItem(row, context)),
+    },
+    month: summarizeSettlements(settledRows),
+  };
+}
+
+/**
+ * Totals the month's settlements through the SAME formula the order detail uses
+ * (`computeSettlementMoney`), so the dashboard can never disagree with any single order.
+ */
+export function summarizeSettlements(
+  rows: readonly SettledDepositRowModel[],
+): DashboardDepositsModel["month"] {
+  const month = { settled: rows.length, refunded: 0, retained: 0, replacements: 0, balanceDue: 0 };
+  for (const row of rows) {
+    const retained = Number(row.depositRetainedAmount ?? 0);
+    const replacements = round2(
+      row.serviceDetails.reduce(
+        (sum, line) => sum + Number(line.replacementPrice ?? 0) * line.damagedQuantity,
+        0,
+      ),
+    );
+    const money = computeSettlementMoney(
+      computeDepositTotal(row.serviceDetails),
+      retained,
+      replacements,
+    );
+    month.refunded = round2(month.refunded + money.refundAmount);
+    month.retained = round2(month.retained + retained);
+    month.replacements = round2(month.replacements + replacements);
+    month.balanceDue = round2(month.balanceDue + money.balanceDue);
+  }
+  return month;
 }
 
 /** Money rounded to cents — repeated float addition otherwise surfaces as `1234.5600000000002`. */

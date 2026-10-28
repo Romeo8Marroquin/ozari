@@ -959,6 +959,23 @@ export const schemas: Record<string, Schema> = {
       at: { type: "string", format: "date-time" },
     },
   },
+  OrderDepositHistoryEntry: {
+    type: "object",
+    description:
+      "One entry of the security deposit's append-only trail: RECORDED (first settlement), " +
+      "CORRECTED (a later edit) or UNDONE. The money is the outcome as recorded at that moment " +
+      "(absent on UNDONE). Deleted together with the order.",
+    properties: {
+      id: { type: "integer", example: 1 },
+      kind: { type: "string", enum: ["RECORDED", "CORRECTED", "UNDONE"], example: "RECORDED" },
+      depositTotal: { type: "number", nullable: true, example: 200 },
+      claimsTotal: { type: "number", nullable: true, example: 0 },
+      refundAmount: { type: "number", nullable: true, example: 200 },
+      balanceDue: { type: "number", nullable: true, example: 0 },
+      byUserName: { type: "string", example: "Romeo Marroquín" },
+      at: { type: "string", format: "date-time" },
+    },
+  },
   OrderDetail: {
     description:
       "The full order: the list-item fields plus the decrypted contact/address SNAPSHOTS " +
@@ -1020,6 +1037,7 @@ export const schemas: Record<string, Schema> = {
           extras: { type: "array", items: schemaRef("OrderExtra") },
           securityDeposit: { allOf: [schemaRef("OrderSecurityDeposit")], nullable: true },
           statusHistory: { type: "array", items: schemaRef("OrderStatusChange") },
+          depositHistory: { type: "array", items: schemaRef("OrderDepositHistoryEntry") },
           createdAt: { type: "string", format: "date-time" },
         },
       },
@@ -1668,6 +1686,33 @@ export const schemas: Record<string, Schema> = {
                 name: { type: "string", example: "Pendiente" },
                 colorKey: { type: "string", nullable: true, example: "amber" },
                 count: { type: "integer", example: 6 },
+              },
+            },
+          },
+          deposits: {
+            type: "object",
+            description:
+              "The security-deposit corner: delivered orders whose deposit is still open (same " +
+              "predicate as the list's `depositSettlementPending`; `items` = the oldest deliveries, " +
+              "capped at 5) and the outcome of settlements first recorded this month.",
+            properties: {
+              pending: {
+                type: "object",
+                properties: {
+                  orders: { type: "integer", example: 2 },
+                  amount: { type: "number", example: 400 },
+                  items: { type: "array", items: schemaRef("OrderListItem") },
+                },
+              },
+              month: {
+                type: "object",
+                properties: {
+                  settled: { type: "integer", example: 4 },
+                  refunded: { type: "number", example: 520 },
+                  retained: { type: "number", example: 30 },
+                  replacements: { type: "number", example: 120 },
+                  balanceDue: { type: "number", example: 40 },
+                },
               },
             },
           },

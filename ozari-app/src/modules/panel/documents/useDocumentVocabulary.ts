@@ -2,12 +2,37 @@ import { useTranslation } from 'react-i18next';
 import { usePreferences } from '../preferences/usePreferences';
 import { readLetterhead } from './documentModel';
 import type { DocumentBankAccount, DocumentKind, DocumentLetterhead } from './documentModel';
-import type { DocumentCopy } from './OrderDocument';
+import type { DamageReportCopy, DocumentChromeCopy, DocumentCopy } from './OrderDocument';
 
 const KEY = 'modules.panel.documents';
 
+type Translate = ReturnType<typeof useTranslation>['t'];
+
+/** The words every document's frame and shared blocks print — ONE source, so the comprobante and
+ *  the damage report cannot label the same card, column or page number differently. */
+function chromeCopy(t: Translate, title: string): DocumentChromeCopy {
+  return {
+    title,
+    reference: t(`${KEY}.fields.reference`),
+    issuedAt: t(`${KEY}.fields.issuedAt`),
+    phonePrefix: t(`${KEY}.fields.phonePrefix`),
+    clientCard: t(`${KEY}.fields.clientCard`),
+    clientName: t(`${KEY}.fields.clientName`),
+    contact: t(`${KEY}.fields.contact`),
+    address: t(`${KEY}.fields.address`),
+    eventCard: t(`${KEY}.fields.eventCard`),
+    eventType: t(`${KEY}.fields.eventType`),
+    delivery: t(`${KEY}.fields.delivery`),
+    pickup: t(`${KEY}.fields.pickup`),
+    columnQuantity: t(`${KEY}.columns.quantity`),
+    columnLineTotal: t(`${KEY}.columns.lineTotal`),
+    banks: t(`${KEY}.fields.banks`),
+    page: (page, total) => t(`${KEY}.fields.page`, { page, total }),
+  };
+}
+
 /**
- * The vocabulary and the letterhead both documents share.
+ * The vocabulary and the letterhead every document shares.
  *
  * Extracted the moment there were two callers (2026-08-26). "One template, so the two documents can
  * never drift into looking like different companies" (EPIC-2-DOCUMENTS §4) is only half true while
@@ -20,22 +45,11 @@ const KEY = 'modules.panel.documents';
 export function useDocumentCopy(kind: DocumentKind): DocumentCopy {
   const { t } = useTranslation();
   return {
-    title: t(`${KEY}.${kind === 'quote' ? 'quote' : 'receipt'}.title`),
-    reference: t(`${KEY}.fields.reference`),
-    issuedAt: t(`${KEY}.fields.issuedAt`),
+    ...chromeCopy(t, t(`${KEY}.${kind === 'quote' ? 'quote' : 'receipt'}.title`)),
     validUntil: t(`${KEY}.fields.validUntil`),
     paid: t(`${KEY}.fields.paid`),
     quoteNotice: t(`${KEY}.notices.quote`),
     termsNotice: t(`${KEY}.notices.terms`),
-    phonePrefix: t(`${KEY}.fields.phonePrefix`),
-    clientCard: t(`${KEY}.fields.clientCard`),
-    clientName: t(`${KEY}.fields.clientName`),
-    contact: t(`${KEY}.fields.contact`),
-    address: t(`${KEY}.fields.address`),
-    eventCard: t(`${KEY}.fields.eventCard`),
-    eventType: t(`${KEY}.fields.eventType`),
-    delivery: t(`${KEY}.fields.delivery`),
-    pickup: t(`${KEY}.fields.pickup`),
     billedDays: t(`${KEY}.fields.billedDays`),
     // Pluralised through i18next rather than by appending a unit: "1 días" is the kind of slip that
     // makes a client wonder what else on the page was assembled by string concatenation.
@@ -44,11 +58,9 @@ export function useDocumentCopy(kind: DocumentKind): DocumentCopy {
     groupRental: t(`${KEY}.groups.rental`),
     groupSale: t(`${KEY}.groups.sale`),
     columnDescription: t(`${KEY}.columns.description`),
-    columnQuantity: t(`${KEY}.columns.quantity`),
     columnDays: t(`${KEY}.columns.days`),
     columnDailyPrice: t(`${KEY}.columns.dailyPrice`),
     columnUnitPrice: t(`${KEY}.columns.unitPrice`),
-    columnLineTotal: t(`${KEY}.columns.lineTotal`),
     subtotal: t(`${KEY}.totals.subtotal`),
     deliveryFee: t(`${KEY}.totals.delivery`),
     deliveryIncludesReturn: t(`${KEY}.totals.deliveryIncludesReturn`),
@@ -58,10 +70,10 @@ export function useDocumentCopy(kind: DocumentKind): DocumentCopy {
     total: t(`${KEY}.totals.total`),
     deposit: t(`${KEY}.totals.deposit`),
     balance: t(`${KEY}.totals.balance`),
-    guaranteeHeld: t(`${KEY}.securityDeposit.held`),
-    guaranteeHeldNote: t(`${KEY}.securityDeposit.heldNote`),
-    guaranteeRefunded: t(`${KEY}.securityDeposit.refunded`),
-    guaranteeRefundedNote: t(`${KEY}.securityDeposit.refundedNote`),
+    depositHeld: t(`${KEY}.securityDeposit.held`),
+    depositHeldNote: t(`${KEY}.securityDeposit.heldNote`),
+    depositRefunded: t(`${KEY}.securityDeposit.refunded`),
+    depositRefundedNote: t(`${KEY}.securityDeposit.refundedNote`),
     settlementTitle: t(`${KEY}.securityDeposit.settlementTitle`),
     settlementRetention: t(`${KEY}.securityDeposit.retention`),
     settlementReplacement: (product) => t(`${KEY}.securityDeposit.replacement`, { product }),
@@ -73,16 +85,46 @@ export function useDocumentCopy(kind: DocumentKind): DocumentCopy {
     settlementRefund: t(`${KEY}.securityDeposit.refund`),
     settlementRefundNote: (amount) => t(`${KEY}.securityDeposit.refundNote`, { amount }),
     conditions: t(`${KEY}.fields.conditions`),
-    banks: t(`${KEY}.fields.banks`),
-    page: (page, total) => t(`${KEY}.fields.page`, { page, total }),
+  };
+}
+
+/**
+ * The damage report's vocabulary (EPIC-2-DOCUMENTS §2c) — the shared frame words plus its own.
+ * The client's word is "Depósito", never "garantía" or "liquidación" (owner, 2026-10-27).
+ */
+export function useDamageReportCopy(): DamageReportCopy {
+  const { t } = useTranslation();
+  const report = `${KEY}.damageReport`;
+  return {
+    ...chromeCopy(t, t(`${report}.title`)),
+    draftMark: t(`${report}.draftMark`),
+    settledAt: t(`${report}.settledAt`),
+    depositTitle: t(`${report}.depositTitle`),
+    columnProduct: t(`${report}.columns.product`),
+    columnDepositEach: t(`${report}.columns.depositEach`),
+    retentionTitle: t(`${report}.retentionTitle`),
+    retentionNoReason: t(`${report}.retentionNoReason`),
+    replacementsTitle: t(`${report}.replacementsTitle`),
+    columnUnits: t(`${report}.columns.units`),
+    columnReplacementEach: t(`${report}.columns.replacementEach`),
+    noClaims: t(`${report}.noClaims`),
+    claimsTotal: t(`${report}.totals.claims`),
+    claimsBreakdown: (retained, damages) =>
+      t(`${report}.totals.claimsBreakdown`, { retained, damages }),
+    refundNote: (amount) => t(`${report}.totals.refundNote`, { amount }),
+    applied: t(`${report}.totals.applied`),
+    refund: t(`${report}.totals.refund`),
+    balanceDue: t(`${report}.totals.balanceDue`),
+    payTitle: t(`${report}.payTitle`),
+    payLead: t(`${report}.payLead`),
   };
 }
 
 /**
  * The business's letterhead, from the preferences the admin already filled in.
  *
- * That query is Admin-only and `staleTime: Infinity`, which is fine because both document actions
- * are Admin-only too. A letterhead we could not read is a THINNER document, never a broken button:
+ * That query is Admin-only and `staleTime: Infinity`, which is fine because every document action
+ * is Admin-only too. A letterhead we could not read is a THINNER document, never a broken button:
  * `readLetterhead` resolves every missing key to its empty value, and the figures — the part the
  * admin actually asked for — do not come from preferences at all.
  */

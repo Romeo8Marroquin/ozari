@@ -189,6 +189,26 @@ export interface OrderStatusHistoryResponseModel {
   at: Date;
 }
 
+/** What a deposit-history row records: the first settlement, a later correction, or its undo. */
+export type OrderDepositEventKindModel = "RECORDED" | "CORRECTED" | "UNDONE";
+
+/**
+ * One entry of the deposit's append-only trail (`service_deposit_history`) — shown beside the status
+ * history so "daños reportados" / "depósito devuelto" appear in the order's timeline. The money is the
+ * outcome AS RECORDED THEN (absent on `UNDONE`), so the entry stays true after later corrections.
+ */
+export interface OrderDepositHistoryEntryResponseModel {
+  id: number;
+  kind: OrderDepositEventKindModel;
+  depositTotal: number | undefined;
+  claimsTotal: number | undefined;
+  refundAmount: number | undefined;
+  balanceDue: number | undefined;
+  /** Decrypted full name of the user who recorded it. */
+  byUserName: string;
+  at: Date;
+}
+
 /** One tracking photo, tagged with the step it documents. */
 export interface OrderEvidenceResponseModel {
   id: number;
@@ -235,6 +255,9 @@ export interface OrderDetailResponseModel extends OrderListItemResponseModel {
   /** The refundable deposit + damage settlement; absent when no line can carry either. */
   securityDeposit: OrderSecurityDepositResponseModel | undefined;
   statusHistory: OrderStatusHistoryResponseModel[];
+  /** The deposit's trail, chronological — top-level (not inside `securityDeposit`) because an undone
+   *  settlement on an order later edited out of qualifying still has history worth showing. */
+  depositHistory: OrderDepositHistoryEntryResponseModel[];
   /** Tracking photos, each tagged with the step it documents (the detail page groups by `statusId`).
    *  Absent entries are normal: a rewound step drops its photos, and old evidence is purged by the
    *  retention policy — the step is still proven by its history row. */

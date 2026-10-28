@@ -9,11 +9,11 @@ const { toBlob, pdf } = vi.hoisted(() => {
   return { toBlob, pdf: vi.fn<(element: unknown) => { toBlob: typeof toBlob }>(() => ({ toBlob })) };
 });
 vi.mock('@react-pdf/renderer', () => ({ pdf }));
-vi.mock('./OrderDocument', () => ({ default: () => null }));
+vi.mock('./OrderDocument', () => ({ default: () => null, DamageReportDocument: () => null }));
 
-import { downloadDocument } from './downloadDocument';
-import type { DocumentModel } from './documentModel';
-import type { DocumentCopy } from './OrderDocument';
+import { downloadDamageReport, downloadDocument } from './downloadDocument';
+import type { DamageReportModel, DocumentModel } from './documentModel';
+import type { DamageReportCopy, DocumentCopy } from './OrderDocument';
 
 const model = {
   kind: 'receipt',
@@ -77,6 +77,20 @@ describe('downloadDocument', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('renders the DAMAGE REPORT through the same machinery, under its own name', async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const report = { reference: 42, draft: true } as unknown as DamageReportModel;
+    await downloadDamageReport({ ...input, model: report, copy: {} as DamageReportCopy });
+    const element = pdf.mock.calls[0]?.[0] as unknown as { props: Record<string, unknown> };
+    // The report's own model reaches the template — not a comprobante's.
+    expect(element.props['model']).toBe(report);
+    expect(element.props['money']).toBe(input.money);
+    // A draft says so in its file name, so it cannot pass for the recorded statement.
+    const anchor = click.mock.instances[0] as HTMLAnchorElement;
+    expect(anchor.download).toBe('reporte-danos-ped-00042-borrador.pdf');
+    click.mockRestore();
   });
 
   it('passes the model and the caller’s formatters through to the template', async () => {

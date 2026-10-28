@@ -169,6 +169,9 @@ describe('OrderDocumentButton', () => {
       `${KEY}.securityDeposit.replacementDetail`,
     );
     expect(input.copy.settlementRefundNote('$ 500.00')).toBe(`${KEY}.securityDeposit.refundNote`);
+    // The owner's word is "Depósito" — the copy leaves are the deposit ones, never a "garantía".
+    expect(input.copy.depositHeld).toBe(`${KEY}.securityDeposit.held`);
+    expect(input.copy.settlementTitle).toBe(`${KEY}.securityDeposit.settlementTitle`);
   });
 
   it('carries the security deposit through to the document', async () => {

@@ -20,7 +20,7 @@ export interface SettleOrderVariables {
  *
  * Cache handling mirrors `usePayOrder` exactly, including the reason the DASHBOARD is **cancelled**
  * before it is invalidated: it polls, and a read issued a moment before the save would otherwise land
- * after it and paint the old state back. The agenda re-reads too — its "garantía por liquidar" chip
+ * after it and paint the old state back. The agenda re-reads too — its "Depósito pendiente" chip
  * is derived from this record.
  */
 export function useSettleOrder() {

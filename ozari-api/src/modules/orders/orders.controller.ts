@@ -952,6 +952,7 @@ export const deleteOrder = async (
       // Children first — every one of these rows exists only because this order did.
       await tx.serviceEvidence.deleteMany({ where: { serviceId: id } });
       await tx.serviceStatusHistory.deleteMany({ where: { serviceId: id } });
+      await tx.serviceDepositHistory.deleteMany({ where: { serviceId: id } });
       await tx.serviceDetail.deleteMany({ where: { serviceId: id } });
       await tx.serviceExtra.deleteMany({ where: { serviceId: id } });
       await tx.service.delete({ where: { id } });
