@@ -38,16 +38,70 @@ export interface ProductImageUploadsResponseModel {
   uploads: ProductImageUploadResponseModel[];
 }
 
+/**
+ * One photo slot of a VARIATION set (an option value's photos) — the update gallery's shape: exactly
+ * one of `id` (a kept photo of this product, from ANY set — a photo may move between sets) or `key`
+ * (a new upload). On create every slot carries a `key` (ids are forbidden). Sanitized: `isPrimary`
+ * resolved (exactly one true per non-empty set).
+ */
+export interface ProductVariationImageRequestModel {
+  id?: number;
+  key?: string;
+  isPrimary?: boolean;
+}
+
+/** One value of an option ("Rojo"). `key` is the client-minted handle variants reference it by. */
+export interface ProductOptionValueRequestModel {
+  /** Update only: a kept value of THIS option (moving a value between options is a 400). */
+  id?: number;
+  key: string;
+  name: string;
+  images: ProductVariationImageRequestModel[];
+}
+
+/** One option ("Color"); array order = `sortOrder` (label order AND photo precedence). */
+export interface ProductOptionRequestModel {
+  /** Update only: a kept option of THIS product. */
+  id?: number;
+  name: string;
+  values: ProductOptionValueRequestModel[];
+}
+
+/**
+ * One OFFERED combination. `valueKeys` holds exactly one value key per option — sanitized into
+ * option order. Overrides follow the product's business type (Alquiler: rent/replacement/deposit;
+ * Venta: sell); absent = inherit the product's value. A deposit of 0 = explicitly none.
+ */
+export interface ProductVariantRequestModel {
+  /** Update only: an ACTIVE variant of this product (its stock and holds carry over). */
+  id?: number;
+  valueKeys: string[];
+  quantity: number;
+  rentPrice: number | undefined;
+  sellPrice: number | undefined;
+  replacementPrice: number | undefined;
+  securityDeposit: number | undefined;
+  description: string | undefined;
+  isDefault: boolean;
+}
+
 export interface CreateProductRequestModel {
   businessTypeId: number;
   categoryId: number;
   currencyId: number;
   description: string | undefined;
-  /** Sanitized by the validator: every `isPrimary` resolved (exactly one true when non-empty). */
+  /** Sanitized by the validator: every `isPrimary` resolved (exactly one true when non-empty).
+   *  The product's SHOWCASE photos only — value photos travel inside `options`. */
   images: CreateProductImageRequestModel[];
   name: string;
   productDetails: CreateProductDetailRequestModel[];
+  /** The product's stock when it has NO variations; resolved to 0 by the validator when it has
+   *  (the request must then omit it — `quantityWithVariants`), whose stock lives on each variant. */
   quantity: number;
+  /** Variation axes, in order; empty = a product without variations. */
+  options: ProductOptionRequestModel[];
+  /** The offered combinations — empty exactly when `options` is. */
+  variants: ProductVariantRequestModel[];
   /** Required when `businessTypeId` = Alquiler; forbidden for Venta (see the conditional price rule). */
   rentPrice: number | undefined;
   /** The period the rent price is quoted against — required with `rentPrice`, forbidden for Venta. */
@@ -110,6 +164,67 @@ export interface ProductImageResponseModel {
   sortOrder: number;
 }
 
+/** One value of an option as projected (its photo set in display order). */
+export interface ProductOptionValueResponseModel {
+  id: number;
+  name: string;
+  sortOrder: number;
+  images: ProductImageResponseModel[];
+}
+
+/** One variation axis as projected, values in their order. */
+export interface ProductOptionResponseModel {
+  id: number;
+  name: string;
+  sortOrder: number;
+  values: ProductOptionValueResponseModel[];
+}
+
+/** The raw override columns of a variant (Admin only) — what the edit form prefills; absent = inherit. */
+export interface ProductVariantOverridesModel {
+  rentPrice?: number | undefined;
+  sellPrice?: number | undefined;
+  replacementPrice?: number | undefined;
+  securityDeposit?: number | undefined;
+  description?: string | undefined;
+}
+
+/** How order lines use a variant (Admin only, detail + PUT): every line, and the HOLDING ones. */
+export interface ProductVariantUsageModel {
+  lines: number;
+  holding: number;
+}
+
+/**
+ * One ACTIVE variant as projected, with EFFECTIVE values (its override, else the product's).
+ * `label` is its values' names in option order ("Rojo · Redondo"). Exactly one variant of a product
+ * has `isDefault: true` (the flagged one, else the first in canonical order).
+ */
+export interface ProductVariantResponseModel {
+  id: number;
+  valueIds: number[];
+  label: string;
+  isDefault: boolean;
+  rentPrice?: number | undefined;
+  sellPrice?: number | undefined;
+  securityDeposit?: number | undefined;
+  description?: string | undefined;
+  /** Its first value (in option order) with photos gives its primary; else the showcase primary. */
+  imageUrl?: string | undefined;
+  /** Admin only — the variant's own stock and availability (same rules as a product's). */
+  quantity?: number;
+  available?: number;
+  inStock?: boolean;
+  /** Admin only, Alquiler only. */
+  total?: number;
+  /** Admin only — effective replacement value. */
+  replacementPrice?: number | undefined;
+  /** Admin only — the raw override columns. */
+  overrides?: ProductVariantOverridesModel;
+  /** Admin only, `GET /products/:id` + the PUT response only. */
+  usage?: ProductVariantUsageModel;
+}
+
 /**
  * A product as returned by the list endpoint. The "catalog" fields are visible to every role; the
  * `inStock`/`available`/`total`/`replacementPrice`/`isActive` fields are **role-gated** — present
@@ -136,9 +251,17 @@ export interface ProductListItemResponseModel {
   /** Refundable security deposit per unit (Alquiler only; absent when the product asks none). A
    *  public commercial condition like the price — every role sees it, unlike `replacementPrice`. */
   securityDeposit: number | undefined;
+  /** The product's SHOWCASE photos only (value photos live under `options[].values[].images`). */
   images: ProductImageResponseModel[];
+  /** The photo a card/tile shows: the showcase primary, else the DEFAULT variant's image, else absent. */
+  coverImageUrl?: string | undefined;
+  /** Variation axes in order — empty for a product without variations. */
+  options: ProductOptionResponseModel[];
+  /** ACTIVE variants in canonical order (option order, then value order) — empty without variations. */
+  variants: ProductVariantResponseModel[];
   details: BaseProductDetailsResponseModel[];
-  /** Availability signal (Admin only) — derived: `available > 0`. */
+  /** Availability signal (Admin only) — derived: `available > 0`. For a product WITH variants every
+   *  stock figure (`inStock`/`available`/`total`) is the Σ over its active variants. */
   inStock?: boolean;
   /**
    * Units takeable RIGHT NOW (Admin only). Venta: the recorded stock (sales decrement it).
@@ -207,6 +330,30 @@ export interface ProductListResponseModel {
 /** `GET /products/:id` — the same role-projected shape as a list item, single row. */
 export interface ProductDetailResponseModel {
   product: ProductListItemResponseModel;
+}
+
+/** What a `PUT /products/:id` did to the variants that left the body (NO-TRASH, reported — the UI
+ *  never guesses): `retired` were referenced by order history and tombstoned; `deleted` hard-deleted. */
+export interface ProductVariantOutcomeModel {
+  retired: { id: number; label: string }[];
+  deleted: number;
+}
+
+/** `PUT /products/:id` — the projected product, plus `variantOutcome` when any variant was removed. */
+export interface UpdateProductResponseModel extends ProductListItemResponseModel {
+  variantOutcome?: ProductVariantOutcomeModel;
+}
+
+/** `DELETE /products/:id` — which NO-TRASH branch happened (order history keeps a deactivated row). */
+export interface DeleteProductResponseModel {
+  outcome: "deleted" | "deactivated";
+}
+
+/** One variant whose removal is blocked by HOLDING order lines (409 `variantInUse`). */
+export interface ProductVariantConflictModel {
+  variantId: number;
+  label: string;
+  orderIds: number[];
 }
 
 /**

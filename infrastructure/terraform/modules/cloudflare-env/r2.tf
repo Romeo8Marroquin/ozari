@@ -25,17 +25,35 @@ resource "cloudflare_r2_bucket_cors" "assets" {
   account_id  = var.account_id
   bucket_name = cloudflare_r2_bucket.assets.name
 
-  rules = [{
-    id = "browser-presigned-uploads"
-    allowed = {
-      # PUT only. Public reads are plain <img> tags, which are not CORS requests and need nothing
-      # here; add GET only if something ever has to `fetch` an image from the app origin.
-      methods = ["PUT"]
-      origins = var.r2_cors_allowed_origins
-      headers = ["content-type"]
-    }
-    max_age_seconds = 3600
-  }]
+  rules = [
+    {
+      id = "browser-presigned-uploads"
+      allowed = {
+        # PUT only — the uploads. Reads have their own rule below.
+        methods = ["PUT"]
+        origins = var.r2_cors_allowed_origins
+        headers = ["content-type"]
+      }
+      max_age_seconds = 3600
+    },
+    {
+      # The printed documents FETCH each row's product photo (ozari-app `documentImages.ts`) to
+      # re-encode it for react-pdf, which reads neither WebP nor AVIF — a CORS request, unlike the
+      # catalog's plain <img> tags. Without this rule the PDFs still generate, without photos.
+      #
+      # Any origin, deliberately: every object here is already public (a plain GET with no Origin
+      # header returns it), no credentials are involved, so a CORS allowlist on a read protects
+      # nothing. And a wildcard is what keeps the EDGE CACHE honest: R2 echoes a matching origin,
+      # so a response cached for one origin (localhost on staging) could be served to another and
+      # fail there; `*` is the same answer for everyone.
+      id = "public-reads"
+      allowed = {
+        methods = ["GET", "HEAD"]
+        origins = ["*"]
+      }
+      max_age_seconds = 3600
+    },
+  ]
 }
 
 # Public reads come from a brand hostname, in every environment. It is cached at the edge, it is

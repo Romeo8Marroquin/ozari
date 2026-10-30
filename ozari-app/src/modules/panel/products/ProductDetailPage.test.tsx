@@ -218,6 +218,24 @@ describe('ProductDetailPage', () => {
     expect(document.querySelectorAll('[data-morph-id="7"] img')).toHaveLength(1);
   });
 
+  it('frames the hero in the grid card’s 3:4 and shows the WHOLE photo — the skeleton wears the same frame', () => {
+    setProduct({ data: undefined, isLoading: true, isFetching: true });
+    const { rerender } = renderPage();
+    // The cold-load placeholder is the real frame, so nothing jumps when the data lands.
+    expect(document.querySelector('[role="status"] .aspect-\\[3\\/4\\]')).not.toBeNull();
+
+    setProduct({ data: base });
+    rerender(<ProductDetailPage />);
+    const frame = document.querySelector<HTMLElement>('[data-morph-id="7"]')!;
+    expect(frame.className).toContain('aspect-[3/4]');
+    // Never cropped: contained (letterboxed on the frame's white), never covered.
+    const hero = screen.getByTestId('product-hero-image');
+    expect(hero.className).toContain('object-contain');
+    expect(hero.className).not.toContain('object-cover');
+    // The frame and its thumbnails share ONE capped, centred column (fits the viewport at lg).
+    expect(frame.parentElement!.className).toContain('max-w-[max(14rem,calc((100svh_-_12rem)*0.75))]');
+  });
+
   it('keeps the share control MOUNTED through the skeleton (row sized, inert) and fades it in with the data', () => {
     setProduct({ data: undefined, isLoading: true, isFetching: true });
     const { rerender } = renderPage();
@@ -566,5 +584,115 @@ describe('ProductDetailPage', () => {
     const { registeredMotion } = renderPage();
     await expect(registeredMotion()!.exit()).resolves.toBeUndefined();
     expect(() => registeredMotion()!.enter({ fromCurrent: true })).not.toThrow();
+  });
+});
+
+describe('ProductDetailPage — variations', () => {
+  const photo = (id: number, name: string) => ({
+    id,
+    url: `https://cdn/${name}.webp`,
+    isPrimary: true,
+    sortOrder: 0,
+  });
+  const withVariations: Product = {
+    ...base,
+    options: [
+      {
+        id: 1,
+        name: 'Color',
+        sortOrder: 0,
+        values: [
+          { id: 1, name: 'Rojo', sortOrder: 0, images: [photo(31, 'rojo')] },
+          { id: 2, name: 'Azul', sortOrder: 1, images: [] },
+        ],
+      },
+      {
+        id: 2,
+        name: 'Tamaño',
+        sortOrder: 1,
+        values: [
+          { id: 3, name: 'Redondo', sortOrder: 0, images: [photo(32, 'redondo')] },
+          { id: 4, name: 'Cuadrado', sortOrder: 1, images: [] },
+        ],
+      },
+    ],
+    variants: [
+      {
+        id: 10,
+        valueIds: [1, 3],
+        label: 'Rojo · Redondo',
+        isDefault: true,
+        rentPrice: 90,
+        securityDeposit: 0,
+        replacementPrice: 400,
+        description: 'Mantel rojo para mesa redonda',
+        available: 3,
+        total: 5,
+        inStock: true,
+      },
+      { id: 11, valueIds: [2, 3], label: 'Azul · Redondo', isDefault: false, rentPrice: 60 },
+    ],
+  };
+  const chip = (name: string) => screen.getByRole('button', { name });
+  const hero = () => screen.queryByTestId('product-hero-image');
+
+  it('opens on the showcase, priced "Desde" its lowest variation, asking for the picks', () => {
+    setProduct({ data: withVariations });
+    renderPage();
+    expect(hero()).toHaveAttribute('src', 'https://cdn/a.webp');
+    expect(screen.getByText(`${K}.card.priceFrom`)).toBeInTheDocument();
+    expect(screen.getAllByRole('group', { name: `${D}.options` })).toHaveLength(2);
+    expect(screen.getByText(`${D}.pickHint`)).toBeInTheDocument();
+  });
+
+  it("a pick shows that value's photos; picking it again goes back to the showcase", async () => {
+    setProduct({ data: withVariations });
+    renderPage();
+    await userEvent.click(chip('Rojo'));
+    expect(chip('Rojo')).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(hero()).toHaveAttribute('src', 'https://cdn/rojo.webp'));
+
+    // Azul has no photos of its own (and nothing else is picked) → the showcase.
+    await userEvent.click(chip('Azul'));
+    await waitFor(() => expect(hero()).toHaveAttribute('src', 'https://cdn/a.webp'));
+    // Un-picking Azul keeps the same set — nothing to crossfade.
+    await userEvent.click(chip('Azul'));
+    expect(chip('Azul')).toHaveAttribute('aria-pressed', 'false');
+    expect(hero()).toHaveAttribute('src', 'https://cdn/a.webp');
+  });
+
+  it('a complete pick speaks for THAT variation: price, deposit, replacement, stock, description', async () => {
+    useRole.mockReturnValue(Role.Admin);
+    setProduct({ data: { ...withVariations, available: 9, total: 12, replacementPrice: 500 } });
+    renderPage();
+    await userEvent.click(chip('Rojo'));
+    await userEvent.click(chip('Redondo'));
+
+    expect(screen.getByText('Rojo · Redondo')).toBeInTheDocument();
+    expect(screen.getByText('Q90 / Día')).toBeInTheDocument();
+    // A deposit override of 0 is the variation's own value — never the product's.
+    expect(screen.getByText('Q0')).toBeInTheDocument();
+    expect(screen.getByText('Q400')).toBeInTheDocument();
+    expect(screen.getByText(`${K}.stock.countOfTotal`)).toBeInTheDocument();
+    expect(screen.getByText('Mantel rojo para mesa redonda')).toBeInTheDocument();
+  });
+
+  it('says a combination is not offered, and mutes the values that lead nowhere', async () => {
+    setProduct({ data: withVariations });
+    renderPage();
+    await userEvent.click(chip('Rojo'));
+    expect(chip('Cuadrado').className).toContain('opacity-45');
+    expect(chip('Redondo').className).not.toContain('opacity-45');
+    await userEvent.click(chip('Cuadrado'));
+    expect(screen.getByText(`${D}.notOffered`)).toBeInTheDocument();
+  });
+
+  it("opens without a showcase on the default variation's photos (the grid's cover)", async () => {
+    setProduct({ data: { ...withVariations, images: [] } });
+    renderPage();
+    expect(hero()).toHaveAttribute('src', 'https://cdn/rojo.webp');
+    // Azul alone has no photos and there is no showcase → the brand mark (no ghost left behind).
+    await userEvent.click(chip('Azul'));
+    expect(hero()).not.toBeInTheDocument();
   });
 });

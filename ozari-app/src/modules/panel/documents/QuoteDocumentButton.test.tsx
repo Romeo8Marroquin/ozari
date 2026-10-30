@@ -43,6 +43,7 @@ const product = {
   rentTimeUnitId: 2,
   rentPrice: 10,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
+  images: [],
 } as unknown as Product;
 
 const values = {

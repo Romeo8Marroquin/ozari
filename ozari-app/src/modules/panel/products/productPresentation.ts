@@ -1,4 +1,5 @@
 import type { Product } from './product.types';
+import { variantPriceRange } from './productVariations';
 
 /**
  * Display helpers for a product tile. Pure formatting only — the role→field decisions live in the
@@ -25,6 +26,26 @@ export function formatProductPrice(product: Product): string | null {
     return formatMoney(sellPrice, currency.symbol);
   }
   return null;
+}
+
+/**
+ * The headline price with variations taken into account (their prices arrive EFFECTIVE): one shared
+ * variation price shows plainly, differing ones show the LOWEST with `from: true` (the caller words
+ * it "Desde Q50 / Día"). Without variations it is `formatProductPrice`. `null` = nothing to show.
+ */
+export function formatHeadlinePrice(product: Product): { price: string; from: boolean } | null {
+  const range = variantPriceRange(product);
+  if (!range) {
+    const price = formatProductPrice(product);
+    return price === null ? null : { price, from: false };
+  }
+  // A variation carries its type's price only, and so does the product — the side it has is the
+  // side the lowest price goes on (a rental keeps its period).
+  const lowest =
+    product.rentPrice !== undefined
+      ? (formatProductPrice({ ...product, rentPrice: range.min }) as string)
+      : formatMoney(range.min, product.currency.symbol);
+  return { price: lowest, from: range.min !== range.max };
 }
 
 /**

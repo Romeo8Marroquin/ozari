@@ -33,6 +33,21 @@ describe('useGalleryImages — adding', () => {
     expect(result.current.isFull).toBe(false);
   });
 
+  it("caps a set at its OWN maxCount (an option value's 4 photos)", () => {
+    const { result } = renderHook(() => useGalleryImages(undefined, { maxCount: 2 }));
+    act(() =>
+      result.current.addFiles([
+        makeFile('a.png'),
+        makeFile('b.png', { lastModified: 2 }),
+        makeFile('c.png', { lastModified: 3 }),
+      ]),
+    );
+    expect(result.current.images).toHaveLength(2);
+    expect(result.current.maxCount).toBe(2);
+    expect(result.current.isFull).toBe(true);
+    expect(result.current.error).toBe(`${KEY}.tooMany`);
+  });
+
   it('ignores an empty selection', () => {
     const { result } = renderHook(() => useGalleryImages());
     act(() => result.current.addFiles([]));

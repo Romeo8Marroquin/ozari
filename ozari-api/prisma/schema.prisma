@@ -384,8 +384,96 @@ model Product {
   productDetails ProductDetail[]
   productImages  ProductImage[]
   serviceDetails ServiceDetail[]
+  // VARIATIONS (owner 2026-10-29, EPIC-1-INVENTORY §6): generic options ("Color", "Tamaño") with
+  // their values, and the OFFERED combinations as variants with their OWN stock. A product WITH
+  // active variants keeps `quantity = 0` and never reads it for availability (Σ variants instead).
+  // Deliberately no `default_variant_id` FK: circular, and the default is a flag on the variant.
+  options        ProductOption[]
+  variants       ProductVariant[]
 
   @@map("products")
+}
+
+// One axis of a product's variations ("Color", "Tamaño"). An ATTRIBUTE row (NO-TRASH: hard-deleted
+// when it leaves the product — history reads the line's `variantLabel` snapshot, never this row).
+// `sortOrder` is the array order the admin gave it: the label order AND the photo precedence (the
+// first option whose value has photos wins). No DB uniqueness on names/sortOrder — the validator
+// enforces normalized uniqueness per product.
+model ProductOption {
+  id        Int       @id @default(autoincrement())
+  productId Int       @map("product_id")
+  name      String
+  sortOrder Int       @map("sort_order")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  product Product              @relation(fields: [productId], references: [id])
+  values  ProductOptionValue[]
+
+  @@index([productId])
+  @@map("product_options")
+}
+
+// One value of an option ("Rojo", "Redondo"), with its OWN photo set (`product_images.option_value_id`).
+// An attribute row like its option: deleting it cascades its join rows (a tombstoned variant loses
+// that link; its lines keep their `variantLabel`).
+model ProductOptionValue {
+  id        Int       @id @default(autoincrement())
+  optionId  Int       @map("option_id")
+  name      String
+  sortOrder Int       @map("sort_order")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  option        ProductOption         @relation(fields: [optionId], references: [id])
+  images        ProductImage[]
+  variantValues ProductVariantValue[]
+
+  @@index([optionId])
+  @@map("product_option_values")
+}
+
+// One OFFERED combination of a product's option values, with its own stock and optional price/
+// deposit/replacement/description OVERRIDES (NULL = inherit the product's; a deposit of 0 =
+// explicitly none). `combinationKey` is SERVER-BUILT: the sorted value ids ("12.34") while active,
+// `retired:<id>` once tombstoned — so a retired combination can be offered again as a NEW row.
+// The only variation row that TOMBSTONES (NO-TRASH): order lines reference it.
+model ProductVariant {
+  id               Int       @id @default(autoincrement())
+  productId        Int       @map("product_id")
+  combinationKey   String    @map("combination_key")
+  rentPrice        Decimal?  @map("rent_price") @db.Decimal(15, 2)
+  sellPrice        Decimal?  @map("sell_price") @db.Decimal(15, 2)
+  replacementPrice Decimal?  @map("replacement_price") @db.Decimal(15, 2)
+  securityDeposit  Decimal?  @map("security_deposit") @db.Decimal(15, 2)
+  description      String?
+  // OWN stock: the rental fleet of this combination, or its shelf for a sale (sales decrement it).
+  quantity         Int
+  isDefault        Boolean   @default(false) @map("is_default")
+  isActive         Boolean   @default(true) @map("is_active")
+  updatedAt        DateTime? @updatedAt @map("updated_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  product        Product               @relation(fields: [productId], references: [id])
+  values         ProductVariantValue[]
+  serviceDetails ServiceDetail[]
+
+  @@unique([productId, combinationKey])
+  @@index([productId])
+  @@map("product_variants")
+}
+
+// Which values make up a variant (exactly one per option). Pure join rows.
+model ProductVariantValue {
+  variantId     Int @map("variant_id")
+  optionValueId Int @map("option_value_id")
+
+  variant     ProductVariant     @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  optionValue ProductOptionValue @relation(fields: [optionValueId], references: [id], onDelete: Cascade)
+
+  @@id([variantId, optionValueId])
+  @@index([optionValueId])
+  @@map("product_variant_values")
 }
 
 // A product photo stored in R2. Supersedes the retired single `Product.imageUrl`: a product has a
@@ -394,9 +482,15 @@ model Product {
 // from R2); `url` is the public read URL. **Hard-deleted, never tombstoned** (the no-trash policy,
 // owner decision 2026-07-15): a removed photo's row is deleted in the update/delete transaction and
 // its R2 object is removed post-commit — nothing references an image row, so nothing needs a flag.
+//
+// Photo SETS (variations, 2026-10-29): `optionValueId` NULL = a product SHOWCASE photo (every row
+// that existed before variations); set = a photo of that option VALUE. `productId` stays NOT NULL on
+// value photos so the delete sweep and `reconcile:images` keep working unchanged. Each set has its
+// own `sortOrder` sequence and its own single `isPrimary`.
 model ProductImage {
-  id        Int       @id @default(autoincrement())
-  productId Int       @map("product_id")
+  id            Int       @id @default(autoincrement())
+  productId     Int       @map("product_id")
+  optionValueId Int?      @map("option_value_id")
   // UNIQUE: one R2 object belongs to exactly one image row — prevents two products from sharing
   // (and later double-deleting) the same object, even if an admin replays a used key.
   r2Key     String    @unique @map("r2_key")
@@ -406,9 +500,11 @@ model ProductImage {
   updatedAt DateTime? @updatedAt @map("updated_at")
   createdAt DateTime  @default(now()) @map("created_at")
 
-  product Product @relation(fields: [productId], references: [id])
+  product     Product             @relation(fields: [productId], references: [id])
+  optionValue ProductOptionValue? @relation(fields: [optionValueId], references: [id])
 
   @@index([productId])
+  @@index([optionValueId])
   @@map("product_images")
 }
 
@@ -854,15 +950,23 @@ model ServiceDetail {
   // only by the deposit settlement (`PUT /orders/:id/settlement`); 0 = none.
   damagedQuantity  Int      @default(0) @map("damaged_quantity")
   damageNote       String?  @map("damage_note")
+  // The VARIATION ordered (variations, 2026-10-29) — NULL for a product without variants. Line
+  // identity is (productId, variantId). RESTRICT: a referenced variant is tombstoned, never deleted.
+  // `variantLabel` ("Rojo · Redondo") is a SNAPSHOT re-derived on every order save like the prices,
+  // so history reads true after the options are renamed or removed.
+  variantId    Int?      @map("variant_id")
+  variantLabel String?   @map("variant_label")
   currencyId   Int       @map("currency_id")
   isActive     Boolean   @default(true) @map("is_active")
   updatedAt    DateTime? @updatedAt @map("updated_at")
   createdAt    DateTime  @default(now()) @map("created_at")
 
-  service  Service  @relation(fields: [serviceId], references: [id])
-  product  Product  @relation(fields: [productId], references: [id])
-  currency Currency @relation(fields: [currencyId], references: [id])
+  service  Service         @relation(fields: [serviceId], references: [id])
+  product  Product         @relation(fields: [productId], references: [id])
+  variant  ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  currency Currency        @relation(fields: [currencyId], references: [id])
 
+  @@index([variantId])
   @@map("service_details")
 }
 

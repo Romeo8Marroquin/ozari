@@ -442,7 +442,7 @@ silently drifts, so it is stated once here and implemented in exactly two helper
 
 | | RENTAL units | SALE units |
 |---|---|---|
-| **How availability is known** | DERIVED, live, from the order's status (`inventoryHold`) — nothing is stored | A real column: `products.quantity`, decremented at creation |
+| **How availability is known** | DERIVED, live, from the order's status (`inventoryHold`) — nothing is stored | A real column, decremented at creation: `products.quantity`, or **`product_variants.quantity` when the line has a `variantId`** (variations, 2026-10-29) |
 | **Create** | nothing to write (the status holds it) | decrement, after the availability check |
 | **Forward / backward** | follows the status automatically (En ruta/Entregado/Recolectado hold; Listo releases) | untouched — a sale is a sale from the moment it's confirmed |
 | **Cancel** | released instantly (Cancelado holds nothing) | **restored** — the order stopped being real |
@@ -452,7 +452,19 @@ silently drifts, so it is stated once here and implemented in exactly two helper
 | **Edit** (`PUT /orders/:id`, DONE 2026-07-28) | re-checked for the new window/lines **excluding this order** — and only when its status actually holds (a finished/cancelled order reserves nothing, so its edit is pure paperwork) | the DIFFERENCE applied, up or down, and only while `holdsSaleStock` — a delivered sale is never restocked by a correction |
 
 Two rules carry the whole table: **rental availability is never written, only derived**, and **every
-point where a SALE order stops or resumes being real must move `products.quantity` exactly once**.
+point where a SALE order stops or resumes being real must move the line's stock pool exactly once**.
+
+**Where sale units live (variations, 2026-10-29).** A line's stock POOL is the `(productId,
+variantId)` pair (`stockKey`). Without a variant the units sit on `products.quantity`; with one they
+sit on **that variant's own row** (`product_variants.quantity` — a variant product's
+`products.quantity` is 0 and never read). Every write goes through ONE helper,
+`moveSaleStock(tx, { productId, variantId }, delta)`: create's decrement, the edit's deltas,
+`releaseSaleStock` and `reclaimOrderStock` all call it, so nothing else picks a column. The product row
+lock still serializes every pool of the product. Rental pools are derived per `(productId, variantId)`
+the same way (`groupBy ["productId","variantId"]`). **Reopening onto a vanished pool** — the product
+was deleted, or the line's variant has been RETIRED (tombstoned) since the cancellation — answers the
+same structured `409` with `available: 0` for that line (`poolQuantity` returns `null`), carrying its
+`variantId`/`variantLabel`. The goods cannot come back, so the order cannot either.
 
 The second rule needs one predicate, `holdsSaleStock(order)` = *not cancelled and not delivered* —
 the single answer to "would giving these back put real goods on the shelf, or invent them?". A sale

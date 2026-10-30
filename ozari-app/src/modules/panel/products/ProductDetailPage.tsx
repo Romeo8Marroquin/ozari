@@ -36,7 +36,8 @@ import ImageLightbox from '@components/ImageLightbox';
 import { scrollPanelToTop } from './productsScroll';
 import ProductsStatus from './ProductsStatus';
 import SectionReveal from './SectionReveal';
-import { formatMoney, formatProductPrice, primaryImageIndex } from './productPresentation';
+import { formatHeadlinePrice, formatMoney, primaryImageIndex } from './productPresentation';
+import { effectivePricing, matchVariant, photoSetFor, variantMatchesPicks } from './productVariations';
 import { useProduct } from './useProduct';
 import type { Product } from './product.types';
 
@@ -86,10 +87,27 @@ const StockLine: React.FC<{ product: Product }> = ({ product }) => {
   );
 };
 
-/** The shimmering placeholder for a COLD load (a deep link — arriving from the grid is cache-warm). */
+/**
+ * The gallery column: the hero's FRAME is the grid card's own 3:4 (owner, 2026-10-29) — one standard
+ * frame for a product photo across the catalog — and the photo is shown WHOLE inside it
+ * (`object-contain`), letterboxed on the frame's white, so a tall chair is never cropped and
+ * switching images never changes the layout. At the width of its column a 3:4 frame can be taller
+ * than the screen (a 492px lg column → 656px), so the WIDTH is capped from the viewport HEIGHT:
+ * `(100svh − 12rem) × 3/4` leaves room for the header, the page padding and the back row, with a
+ * 14rem floor for a landscape phone. Capping the width (never the height) is what keeps the frame
+ * 3:4 at every size, and `svh` (not `dvh`) keeps it still while a mobile URL bar slides. The
+ * thumbnails share the column, so they stay aligned under the frame. `productImageMorph`'s
+ * `estimateDetailHeroRect` mirrors these numbers.
+ */
+const PRODUCT_HERO_COLUMN = 'mx-auto w-full max-w-[max(14rem,calc((100svh_-_12rem)*0.75))]';
+
+/** The shimmering placeholder for a COLD load (a deep link — arriving from the grid is cache-warm).
+ *  Its hero block is the real frame, so nothing moves when the data lands. */
 const DetailSkeleton: React.FC = () => (
   <div className="grid gap-6 lg:grid-cols-2 lg:gap-10" aria-hidden>
-    <div className="reveal-item aspect-[4/3] animate-pulse rounded-card bg-charcoal/[0.06]" />
+    <div
+      className={`${PRODUCT_HERO_COLUMN} reveal-item aspect-[3/4] animate-pulse rounded-card bg-charcoal/[0.06]`}
+    />
     <div className="flex flex-col gap-4">
       <div className="reveal-item h-5 w-40 animate-pulse rounded-chip bg-charcoal/[0.06]" />
       <div className="reveal-item h-8 w-3/4 animate-pulse rounded-chip bg-charcoal/[0.06]" />
@@ -138,9 +156,17 @@ const ProductDetailPage: React.FC = () => {
   // sits in the gallery: images arrive in the admin's display order and the star is independent of
   // it, so the page OPENS on the primary without reordering the thumbnails around it.
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const images = useMemo(() => product?.images ?? [], [product]);
-  const activeIndex = selectedIndex ?? (product ? primaryImageIndex(product) : 0);
+  // The visitor's pick per option (option order; `null` = not picked). Picks only change WHICH
+  // photos the gallery shows and which variation's price/stock the info speaks for — the hero
+  // frame never changes.
+  const [rawPicks, setRawPicks] = useState<(number | null)[]>([]);
+  const options = useMemo(() => product?.options ?? [], [product]);
+  const picks = useMemo(() => options.map((_, index) => rawPicks[index] ?? null), [options, rawPicks]);
+  const images = useMemo(() => (product ? photoSetFor(product, picks) : []), [product, picks]);
+  const activeIndex = selectedIndex ?? primaryImageIndex({ images });
   const activeImage = images[activeIndex] ?? images[0];
+  const allPicked = options.length > 0 && picks.every((pick) => pick !== null);
+  const variant = product && allPicked ? matchVariant(product, picks) : undefined;
 
   // The full-size viewer (opens on the hero / its expand affordance, at the current image).
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -163,19 +189,47 @@ const ProductDetailPage: React.FC = () => {
     setGhostImageUrl(activeImage?.url ?? null);
     setSelectedIndex(index);
   };
+  // A pick (or un-pick — pressing the chosen value again) that brings a different photo set
+  // crossfades to the new set's primary, through the same ghost layer as a thumbnail switch.
+  const pick = (optionIndex: number, valueId: number): void => {
+    /* v8 ignore next -- the pickers only render alongside the product */
+    if (!product) return;
+    const next = picks.map((current, index) =>
+      index === optionIndex ? (current === valueId ? null : valueId) : current,
+    );
+    setRawPicks(next);
+    const nextImages = photoSetFor(product, next);
+    if (nextImages === images) return;
+    setSelectedIndex(null);
+    const incoming = nextImages[primaryImageIndex({ images: nextImages })];
+    // Only when a photo is both leaving AND arriving: the ghost needs an incoming hero to fade over.
+    if (activeImage && incoming && incoming.url !== activeImage.url) setGhostImageUrl(activeImage.url);
+  };
+  // BOTH layers tween: the photo is CONTAINED (letterboxed), so wherever the incoming photo does not
+  // reach — the sides, when a wide photo gives way to a tall one — the ghost shows through, and left
+  // at full opacity it would vanish in one frame when it unmounts. Fading it out on the same clock
+  // makes the whole frame one crossfade.
+  const ghostImage = useRef<HTMLImageElement>(null);
   useLayoutEffect(() => {
     if (!ghostImageUrl) return;
     const incoming = heroImage.current;
-    /* v8 ignore next -- a ghost only exists after a switch, when the hero img is mounted */
-    if (!incoming) return;
+    const outgoing = ghostImage.current;
+    /* v8 ignore next -- a ghost only exists after a switch, when both layers are mounted */
+    if (!incoming || !outgoing) return;
     const seconds = prefersReducedMotion() ? 0 : 0.22;
     const tween = gsap.fromTo(
       incoming,
       { autoAlpha: 0 },
       { autoAlpha: 1, duration: seconds, ease: 'power2.inOut', onComplete: () => setGhostImageUrl(null) },
     );
+    const fadeOut = gsap.fromTo(
+      outgoing,
+      { autoAlpha: 1 },
+      { autoAlpha: 0, duration: seconds, ease: 'power2.inOut', overwrite: true },
+    );
     return () => {
       tween.kill();
+      fadeOut.kill();
     };
   }, [ghostImageUrl]);
 
@@ -282,6 +336,21 @@ const ProductDetailPage: React.FC = () => {
   }, [id]);
 
   const isSell = product?.businessType === SELL_BUSINESS_TYPE;
+  // What the info column speaks for: the picked VARIATION (its values arrive effective, stock
+  // included for the Admin) once every option is picked; the product — "Desde" its lowest price —
+  // until then.
+  const shown: Product | null | undefined =
+    product && variant
+      ? {
+          ...product,
+          ...effectivePricing(product, variant),
+          available: variant.available,
+          total: variant.total,
+          inStock: variant.inStock,
+          variants: undefined,
+        }
+      : product;
+  const headline = shown ? formatHeadlinePrice(shown) : null;
 
   return (
     <div ref={root} className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6">
@@ -360,23 +429,26 @@ const ProductDetailPage: React.FC = () => {
               </div>
             }
           >
-            {product && (
+            {product && shown && (
               <div className="grid gap-6 lg:grid-cols-2 lg:gap-10">
               {/* ── Gallery ─────────────────────────────────────────────────────────────── */}
-              <div className="flex flex-col gap-3">
-                {/* The hero — the morph's TARGET (same `data-morph-id` as the card photo). */}
+              <div className={`${PRODUCT_HERO_COLUMN} flex flex-col gap-3`}>
+                {/* The hero — the morph's TARGET (same `data-morph-id` as the card photo). A
+                    fixed 3:4 frame showing the WHOLE photo (see `PRODUCT_HERO_COLUMN`). */}
                 <div
                   ref={heroWrap}
                   data-morph-id={id}
-                  className="reveal-item relative aspect-[4/3] overflow-hidden rounded-card bg-white ring-1 ring-black/[0.04] shadow-sm"
+                  className="reveal-item relative aspect-[3/4] overflow-hidden rounded-card bg-white ring-1 ring-black/[0.04] shadow-sm"
                 >
                   {/* The GHOST layer (the outgoing image) sits under the incoming one during the
-                      crossfade — rendered first so the real hero stays on top. */}
+                      crossfade — rendered first so the real hero stays on top. Same fit as the
+                      hero, so the crossfade never changes the photo's size. */}
                   {ghostImageUrl && (
                     <img
+                      ref={ghostImage}
                       aria-hidden
                       src={ghostImageUrl}
-                      className="absolute inset-0 size-full object-cover"
+                      className="absolute inset-0 size-full object-contain"
                     />
                   )}
                   {activeImage ? (
@@ -386,7 +458,7 @@ const ProductDetailPage: React.FC = () => {
                         data-testid="product-hero-image"
                         src={activeImage.url}
                         alt={t(`${KEY}.imageAlt`, { name: product.name })}
-                        className="absolute inset-0 size-full object-cover"
+                        className="absolute inset-0 size-full object-contain"
                       />
                       {/* The whole hero opens the full-size viewer; the corner glyph is the
                           visible affordance (part of the same button — one control). */}
@@ -445,33 +517,84 @@ const ProductDetailPage: React.FC = () => {
                   </span>
                 </div>
                 <h2 className="reveal-item text-2xl font-bold text-charcoal sm:text-3xl">{product.name}</h2>
-                {formatProductPrice(product) && (
-                  <p className="reveal-item text-xl font-bold text-charcoal">{formatProductPrice(product)}</p>
+                {headline && (
+                  <p className="reveal-item text-xl font-bold text-charcoal">
+                    {headline.from ? t(`${KEY}.card.priceFrom`, { price: headline.price }) : headline.price}
+                  </p>
                 )}
-                <StockLine product={product} />
+                {/* The option pickers: one chip row per option. A value no offered variation
+                    pairs with the other picks stays pressable (so the visitor can switch
+                    straight across) but reads muted; the combination then says it is not offered. */}
+                {options.length > 0 && (
+                  <div className="reveal-item flex flex-col gap-3">
+                    {options.map((option, optionIndex) => (
+                      <div
+                        key={option.id}
+                        role="group"
+                        aria-label={t(`${DKEY}.options`, { name: option.name })}
+                        className="flex min-w-0 flex-col gap-1.5"
+                      >
+                        <span className="text-xs font-semibold uppercase tracking-wide text-charcoal/50">
+                          {option.name}
+                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          {option.values.map((value) => {
+                            const pressed = picks[optionIndex] === value.id;
+                            const trial = picks.map((current, index) =>
+                              index === optionIndex ? value.id : current,
+                            );
+                            /* v8 ignore next -- `?? []`: a product with options always carries variants */
+                            const reachable = (product.variants ?? []).some((candidate) =>
+                              variantMatchesPicks(product, candidate, trial),
+                            );
+                            return (
+                              <button
+                                key={value.id}
+                                type="button"
+                                aria-pressed={pressed}
+                                onClick={() => pick(optionIndex, value.id)}
+                                className={`max-w-full cursor-pointer truncate rounded-chip px-3 py-1.5 text-sm font-medium transition-[background-color,color,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta motion-reduce:transition-none ${
+                                  pressed
+                                    ? 'bg-charcoal text-white'
+                                    : `bg-charcoal/[0.05] text-charcoal/80 hover:bg-charcoal/[0.09] ${reachable ? '' : 'opacity-45'}`
+                                }`}
+                              >
+                                {value.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    <p className={`text-xs ${allPicked && !variant ? 'text-amber-700' : 'text-charcoal/50'}`}>
+                      {allPicked ? (variant ? variant.label : t(`${DKEY}.notOffered`)) : t(`${DKEY}.pickHint`)}
+                    </p>
+                  </div>
+                )}
+                <StockLine product={shown} />
                 {/* Field-presence gated (the projection only sends it to Admin): what the business
                     charges if the product is lost or damaged. Captured on the create form — this
                     is where the admin sees it again. */}
-                {product.replacementPrice !== undefined && (
+                {shown.replacementPrice !== undefined && (
                   <p className="reveal-item text-sm text-charcoal/70">
                     <span className="font-medium text-charcoal/60">{t(`${DKEY}.replacementPrice`)}: </span>
-                    {formatMoney(product.replacementPrice, product.currency.symbol)}
+                    {formatMoney(shown.replacementPrice, product.currency.symbol)}
                   </p>
                 )}
                 {/* The refundable deposit per unit — a public commercial condition (every role
                     receives it), shown beside the price because the client pays it up front. It is
                     NOT part of the price: it comes back when the goods do. */}
-                {product.securityDeposit !== undefined && (
+                {shown.securityDeposit !== undefined && (
                   <p className="reveal-item text-sm text-charcoal/70">
                     <span className="font-medium text-charcoal/60">{t(`${DKEY}.securityDeposit`)}: </span>
-                    {formatMoney(product.securityDeposit, product.currency.symbol)}
+                    {formatMoney(shown.securityDeposit, product.currency.symbol)}
                     <span className="text-charcoal/50"> · {t(`${DKEY}.securityDepositNote`)}</span>
                   </p>
                 )}
                 <div className="reveal-item flex flex-col gap-1.5">
                   <h3 className="text-sm font-semibold text-charcoal">{t(`${DKEY}.descriptionTitle`)}</h3>
                   <p className="text-sm leading-relaxed text-charcoal/70">
-                    {product.description ?? t(`${KEY}.card.noDescription`)}
+                    {shown.description ?? t(`${KEY}.card.noDescription`)}
                   </p>
                 </div>
                 {product.details.length > 0 && (

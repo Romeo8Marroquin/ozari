@@ -10,8 +10,16 @@ import {
 import {
   ORDER_LIST_VIEWS,
   OrderSettlementConflictError,
+  VARIANT_LABEL_SEPARATOR,
   assertSettlementSurvivesEdit,
+  buildHoldingLinesWhere,
   buildOrderListWhere,
+  conflictVariantFields,
+  moveSaleStock,
+  saleStockDeltas,
+  poolQuantity,
+  stockKey,
+  variantLabelOf,
   buildRentedInWindowWhere,
   canRecordDepositCollection,
   canRecordSettlement,
@@ -22,6 +30,8 @@ import {
   depositCollectionStatus,
   heldDeposit,
   isSettleableLine,
+  lineImageUrl,
+  richOrderInclude,
   pendingDepositToCollect,
   projectDepositCollection,
   withDepositToCollect,
@@ -116,7 +126,10 @@ const makeRichLine = (
   replacementPrice: null,
   damagedQuantity: 0,
   damageNote: null,
-  product: { name: "Silla plegable" },
+  variantId: null,
+  variantLabel: null,
+  product: { name: "Silla plegable", productImages: [] },
+  variant: null,
   ...overrides,
 });
 
@@ -590,12 +603,15 @@ describe("priceOrderLine", () => {
     sellPrice: null,
     securityDeposit: null,
     replacementPrice: null,
+    variants: [],
     ...overrides,
   });
 
   it("a Día rental bills unitary × qty × billed days", () => {
     expect(priceOrderLine(25, product(), 2)).toEqual({
       productId: 3,
+      variantId: null,
+      variantLabel: null,
       quantity: 25,
       isRental: true,
       unitaryPrice: 6,
@@ -636,6 +652,8 @@ describe("priceOrderLine", () => {
       ),
     ).toEqual({
       productId: 3,
+      variantId: null,
+      variantLabel: null,
       quantity: 10,
       isRental: false,
       unitaryPrice: 3.5,
@@ -653,6 +671,251 @@ describe("priceOrderLine", () => {
 
   it("returns null when the product violates the conditional price rule", () => {
     expect(priceOrderLine(1, product({ rentPrice: null }), 1)).toBeNull();
+  });
+
+  describe("a VARIANT line", () => {
+    const value = (name: string, sortOrder: number) => ({
+      optionValue: { name, option: { sortOrder } },
+    });
+    const guarded = product({
+      securityDeposit: new Prisma.Decimal("40.00"),
+      replacementPrice: new Prisma.Decimal("120.00"),
+      variants: [
+        {
+          // Inherits everything; its values arrive out of option order.
+          id: 31,
+          rentPrice: null,
+          sellPrice: null,
+          securityDeposit: null,
+          replacementPrice: null,
+          values: [value("Redondo", 1), value("Rojo", 0)],
+        },
+        {
+          // Overrides price + replacement, and asks NO deposit (0 = explicitly none).
+          id: 32,
+          rentPrice: new Prisma.Decimal("9.00"),
+          sellPrice: null,
+          securityDeposit: new Prisma.Decimal("0.00"),
+          replacementPrice: new Prisma.Decimal("150.00"),
+          values: [value("Azul", 0)],
+        },
+      ],
+    });
+
+    it("inherits the product's values and snapshots its label in OPTION order", () => {
+      expect(priceOrderLine(2, guarded, 3, 31)).toEqual({
+        productId: 3,
+        variantId: 31,
+        variantLabel: "Rojo · Redondo",
+        quantity: 2,
+        isRental: true,
+        unitaryPrice: 6,
+        parcialPrice: 36,
+        securityDeposit: 40,
+        replacementPrice: 120,
+      });
+    });
+
+    it("prices from the variant's OVERRIDES — price, deposit (0 kept) and replacement", () => {
+      expect(priceOrderLine(2, guarded, 1, 32)).toMatchObject({
+        variantLabel: "Azul",
+        unitaryPrice: 9,
+        parcialPrice: 18,
+        securityDeposit: 0,
+        replacementPrice: 150,
+      });
+    });
+
+    it("returns null for a variant that is not an ACTIVE variant of the product", () => {
+      expect(priceOrderLine(1, guarded, 1, 99)).toBeNull();
+    });
+
+    it("a SALE variant bills its sell override", () => {
+      const sale = product({
+        productBusinessTypeId: 2,
+        rentPrice: null,
+        sellPrice: new Prisma.Decimal("3.00"),
+        variants: [
+          {
+            id: 41,
+            rentPrice: null,
+            sellPrice: new Prisma.Decimal("4.50"),
+            securityDeposit: null,
+            replacementPrice: null,
+            values: [value("Verde", 0)],
+          },
+        ],
+      });
+      expect(priceOrderLine(2, sale, 5, 41)).toMatchObject({
+        isRental: false,
+        unitaryPrice: 4.5,
+        parcialPrice: 9,
+        securityDeposit: null,
+      });
+    });
+  });
+});
+
+describe("variation helpers", () => {
+  it("stockKey identifies a pool: the product's own (no variant) or one variant", () => {
+    expect(stockKey(3, null)).toBe("3:");
+    expect(stockKey(3, undefined)).toBe("3:");
+    expect(stockKey(3, 31)).toBe("3:31");
+  });
+
+  it("variantLabelOf joins the value names in OPTION order with the separator", () => {
+    expect(VARIANT_LABEL_SEPARATOR).toBe(" · ");
+    expect(
+      variantLabelOf([
+        { optionValue: { name: "Grande", option: { sortOrder: 2 } } },
+        { optionValue: { name: "Rojo", option: { sortOrder: 0 } } },
+        { optionValue: { name: "Redondo", option: { sortOrder: 1 } } },
+      ]),
+    ).toBe("Rojo · Redondo · Grande");
+    expect(variantLabelOf([])).toBe("");
+  });
+
+  it("buildHoldingLinesWhere: open/future rentals by status, undelivered sales, never cancelled", () => {
+    expect(buildHoldingLinesWhere({ out: [3, 4], window: [1, 2] })).toEqual({
+      isActive: true,
+      service: { isActive: true, cancelledAt: null },
+      OR: [
+        { isRental: true, service: { serviceStatusId: { in: [3, 4, 1, 2] } } },
+        { isRental: false, service: { deliveredAt: null } },
+      ],
+    });
+  });
+
+  it("moveSaleStock writes the VARIANT row for a variant line, else the product row", async () => {
+    const tx = {
+      product: { update: vi.fn().mockResolvedValue({}) },
+      productVariant: { update: vi.fn().mockResolvedValue({}) },
+    } as unknown as Prisma.TransactionClient;
+    await moveSaleStock(tx, { productId: 3, variantId: 31 }, -2);
+    expect(tx.productVariant.update).toHaveBeenCalledWith({
+      where: { id: 31 },
+      data: { quantity: { increment: -2 } },
+    });
+    expect(tx.product.update).not.toHaveBeenCalled();
+    await moveSaleStock(tx, { productId: 3, variantId: null }, 5);
+    expect(tx.product.update).toHaveBeenCalledWith({
+      where: { id: 3 },
+      data: { quantity: { increment: 5 } },
+    });
+  });
+
+  it("saleStockDeltas nets an edit's SALE units per pool (rentals and unchanged pools drop out)", () => {
+    const line = (productId: number, variantId: number | null, quantity: number, isRental = false) => ({
+      productId,
+      variantId,
+      quantity,
+      isRental,
+    });
+    expect(
+      saleStockDeltas(
+        [line(3, 31, 2), line(3, 32, 1), line(4, null, 5), line(9, null, 7, true)],
+        [line(3, 31, 5), line(3, 33, 4), line(4, null, 5), line(9, null, 1, true)],
+      ),
+    ).toEqual([
+      // Rojo grew by 3 → 3 more taken; Azul left → given back; Verde is new → taken.
+      { productId: 3, variantId: 31, delta: -3 },
+      { productId: 3, variantId: 32, delta: 1 },
+      { productId: 3, variantId: 33, delta: -4 },
+    ]);
+  });
+
+  it("conflictVariantFields carries the variant fields only for a variant line", () => {
+    expect(conflictVariantFields(null, null)).toEqual({});
+    expect(conflictVariantFields(31, "Rojo")).toEqual({ variantId: 31, variantLabel: "Rojo" });
+  });
+
+  it("poolQuantity reads the product's own stock, an ACTIVE variant's, or null when retired", () => {
+    const product = { id: 3, quantity: 0, variants: [{ id: 31, quantity: 12 }] };
+    expect(poolQuantity({ ...product, quantity: 7 }, null)).toBe(7);
+    expect(poolQuantity(product, 31)).toBe(12);
+    expect(poolQuantity(product, 99)).toBeNull();
+  });
+});
+
+describe("lineImageUrl", () => {
+  it("fetches ONE showcase image per line — the primary, else the first by display order", () => {
+    // The pick lives in the query (never the whole gallery): primary first, then display order,
+    // and never a value photo (the wrong colour for a line of another variant).
+    expect(richOrderInclude.serviceDetails.select.product.select.productImages).toEqual({
+      where: { optionValueId: null },
+      orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
+      take: 1,
+      select: { url: true },
+    });
+  });
+
+  it("is the fetched image's URL, or undefined when the product has none", () => {
+    const url = "https://assets.example.com/products/chair.webp";
+    expect(
+      lineImageUrl({ product: { name: "Silla", productImages: [{ url }] }, variant: null }),
+    ).toBe(url);
+    expect(
+      lineImageUrl({ product: { name: "Silla", productImages: [] }, variant: null }),
+    ).toBeUndefined();
+  });
+
+  it("prefers the VARIANT's photo: its first value (option order) that has one", () => {
+    const showcase = "https://assets.example.com/products/showcase.webp";
+    const red = "https://assets.example.com/products/red.webp";
+    const round = "https://assets.example.com/products/round.webp";
+    const variant = {
+      values: [
+        { optionValue: { option: { sortOrder: 1 }, images: [{ url: round }] } },
+        { optionValue: { option: { sortOrder: 0 }, images: [{ url: red }] } },
+      ],
+    };
+    const product = { name: "Mantel", productImages: [{ url: showcase }] };
+    expect(lineImageUrl({ product, variant })).toBe(red);
+    // The first option's value has no photo → the next option's value gives it.
+    expect(
+      lineImageUrl({
+        product,
+        variant: {
+          values: [
+            { optionValue: { option: { sortOrder: 1 }, images: [{ url: round }] } },
+            { optionValue: { option: { sortOrder: 0 }, images: [] } },
+          ],
+        },
+      }),
+    ).toBe(round);
+    // No value has a photo → the showcase primary (never the default variant's).
+    expect(
+      lineImageUrl({
+        product,
+        variant: { values: [{ optionValue: { option: { sortOrder: 0 }, images: [] } }] },
+      }),
+    ).toBe(showcase);
+  });
+
+  it("the detail projection carries a variant line's id and label snapshot (absent without one)", () => {
+    const detail = projectOrderDetail(
+      makeRichOrder({
+        serviceDetails: [
+          makeRichLine({ id: 11, variantId: 31, variantLabel: "Rojo · Redondo" }),
+          makeRichLine({ id: 12, productId: 4 }),
+        ],
+      }),
+      makeProjectionContext(),
+    );
+    expect(detail.lines[0]).toMatchObject({ variantId: 31, variantLabel: "Rojo · Redondo" });
+    expect(detail.lines[1]?.variantId).toBeUndefined();
+    expect(detail.lines[1]?.variantLabel).toBeUndefined();
+  });
+
+  it("is what the detail projection carries per line", () => {
+    const url = "https://assets.example.com/products/chair.webp";
+    const detail = projectOrderDetail(
+      makeRichOrder({
+        serviceDetails: [makeRichLine({ product: { name: "Silla", productImages: [{ url }] } })],
+      }),
+      makeProjectionContext(),
+    );
+    expect(detail.lines[0]?.imageUrl).toBe(url);
   });
 });
 
@@ -683,6 +946,8 @@ describe("projectOrderDetail", () => {
     });
     expect(detail.assignee).toBeUndefined();
     expect(detail.isMine).toBe(false);
+    // A product without photos projects no image — the document row prints without one.
+    expect(detail.lines[0]?.imageUrl).toBeUndefined();
     // No pin is the NORMAL case — the maps button falls back to searching the address text.
     expect(detail.deliveryCoords).toBeUndefined();
     expect(detail.deliveryAmount).toBeUndefined();
@@ -1059,6 +1324,8 @@ describe("security deposit & damage settlement", () => {
   describe("assertSettlementSurvivesEdit", () => {
     const priced = (overrides: Partial<PricedOrderLineModel> = {}): PricedOrderLineModel => ({
       productId: 3,
+      variantId: null,
+      variantLabel: null,
       quantity: 5,
       isRental: true,
       unitaryPrice: 30,
@@ -1070,7 +1337,7 @@ describe("security deposit & damage settlement", () => {
     const settled = (damagedQuantity: number, retained: string | null = null) => ({
       depositSettledAt: DELIVERED,
       depositRetainedAmount: retained === null ? null : dec(retained),
-      serviceDetails: [{ productId: 3, damagedQuantity }],
+      serviceDetails: [{ productId: 3, variantId: null as number | null, damagedQuantity }],
     });
 
     it("passes an unsettled order, and a settled one the edit keeps coherent", () => {
@@ -1097,6 +1364,24 @@ describe("security deposit & damage settlement", () => {
       ["the deposit was dropped while something was retained", settled(0, "0.01"), [priced({ securityDeposit: null })]],
     ])("refuses when %s", (_label, order, next) => {
       expect(() => assertSettlementSurvivesEdit(order, next)).toThrow(OrderSettlementConflictError);
+    });
+
+    it("matches a damaged line by (product, VARIANT) — another variant of the product is not it", () => {
+      const order = {
+        depositSettledAt: null,
+        depositRetainedAmount: null,
+        serviceDetails: [{ productId: 3, variantId: 31 as number | null, damagedQuantity: 2 }],
+      };
+      expect(() =>
+        assertSettlementSurvivesEdit(order, [priced({ variantId: 31, variantLabel: "Rojo" })]),
+      ).not.toThrow();
+      // The edit swapped the damaged red chairs for blue ones: the damage has no line any more.
+      expect(() =>
+        assertSettlementSurvivesEdit(order, [priced({ variantId: 32, variantLabel: "Azul" })]),
+      ).toThrow(OrderSettlementConflictError);
+      expect(() => assertSettlementSurvivesEdit(order, [priced()])).toThrow(
+        OrderSettlementConflictError,
+      );
     });
   });
 });

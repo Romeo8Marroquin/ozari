@@ -39,8 +39,11 @@ export interface GalleryState {
   setPrimary: (id: string) => void;
   /** Reorder: move the image to `toIndex` (clamped). The primary flag rides the id, not the slot. */
   moveImage: (id: string, toIndex: number) => void;
-  /** Whether the gallery is at the backend's per-product cap (the picker hides itself). */
+  /** Whether the gallery is at its cap (the picker hides itself). */
   isFull: boolean;
+  /** This set's cap: the showcase's `PRODUCT_IMAGE_MAX_COUNT` (the default), or an option value's
+   *  `PRODUCT_OPTION_VALUE_IMAGE_MAX_COUNT` — each photo set owns its own limit. */
+  maxCount: number;
 }
 
 let localIdCounter = 0;
@@ -67,6 +70,8 @@ const seedFromProduct = (initialImages: ProductImage[]): GalleryImage[] =>
  * the backend re-enforces every rule (the presign binds type+size into the signature; create/update
  * cap the list).
  *
+ * `maxCount` is the SET's cap (default: the showcase's 8; an option value's set passes 4).
+ *
  * `initialImages` (edit mode) seeds the grid with the product's EXISTING photos — read once on
  * mount; every movement after that (add/remove/reorder/star) is staged locally, zero network, and
  * only the save sends the final state (the RECONCILE design).
@@ -76,7 +81,10 @@ const seedFromProduct = (initialImages: ProductImage[]): GalleryImage[] =>
  * defaults to the flagged/first photo and follows removals; `setPrimary` moves the star; the order
  * and the star are INDEPENDENT — any slot can be the primary.
  */
-export function useGalleryImages(initialImages?: ProductImage[]): GalleryState {
+export function useGalleryImages(
+  initialImages?: ProductImage[],
+  { maxCount = PRODUCT_IMAGE_MAX_COUNT }: { maxCount?: number } = {},
+): GalleryState {
   const { t } = useTranslation();
   // Seed ONCE (lazy initializer): both the list and the starred id come from the same seeded array,
   // so their local ids always agree. The flagged photo takes the star; a flag-less seed falls back
@@ -140,8 +148,8 @@ export function useGalleryImages(initialImages?: ProductImage[]): GalleryState {
             reject(t(`${KEY}.duplicate`));
             continue;
           }
-          if (current.length + accepted.length >= PRODUCT_IMAGE_MAX_COUNT) {
-            reject(t(`${KEY}.tooMany`, { max: PRODUCT_IMAGE_MAX_COUNT }));
+          if (current.length + accepted.length >= maxCount) {
+            reject(t(`${KEY}.tooMany`, { max: maxCount }));
             break;
           }
           known.add(fingerprint(file));
@@ -161,7 +169,7 @@ export function useGalleryImages(initialImages?: ProductImage[]): GalleryState {
         return next;
       });
     },
-    [t],
+    [t, maxCount],
   );
 
   const removeImage = useCallback((id: string) => {
@@ -204,6 +212,7 @@ export function useGalleryImages(initialImages?: ProductImage[]): GalleryState {
     removeImage,
     setPrimary,
     moveImage,
-    isFull: images.length >= PRODUCT_IMAGE_MAX_COUNT,
+    isFull: images.length >= maxCount,
+    maxCount,
   };
 }

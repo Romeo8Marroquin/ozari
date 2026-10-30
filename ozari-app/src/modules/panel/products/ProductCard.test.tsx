@@ -96,6 +96,50 @@ describe('ProductCard', () => {
     expect(panelNavigate).toHaveBeenCalledWith('/panel/productos/1');
   });
 
+  describe('with variations', () => {
+    const variant = (id: number, price: { rentPrice?: number; sellPrice?: number }) => ({
+      id,
+      valueIds: [id],
+      label: `Color ${id}`,
+      isDefault: id === 1,
+      ...price,
+    });
+
+    it("shows the server's cover — the default variation's photo when there is no showcase", () => {
+      render(
+        <ProductCard product={{ ...base, images: [], coverImageUrl: 'https://cdn/rojo.webp' }} />,
+      );
+      expect(screen.getByRole('img')).toHaveAttribute('src', 'https://cdn/rojo.webp');
+    });
+
+    it('shows "Desde" the lowest price when the variations are priced differently', () => {
+      render(
+        <ProductCard
+          product={{ ...base, variants: [variant(1, { rentPrice: 90 }), variant(2, { rentPrice: 60 })] }}
+        />,
+      );
+      expect(screen.getByText(`${K}.card.priceFrom`)).toBeInTheDocument();
+      expect(screen.queryByText('Q75 / Día')).not.toBeInTheDocument();
+    });
+
+    it('shows the one shared variation price plainly (a sale too)', () => {
+      render(
+        <ProductCard
+          product={{
+            ...base,
+            businessType: 'Venta',
+            businessTypeId: 2,
+            rentPrice: undefined,
+            rentTimeUnit: undefined,
+            sellPrice: 100,
+            variants: [variant(1, { sellPrice: 120 }), variant(2, { sellPrice: 120 })],
+          }}
+        />,
+      );
+      expect(screen.getByText('Q120')).toBeInTheDocument();
+      expect(screen.queryByText(`${K}.card.priceFrom`)).not.toBeInTheDocument();
+    });
+  });
 
   it('never navigates from an action press (siblings, never nested; propagation stopped)', async () => {
     useRole.mockReturnValue(Role.Client);

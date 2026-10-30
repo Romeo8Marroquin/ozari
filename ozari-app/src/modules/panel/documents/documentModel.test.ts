@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  damageDisplayName,
   damageReportFileName,
   documentFileName,
   documentReference,
@@ -19,7 +20,7 @@ import type {
   OrderDetail,
   OrderSecurityDeposit,
 } from '../orders/order.types';
-import type { Product } from '../products/product.types';
+import type { Product, ProductVariant } from '../products/product.types';
 import type { PreferenceSetting } from '../preferences/preference.types';
 
 // Built from LOCAL parts, not an ISO string: the quote's file name is stamped with local date parts
@@ -164,6 +165,22 @@ describe('fromOrderDetail', () => {
     expect(model.groups.map((group) => group.kind)).toEqual(['rental', 'sale']);
     expect(model.groups[0]?.subtotal).toBe(150);
     expect(model.groups[1]?.subtotal).toBe(40);
+  });
+
+  it('carries each line’s photo from the API, and no field at all when the product has none', () => {
+    const model = fromOrderDetail(
+      order({
+        lines: [
+          line({ imageUrl: 'https://assets.example.com/mesa.webp' }),
+          line({ id: 2, productName: 'Piñata', isRental: false, parcialPrice: 50 }),
+        ],
+        totalAmount: 200,
+      }),
+      letterhead,
+      ISSUED_AT,
+    );
+    expect(model.groups[0]?.lines[0]?.imageUrl).toBe('https://assets.example.com/mesa.webp');
+    expect(model.groups[1]?.lines[0]).not.toHaveProperty('imageUrl');
   });
 
   it('OMITS a group nobody ordered from — never an empty table under a heading', () => {
@@ -625,6 +642,7 @@ describe('fromOrderForm', () => {
       rentTimeUnitId: 2, // Día
       rentPrice: 10,
       currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
+      images: [],
       ...over,
     }) as unknown as Product;
 
@@ -638,7 +656,7 @@ describe('fromOrderForm', () => {
       deliveryName: 'Quien recibe',
       deliveryContact: '1234-1234',
       deliveryAddress: 'Test dirección',
-      lines: [{ productId: 1, quantity: '5', isRental: true }],
+      lines: [{ productId: 1, variantId: null, pickedValues: [], quantity: '5', isRental: true }],
       ...over,
     }) as CreateOrderFormType;
 
@@ -660,6 +678,21 @@ describe('fromOrderForm', () => {
     const model = quote();
     expect(model?.groups[0]?.lines[0]).toMatchObject({ quantity: 5, unitPrice: 10, days: 3, total: 150 });
     expect(model?.totals.total).toBe(150);
+  });
+
+  it('prints each line with the photo the catalog card shows — the flagged primary, else the first', () => {
+    const image = (id: number, isPrimary: boolean) => ({
+      id,
+      url: `https://assets.example.com/${id}.webp`,
+      isPrimary,
+      sortOrder: id,
+    });
+    const flagged = quote({}, [product({ images: [image(1, false), image(2, true)] })]);
+    expect(flagged?.groups[0]?.lines[0]?.imageUrl).toBe('https://assets.example.com/2.webp');
+    const unflagged = quote({}, [product({ images: [image(3, false), image(4, false)] })]);
+    expect(unflagged?.groups[0]?.lines[0]?.imageUrl).toBe('https://assets.example.com/3.webp');
+    // No photos ⇒ no field at all, so the row prints exactly as before photos existed.
+    expect(quote()?.groups[0]?.lines[0]).not.toHaveProperty('imageUrl');
   });
 
   it('says on its face that it is a PROPOSAL, not a record', () => {
@@ -718,7 +751,7 @@ describe('fromOrderForm', () => {
 
   it('drops the pickup and the days for a purchase-only quote', () => {
     const model = quote(
-      { lines: [{ productId: 2, quantity: '3', isRental: false }], pickupAt: '' },
+      { lines: [{ productId: 2, variantId: null, pickedValues: [], quantity: '3', isRental: false }], pickupAt: '' },
       [product({ id: 2, businessTypeId: 2, sellPrice: 40, rentPrice: undefined })],
     );
     expect(model?.event.pickupAt).toBeUndefined();
@@ -731,7 +764,7 @@ describe('fromOrderForm', () => {
     // The form hides the field for a purchase-only order, so a leftover value there is stale — the
     // same stance the schema's own pickup-coherence rule takes.
     const model = quote(
-      { lines: [{ productId: 2, quantity: '1', isRental: false }], pickupAt: '2026-07-31T16:50' },
+      { lines: [{ productId: 2, variantId: null, pickedValues: [], quantity: '1', isRental: false }], pickupAt: '2026-07-31T16:50' },
       [product({ id: 2, businessTypeId: 2, sellPrice: 40, rentPrice: undefined })],
     );
     expect(model?.event.pickupAt).toBeUndefined();
@@ -744,9 +777,9 @@ describe('fromOrderForm', () => {
     const model = quote(
       {
         lines: [
-          { productId: 1, quantity: '5', isRental: true },
-          { productId: 3, quantity: '2', isRental: true },
-          { productId: 2, quantity: '1', isRental: false },
+          { productId: 1, variantId: null, pickedValues: [], quantity: '5', isRental: true },
+          { productId: 3, variantId: null, pickedValues: [], quantity: '2', isRental: true },
+          { productId: 2, variantId: null, pickedValues: [], quantity: '1', isRental: false },
         ],
       },
       [
@@ -840,6 +873,26 @@ describe('fromDamageReport', () => {
     ]);
   });
 
+  it('gives the deposit lines and the replacements the damaged LINE’s photo', () => {
+    const mesa = 'https://assets.example.com/mesa.webp';
+    const model = fromDamageReport(
+      depositOrder({
+        lines: [
+          line({ securityDeposit: 50, quantity: 5, imageUrl: mesa }),
+          line({ id: 2, productName: 'Silla', securityDeposit: 12.5, quantity: 20 }),
+        ],
+      }),
+      settlement(),
+      letterhead,
+      ISSUED_AT,
+    );
+    expect(model.deposit.lines[0]?.imageUrl).toBe(mesa);
+    expect(model.deposit.lines[1]).not.toHaveProperty('imageUrl');
+    // Matched by line id: line 1 has the photo, line 2 has none.
+    expect(model.replacements[0]?.imageUrl).toBe(mesa);
+    expect(model.replacements[1]).not.toHaveProperty('imageUrl');
+  });
+
   it('squares the order with THESE claims — the same result the comprobante shows', () => {
     // Unpaid: service 150 still due + claims 795.01 − the deposit 500 ⇒ 445.01 to collect.
     const unpaid = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT);
@@ -881,7 +934,7 @@ describe('fromDamageReport', () => {
 
   it('breaks the deposit down by the rental lines that actually carried one', () => {
     const model = fromDamageReport(depositOrder(), settlement(), letterhead, ISSUED_AT);
-    // The TOTAL is the API's; the per-line rows are its breakdown (the server's own Σ rule).
+    // The TOTAL is the API's; the per-line rows are its breakdown (the server's own Î£ rule).
     expect(model.deposit).toEqual({
       total: 500,
       lines: [
@@ -1061,5 +1114,162 @@ describe('documentReference / documentFileName', () => {
     const model = fromOrderDetail(order(), letterhead, new Date(2026, 7, 5, 21, 30));
     delete model.reference;
     expect(documentFileName(model)).toBe('cotizacion-05-08-2026.pdf');
+  });
+});
+
+describe('variations — the line name and the photo (2026-10-29)', () => {
+  const mantel = 'https://assets.example.com/mantel-rojo.webp';
+  const showcase = (id: number, isPrimary: boolean) => ({
+    id,
+    url: `https://assets.example.com/showcase-${id}.webp`,
+    isPrimary,
+    sortOrder: id,
+  });
+
+  it('names a comprobante row by product AND variation, and keeps the API photo', () => {
+    const model = fromOrderDetail(
+      order({
+        lines: [
+          line({ productName: 'Mantel', variantId: 9, variantLabel: 'Rojo · Redondo', imageUrl: mantel }),
+          line({ id: 2, productName: 'Silla' }),
+        ],
+      }),
+      letterhead,
+      ISSUED_AT,
+    );
+    expect(model.groups[0]?.lines[0]).toMatchObject({
+      description: 'Mantel — Rojo · Redondo',
+      imageUrl: mantel,
+    });
+    // A line without a variation prints exactly as before.
+    expect(model.groups[0]?.lines[1]?.description).toBe('Silla');
+  });
+
+  it('names a replacement by the damage’s own variation, else its line’s', () => {
+    const lines = [
+      line({ productName: 'Mantel', variantLabel: 'Rojo · Redondo' }),
+      line({ id: 2, productName: 'Mantel', variantLabel: 'Azul · Cuadrado' }),
+    ];
+    expect(
+      damageDisplayName(
+        { lineId: 1, productName: 'Mantel', variantLabel: 'Rojo · Ovalado', quantity: 1, unitAmount: 1, amount: 1 },
+        lines,
+      ),
+    ).toBe('Mantel — Rojo · Ovalado');
+    expect(
+      damageDisplayName({ lineId: 2, productName: 'Mantel', quantity: 1, unitAmount: 1, amount: 1 }, lines),
+    ).toBe('Mantel — Azul · Cuadrado');
+    // A vanished line and no label of its own: the bare product name.
+    expect(
+      damageDisplayName({ lineId: 99, productName: 'Mantel', quantity: 1, unitAmount: 1, amount: 1 }, lines),
+    ).toBe('Mantel');
+  });
+
+  it('prints the variation name on the comprobante’s damages AND both damage-report tables', () => {
+    const variantOrder = order({
+      securityDeposit: {
+        total: 50,
+        held: 50,
+        collection: { status: 'RECEIVED', canRecord: false },
+        canSettle: true,
+        settlement: {
+          settledAt: '2026-08-02T10:00:00Z',
+          retainedAmount: 0,
+          damages: [{ lineId: 1, productName: 'Mantel', quantity: 1, unitAmount: 80, amount: 80 }],
+          damagesTotal: 80,
+          claimsTotal: 80,
+          appliedFromDeposit: 50,
+          refundAmount: 0,
+          balanceDue: 30,
+        },
+      },
+      lines: [
+        line({ productName: 'Mantel', variantLabel: 'Rojo · Redondo', securityDeposit: 10, imageUrl: mantel }),
+      ],
+    });
+    const receipt = fromOrderDetail(variantOrder, letterhead, ISSUED_AT);
+    expect(receipt.damages?.claims[0]).toMatchObject({ description: 'Mantel — Rojo · Redondo' });
+    const report = fromDamageReport(
+      variantOrder,
+      variantOrder.securityDeposit!.settlement!,
+      letterhead,
+      ISSUED_AT,
+    );
+    expect(report.deposit.lines[0]).toMatchObject({ description: 'Mantel — Rojo · Redondo', imageUrl: mantel });
+    expect(report.replacements[0]).toMatchObject({ description: 'Mantel — Rojo · Redondo', imageUrl: mantel });
+  });
+
+  describe('the cotización', () => {
+    const variant = (over: Partial<ProductVariant> = {}): ProductVariant => ({
+      id: 9,
+      valueIds: [1, 2],
+      label: 'Rojo · Redondo',
+      isDefault: false,
+      rentPrice: 25,
+      securityDeposit: 0,
+      imageUrl: mantel,
+      ...over,
+    });
+    const product = (over: Partial<Product> = {}): Product =>
+      ({
+        id: 1,
+        name: 'Mantel',
+        businessTypeId: 1,
+        rentTimeUnitId: 2,
+        rentPrice: 10,
+        securityDeposit: 50,
+        currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
+        images: [showcase(1, false), showcase(2, true)],
+        // The DEFAULT variation's photo — never what a picked variation prints.
+        coverImageUrl: 'https://assets.example.com/default-blue.webp',
+        variants: [variant(), variant({ id: 10, label: 'Azul · Redondo', imageUrl: undefined })],
+        ...over,
+      }) as unknown as Product;
+    const quote = (variantId: number | null, products: Product[] = [product()]) =>
+      fromOrderForm(
+        {
+          values: {
+            ...createOrderDefaultValues,
+            eventTypeId: 1,
+            clientRegistryId: 7,
+            deliveryAt: '2026-07-29T11:50',
+            pickupAt: '2026-07-31T16:50',
+            deliveryName: 'Quien recibe',
+            deliveryContact: '1234-1234',
+            deliveryAddress: 'Test dirección',
+            lines: [{ productId: 1, variantId, pickedValues: [], quantity: '2', isRental: true }],
+          } as CreateOrderFormType,
+          productsById: new Map(products.map((p) => [p.id, p])),
+          clientName: 'Cliente',
+          eventTypeName: 'Boda',
+        },
+        letterhead,
+        ISSUED_AT,
+      );
+
+    it('names, prices and pictures the PICKED variation', () => {
+      const model = quote(9);
+      // 2 × Q25 (the variation's effective price) × 3 started days = Q150.
+      expect(model?.groups[0]?.lines[0]).toMatchObject({
+        description: 'Mantel — Rojo · Redondo',
+        unitPrice: 25,
+        total: 150,
+        imageUrl: mantel,
+      });
+      // The variation's deposit override of 0 is "none" — the product's Q50 must not leak back in.
+      expect(model?.totals.balance.depositDue).toBe(0);
+    });
+
+    it('falls back to the SHOWCASE primary, never the cover (the default variation’s photo)', () => {
+      expect(quote(10)?.groups[0]?.lines[0]).toMatchObject({
+        description: 'Mantel — Azul · Redondo',
+        imageUrl: 'https://assets.example.com/showcase-2.webp',
+      });
+      // No variation picked (a product without them): the bare name, the showcase primary.
+      expect(quote(null, [product({ variants: [] })])?.groups[0]?.lines[0]).toMatchObject({
+        description: 'Mantel',
+        imageUrl: 'https://assets.example.com/showcase-2.webp',
+      });
+    });
   });
 });

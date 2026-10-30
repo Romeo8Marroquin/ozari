@@ -24,6 +24,11 @@ const rentalProduct = {
   rentTimeUnitId: 2,
   rentPrice: new Prisma.Decimal("6.00"),
   sellPrice: null,
+  variants: [] as Array<{
+    id: number;
+    rentPrice: Prisma.Decimal | null;
+    sellPrice: Prisma.Decimal | null;
+  }>,
 };
 const saleProduct = {
   id: 4,
@@ -32,6 +37,20 @@ const saleProduct = {
   rentTimeUnitId: null,
   rentPrice: null,
   sellPrice: new Prisma.Decimal("3.50"),
+  variants: [] as Array<{
+    id: number;
+    rentPrice: Prisma.Decimal | null;
+    sellPrice: Prisma.Decimal | null;
+  }>,
+};
+/** A rental WITH two active variants (51 inherits the price, 52 overrides it). */
+const variantRental = {
+  ...rentalProduct,
+  id: 5,
+  variants: [
+    { id: 51, rentPrice: null, sellPrice: null },
+    { id: 52, rentPrice: new Prisma.Decimal("9.00"), sellPrice: null },
+  ],
 };
 
 function mockPrisma(overrides: Record<string, unknown> = {}) {
@@ -263,6 +282,119 @@ describe("validateCreateOrder", () => {
       HttpEnum.INTERNAL_SERVER_ERROR,
       "orders.createOrder.validators.validationError",
     );
+  });
+
+  describe("variations", () => {
+    const withVariantProduct = () =>
+      mockPrisma({
+        product: { findMany: vi.fn().mockResolvedValue([variantRental, saleProduct]) },
+      });
+
+    it("orders two variants of one product as two lines, carrying variantId (null when absent)", async () => {
+      withVariantProduct();
+      const { req, next } = await run({
+        ...validBody(),
+        lines: [
+          { productId: 5, variantId: 51, quantity: 2 },
+          { productId: 5, variantId: 52, quantity: 1 },
+          { productId: 4, quantity: 1 },
+        ],
+      });
+      expect(next).toHaveBeenCalled();
+      expect((req.body as { lines: unknown[] }).lines).toEqual([
+        { productId: 5, variantId: 51, quantity: 2 },
+        { productId: 5, variantId: 52, quantity: 1 },
+        { productId: 4, variantId: null, quantity: 1 },
+      ]);
+    });
+
+    it("accepts an explicit null variantId for a product without variants", async () => {
+      const { req, next } = await run({
+        ...validBody(),
+        lines: [{ productId: 4, variantId: null, quantity: 1 }],
+        pickupAt: undefined,
+      });
+      expect(next).toHaveBeenCalled();
+      expect((req.body as { lines: Array<{ variantId: unknown }> }).lines[0]?.variantId).toBeNull();
+    });
+
+    it("rejects the SAME (product, variant) pair twice as duplicateLineProduct", async () => {
+      withVariantProduct();
+      await run({
+        ...validBody(),
+        lines: [
+          { productId: 5, variantId: 51, quantity: 1 },
+          { productId: 5, variantId: 51, quantity: 2 },
+        ],
+      });
+      expectRejected("duplicateLineProduct");
+    });
+
+    it.each([["x"], [1.5], [0], [-3]])("rejects a malformed variantId %s", async (variantId) => {
+      await run({ ...validBody(), lines: [{ productId: 3, variantId, quantity: 1 }] });
+      expectRejected("invalidLineVariant");
+    });
+
+    it("rejects a line of a product WITH variants that names none (variantRequired)", async () => {
+      withVariantProduct();
+      await run({ ...validBody(), lines: [{ productId: 5, quantity: 1 }] });
+      expectRejected("variantRequired");
+    });
+
+    it("rejects a variant on a product WITHOUT variants (variantForbidden)", async () => {
+      await run({ ...validBody(), lines: [{ productId: 3, variantId: 51, quantity: 1 }] });
+      expectRejected("variantForbidden");
+    });
+
+    it("rejects a variant of ANOTHER product, or a retired one (invalidLineVariant)", async () => {
+      withVariantProduct();
+      await run({ ...validBody(), lines: [{ productId: 5, variantId: 99, quantity: 1 }] });
+      expectRejected("invalidLineVariant");
+    });
+
+    it("checks the price on the variant's EFFECTIVE value (override, else the product's)", async () => {
+      // The product lost its price (defensive): the overriding variant still prices, the
+      // inheriting one cannot.
+      mockPrisma({
+        product: {
+          findMany: vi.fn().mockResolvedValue([{ ...variantRental, rentPrice: null }]),
+        },
+      });
+      const { next } = await run({
+        ...validBody(),
+        lines: [{ productId: 5, variantId: 52, quantity: 1 }],
+      });
+      expect(next).toHaveBeenCalled();
+
+      vi.clearAllMocks();
+      mockPrisma({
+        product: {
+          findMany: vi.fn().mockResolvedValue([{ ...variantRental, rentPrice: null }]),
+        },
+      });
+      await run({ ...validBody(), lines: [{ productId: 5, variantId: 51, quantity: 1 }] });
+      expectRejected("unknownLineProduct");
+    });
+
+    it("prices a SALE variant from its sell override too", async () => {
+      mockPrisma({
+        product: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              ...saleProduct,
+              sellPrice: null,
+              variants: [{ id: 61, rentPrice: null, sellPrice: new Prisma.Decimal("4.00") }],
+            },
+          ]),
+        },
+      });
+      const { next } = await run({
+        ...validBody(),
+        pickupAt: undefined,
+        lines: [{ productId: 4, variantId: 61, quantity: 1 }],
+      });
+      expect(next).toHaveBeenCalled();
+    });
   });
 });
 

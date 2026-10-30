@@ -184,7 +184,8 @@ Product/asset **images** live in a Cloudflare **R2** bucket. R2 is S3-compatible
 `@aws-sdk/client-s3` (helper: `src/helpers/storage.ts`, policy: `appConfig.storage`). **Reads are
 public** (no private data); **writes/deletes** use credentials, and the browser uploads **directly to
 R2 via a short-lived presigned PUT URL** the API mints — image bytes never pass through Cloud Run, so
-the 10 kB body cap stands.
+the 10 kB body cap stands (the one exception, a 32 kB JSON cap on the product create/update bodies
+that carry variations, is unrelated to images — `AUTH-AND-SECURITY.md` §1).
 
 | | staging | production |
 |---|---|---|
@@ -238,8 +239,13 @@ CORS is a *browser gate*, not the upload authorization — that is the presigned
 without an admin session; keeping it off production means a compromised dev machine's browser
 context can't even preflight against prod assets.
 
-Public **reads** don't need CORS (plain `<img>` tags aren't CORS requests). If a feature ever needs
-to `fetch` an image from the app origin, add `"GET"` to the rule first.
+Public **reads** have their OWN rule, `public-reads` (2026-10-29): GET/HEAD from **any** origin. The
+catalog's `<img>` tags never needed it, but the printed documents `fetch` each line's product photo
+(`ozari-app` `documentImages.ts`) to re-encode it for react-pdf — a CORS request. The objects are
+already public and no credentials ride along, so an allowlist would protect nothing, and `*` keeps
+the edge cache from serving one origin's CORS answer to another. Missing it (or the read host in the
+CSP `connect-src`), the PDFs still generate — **without photos**. After the first apply, purge the
+image host's cache if staging still prints none.
 
 **The CSP is the OTHER browser gate, and it is checked first.** The app's `connect-src`
 (`ozari-app/index.html`) pins the exact write host `https://<account-id>.r2.cloudflarestorage.com`,

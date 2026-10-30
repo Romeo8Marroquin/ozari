@@ -44,6 +44,22 @@ export const PRODUCT_IMAGE_MAX_COUNT = 8;
 export const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 export const PRODUCT_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];
 
+// Product VARIATIONS policy — mirrors `appConfig` (`maxProductOptions`, `maxOptionValues`,
+// `maxProductVariants`, `maxImagesPerOptionValue`, `maxImagesTotalPerProduct`) and the API's
+// `products.variations.ts` parser. The showcase keeps `PRODUCT_IMAGE_MAX_COUNT` above.
+export const PRODUCT_MAX_OPTIONS = 3;
+export const PRODUCT_MAX_OPTION_VALUES = 20;
+export const PRODUCT_MAX_VARIANTS = 60;
+export const PRODUCT_OPTION_VALUE_IMAGE_MAX_COUNT = 4;
+export const PRODUCT_IMAGE_MAX_TOTAL = 40;
+// An option or value NAME: 1–40 characters of the `fullNameRegex` alphabet (letters incl. accents,
+// digits, spaces, apostrophe, hyphen) — the full-name policy's characters at a label's length, so
+// "Rojo" or "XL" pass. Uniqueness is case- and accent-insensitive (`normalizeVariationName`).
+export const VARIATION_NAME_MAX_LENGTH = 40;
+export const VARIATION_NAME_REGEX = /^(?=.{1,40}$)[A-Za-zÀ-ÖØ-öø-ÿ0-9\s'-]+$/;
+// The client-minted value KEY the variants reference values by (never stored).
+export const VARIATION_KEY_REGEX = /^[A-Za-z0-9_-]{1,40}$/;
+
 // ── Order + client-registry form policy — mirrors the backend order/registry validators ──────
 // (`ozari-api/src/modules/orders/orders.validator.ts` + `clientRegistries.validator.ts` +
 // `config/app.ts`). The backend is the security boundary; these are the UX mirror.

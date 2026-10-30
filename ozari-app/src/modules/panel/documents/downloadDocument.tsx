@@ -1,3 +1,4 @@
+import { embedDamageReportImages, embedDocumentImages } from './documentImages';
 import { damageReportFileName, documentFileName } from './documentModel';
 import type { DamageReportModel, DocumentModel } from './documentModel';
 import type { DamageReportCopy, DocumentCopy } from './OrderDocument';
@@ -59,18 +60,26 @@ function saveBlob(blob: Blob, fileName: string): void {
 const loadRenderer = () =>
   Promise.all([import('@react-pdf/renderer'), import('./OrderDocument')]);
 
+/**
+ * The row photos are fetched WHILE the renderer chunk downloads — two waits overlapped into one —
+ * and arrive embedded (or dropped, when one cannot be had: `documentImages.ts`). The template never
+ * sees a network URL, so a photo can never stall or fail the file.
+ */
 export async function downloadDocument(input: DownloadDocumentInput): Promise<void> {
-  const [{ pdf }, { default: OrderDocument }] = await loadRenderer();
+  const [[{ pdf }, { default: OrderDocument }], model] = await Promise.all([
+    loadRenderer(),
+    embedDocumentImages(input.model),
+  ]);
   const blob = await pdf(
     <OrderDocument
-      model={input.model}
+      model={model}
       copy={input.copy}
       money={input.money}
       date={input.date}
       dateTime={input.dateTime}
     />,
   ).toBlob();
-  saveBlob(blob, documentFileName(input.model));
+  saveBlob(blob, documentFileName(model));
 }
 
 export interface DownloadDamageReportInput extends Omit<DownloadDocumentInput, 'model' | 'copy'> {
@@ -80,15 +89,18 @@ export interface DownloadDamageReportInput extends Omit<DownloadDocumentInput, '
 
 /** The damage report (EPIC-2-DOCUMENTS §2c) — same machinery, same lazy chunk, its own file name. */
 export async function downloadDamageReport(input: DownloadDamageReportInput): Promise<void> {
-  const [{ pdf }, { DamageReportDocument }] = await loadRenderer();
+  const [[{ pdf }, { DamageReportDocument }], model] = await Promise.all([
+    loadRenderer(),
+    embedDamageReportImages(input.model),
+  ]);
   const blob = await pdf(
     <DamageReportDocument
-      model={input.model}
+      model={model}
       copy={input.copy}
       money={input.money}
       date={input.date}
       dateTime={input.dateTime}
     />,
   ).toBlob();
-  saveBlob(blob, damageReportFileName(input.model));
+  saveBlob(blob, damageReportFileName(model));
 }

@@ -40,8 +40,13 @@ export function useProductImageUploads() {
   const [isUploading, setIsUploading] = useState(false);
 
   const uploadImages = useCallback(
-    async (images: GalleryImage[]): Promise<Record<string, string>> => {
-      const newImages = images.filter((image): image is NewGalleryImage => Boolean(image.file));
+    async (...sets: GalleryImage[][]): Promise<Record<string, string>> => {
+      // Every photo SET of the product (the showcase + each option value's) goes in ONE presign call
+      // — the API caps it at `maxImagesTotalPerProduct`. Local ids are unique across sets (one
+      // counter), so the returned map needs no set qualifier.
+      const newImages = sets
+        .flat()
+        .filter((image): image is NewGalleryImage => Boolean(image.file));
       if (newImages.length === 0) return {};
       setIsUploading(true);
       setProgress({});

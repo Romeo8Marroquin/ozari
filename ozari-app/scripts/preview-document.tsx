@@ -21,6 +21,10 @@
  *   `--quote` The cotización — the same model with a different `kind`: no order number, a validity
  *             date, and the "sujeta a cambios" notice.
  *   `--rows=N` the rental group's line count — walks the page break through the column.
+ *   `--no-photos` every row without its product photo — the document exactly as it was before row
+ *             photos (2026-10-29). By default the rows carry LOCAL images of awkward shapes (tall,
+ *             wide, square) plus a row with none; `--free` puts a photo on EVERY line, since it is
+ *             the one-page check and that is the worst case for it.
  *
  * The MONEY BOX is squared by the app's own `squareOrderBalance` (EPIC-2-DOCUMENTS §2b), fed by
  * these flags — so every outcome the rule can reach is one command away:
@@ -52,6 +56,7 @@
  *   `--banks=3`  the awkward third (logo-less) account; by default the report prints the two this
  *                business actually has, since its one-page target is the ordinary case.
  */
+import { readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -73,6 +78,7 @@ import { advanceRows } from '../src/modules/panel/documents/documentModel';
 import { squareOrderBalance } from '../src/modules/panel/orders/orderBalance';
 import type { OrderBalanceInput } from '../src/modules/panel/orders/orderBalance';
 import type { OrderDepositCollectionStatus } from '../src/modules/panel/orders/order.types';
+import { lineDisplayName } from '../src/modules/panel/products/productVariations';
 
 const flag = (name: string): boolean => process.argv.includes(name);
 const option = (name: string): string | undefined =>
@@ -142,6 +148,9 @@ const notReceived = collection !== undefined && !received;
 const isPaid = !quote && (flag('--paid') || (reviewed && !flag('--unpaid')));
 
 // 120 chairs × Q5 + 12 tables × Q25 — the per-unit deposits the default rental lines carry.
+/** The fixture's VARIATION line (2026-10-29), named exactly as `fromOrderDetail` names it. */
+const VARIATION_LINE_NAME = lineDisplayName({ productName: 'Mantel', variantLabel: 'Rojo · Redondo' });
+
 const DEPOSIT_TOTAL = 900;
 // A retention is charged up to the NOMINAL deposit, received or not (owner, 2026-10-28).
 const RETAINED = clean ? 0 : (retentionOption ?? 150);
@@ -168,9 +177,10 @@ const replacementClaims: Extract<DocumentDepositClaim, { kind: 'replacement' }>[
           amount: 700,
           note: longReason ? LONGEST_TEXT : 'Quemaduras de cigarro en ambas piezas.',
         },
+        // A replacement on the VARIATION line — named by product + variation, like its row.
         {
           kind: 'replacement',
-          description: 'Sillas plásticas blancas',
+          description: VARIATION_LINE_NAME,
           quantity: 4,
           unitAmount: 45,
           amount: 180,
@@ -211,38 +221,106 @@ const retainedTotal = claims.reduce((sum, claim) => sum + (claim.kind === 'reten
 
 // ── The order itself ───────────────────────────────────────────────────────────────────────────
 
+// ── The row photos ─────────────────────────────────────────────────────────────────────────────
+// In the app every photo is fetched, decoded and re-encoded as a small `data:` URI before the
+// template sees it (`documentImages.ts`); Node has no canvas, so the preview embeds LOCAL files as
+// they are. Deliberately awkward shapes, so `contain` is visible: a TALL one, a WIDE one, a square
+// one — and rows with NO photo (`photos.none`) to check the gutter keeps descriptions aligned.
+// `--no-photos` renders every row without one (the document as it was before photos).
+const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const photo = (relative: string): string =>
+  `data:image/png;base64,${readFileSync(path.join(appRoot, relative)).toString('base64')}`;
+const noPhotos = flag('--no-photos');
+const photos = {
+  tall: photo('public/assets/media-image.png'),
+  wide: photo('src/assets/banks/banrural.png'),
+  square: photo('src/assets/pngs/party.png'),
+  // The VARIATION line's own photo (2026-10-29) — a different picture from every other row, the way
+  // a red tablecloth's value photo differs from the product's showcase.
+  variation: photo('src/assets/maps/apple-maps.png'),
+};
+const withPhoto = <Line extends object>(line: Line, imageUrl: string | undefined): Line =>
+  noPhotos || imageUrl === undefined ? line : { ...line, imageUrl };
+/** The filler rows' photos: the three shapes in turn, and every fourth row without one. */
+const fillerPhoto = (index: number): string | undefined =>
+  index % 4 === 3 ? undefined : [photos.tall, photos.wide, photos.square][index % 4];
+
 const rentalLines: DocumentLine[] = rowCount !== undefined
-  ? Array.from({ length: rowCount }, (_, index) => ({
-      description: `Producto de relleno ${index + 1}`,
-      quantity: 1,
-      unitPrice: 10,
-      days: 3,
-      total: 30,
-    }))
+  ? Array.from({ length: rowCount }, (_, index) =>
+      withPhoto(
+        {
+          description: `Producto de relleno ${index + 1}`,
+          quantity: 1,
+          unitPrice: 10,
+          days: 3,
+          total: 30,
+        },
+        fillerPhoto(index),
+      ),
+    )
   : long
-  ? Array.from({ length: 30 }, (_, index) => ({
-      description: `Producto de prueba número ${index + 1} con un nombre deliberadamente largo`,
-      quantity: index + 1,
-      unitPrice: 10 + index,
-      days: 3,
-      total: (10 + index) * (index + 1) * 3,
-    }))
+  ? Array.from({ length: 30 }, (_, index) =>
+      withPhoto(
+        {
+          description: `Producto de prueba número ${index + 1} con un nombre deliberadamente largo`,
+          quantity: index + 1,
+          unitPrice: 10 + index,
+          days: 3,
+          total: (10 + index) * (index + 1) * 3,
+        },
+        fillerPhoto(index),
+      ),
+    )
   : [
-      { description: 'Sillas plásticas blancas', quantity: 120, unitPrice: 2, days: 3, total: 720 },
-      { description: 'Mesas rectangulares de 8 personas', quantity: 12, unitPrice: 25, days: 3, total: 900 },
-      {
-        description: 'Mantelería de lino con cubremantel a juego, incluye planchado y entrega',
-        quantity: 12,
-        unitPrice: 18,
-        days: 3,
-        total: 648,
-      },
+      withPhoto(
+        { description: 'Sillas plásticas blancas', quantity: 120, unitPrice: 2, days: 3, total: 720 },
+        photos.tall,
+      ),
+      // `--free` is the ordinary FIVE-line order (§2a #20), so there the variation line below takes
+      // this one-line row's place instead of adding a sixth: same height, the same one-page check.
+      ...(free
+        ? []
+        : [
+            withPhoto(
+              {
+                description: 'Mesas rectangulares de 8 personas',
+                quantity: 12,
+                unitPrice: 25,
+                days: 3,
+                total: 900,
+              },
+              photos.wide,
+            ),
+          ]),
+      withPhoto(
+        {
+          description: 'Mantelería de lino con cubremantel a juego, incluye planchado y entrega',
+          quantity: 12,
+          unitPrice: 18,
+          days: 3,
+          total: 648,
+        },
+        photos.square,
+      ),
+      // A product sold by VARIATION: the line prints product + variation, with the variation's photo.
+      withPhoto(
+        { description: VARIATION_LINE_NAME, quantity: 10, unitPrice: 15, days: 3, total: 450 },
+        photos.variation,
+      ),
     ];
 
 const rentalSubtotal = rentalLines.reduce((sum, line) => sum + line.total, 0);
 const saleLines: DocumentLine[] = [
-  { description: 'Piñata temática', quantity: 2, unitPrice: 85, total: 170 },
-  { description: 'Bolsas de dulces surtidos', quantity: 40, unitPrice: 12, total: 480 },
+  // The row WITHOUT a photo — except on `--free`, which is the one-page check and so carries the
+  // WORST case: a photo on every line.
+  withPhoto(
+    { description: 'Piñata temática', quantity: 2, unitPrice: 85, total: 170 },
+    free ? photos.square : undefined,
+  ),
+  withPhoto(
+    { description: 'Bolsas de dulces surtidos', quantity: 40, unitPrice: 12, total: 480 },
+    photos.wide,
+  ),
 ];
 const saleSubtotal = saleLines.reduce((sum, line) => sum + line.total, 0);
 
@@ -460,19 +538,31 @@ const reportCopy: DamageReportCopy = {
   payLead: 'Al depositar, indica el número de pedido.',
 };
 
-const reportReplacements = claims.flatMap((claim) =>
-  claim.kind === 'replacement'
-    ? [
-        {
-          description: claim.description,
-          quantity: claim.quantity,
-          unitAmount: claim.unitAmount,
-          amount: claim.amount,
-          ...(claim.note !== undefined && { note: claim.note }),
-        },
-      ]
-    : [],
-);
+/** The damaged line's photo, as `fromDamageReport` finds it by line id: the fixture's own products
+ *  by name, the fillers in turn. */
+const replacementPhoto = (description: string, index: number): string | undefined =>
+  description.startsWith('Mantelería')
+    ? photos.square
+    : description === VARIATION_LINE_NAME
+      ? photos.variation
+      : description.startsWith('Sillas')
+        ? photos.tall
+        : fillerPhoto(index);
+
+const reportReplacements = claims
+  .filter((claim) => claim.kind === 'replacement')
+  .map((claim, index) =>
+    withPhoto(
+      {
+        description: claim.description,
+        quantity: claim.quantity,
+        unitAmount: claim.unitAmount,
+        amount: claim.amount,
+        ...(claim.note !== undefined && { note: claim.note }),
+      },
+      replacementPhoto(claim.description, index),
+    ),
+  );
 
 const reportModel: DamageReportModel = {
   // The letterhead this business ACTUALLY has — two accounts — because the report's one-page
@@ -491,8 +581,14 @@ const reportModel: DamageReportModel = {
     ? {
         total: DEPOSIT_TOTAL,
         lines: [
-          { description: 'Sillas plásticas blancas', quantity: 120, unitAmount: 5, total: 600 },
-          { description: 'Mesas rectangulares de 8 personas', quantity: 12, unitAmount: 25, total: 300 },
+          withPhoto(
+            { description: 'Sillas plásticas blancas', quantity: 120, unitAmount: 5, total: 600 },
+            photos.tall,
+          ),
+          withPhoto(
+            { description: 'Mesas rectangulares de 8 personas', quantity: 12, unitAmount: 25, total: 300 },
+            photos.wide,
+          ),
         ],
       }
     : { total: 0, lines: [] },
@@ -524,6 +620,7 @@ const variant = [
   retentionOption === undefined ? '' : `-retention${retentionOption}`,
   damageCount === undefined ? '' : `-damages${damageCount}`,
   longReason ? '-long-reason' : '',
+  noPhotos ? '-no-photos' : '',
 ].join('');
 const out = path.join(here, `preview${variant}.pdf`);
 

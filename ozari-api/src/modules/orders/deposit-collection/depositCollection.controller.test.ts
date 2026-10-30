@@ -118,7 +118,7 @@ const richOrder = () => ({
       replacementPrice: dec("120"),
       damagedQuantity: 0,
       damageNote: null,
-      product: { name: "Silla plegable" },
+      product: { name: "Silla plegable", productImages: [] },
     },
   ],
   serviceExtras: [],

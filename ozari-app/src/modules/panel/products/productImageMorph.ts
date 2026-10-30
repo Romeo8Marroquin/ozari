@@ -48,17 +48,52 @@ export interface MorphRect {
   height: number;
 }
 
+/**
+ * How a photo sits in its frame. The grid card COVERS its 3:4 tile (a cropped, full-bleed photo);
+ * the detail hero CONTAINS it in the same 3:4 frame (the whole photo, letterboxed on white — owner,
+ * 2026-10-29). `object-fit` itself cannot animate, so the clone animates the difference instead:
+ * see {@link MorphFit}.
+ */
+type PhotoFit = 'cover' | 'contain';
+
+/** The detail hero's fit — the forward flight's destination (the card's is read at lift-off). */
+const HERO_FIT: PhotoFit = 'contain';
+
+/**
+ * The clone's PHOTO inside its frame. The clone is a clipping frame (the tweened rect) holding the
+ * image at `object-fit: contain`, and "cover" is the same image SCALED UP about the centre until it
+ * fills the frame — for a frame of aspect `f` and a photo of aspect `a`, by `max(f/a, a/f)`. So the
+ * cover→contain change is a plain `scale` tween on the inner image that rides the flight's own
+ * clock, and the landing is pixel-continuous with whichever fit the destination wears: no snap at
+ * the hand-off. `aspect` is null when the photo's natural size is unknown (not decoded yet) — the
+ * clone then simply covers, as it always did.
+ */
+interface MorphFit {
+  image: HTMLImageElement;
+  aspect: number | null;
+  destinationFit: PhotoFit;
+}
+
 interface MorphStash {
   productId: number;
-  clone: HTMLImageElement;
+  clone: HTMLElement;
+  fit: MorphFit;
   /** The in-progress travel toward the known destination (a begin without one no-ops instead). */
   flight: { tween: gsap.core.Tween; destination: MorphRect };
 }
 
 interface MorphLanding {
-  clone: HTMLImageElement;
+  clone: HTMLElement;
+  fitImage: HTMLImageElement;
   reveal: HTMLElement | null;
   onSettled: (() => void) | null;
+}
+
+/** The inner image's scale that renders `fit` inside a frame of `rect` (1 = contain). */
+function fitScale(fit: PhotoFit, rect: MorphRect, aspect: number | null): number {
+  if (fit === 'contain' || aspect === null || rect.height === 0) return 1;
+  const frame = rect.width / rect.height;
+  return Math.max(frame / aspect, aspect / frame);
 }
 
 let stash: MorphStash | null = null;
@@ -72,7 +107,13 @@ let safetyTimer: number | null = null;
  * anything that reflows the content column (sidebar expand/collapse, resize) invalidates it —
  * flying to a dead position is worse than the correction path.
  */
-let returnTarget: { productId: number; rect: MorphRect; signature: string | null } | null = null;
+let returnTarget: {
+  productId: number;
+  rect: MorphRect;
+  signature: string | null;
+  /** How the card wears its photo — the back flight lands on exactly that. */
+  fit: PhotoFit;
+} | null = null;
 
 /**
  * The MEASURED detail-hero rect from a previous claimed arrival, keyed by viewport size AND the
@@ -135,8 +176,10 @@ const FADE = { duration: 0.12, ease: 'power2.inOut' } as const;
 
 /**
  * Predict where the detail hero will land BEFORE the detail page exists — its layout is
- * deterministic: a centered `max-w-5xl` column inside the (padded) panel screen, the hero
- * full-width (4:3) below the back row, or the left half (`gap-10`) from `lg`. Vertically it's
+ * deterministic: a centered `max-w-5xl` column inside the (padded) panel screen, the hero a 3:4
+ * frame (the grid card's own aspect) the width of its column — full width below `lg`, the left
+ * half (`gap-10`) from it — capped so it fits the viewport (`HERO_HEIGHT_RESERVE_PX`, mirroring
+ * `PRODUCT_HERO_COLUMN` in `ProductDetailPage`) and centred in its column. Vertically it's
  * anchored to the SCROLL CONTAINER's viewport (the detail always opens scrolled to the top), so a
  * scrolled grid doesn't skew the guess. Only a prediction — the claim corrects to the measured
  * rect — but it lets the travel start on the click itself.
@@ -158,15 +201,30 @@ export function estimateDetailHeroRect(): MorphRect | null {
   const scrollerBox = (screenEl.parentElement ?? screenEl).getBoundingClientRect();
   const contentWidth = Math.min(box.width, 1024); // max-w-5xl = 64rem
   const contentLeft = box.left + (box.width - contentWidth) / 2;
-  const heroWidth = window.innerWidth >= 1024 ? (contentWidth - 40) / 2 : contentWidth; // lg: gap-10 split
+  const columnWidth = window.innerWidth >= 1024 ? (contentWidth - 40) / 2 : contentWidth; // lg: gap-10 split
+  // The viewport cap: `max(14rem, (100svh − 12rem) × 3/4)` — mirrored from the page's class.
+  const heroWidth = Math.min(
+    columnWidth,
+    Math.max(HERO_MIN_CAP_PX, (window.innerHeight - HERO_HEIGHT_RESERVE_PX) * 0.75),
+  );
   const padding = window.innerWidth >= 1024 ? 32 : window.innerWidth >= 768 ? 24 : 16; // p-4/md:6/lg:8
   // + the back/share row (36px — the always-mounted share control sizes it) and the page's gap-6.
   // This constant MUST track the detail page's pre-hero chrome: a stale value makes every
   // first-flight-of-a-session (nothing measured yet — e.g. right after a refresh) land short and
   // then visibly correct.
   const top = scrollerBox.top + padding + 60;
-  return { left: contentLeft, top, width: heroWidth, height: (heroWidth * 3) / 4 };
+  return {
+    left: contentLeft + (columnWidth - heroWidth) / 2,
+    top,
+    width: heroWidth,
+    height: (heroWidth * 4) / 3,
+  };
 }
+
+/** The height the hero frame leaves for the chrome around it (`12rem`) and its width floor
+ *  (`14rem`) — the two numbers in `PRODUCT_HERO_COLUMN`'s cap; keep them in step. */
+const HERO_HEIGHT_RESERVE_PX = 192;
+const HERO_MIN_CAP_PX = 224;
 
 function dropSafetyTimer(): void {
   if (safetyTimer !== null) {
@@ -184,7 +242,7 @@ function finishLanding(instant: boolean): void {
   const current = landing;
   landing = null;
   if (!current) return;
-  gsap.killTweensOf(current.clone);
+  gsap.killTweensOf([current.clone, current.fitImage]);
   if (current.reveal) gsap.set(current.reveal, { autoAlpha: 1 });
   current.onSettled?.();
   if (instant) {
@@ -217,7 +275,7 @@ export function releaseProductImageMorph(instant = false): void {
   stash = null;
   if (!current) return;
   if (instant) {
-    gsap.killTweensOf(current.clone);
+    gsap.killTweensOf([current.clone, current.fit.image]);
     current.clone.remove();
     return;
   }
@@ -263,15 +321,19 @@ export function beginProductImageMorph(
   if (rect.width === 0 || rect.height === 0) return;
 
   const forward = estimate !== null;
+  const sourceFit: PhotoFit = getComputedStyle(image).objectFit === 'contain' ? 'contain' : 'cover';
   let destination: MorphRect;
+  let destinationFit: PhotoFit;
   if (forward) {
     destination = estimate;
+    destinationFit = HERO_FIT;
     // The card's rect — pixel-correct for the back flight (the return restores this scroll), as
     // long as the layout hasn't reflowed in between (the signature guards that).
     returnTarget = {
       productId,
       rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
       signature: layoutSignature(),
+      fit: sourceFit,
     };
   } else {
     if (
@@ -283,11 +345,15 @@ export function beginProductImageMorph(
       return;
     }
     destination = returnTarget.rect;
+    destinationFit = returnTarget.fit;
   }
 
-  const clone = document.createElement('img');
-  clone.src = image.currentSrc || image.src;
-  clone.alt = '';
+  // The clone is a clipping FRAME (the rect that travels) around the photo, which sits at
+  // `contain` and is scaled up to read as `cover` — see `MorphFit`. The frame's white is the
+  // hero's own background, so a contained photo lands on exactly the letterbox it will have.
+  const aspect =
+    image.naturalWidth > 0 && image.naturalHeight > 0 ? image.naturalWidth / image.naturalHeight : null;
+  const clone = document.createElement('div');
   clone.setAttribute('aria-hidden', 'true');
   Object.assign(clone.style, {
     position: 'fixed',
@@ -295,13 +361,27 @@ export function beginProductImageMorph(
     top: `${rect.top}px`,
     width: `${rect.width}px`,
     height: `${rect.height}px`,
-    objectFit: 'cover',
+    overflow: 'hidden',
+    backgroundColor: '#ffffff',
     borderRadius: 'var(--radius-card)',
     zIndex: 'var(--z-float-body)',
     pointerEvents: 'none',
     margin: '0',
   });
+  const photo = document.createElement('img');
+  photo.src = image.currentSrc || image.src;
+  photo.alt = '';
+  Object.assign(photo.style, {
+    position: 'absolute',
+    inset: '0',
+    width: '100%',
+    height: '100%',
+    // Unknown proportions (not decoded yet) → cover throughout, the pre-2026-10-29 behaviour.
+    objectFit: aspect === null ? 'cover' : 'contain',
+  });
+  clone.appendChild(photo);
   document.body.appendChild(clone);
+  gsap.set(photo, { scale: fitScale(sourceFit, rect, aspect) });
 
   // The source vanishes NOW — only the clone remains at the origin. Forward: a soft fade (the
   // card cell carries text/scrim; the exit sweep overwrites-and-continues the tween). Back: an
@@ -320,7 +400,14 @@ export function beginProductImageMorph(
   // than restart it (no velocity kink, ever). A destination is GUARANTEED here (a begin without
   // one no-ops above), so a clone can never float blind over the next page.
   const tween = gsap.to(clone, { ...destination, duration: FLIGHT.duration, ease: FLIGHT.ease });
-  stash = { productId, clone, flight: { tween, destination } };
+  // The fit change rides the SAME clock and curve as the travel: one movement, not two.
+  gsap.to(photo, {
+    scale: fitScale(destinationFit, destination, aspect),
+    duration: FLIGHT.duration,
+    ease: FLIGHT.ease,
+    overwrite: true,
+  });
+  stash = { productId, clone, fit: { image: photo, aspect, destinationFit }, flight: { tween, destination } };
   safetyTimer = window.setTimeout(() => releaseProductImageMorph(), SAFETY_TIMEOUT_MS);
 }
 
@@ -356,7 +443,7 @@ function performClaim(
     return false;
   }
   dropSafetyTimer();
-  const { clone, flight } = stash;
+  const { clone, flight, fit } = stash;
   stash = null;
 
   const rect = target.getBoundingClientRect();
@@ -369,7 +456,9 @@ function performClaim(
     };
   }
   if (reveal) gsap.set(reveal, { autoAlpha: 0 });
-  landing = { clone, reveal, onSettled };
+  landing = { clone, fitImage: fit.image, reveal, onSettled };
+  // The photo's scale for the MEASURED frame — what the destination really renders.
+  const landedScale = fitScale(fit.destinationFit, rect, fit.aspect);
 
   // The measured rect CONFIRMS the flight's destination → never restart the flight (a restarted
   // ease reads as a felt "bump" even with perfect rects): it completes naturally, then a tiny
@@ -383,6 +472,12 @@ function performClaim(
     Math.abs(rect.height - flight.destination.height) <= DESTINATION_TOLERANCE_PX;
   if (confirmed) {
     const settle = (): void => {
+      gsap.to(fit.image, {
+        scale: landedScale,
+        duration: SETTLE.duration,
+        ease: SETTLE.ease,
+        overwrite: true,
+      });
       gsap.to(clone, {
         left: rect.left,
         top: rect.top,
@@ -403,6 +498,12 @@ function performClaim(
     return true;
   }
 
+  gsap.to(fit.image, {
+    scale: landedScale,
+    duration: CORRECTION.duration,
+    ease: CORRECTION.ease,
+    overwrite: true,
+  });
   gsap.to(clone, {
     left: rect.left,
     top: rect.top,

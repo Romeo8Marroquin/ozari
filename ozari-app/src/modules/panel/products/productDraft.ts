@@ -24,6 +24,10 @@ export function readProductDraft(): CreateProductFormType | null {
           detail: typeof row?.detail === 'string' ? row.detail : '',
         }))
       : [],
+    // Options/variations restore as typed (their photos cannot — Files never reach a draft); a
+    // pre-variations or malformed draft reads as "no variations".
+    options: Array.isArray(stored.options) ? stored.options : [],
+    variants: Array.isArray(stored.variants) ? stored.variants : [],
   } as CreateProductFormType;
   return isMeaningfulDraft(draft) ? draft : null;
 }
