@@ -177,12 +177,19 @@ export const appConfig = {
     maxUploadBytes: 5 * 1024 * 1024, // 5 MB
     // SHOWCASE gallery cap per product — bounds the `images` a create/update accepts (the product's
     // own photos, `option_value_id` NULL).
-    maxImagesPerProduct: 8,
+    //
+    // The three photo caps were raised on 2026-10-30 (owner: "better to miss by a higher value than a
+    // lower one"): 40 in total could not even hold a 15-colour product at 4 photos each. 150 covers ONE
+    // fully photographed option (20 values × 6 + 10 showcase = 130) with room to spare.
+    maxImagesPerProduct: 10,
     // Photo cap per option VALUE (variations, 2026-10-29) — each value has its own small set.
-    maxImagesPerOptionValue: 4,
+    maxImagesPerOptionValue: 6,
     // Every photo of one product across ALL its sets (showcase + every value). Also the per-call cap
-    // of `POST /products/images/upload-url`, so one save's uploads are one presign call.
-    maxImagesTotalPerProduct: 40,
+    // of `POST /products/images/upload-url`, so one save's uploads are one presign call. That body
+    // still fits the GLOBAL 10 kB cap: 150 files serialize to 7,961 bytes at most (every
+    // `contentLength` at its 7-digit 5 MB ceiling) — measured in `bodyLimit.integration.test.ts`. Past
+    // ~190 files it would not; raise this only together with that route's parser.
+    maxImagesTotalPerProduct: 150,
     // Whitelisted upload content types → their canonical file extension (the object key's suffix).
     allowedImageTypes: {
       "image/jpeg": "jpg",
@@ -226,10 +233,19 @@ export const appConfig = {
   maxProductOptions: 3,
   maxOptionValues: 20,
   maxProductVariants: 60,
-  // The ONE body-size exception (AUTH-AND-SECURITY.md): `POST /products` and `PUT /products/:id`
-  // carry a full variations matrix (3 options × 20 values, 60 variants, 40 photo refs), which does
-  // not fit the global 10 kB cap. Route-scoped and Admin-only routes; every other route keeps 10 kB.
-  productWriteBodyLimit: "32kb",
+  // The ONE body-size exception (AUTH-AND-SECURITY.md §1 item 4): `POST /products` and
+  // `PUT /products/:id` carry a full variations matrix, which does not fit the global 10 kB cap.
+  // Route-scoped and Admin-only routes; every other route keeps 10 kB. Sized from the MEASURED worst
+  // case (`bodyLimit.integration.test.ts` builds and serializes it): 3 options × 20 values, 150 photo
+  // refs, 60 variants with every override and a 500-character description each, every text field at
+  // its maximum length — 60.6 kB in ASCII, 95.2 kB when every character is a 2-byte accented letter.
+  // The old 32 kB never covered it (the 60 variant descriptions alone are 31 kB).
+  productWriteBodyLimit: "100kb",
+  // The interactive-transaction budget of a product create/update/delete. Prisma's default 5 s
+  // `timeout` is too tight for the largest legal save (150 photo rows + 60 variants with their join
+  // rows ≈ 400 statements, each a round-trip from us-east4 to Neon). 20 s stays inside the 30 s
+  // request timeout (app.ts), so a stuck write still rolls back before the client gives up.
+  productWriteTransaction: { maxWait: 5000, timeout: 20000 },
 
   // Order list pagination: the agenda/history views' default page size and hard cap (same clamp
   // stance as products — a single list call can never fetch an unbounded number of rows).

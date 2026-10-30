@@ -40,7 +40,7 @@ export const PRODUCT_MAX_QUANTITY = 5000;
 
 // Gallery upload policy — mirrors `appConfig.storage` (the backend re-enforces all of it: the
 // content type + exact size are bound INTO each presigned URL, and the create endpoint caps images).
-export const PRODUCT_IMAGE_MAX_COUNT = 8;
+export const PRODUCT_IMAGE_MAX_COUNT = 10;
 export const PRODUCT_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 export const PRODUCT_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'];
 
@@ -50,8 +50,9 @@ export const PRODUCT_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'im
 export const PRODUCT_MAX_OPTIONS = 3;
 export const PRODUCT_MAX_OPTION_VALUES = 20;
 export const PRODUCT_MAX_VARIANTS = 60;
-export const PRODUCT_OPTION_VALUE_IMAGE_MAX_COUNT = 4;
-export const PRODUCT_IMAGE_MAX_TOTAL = 40;
+// Raised 2026-10-30 (6 / 10 showcase / 150 total) — "miss high": see EPIC-1-INVENTORY.md.
+export const PRODUCT_OPTION_VALUE_IMAGE_MAX_COUNT = 6;
+export const PRODUCT_IMAGE_MAX_TOTAL = 150;
 // An option or value NAME: 1–40 characters of the `fullNameRegex` alphabet (letters incl. accents,
 // digits, spaces, apostrophe, hyphen) — the full-name policy's characters at a label's length, so
 // "Rojo" or "XL" pass. Uniqueness is case- and accent-insensitive (`normalizeVariationName`).

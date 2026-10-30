@@ -272,6 +272,47 @@ animation — and it self-suppresses after a few adjustments, so it looks interm
 `[overflow-anchor:none]` therefore lives on the panel's `main.panel-main` AND on the `Modal` body,
 once each, not per page: GSAP owns choreography here, and that includes the scroll.
 
+### Lists, slots and boxes — the four shared primitives (2026-10-30)
+
+Before writing any appear/disappear/reorder motion, reach for one of these; each already handles
+interruption, reduced motion and leaves no inline style behind.
+
+- **`Collapse`** (`components/Collapse.tsx`) — a block that appears/disappears IN FLOW: CSS
+  `grid-template-rows` 0fr↔1fr + opacity, 300ms `--ease-settle` (binary state ⇒ CSS; retargets
+  natively). Pass content only while open (`{open && …}`) and the last open content stays painted
+  through the closing ease, then unmounts (at once under reduced motion); content passed while
+  closed stays mounted (a value's photo set). Closed = `inert` + `aria-hidden`. Inside a `gap-N`
+  column pass `closedClassName="-mt-N"` so the folded block also gives back its gap. ⚠️ Its inner box
+  is `overflow-hidden`: a floating label inside needs `pt-field` IN the fold, not a margin outside.
+- **`useListMotion`** (`modules/panel/useListMotion.ts`) — items that ENTER / LEAVE / REORDER
+  (the product variations editor). `item(id)` is the ref; an item mounting after the first frame
+  plays `detailRowIn` (0.35s `power3.out`, its gap swallowed) — once: one nested inside another
+  arrival rides its parent. `leave(ids, commit, { focusFallback })` plays `detailRowOut` (0.2s out +
+  0.3s collapse) and only THEN commits — `commit` must read the LATEST state (`getValues`, a ref
+  mirror), it runs a beat later. Focus left inside what left goes to the nearest surviving item's
+  `[data-focus-on-remove]` control (else its first enabled one), else to the fallback (the list's
+  add button). `reorder(ids, commit)` = just-in-time FLIP (`captureElements` → commit →
+  `glideReorder`, 0.35s `power3.out`), refocusing a control the move blurred. Items whose React key
+  must survive a change of their data need a stable identity (the editor's option uids,
+  `carryRowKeys` for combination rows) — an index or data key remounts them and the whole list
+  re-grows.
+- **`SlotSwap`** (`modules/panel/SlotSwap.tsx`) — one slot whose content is REPLACED (the product
+  stock field ↔ "managed per variation"; the detail page's thumbnail strip when a pick brings
+  another photo set): `editorSlotOut` (0.22s) → commit → the box eases from its old height
+  (`animateHeightFrom`, 0.35s `power3.out`) while `editorSlotIn` (0.35s) brings the new content.
+  A key that flips back mid-exit brings the old content back; nothing commits.
+- **`useMorphOnChange` + `MorphSwap`** — a region whose TEXT rewrites (the detail page's info after a
+  pick): `MorphSwap` cross-fades each text (inline = width morph; `block` for prose) and the region
+  eases its height. Never nest a `Collapse` (CSS height) inside such a region: two height owners.
+- **Height eases share one helper**: `animateHeightFrom(box, fromHeight, timing)` releases any ease
+  still pinning the box before it measures (a rapid add → remove used to land on a stale target and
+  snap). The gallery grid's height rides `GALLERY_REFLOW` (0.4s `power3.out`) — the tiles' own FLIP
+  clock — and `releaseHeightOnResize(box)` drops an ease the moment the box's WIDTH changes, so a
+  window resize re-wraps instantly instead of animating.
+- **A just-mounted label/note** may fade in with Tailwind's `starting:opacity-0` (CSS
+  `@starting-style`) — binary, CSS-owned, nothing to clean up (the editor's default radio, the
+  `FormError` message replacing another).
+
 ### Scroll memory, grid diffs, the panel exit
 
 - **Per-page scroll memory is automatic** (`PanelScrollMemory`, mounted in `PanelLayout` BEFORE the
@@ -381,8 +422,8 @@ authoritative, and a stale edit draft would silently resurrect values somebody e
   against itself reads as "untouched" and deletes it.
 - Any suite that mounts a create form must `sessionStorage.clear()` in `beforeEach`, or every test
   after the first inherits the previous one's half-typed form.
-- The transient-appearance pattern for in-form notes is the always-mounted `grid-rows 0fr↔1fr`
-  collapse (never conditional render — it pops and shoves).
+- The transient-appearance pattern for in-form notes is `Collapse` (§4 "Lists, slots and boxes") —
+  never a bare conditional render (it pops and shoves).
 
 ### The loading doctrine (per-card skeleton reveal)
 

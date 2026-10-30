@@ -702,7 +702,7 @@ export const paths: OpenAPIV3.PathsObject = {
         "defaulting to the first). **Variations** (`options` + `variants`, see " +
         "`CreateProductRequest`) are written in the SAME transaction; every `id` is forbidden on " +
         "create, and `quantity` is forbidden once options exist (each variant has its own stock). " +
-        "**Body limit 32kb** for this route and the PUT (every other route stays 10kb). Any rule " +
+        "**Body limit 100kb** for this route and the PUT (every other route stays 10kb). Any rule " +
         "violation or unknown lookup id is a `400`. Returns the " +
         "created product in the SAME role-projected shape the list uses. Authenticated limiter " +
         "(100/min).",
@@ -891,7 +891,7 @@ export const paths: OpenAPIV3.PathsObject = {
         "every photo set → variants with a two-phase combination-key write, so swapping two " +
         "variants' combinations works); a removed variant an order line references is RETIRED " +
         "(tombstoned), else hard-deleted, and the response reports which in `variantOutcome`. " +
-        "**Body limit 32kb.** Returns the updated product in the role-projected list shape (plus " +
+        "**Body limit 100kb.** Returns the updated product in the role-projected list shape (plus " +
         "each variant's `usage` for an Admin). Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
@@ -1031,7 +1031,7 @@ export const paths: OpenAPIV3.PathsObject = {
       description:
         "Returns short-lived (5 min) **presigned PUT URLs** so the browser uploads product photos " +
         "STRAIGHT to R2 — the image bytes never pass through the API. Requires the `Admin` role. " +
-        "1–40 files per call (a product's photo total across its showcase and option values); " +
+        "1–150 files per call (a product's photo total across its showcase and option values); " +
         "each file's content type must be a whitelisted image type " +
         "(`image/jpeg`, `image/png`, `image/webp`, `image/avif`) and its exact size ≤ 5 MB — both " +
         "are bound into the signature, so a minted URL can't upload anything else. Reference the " +

@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import Button from '@components/Button';
+import { PRODUCT_IMAGE_MAX_COUNT } from '@constants/Regex';
 import {
   DetailsSkeleton,
   FormSection,
@@ -32,7 +33,7 @@ const ProductFormSkeleton: React.FC = () => {
       </FormSection>
       <FormSection
         title={t(`${KEY}.sections.photos.title`)}
-        description={t(`${EDIT_KEY}.photosDescription`)}
+        description={t(`${EDIT_KEY}.photosDescription`, { max: PRODUCT_IMAGE_MAX_COUNT })}
       >
         <PhotosSkeleton />
       </FormSection>

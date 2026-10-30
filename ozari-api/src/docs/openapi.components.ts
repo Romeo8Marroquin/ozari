@@ -2323,7 +2323,7 @@ export const schemas: Record<string, Schema> = {
             },
             images: {
               type: "array",
-              maxItems: 4,
+              maxItems: 6,
               items: schemaRef("ProductVariationImageRequest"),
             },
           },
@@ -2362,7 +2362,7 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     required: ["businessTypeId", "categoryId", "currencyId", "name"],
     description:
-      "**Body limit 32kb** (this route and `PUT /products/{id}` only — every other route is 10kb). " +
+      "**Body limit 100kb** (this route and `PUT /products/{id}` only — every other route is 10kb). " +
       "Creates a product (+ nested details + gallery images). The CONDITIONAL price rule applies by " +
       "business type: **Alquiler** requires `rentPrice` + `rentTimeUnitId` and forbids `sellPrice`; " +
       "**Venta** requires `sellPrice` and forbids the rent fields AND `replacementPrice` (the " +
@@ -2371,8 +2371,8 @@ export const schemas: Record<string, Schema> = {
       "minted by `/products/images/upload-url` (the files must already be uploaded); the public URL " +
       "is derived server-side from each key. **Variations**: `options` + `variants` (both empty or " +
       "both present; every `id` anywhere in the body is FORBIDDEN on create — `400` " +
-      "`idsForbiddenOnCreate`). Limits: 3 options, 20 values per option, 60 variants, 4 photos per " +
-      "value, 8 showcase photos, 40 photos in total; image keys unique across the whole body.",
+      "`idsForbiddenOnCreate`). Limits: 3 options, 20 values per option, 60 variants, 6 photos per " +
+      "value, 10 showcase photos, 150 photos in total; image keys unique across the whole body.",
     properties: {
       name: { type: "string", minLength: 5, maxLength: 255, example: "Mesa redonda" },
       description: { type: "string", nullable: true, minLength: 5, maxLength: 500, example: "Mesa para 8 personas" },
@@ -2429,9 +2429,9 @@ export const schemas: Record<string, Schema> = {
       },
       images: {
         type: "array",
-        maxItems: 8,
+        maxItems: 10,
         description:
-          "Optional SHOWCASE gallery (max 8; value photos travel inside `options`). Array order = " +
+          "Optional SHOWCASE gallery (max 10; value photos travel inside `options`). Array order = " +
           "`sortOrder`. At most ONE image may set " +
           "`isPrimary: true`; when none does, the FIRST image becomes the primary.",
         items: {
@@ -2453,7 +2453,7 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     required: ["businessTypeId", "categoryId", "currencyId", "name"],
     description:
-      "**Body limit 32kb** (like `POST /products`). " +
+      "**Body limit 100kb** (like `POST /products`). " +
       "The product's FULL desired state (declarative, never a partial patch — the RECONCILE " +
       "design): the same scalar rules as create (incl. the conditional price rule), plus the FINAL " +
       "details and gallery lists. `productDetails` rows with an `id` keep/update one of the " +
@@ -2523,7 +2523,7 @@ export const schemas: Record<string, Schema> = {
       },
       images: {
         type: "array",
-        maxItems: 8,
+        maxItems: 10,
         description:
           "The FINAL SHOWCASE gallery in display order (array order = `sortOrder`). Each slot carries " +
           "exactly ONE of `id`/`key`. At most ONE slot may set `isPrimary: true`; when none does, " +
@@ -2548,14 +2548,15 @@ export const schemas: Record<string, Schema> = {
     required: ["files"],
     description:
       "Requests presigned R2 PUT URLs for product photo uploads — every set at once, showcase and " +
-      "option values (1–40 per call, the per-product photo total). Each file's " +
+      "option values (1–150 per call, the per-product photo total — the body stays inside the " +
+      "global 10kb). Each file's " +
       "content type must be a whitelisted image type and its size within the 5 MB cap — both are " +
       "bound INTO the signature, so a minted URL only works for exactly that file.",
     properties: {
       files: {
         type: "array",
         minItems: 1,
-        maxItems: 40,
+        maxItems: 150,
         items: {
           type: "object",
           required: ["contentType", "contentLength"],

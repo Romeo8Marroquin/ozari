@@ -48,6 +48,8 @@ import {
 } from '../products/productVariations';
 import ProductsStatus from '../products/ProductsStatus';
 import AnimatedMessage from '@components/AnimatedMessage';
+import Collapse from '@components/Collapse';
+import useMorphOnChange from '../useMorphOnChange';
 import { currentPicks, nextPicks, valueChoices } from './orderLineVariants';
 import SectionReveal from '../products/SectionReveal';
 import ClientRegistryModal from './ClientRegistryModal';
@@ -106,6 +108,23 @@ const EKEY = 'modules.panel.orders.edit';
  *  have the units"; a driver conflict is "we can't be there", and mixing the two would confuse both. */
 const DKEY = 'modules.panel.orders.driverAvailability';
 const SECONDARY_COLOR = '#262626';
+
+/**
+ * A line's per-option selects as one REGION: switching the line to another product with options
+ * (two selects → three, or the grid re-wrapping) eases the block's height instead of jumping, so the
+ * line's subtotal and the next line glide. Its appearance and exit are the surrounding `Collapse`'s.
+ */
+const LineVariationPicks: React.FC<{ productId: number; children: React.ReactNode }> = ({
+  productId,
+  children,
+}) => {
+  const region = useMorphOnChange<HTMLDivElement>(productId);
+  return (
+    <div ref={region} className="flex flex-col pt-field">
+      {children}
+    </div>
+  );
+};
 
 interface OrderFormProps {
   /** `create` (default) posts a new order; `edit` prefills from `order` and saves through PUT. */
@@ -1328,8 +1347,13 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                                 the values the earlier picks still lead to). They measure the LINE,
                                 not the window — one column on a phone-width line, then two or
                                 three — and `gap-y-field`/`mt-field` clear each floating label. */}
+                            {/* They APPEAR and LEAVE with the product (Collapse — the last selects stay
+                                painted while the row closes), and a switch between two products
+                                with options eases the block's height (LineVariationPicks). The
+                                spacing is padding INSIDE the fold, so a closed block takes none. */}
+                            <Collapse open={lineProduct !== undefined && lineOptions.length > 0}>
                             {lineProduct && lineOptions.length > 0 && (
-                              <div className="mt-field flex flex-col">
+                              <LineVariationPicks productId={lineProduct.id}>
                                 <div className="grid gap-x-3 gap-y-field @min-[26rem]:grid-cols-2 @min-[40rem]:grid-cols-3">
                                   {lineOptions.map((option, optionIndex) => (
                                     <div key={option.id} className="min-w-0">
@@ -1358,8 +1382,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                                   id={`order-line-${index}-variant-error`}
                                   errorMessage={variantError}
                                 />
-                              </div>
+                              </LineVariationPicks>
                             )}
+                            </Collapse>
                             <LineSubtotalNote
                               product={lineProduct}
                               variant={lineVariant}

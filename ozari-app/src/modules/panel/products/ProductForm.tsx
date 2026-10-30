@@ -28,6 +28,7 @@ import FormDraftNote from '../FormDraftNote';
 import { usePanelNavigate } from '../PanelNavContext';
 import { useFormDraftsEnabled } from '../preferences/usePreferences';
 import PreferencesCta from '../PreferencesCta';
+import SlotSwap from '../SlotSwap';
 import type { CatalogOption, CurrencyCatalogOption, ProductCatalog } from './product.types';
 import {
   clearProductDraft,
@@ -62,7 +63,7 @@ import {
   type UpdateProductImageRef,
   type ValueImagesByKey,
 } from './SchemaCreateProduct';
-import { PRODUCT_IMAGE_MAX_TOTAL } from '@constants/Regex';
+import { PRODUCT_IMAGE_MAX_COUNT, PRODUCT_IMAGE_MAX_TOTAL } from '@constants/Regex';
 import { useCreateProduct } from './useCreateProduct';
 import { useProductCatalog } from './useProductCatalog';
 import { useUpdateProduct } from './useUpdateProduct';
@@ -629,7 +630,9 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
           <FormSection
             title={t(`${KEY}.sections.photos.title`)}
             // Edit gets its own copy: there is no draft here, and removals apply on save.
-            description={t(isEdit ? `${EDIT_KEY}.photosDescription` : `${KEY}.sections.photos.description`)}
+            description={t(isEdit ? `${EDIT_KEY}.photosDescription` : `${KEY}.sections.photos.description`, {
+              max: PRODUCT_IMAGE_MAX_COUNT,
+            })}
           >
             <SectionReveal
               loading={!catalogReady}
@@ -733,12 +736,11 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
                     )}
                     {/* One stock for the product — or, with options, one per variation (below in
                         Variaciones), and the API refuses a product quantity then. */}
-                    {hasOptions ? (
-                      <p className="reveal-item min-w-0 self-center text-sm text-charcoal/55">
-                        {t(`${KEY}.variations.quantityManaged`)}
-                      </p>
-                    ) : (
-                      <div className="reveal-item min-w-0">
+                    {/* The field gives way to the note (and back) as one movement — SlotSwap. */}
+                    <SlotSwap swapKey={hasOptions ? 'managed' : 'quantity'} className="reveal-item min-w-0">
+                      {hasOptions ? (
+                        <p className="text-sm text-charcoal/55">{t(`${KEY}.variations.quantityManaged`)}</p>
+                      ) : (
                         <CustomInputForm<CreateProductFormType>
                           id="product-quantity"
                           name="quantity"
@@ -747,8 +749,8 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
                           placeholder={t(`${KEY}.fields.quantityPlaceholder`)}
                           aria-label={t(`${KEY}.fields.quantityLabel`)}
                         />
-                      </div>
-                    )}
+                      )}
+                    </SlotSwap>
                   </div>
                 </div>
               )}

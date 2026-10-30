@@ -45,9 +45,9 @@ vi.mock("@/config/app.js", () => ({
     maxProductVariants: 60,
     storage: {
       maxUploadBytes: 5 * 1024 * 1024,
-      maxImagesPerProduct: 8,
-      maxImagesPerOptionValue: 4,
-      maxImagesTotalPerProduct: 40,
+      maxImagesPerProduct: 10,
+      maxImagesPerOptionValue: 6,
+      maxImagesTotalPerProduct: 150,
       allowedImageTypes: {
         "image/jpeg": "jpg",
         "image/png": "png",
@@ -247,7 +247,7 @@ describe("Products Validator", () => {
       await mockValidPrisma();
       mockReq.body = {
         ...validRentBody(),
-        images: Array.from({ length: 9 }, (_, i) => ({ key: mintedKey(i) })),
+        images: Array.from({ length: 11 }, (_, i) => ({ key: mintedKey(i) })),
       };
       await run();
       expectRejected("tooManyImages");
@@ -624,7 +624,7 @@ describe("Products Validator", () => {
 
     it("should reject more files than the product's TOTAL photo cap (showcase + every value set)", () => {
       mockReq.body = {
-        files: Array.from({ length: 41 }, () => ({
+        files: Array.from({ length: 151 }, () => ({
           contentType: "image/webp",
           contentLength: 1024,
         })),
@@ -941,7 +941,7 @@ describe("Products Validator", () => {
       await mockValidPrisma();
       mockReq.body = {
         ...validUpdateBody(),
-        images: Array.from({ length: 9 }, (_, i) => ({ key: mintedKey(i) })),
+        images: Array.from({ length: 11 }, (_, i) => ({ key: mintedKey(i) })),
       };
       await runUpdate();
       expectRejected("tooManyImages");

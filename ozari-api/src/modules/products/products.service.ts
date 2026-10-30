@@ -1178,7 +1178,7 @@ async function reconcileImageSets(
     ? getStorage()
     : null;
   // Sequential on purpose: parallel queries inside a Prisma interactive transaction are unsafe
-  // (one connection), and a product caps at 40 photos — the "optimization" isn't worth the hazard.
+  // (one connection), and a product caps at 150 photos — the "optimization" isn't worth the hazard.
   // Each set numbers its own `sortOrder` from 0 and carries its own single primary.
   for (const { optionValueId, images } of sets) {
     for (const [index, image] of images.entries()) {

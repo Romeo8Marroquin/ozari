@@ -21,9 +21,12 @@ import { useRole } from '@hooks/useRole';
 import { getStatus } from '@utils/apiError';
 import { clearHistoryDepartureHold, setHistoryDepartureHold } from '@utils/historyDeparture';
 import { prefersReducedMotion } from '@utils/motion';
+import MorphSwap from '@components/MorphSwap';
 import { headerTitleOut, staggerIn, staggerOut } from '../pageMotion';
 import { usePanelNavigate } from '../PanelNavContext';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
+import SlotSwap from '../SlotSwap';
+import useMorphOnChange from '../useMorphOnChange';
 import { SELL_BUSINESS_TYPE } from './ProductCard';
 import {
   beginProductImageMorph,
@@ -77,12 +80,13 @@ const StockLine: React.FC<{ product: Product }> = ({ product }) => {
     return null;
   }
   return (
+    // A variation pick rewrites the label (cross-fade + width morph) and may flip the tone (CSS).
     <p
-      className={`reveal-item inline-flex w-fit items-center rounded-chip px-2.5 py-1 text-xs font-semibold ${
+      className={`reveal-item inline-flex w-fit items-center rounded-chip px-2.5 py-1 text-xs font-semibold transition-colors duration-200 motion-reduce:transition-none ${
         available ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
       }`}
     >
-      {label}
+      <MorphSwap swapKey={label}>{label}</MorphSwap>
     </p>
   );
 };
@@ -167,6 +171,8 @@ const ProductDetailPage: React.FC = () => {
   const activeImage = images[activeIndex] ?? images[0];
   const allPicked = options.length > 0 && picks.every((pick) => pick !== null);
   const variant = product && allPicked ? matchVariant(product, picks) : undefined;
+  // The info a pick rewrites eases its height as one region (see the render).
+  const infoRegion = useMorphOnChange(picks.join(','));
 
   // The full-size viewer (opens on the hero / its expand affordance, at the current image).
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -220,7 +226,16 @@ const ProductDetailPage: React.FC = () => {
     const tween = gsap.fromTo(
       incoming,
       { autoAlpha: 0 },
-      { autoAlpha: 1, duration: seconds, ease: 'power2.inOut', onComplete: () => setGhostImageUrl(null) },
+      {
+        autoAlpha: 1,
+        duration: seconds,
+        ease: 'power2.inOut',
+        // A switch mid-fade retargets from the frame on screen: the old tween is killed, never left
+        // to land on its own target over the new one.
+        overwrite: true,
+        clearProps: 'opacity,visibility',
+        onComplete: () => setGhostImageUrl(null),
+      },
     );
     const fadeOut = gsap.fromTo(
       outgoing,
@@ -351,6 +366,10 @@ const ProductDetailPage: React.FC = () => {
         }
       : product;
   const headline = shown ? formatHeadlinePrice(shown) : null;
+  const headlineText =
+    headline && (headline.from ? t(`${KEY}.card.priceFrom`, { price: headline.price }) : headline.price);
+  const pickNote = allPicked ? (variant ? variant.label : t(`${DKEY}.notOffered`)) : t(`${DKEY}.pickHint`);
+  const description = shown?.description ?? t(`${KEY}.card.noDescription`);
 
   return (
     <div ref={root} className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6">
@@ -432,7 +451,9 @@ const ProductDetailPage: React.FC = () => {
             {product && shown && (
               <div className="grid gap-6 lg:grid-cols-2 lg:gap-10">
               {/* ── Gallery ─────────────────────────────────────────────────────────────── */}
-              <div className={`${PRODUCT_HERO_COLUMN} flex flex-col gap-3`}>
+              {/* No column gap: the strip carries its own top padding, so an EMPTY strip takes no
+                  room at all and its height ease covers the spacing too. */}
+              <div className={`${PRODUCT_HERO_COLUMN} flex flex-col`}>
                 {/* The hero — the morph's TARGET (same `data-morph-id` as the card photo). A
                     fixed 3:4 frame showing the WHOLE photo (see `PRODUCT_HERO_COLUMN`). */}
                 <div
@@ -479,8 +500,16 @@ const ProductDetailPage: React.FC = () => {
                     </span>
                   )}
                 </div>
-                {images.length > 1 && (
-                  <div className="reveal-item flex flex-wrap gap-2">
+                {/* The thumbnails SWAP as one strip when a pick brings another photo set: the old
+                    strip leaves, the box eases to the new one's height (appearing, vanishing or
+                    wrapping onto another row moves everything below it), the new strip slides in —
+                    SlotSwap. Keyed by the set's photo ids, so a refetch of the same set is still. */}
+                <SlotSwap
+                  swapKey={images.length > 1 ? images.map((image) => image.id).join(',') : 'none'}
+                  className="reveal-item"
+                >
+                  {images.length > 1 && (
+                  <div className="flex flex-wrap gap-2 pt-3">
                     {images.map((image, index) => (
                       <button
                         key={image.id}
@@ -503,7 +532,8 @@ const ProductDetailPage: React.FC = () => {
                       </button>
                     ))}
                   </div>
-                )}
+                  )}
+                </SlotSwap>
               </div>
 
               {/* ── Info ────────────────────────────────────────────────────────────────── */}
@@ -517,11 +547,16 @@ const ProductDetailPage: React.FC = () => {
                   </span>
                 </div>
                 <h2 className="reveal-item text-2xl font-bold text-charcoal sm:text-3xl">{product.name}</h2>
-                {headline && (
+                {headlineText && (
                   <p className="reveal-item text-xl font-bold text-charcoal">
-                    {headline.from ? t(`${KEY}.card.priceFrom`, { price: headline.price }) : headline.price}
+                    <MorphSwap swapKey={headlineText}>{headlineText}</MorphSwap>
                   </p>
                 )}
+                {/* What a pick rewrites lives in ONE region: its height eases (the description
+                    re-wrapping, a note's line count) while each text cross-fades in place, so the
+                    details and the actions below glide instead of jumping. */}
+                <div ref={infoRegion} className="flex flex-col gap-4">
+
                 {/* The option pickers: one chip row per option. A value no offered variation
                     pairs with the other picks stays pressable (so the visitor can switch
                     straight across) but reads muted; the combination then says it is not offered. */}
@@ -566,8 +601,12 @@ const ProductDetailPage: React.FC = () => {
                         </div>
                       </div>
                     ))}
-                    <p className={`text-xs ${allPicked && !variant ? 'text-amber-700' : 'text-charcoal/50'}`}>
-                      {allPicked ? (variant ? variant.label : t(`${DKEY}.notOffered`)) : t(`${DKEY}.pickHint`)}
+                    <p
+                      className={`text-xs transition-colors duration-200 motion-reduce:transition-none ${allPicked && !variant ? 'text-amber-700' : 'text-charcoal/50'}`}
+                    >
+                      <MorphSwap swapKey={pickNote} block>
+                        {pickNote}
+                      </MorphSwap>
                     </p>
                   </div>
                 )}
@@ -578,7 +617,9 @@ const ProductDetailPage: React.FC = () => {
                 {shown.replacementPrice !== undefined && (
                   <p className="reveal-item text-sm text-charcoal/70">
                     <span className="font-medium text-charcoal/60">{t(`${DKEY}.replacementPrice`)}: </span>
-                    {formatMoney(shown.replacementPrice, product.currency.symbol)}
+                    <MorphSwap swapKey={shown.replacementPrice}>
+                      {formatMoney(shown.replacementPrice, product.currency.symbol)}
+                    </MorphSwap>
                   </p>
                 )}
                 {/* The refundable deposit per unit — a public commercial condition (every role
@@ -587,15 +628,18 @@ const ProductDetailPage: React.FC = () => {
                 {shown.securityDeposit !== undefined && (
                   <p className="reveal-item text-sm text-charcoal/70">
                     <span className="font-medium text-charcoal/60">{t(`${DKEY}.securityDeposit`)}: </span>
-                    {formatMoney(shown.securityDeposit, product.currency.symbol)}
+                    <MorphSwap swapKey={shown.securityDeposit}>
+                      {formatMoney(shown.securityDeposit, product.currency.symbol)}
+                    </MorphSwap>
                     <span className="text-charcoal/50"> · {t(`${DKEY}.securityDepositNote`)}</span>
                   </p>
                 )}
                 <div className="reveal-item flex flex-col gap-1.5">
                   <h3 className="text-sm font-semibold text-charcoal">{t(`${DKEY}.descriptionTitle`)}</h3>
-                  <p className="text-sm leading-relaxed text-charcoal/70">
-                    {shown.description ?? t(`${KEY}.card.noDescription`)}
-                  </p>
+                  <MorphSwap swapKey={description} block className="text-sm leading-relaxed text-charcoal/70">
+                    {description}
+                  </MorphSwap>
+                </div>
                 </div>
                 {product.details.length > 0 && (
                   <div className="reveal-item flex flex-col gap-1.5">

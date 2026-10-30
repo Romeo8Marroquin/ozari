@@ -452,10 +452,14 @@ describe("parseProductVariations — value photos", () => {
       name: `Valor ${index}`,
       images: Array.from({ length: perValue }, () => ({ key: imageKey(next++) })),
     }));
-    expectRejected(
-      body({ showcaseImages: showcase, options: [{ name: "Color", values }] }),
-      "tooManyImagesTotal",
-    );
+    // Spread over as many options as the per-option value cap needs, so only the TOTAL can trip.
+    const perOption = appConfig.maxOptionValues;
+    const options = Array.from({ length: Math.ceil(values.length / perOption) }, (_, index) => ({
+      name: `Opcion ${index}`,
+      values: values.slice(index * perOption, (index + 1) * perOption),
+    }));
+    expect(options.length).toBeLessThanOrEqual(appConfig.maxProductOptions);
+    expectRejected(body({ showcaseImages: showcase, options }), "tooManyImagesTotal");
   });
 });
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import {
@@ -12,6 +12,7 @@ import {
 } from 'react-icons/hi2';
 import AnimatedMessage from '@components/AnimatedMessage';
 import Button from '@components/Button';
+import Collapse from '@components/Collapse';
 import CustomInputForm from '@components/CustomInputForm';
 import {
   PRODUCT_IMAGE_MAX_TOTAL,
@@ -21,17 +22,20 @@ import {
   PRODUCT_OPTION_VALUE_IMAGE_MAX_COUNT,
 } from '@constants/Regex';
 import { decimalInput, integerInput } from '@utils/numericInput';
+import useListMotion from '../useListMotion';
 import type { Product, ProductImage, ProductVariantUsage } from './product.types';
 import ProductImageGallery from './ProductImageGallery';
 import {
   addValueCombinations,
   allValueKeys,
+  carryRowKeys,
   combinationOf,
   dropOptionFromVariants,
   dropValueFromVariants,
   emptyVariantRow,
   generateCombinations,
   mintValueKey,
+  rowKeyOf,
   valueKeyForId,
   variantLabelFor,
   type OptionFormRow,
@@ -45,6 +49,31 @@ const SECONDARY_COLOR = '#262626';
 const ICON_BUTTON =
   'grid size-9 shrink-0 cursor-pointer place-items-center rounded-chip text-charcoal/45 transition-[color,background-color,box-shadow] duration-200 hover:bg-charcoal/[0.05] hover:text-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent';
 const DANGER_BUTTON = `${ICON_BUTTON} hover:bg-red-50 hover:text-red-600`;
+/**
+ * Past this many combination rows a structural move stops animating them one by one (a third
+ * option's value can list hundreds): the option or value itself still leaves or glides, the rows
+ * simply settle. Measured against the work, not the eye — dozens of rows still move.
+ */
+const ROW_MOTION_CAP = 80;
+
+/** Maps a listed combination to what it becomes after a structural change (`null` = it leaves). */
+type Projection = (valueKeys: readonly string[]) => readonly string[] | null;
+
+/** The combinations the editor lists: over the options that HAVE values (option order). */
+const combinationsOf = (options: OptionFormRow[]): string[][] =>
+  generateCombinations(options.filter((option) => option.values.length > 0));
+
+/** Removing value `key`: from an option that keeps other values, every combination using it leaves;
+ *  from an option it was the ONLY value of, every combination simply loses it. */
+const valueRemoval = (key: string, alone: boolean): Projection =>
+  alone ? (combo) => combo.filter((entry) => entry !== key) : (combo) => (combo.includes(key) ? null : combo);
+
+/** The `n`th option's on-screen identity — stable across moves, so its fieldset travels with it. */
+let optionUidCounter = 0;
+const mintOptionUid = (): string => {
+  optionUidCounter += 1;
+  return `o${optionUidCounter}`;
+};
 
 /** An RHF error node's message, wherever the resolver put it (a leaf, or an array's `root`). */
 const messageOf = (node: unknown): string | undefined => {
@@ -121,6 +150,12 @@ interface ProductVariationsEditorProps {
  *
  * Structural moves write `options` and `variants` together through `setValue`, so the two can never
  * disagree; the inputs themselves are ordinary registered fields of the form.
+ *
+ * **Motion** (`useListMotion`): options, values, combination rows and a row's fields enter, leave and
+ * reorder as list items. A removal plays first and COMMITS after (reading the form's latest state),
+ * so what sits below glides up; focus left inside it moves to the neighbour's remove button, else to
+ * the list's add button. Rows keep their identity across a change that renames their combination
+ * (`carryRowKeys`), so an option's first value or a merge moves rows instead of rebuilding the table.
  */
 const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
   disabled,
@@ -143,6 +178,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
   const productDeposit = useWatch({ control, name: 'securityDeposit' });
   const isRent = businessTypeId === BUSINESS_TYPE_RENT;
   const errors = formState.errors;
+  const motion = useListMotion();
 
   // What the SERVER said about each saved variation, and each saved value's photos — read once.
   const usageById = useMemo(
@@ -164,6 +200,19 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
   // A saved variation un-offered and offered again comes BACK (same id, stock, overrides) instead of
   // being deleted and recreated.
   const [parked, setParked] = useState<Map<string, VariantFormRow>>(() => new Map());
+  // Each option's on-screen identity (index-aligned with `options`), and each combination row's.
+  const [optionUids, setOptionUids] = useState<string[]>(() => options.map(() => mintOptionUid()));
+  const [rowKeys, setRowKeys] = useState<Map<string, string>>(() => new Map());
+  /* v8 ignore next -- defensive: every door that adds an option mints its uid in the same render */
+  const uids = options.map((_, index) => optionUids[index] ?? `idx-${index}`);
+
+  // A removal commits a beat after the click: it reads the identities as they are THEN.
+  const latest = useRef({ uids, rowKeys });
+  useLayoutEffect(() => {
+    latest.current = { uids, rowKeys };
+  });
+  const addOptionButton = useRef<HTMLButtonElement>(null);
+  const addValueButtons = useRef(new Map<string, HTMLButtonElement>());
 
   const [photoCounts, setPhotoCounts] = useState<Record<string, number>>({});
   const onCount = useCallback(
@@ -177,6 +226,19 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
     setValue('options', nextOptions, opts);
     setValue('variants', nextVariants, opts);
   };
+  /** Write a structural change, carrying each surviving row's identity through `project`. */
+  const commit = (
+    nextOptions: OptionFormRow[],
+    nextVariants: VariantFormRow[],
+    project: Projection | null,
+    nextUids?: string[],
+  ): void => {
+    if (project) {
+      setRowKeys(carryRowKeys(combinationsOf(getValues('options')), latest.current.rowKeys, project).rowKeys);
+    }
+    if (nextUids) setOptionUids(nextUids);
+    write(nextOptions, nextVariants);
+  };
 
   const holdingOf = (row: VariantFormRow): number =>
     row.id === undefined ? 0 : (usageById.get(row.id)?.holding ?? 0);
@@ -188,48 +250,124 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
     return variants.filter((row) => row.id !== undefined && !kept.has(row.id));
   };
 
+  const combinations = combinationsOf(options);
+  const indexByCombination = new Map(
+    variants.map((row, index) => [combinationOf(row.valueKeys), index] as const),
+  );
+  /** The motion ids of what a structural change takes away: rows that vanish or merge away, and the
+   *  fields of rows that stay listed but lose their variation. */
+  const exitsOf = (nextVariants: VariantFormRow[], project: Projection): string[] => {
+    const carried = carryRowKeys(combinations, rowKeys, project);
+    const offeredAfter = new Set(nextVariants.map((row) => combinationOf(row.valueKeys)));
+    const offeredBefore = new Set(
+      combinations
+        .filter((combo) => indexByCombination.has(combinationOf(combo)))
+        .map((combo) => rowKeyOf(rowKeys, combo)),
+    );
+    const ids = carried.leaving.map((key) => `row:${key}`);
+    for (const [target, key] of carried.rowKeys) {
+      if (offeredBefore.has(key) && !offeredAfter.has(target)) ids.push(`fields:${key}`);
+    }
+    /* v8 ignore next -- past the cap means hundreds of listed rows: too slow to render in jsdom */
+    return ids.length > ROW_MOTION_CAP ? [] : ids;
+  };
+  /** The rows a reorder glides (they follow the options' order) — none past the cap. */
+  const rowIds = (): string[] => {
+    const ids = combinations.map((combo) => `row:${rowKeyOf(rowKeys, combo)}`);
+    /* v8 ignore next -- same cap */
+    return ids.length > ROW_MOTION_CAP ? [] : ids;
+  };
+
   // ── Options ──────────────────────────────────────────────────────────────────────────────────
-  const addOption = (): void => write([...options, { name: '', values: [] }], variants);
+  const addOption = (): void => {
+    const uid = mintOptionUid();
+    motion.reveal(`opt:${uid}`);
+    setOptionUids([...uids, uid]);
+    write([...options, { name: '', values: [] }], variants);
+  };
   const removeOption = (index: number): void => {
-    const keys = options[index].values.map((value) => value.key);
-    write(
-      options.filter((_, i) => i !== index),
-      dropOptionFromVariants(variants, keys),
+    const uid = uids[index];
+    const keys = new Set(options[index].values.map((value) => value.key));
+    const project: Projection = (combo) => combo.filter((key) => !keys.has(key));
+    // The last option takes the whole combinations section with it.
+    const exits =
+      options.length === 1 ? ['combos'] : exitsOf(dropOptionFromVariants(variants, [...keys]), project);
+    motion.leave(
+      [`opt:${uid}`, ...exits],
+      () => {
+        const at = latest.current.uids.indexOf(uid);
+        /* v8 ignore next -- defensive: the option left by another path while this one played out */
+        if (at === -1) return;
+        const current = getValues('options');
+        const gone = new Set(current[at].values.map((value) => value.key));
+        commit(
+          current.filter((_, i) => i !== at),
+          dropOptionFromVariants(getValues('variants'), [...gone]),
+          (combo) => combo.filter((key) => !gone.has(key)),
+          latest.current.uids.filter((_, i) => i !== at),
+        );
+      },
+      { focusFallback: () => addOptionButton.current },
     );
   };
-  const moveOption = (index: number, to: number): void => {
-    const next = [...options];
-    const [moved] = next.splice(index, 1);
-    next.splice(to, 0, moved);
-    write(next, variants);
-  };
+  const moveOption = (index: number, to: number): void =>
+    motion.reorder([...uids.map((uid) => `opt:${uid}`), ...rowIds()], () => {
+      const next = [...options];
+      const [moved] = next.splice(index, 1);
+      next.splice(to, 0, moved);
+      const nextUids = [...uids];
+      const [movedUid] = nextUids.splice(index, 1);
+      nextUids.splice(to, 0, movedUid);
+      setOptionUids(nextUids);
+      write(next, variants);
+    });
 
   // ── Values ───────────────────────────────────────────────────────────────────────────────────
   const addValue = (optionIndex: number): void => {
     const key = mintValueKey(allValueKeys(options));
+    const first = options[optionIndex].values.length === 0;
     const next = options.map((option, i) =>
       i === optionIndex ? { ...option, values: [...option.values, { key, name: '' }] } : option,
     );
-    write(next, addValueCombinations(next, variants, optionIndex, key));
+    motion.reveal(`val:${key}`);
+    // An option's FIRST value extends every listed combination — the same rows, one more value.
+    commit(next, addValueCombinations(next, variants, optionIndex, key), first ? (combo) => [...combo, key] : null);
   };
   const removeValue = (optionIndex: number, valueKey: string): void => {
-    const next = options.map((option, i) =>
-      i === optionIndex
-        ? { ...option, values: option.values.filter((value) => value.key !== valueKey) }
-        : option,
+    const uid = uids[optionIndex];
+    const project = valueRemoval(valueKey, options[optionIndex].values.length === 1);
+    motion.leave(
+      [`val:${valueKey}`, ...exitsOf(dropValueFromVariants(variants, valueKey), project)],
+      () => {
+        const current = getValues('options');
+        const at = current.findIndex((option) => option.values.some((value) => value.key === valueKey));
+        /* v8 ignore next -- defensive: the value left by another path while this one played out */
+        if (at === -1) return;
+        commit(
+          current.map((option, i) =>
+            i === at ? { ...option, values: option.values.filter((value) => value.key !== valueKey) } : option,
+          ),
+          dropValueFromVariants(getValues('variants'), valueKey),
+          valueRemoval(valueKey, current[at].values.length === 1),
+        );
+      },
+      { focusFallback: () => addValueButtons.current.get(uid) },
     );
-    write(next, dropValueFromVariants(variants, valueKey));
   };
-  const moveValue = (optionIndex: number, from: number, to: number): void => {
-    const next = options.map((option, i) => {
-      if (i !== optionIndex) return option;
-      const values = [...option.values];
-      const [moved] = values.splice(from, 1);
-      values.splice(to, 0, moved);
-      return { ...option, values };
-    });
-    write(next, variants);
-  };
+  const moveValue = (optionIndex: number, from: number, to: number): void =>
+    motion.reorder(
+      [...options[optionIndex].values.map((value) => `val:${value.key}`), ...rowIds()],
+      () => {
+        const next = options.map((option, i) => {
+          if (i !== optionIndex) return option;
+          const values = [...option.values];
+          const [moved] = values.splice(from, 1);
+          values.splice(to, 0, moved);
+          return { ...option, values };
+        });
+        write(next, variants);
+      },
+    );
   const togglePhotos = (key: string): void =>
     setOpenPhotos((current) => {
       const next = new Set(current);
@@ -239,27 +377,29 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
     });
 
   // ── Combinations ────────────────────────────────────────────────────────────────────────────
-  const combinations = generateCombinations(options.filter((option) => option.values.length > 0));
-  const indexByCombination = new Map(
-    variants.map((row, index) => [combinationOf(row.valueKeys), index] as const),
-  );
   const offer = (combo: string[]): void => {
     /* v8 ignore next -- defensive: an unoffered checkbox is disabled at the cap */
     if (variants.length >= PRODUCT_MAX_VARIANTS) return;
     const restored = parked.get(combinationOf(combo));
     write(options, [...variants, restored ?? emptyVariantRow(combo)]);
   };
-  const withdraw = (index: number): void => {
-    const row = variants[index];
-    if (row.id !== undefined) {
-      const parkedRow = { ...row, isDefault: false };
-      setParked((current) => new Map(current).set(combinationOf(row.valueKeys), parkedRow));
-    }
-    write(
-      options,
-      variants.filter((_, i) => i !== index),
-    );
-  };
+  /** Un-offer a combination: its fields leave first, then the variation does. */
+  const withdraw = (rowKey: string, combination: string): void =>
+    motion.leave([`fields:${rowKey}`], () => {
+      const current = getValues('variants');
+      const index = current.findIndex((row) => combinationOf(row.valueKeys) === combination);
+      /* v8 ignore next -- defensive: withdrawn by another path while its fields left */
+      if (index === -1) return;
+      const row = current[index];
+      if (row.id !== undefined) {
+        const parkedRow = { ...row, isDefault: false };
+        setParked((map) => new Map(map).set(combination, parkedRow));
+      }
+      write(
+        getValues('options'),
+        current.filter((_, i) => i !== index),
+      );
+    });
   const offerAll = (): void => {
     const next = [...variants];
     for (const combo of combinations) {
@@ -297,17 +437,22 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
 
   return (
     <div className="@container flex flex-col gap-5">
-      {options.length === 0 && <p className="text-sm text-charcoal/55">{t(`${KEY}.empty`)}</p>}
+      <Collapse open={options.length === 0} closedClassName="-mt-5">
+        {options.length === 0 && <p className="text-sm text-charcoal/55">{t(`${KEY}.empty`)}</p>}
+      </Collapse>
 
       {options.map((option, optionIndex) => {
+        const uid = uids[optionIndex];
         const optionName = option.name.trim() || t(`${KEY}.unnamedValue`);
         const optionKeys = option.values.map((value) => value.key);
         const optionBlocked = blocks(droppedBy(dropOptionFromVariants(variants, optionKeys)));
         return (
           <fieldset
-            // Index keys on purpose: every input inside is addressed by its index PATH, so a
-            // re-render after a move must re-address the same slots rather than keep stale ones.
-            key={optionIndex}
+            // Keyed by the option's IDENTITY, so a move carries its node (and its motion) along; the
+            // inputs inside are Controllers addressed by index PATH, which re-read the form's value
+            // at their new path on the same render.
+            key={uid}
+            ref={motion.item(`opt:${uid}`)}
             className="flex min-w-0 flex-col gap-4 rounded-control border border-charcoal/[0.08] p-3 @min-[30rem]:p-4"
           >
             <legend className="sr-only">{optionName}</legend>
@@ -343,6 +488,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                 </button>
                 <button
                   type="button"
+                  data-focus-on-remove
                   className={DANGER_BUTTON}
                   disabled={disabled || optionBlocked}
                   title={optionBlocked ? t(`${KEY}.blockedRemoval`) : undefined}
@@ -365,7 +511,11 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                 const photoCount =
                   photoCounts[value.key] ?? savedImagesByKey.get(value.key)?.length ?? 0;
                 return (
-                  <div key={value.key} className="flex min-w-0 flex-col gap-2">
+                  <div
+                    key={value.key}
+                    ref={motion.item(`val:${value.key}`)}
+                    className="flex min-w-0 flex-col gap-2"
+                  >
                     <div className="flex flex-wrap items-start gap-2">
                       <div className="min-w-0 grow basis-40">
                         <CustomInputForm<CreateProductFormType>
@@ -408,6 +558,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                         </button>
                         <button
                           type="button"
+                          data-focus-on-remove
                           className={DANGER_BUTTON}
                           disabled={disabled || valueBlocked}
                           title={valueBlocked ? t(`${KEY}.blockedRemoval`) : undefined}
@@ -419,15 +570,9 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                       </div>
                     </div>
                     {/* Always mounted — collapsing must not lose the staged photos — and inert
-                        while closed (the always-mounted grid-rows collapse). */}
-                    <div
-                      inert={!photosOpen}
-                      aria-hidden={!photosOpen}
-                      className={`grid transition-[grid-template-rows,opacity] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
-                        photosOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
-                      }`}
-                    >
-                      <div className="flex min-h-0 flex-col gap-2 overflow-hidden">
+                        while closed. */}
+                    <Collapse open={photosOpen} closedClassName="-mt-2">
+                      <div className="flex flex-col gap-2">
                         <p className="text-xs text-charcoal/50">
                           {t(`${KEY}.photosHint`, { max: PRODUCT_OPTION_VALUE_IMAGE_MAX_COUNT })}
                         </p>
@@ -441,7 +586,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                           isUploading={isUploading}
                         />
                       </div>
-                    </div>
+                    </Collapse>
                   </div>
                 );
               })}
@@ -451,6 +596,10 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
               />
               <div className="self-start">
                 <Button
+                  ref={(element) => {
+                    if (element) addValueButtons.current.set(uid, element);
+                    else addValueButtons.current.delete(uid);
+                  }}
                   variant="soft"
                   color={SECONDARY_COLOR}
                   size="sm"
@@ -469,6 +618,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
       <AnimatedMessage id="product-options-error" errorMessage={messageOf(errors.options)} />
       <div className="self-start">
         <Button
+          ref={addOptionButton}
           variant="soft"
           color={SECONDARY_COLOR}
           size="sm"
@@ -481,7 +631,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
       </div>
 
       {options.length > 0 && (
-        <div className="flex flex-col gap-3 border-t border-charcoal/[0.07] pt-5">
+        <div ref={motion.item('combos')} className="flex flex-col gap-3 border-t border-charcoal/[0.07] pt-5">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <div className="min-w-0 grow basis-56">
               <h4 className="text-sm font-semibold text-charcoal">{t(`${KEY}.combinationsTitle`)}</h4>
@@ -511,17 +661,23 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
           <ul className="flex flex-col gap-3" role="list">
             {combinations.map((combo) => {
               const combination = combinationOf(combo);
+              const rowKey = rowKeyOf(rowKeys, combo);
               const index = indexByCombination.get(combination);
               const label = variantLabelFor(options, combo) || t(`${KEY}.unnamedValue`);
               const row = index === undefined ? undefined : variants[index];
+              const withdrawing = motion.leaving.has(`fields:${rowKey}`);
               const holding = row ? holdingOf(row) : 0;
               const parkedRow = parked.get(combination);
               const parkedUsage = parkedRow?.id === undefined ? undefined : usageById.get(parkedRow.id);
+              const parkedNote = !row && parkedUsage !== undefined;
               return (
                 <li
-                  key={combination}
-                  className={`flex min-w-0 flex-col gap-3 rounded-control border p-3 ${
-                    row ? 'border-charcoal/[0.1] bg-white' : 'border-dashed border-charcoal/[0.1] bg-charcoal/[0.015]'
+                  key={rowKey}
+                  ref={motion.item(`row:${rowKey}`)}
+                  className={`flex min-w-0 flex-col gap-3 rounded-control border p-3 transition-[border-color,background-color] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
+                    row && !withdrawing
+                      ? 'border-charcoal/[0.1] bg-white'
+                      : 'border-dashed border-charcoal/[0.1] bg-charcoal/[0.015]'
                   }`}
                 >
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -529,19 +685,26 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                       <input
                         type="checkbox"
                         className="size-4 shrink-0 cursor-pointer accent-charcoal disabled:cursor-not-allowed"
-                        checked={row !== undefined}
+                        checked={row !== undefined && !withdrawing}
                         disabled={
                           disabled ||
+                          withdrawing ||
                           holding > 0 ||
                           (row === undefined && variants.length >= PRODUCT_MAX_VARIANTS)
                         }
-                        onChange={() => (index === undefined ? offer(combo) : withdraw(index))}
+                        onChange={() => (index === undefined ? offer(combo) : withdraw(rowKey, combination))}
                         aria-label={t(`${KEY}.offer`, { label })}
                       />
                       <span className="min-w-0 truncate text-sm font-medium text-charcoal">{label}</span>
                     </label>
+                    {/* The radio and the "not offered" note fade in as they take the slot (CSS
+                        `@starting-style`); the default's highlight eases from row to row. */}
                     {row && index !== undefined ? (
-                      <label className="flex cursor-pointer items-center gap-2 text-xs text-charcoal/65">
+                      <label
+                        className={`flex cursor-pointer items-center gap-2 rounded-chip px-2 py-1 text-xs transition-[color,background-color,opacity] duration-200 ease-[var(--ease-settle)] starting:opacity-0 motion-reduce:transition-none ${
+                          row.isDefault ? 'bg-charcoal/[0.06] font-medium text-charcoal' : 'text-charcoal/65'
+                        }`}
+                      >
                         <input
                           type="radio"
                           name="product-default-variant"
@@ -553,19 +716,23 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                         {t(`${KEY}.defaultLabel`)}
                       </label>
                     ) : (
-                      <span className="text-xs text-charcoal/40">{t(`${KEY}.notOffered`)}</span>
+                      <span className="px-2 text-xs text-charcoal/40 transition-opacity duration-200 starting:opacity-0 motion-reduce:transition-none">
+                        {t(`${KEY}.notOffered`)}
+                      </span>
                     )}
                   </div>
                   {holding > 0 && (
                     <p className="text-xs text-amber-700">{t(`${KEY}.holding`, { count: holding })}</p>
                   )}
-                  {!row && parkedUsage !== undefined && (
-                    <p className="text-xs text-charcoal/55">
-                      {parkedUsage.lines > 0 ? t(`${KEY}.willRetire`) : t(`${KEY}.willDelete`)}
-                    </p>
-                  )}
+                  <Collapse open={parkedNote} closedClassName="-mt-3">
+                    {parkedNote && (
+                      <p className="text-xs text-charcoal/55">
+                        {parkedUsage.lines > 0 ? t(`${KEY}.willRetire`) : t(`${KEY}.willDelete`)}
+                      </p>
+                    )}
+                  </Collapse>
                   {row && index !== undefined && (
-                    <>
+                    <div ref={motion.item(`fields:${rowKey}`)} className="flex min-w-0 flex-col gap-3">
                       <AnimatedMessage
                         id={`product-variant-keys-error-${index}`}
                         errorMessage={messageOf(errors.variants?.[index]?.valueKeys)}
@@ -639,7 +806,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                           />
                         </div>
                       </div>
-                    </>
+                    </div>
                   )}
                 </li>
               );
@@ -649,18 +816,22 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
         </div>
       )}
 
-      {pendingRetire > 0 && (
-        <p className="rounded-control bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          {t(`${KEY}.pendingRetire`, { count: pendingRetire })}
-        </p>
-      )}
-      {options.length > 0 && (
-        <p
-          className={`text-xs ${photoTotal > PRODUCT_IMAGE_MAX_TOTAL ? 'font-semibold text-red-600' : 'text-charcoal/45'}`}
-        >
-          {t(`${KEY}.photosTotal`, { count: photoTotal, max: PRODUCT_IMAGE_MAX_TOTAL })}
-        </p>
-      )}
+      <Collapse open={pendingRetire > 0} closedClassName="-mt-5">
+        {pendingRetire > 0 && (
+          <p className="rounded-control bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {t(`${KEY}.pendingRetire`, { count: pendingRetire })}
+          </p>
+        )}
+      </Collapse>
+      <Collapse open={options.length > 0} closedClassName="-mt-5">
+        {options.length > 0 && (
+          <p
+            className={`text-xs transition-colors duration-200 ${photoTotal > PRODUCT_IMAGE_MAX_TOTAL ? 'font-semibold text-red-600' : 'text-charcoal/45'}`}
+          >
+            {t(`${KEY}.photosTotal`, { count: photoTotal, max: PRODUCT_IMAGE_MAX_TOTAL })}
+          </p>
+        )}
+      </Collapse>
     </div>
   );
 };

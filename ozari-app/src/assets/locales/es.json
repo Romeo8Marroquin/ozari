@@ -1589,7 +1589,7 @@
             },
             "photos": {
               "title": "Fotos",
-              "description": "Hasta 8 fotos del producto. La que lleve la estrella será la principal del catálogo. Las fotos no se guardan en el borrador."
+              "description": "Hasta {{max}} fotos del producto. La que lleve la estrella será la principal del catálogo. Las fotos no se guardan en el borrador."
             },
             "pricing": {
               "title": "Precios e inventario",
@@ -1634,7 +1634,7 @@
           "gallery": {
             "dropzone": {
               "cta": "Arrastra tus fotos aquí o haz clic para buscarlas",
-              "hint": "JPG, PNG, WebP o AVIF · máx. 5 MB por foto · hasta 8 fotos",
+              "hint": "JPG, PNG, WebP o AVIF · máx. 5 MB por foto · hasta {{max}} fotos",
               "add": "Agregar"
             },
             "counter": "{{count}} de {{max}} fotos",
@@ -1754,7 +1754,7 @@
           "loading": "Cargando producto",
           "successTitle": "Producto actualizado",
           "successToast": "Los cambios se guardaron.",
-          "photosDescription": "Hasta 8 fotos del producto. La que lleve la estrella será la principal del catálogo. Los cambios se aplican al guardar.",
+          "photosDescription": "Hasta {{max}} fotos del producto. La que lleve la estrella será la principal del catálogo. Los cambios se aplican al guardar.",
           "variantsRetired_one": "Se retiró la variación {{labels}}; el historial de pedidos la conserva.",
           "variantsRetired_other": "Se retiraron las variaciones {{labels}}; el historial de pedidos las conserva.",
           "actions": {
