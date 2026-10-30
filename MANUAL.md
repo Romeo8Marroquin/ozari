@@ -140,7 +140,9 @@ corresponda.
 - **Categoría** — Mesas, Sillas, Mantelería… Se administran en Preferencias → Productos.
 
 **Fotos**
-- Hasta **8 fotos**, de **5 MB** cada una, en JPG, PNG, WebP o AVIF.
+- Hasta **10 fotos**, de **5 MB** cada una, en JPG, PNG, WebP o AVIF. Con variaciones, cada valor
+  (un color, un tamaño) puede llevar además **hasta 6 fotos** propias, con un máximo de **150 fotos**
+  por producto en total.
 - Una de ellas es la **Principal** —la que aparece en las listas—. Se elige con *Marcar como
   principal*; no es necesariamente la primera.
 - El orden se cambia **arrastrando** las fotos.

@@ -40,9 +40,14 @@ vi.mock("@/config/app.js", () => ({
     maxGlobalAmount: 1000000,
     maxGlobalQuantity: 5000,
     maxArrangedProducts: 3,
+    maxProductOptions: 3,
+    maxOptionValues: 20,
+    maxProductVariants: 60,
     storage: {
       maxUploadBytes: 5 * 1024 * 1024,
-      maxImagesPerProduct: 8,
+      maxImagesPerProduct: 10,
+      maxImagesPerOptionValue: 6,
+      maxImagesTotalPerProduct: 150,
       allowedImageTypes: {
         "image/jpeg": "jpg",
         "image/png": "png",
@@ -71,6 +76,8 @@ const mockValidPrisma = async () => {
         id: 1,
         productImages: [{ id: 11 }, { id: 12 }],
         productDetails: [{ id: 21 }, { id: 22 }],
+        options: [],
+        variants: [],
       }),
     },
   };
@@ -240,7 +247,7 @@ describe("Products Validator", () => {
       await mockValidPrisma();
       mockReq.body = {
         ...validRentBody(),
-        images: Array.from({ length: 9 }, (_, i) => ({ key: mintedKey(i) })),
+        images: Array.from({ length: 11 }, (_, i) => ({ key: mintedKey(i) })),
       };
       await run();
       expectRejected("tooManyImages");
@@ -458,7 +465,10 @@ describe("Products Validator", () => {
         rentPrice: 75.99,
         rentTimeUnitId: 2,
         replacementPrice: 900.55,
+        securityDeposit: undefined,
         sellPrice: undefined,
+        options: [],
+        variants: [],
       });
     });
 
@@ -480,7 +490,10 @@ describe("Products Validator", () => {
         rentPrice: undefined,
         rentTimeUnitId: undefined,
         replacementPrice: undefined,
+        securityDeposit: undefined,
         sellPrice: 12.5,
+        options: [],
+        variants: [],
       });
     });
 
@@ -492,6 +505,60 @@ describe("Products Validator", () => {
 
       expect(mockNext).not.toHaveBeenCalled();
       expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.INTERNAL_SERVER_ERROR);
+    });
+
+    // ── Variations (the shared parser, wired into the create door) ────────────────────────────
+
+    const colorOptions = [{ name: "Color", values: [{ key: "r", name: "Rojo" }] }];
+
+    it("resolves the product quantity to 0 when variations carry the stock", async () => {
+      await mockValidPrisma();
+      const { quantity: _omit, ...body } = validRentBody();
+      mockReq.body = {
+        ...body,
+        options: colorOptions,
+        variants: [{ valueKeys: ["r"], quantity: 6, isDefault: true }],
+      };
+      await run();
+
+      expect(sendOzariError).not.toHaveBeenCalled();
+      expect(mockReq.body).toMatchObject({
+        quantity: 0,
+        options: [{ name: "Color", values: [{ key: "r", name: "Rojo", images: [] }] }],
+        variants: [{ valueKeys: ["r"], quantity: 6, isDefault: true }],
+      });
+    });
+
+    it("rejects a product quantity sent alongside variations (variation namespace)", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validRentBody(),
+        options: colorOptions,
+        variants: [{ valueKeys: ["r"], quantity: 6 }],
+      };
+      await run();
+      expect(mockRes.status).toHaveBeenCalledWith(HttpEnum.BAD_REQUEST);
+      expect(lastErrorKey()).toBe("products.variations.validators.quantityWithVariants");
+    });
+
+    it("still requires the product quantity when there are no variations", async () => {
+      await mockValidPrisma();
+      const { quantity: _omit, ...body } = validRentBody();
+      mockReq.body = body;
+      await run();
+      expectRejected("invalidQuantity");
+    });
+
+    it("forbids ids on create (the parser runs with no existing state)", async () => {
+      await mockValidPrisma();
+      const { quantity: _omit, ...body } = validRentBody();
+      mockReq.body = {
+        ...body,
+        options: [{ id: 3, name: "Color", values: [{ key: "r", name: "Rojo" }] }],
+        variants: [{ valueKeys: ["r"], quantity: 1 }],
+      };
+      await run();
+      expect(lastErrorKey()).toBe("products.variations.validators.idsForbiddenOnCreate");
     });
   });
 
@@ -555,9 +622,9 @@ describe("Products Validator", () => {
       expectUploadsRejected("invalidFiles");
     });
 
-    it("should reject more files than the gallery cap", () => {
+    it("should reject more files than the product's TOTAL photo cap (showcase + every value set)", () => {
       mockReq.body = {
-        files: Array.from({ length: 9 }, () => ({
+        files: Array.from({ length: 151 }, () => ({
           contentType: "image/webp",
           contentLength: 1024,
         })),
@@ -662,6 +729,54 @@ describe("Products Validator", () => {
       expect(lastErrorKey()).toBe(`products.updateProduct.validators.${key}`);
     };
 
+    describe("variations (the product's current ids are the parser's `existing`)", () => {
+      const withColor = async () => {
+        const prisma = await mockValidPrisma();
+        prisma.product.findFirst.mockResolvedValue({
+          id: 1,
+          productImages: [{ id: 11 }, { id: 12 }, { id: 13 }],
+          productDetails: [{ id: 21 }, { id: 22 }],
+          options: [{ id: 3, values: [{ id: 10 }] }],
+          variants: [{ id: 55 }],
+        });
+      };
+      const variationBody = (values: unknown[], variants: unknown[]) => {
+        const { quantity: _omit, ...body } = validUpdateBody();
+        return { ...body, options: [{ id: 3, name: "Color", values }], variants };
+      };
+
+      it("keeps the product's own option, value, photo (moved into a value set) and active variant", async () => {
+        await withColor();
+        mockReq.body = variationBody(
+          [{ id: 10, key: "v10", name: "Rojo", images: [{ id: 13 }] }],
+          [{ id: 55, valueKeys: ["v10"], quantity: 2 }],
+        );
+        await runUpdate();
+        expect(sendOzariError).not.toHaveBeenCalled();
+        expect(mockReq.body).toMatchObject({
+          quantity: 0,
+          options: [{ id: 3, values: [{ id: 10, images: [{ id: 13, isPrimary: true }] }] }],
+          variants: [{ id: 55 }],
+        });
+      });
+
+      it("rejects a value id from another product and a variant that is not active here", async () => {
+        await withColor();
+        mockReq.body = variationBody([{ id: 99, key: "v99", name: "Rojo" }], []);
+        await runUpdate();
+        expect(lastErrorKey()).toBe("products.variations.validators.invalidValueId");
+
+        vi.clearAllMocks();
+        await withColor();
+        mockReq.body = variationBody(
+          [{ id: 10, key: "v10", name: "Rojo" }],
+          [{ id: 57, valueKeys: ["v10"], quantity: 2 }],
+        );
+        await runUpdate();
+        expect(lastErrorKey()).toBe("products.variations.validators.invalidVariantId");
+      });
+    });
+
     it("passes a valid full-state body through, sanitized", async () => {
       await mockValidPrisma();
       mockReq.body = { ...validUpdateBody(), name: "  Mesa redonda blanca  " };
@@ -686,7 +801,10 @@ describe("Products Validator", () => {
         rentPrice: 75,
         rentTimeUnitId: 2,
         replacementPrice: 900,
+        securityDeposit: undefined,
         sellPrice: undefined,
+        options: [],
+        variants: [],
       });
     });
 
@@ -823,7 +941,7 @@ describe("Products Validator", () => {
       await mockValidPrisma();
       mockReq.body = {
         ...validUpdateBody(),
-        images: Array.from({ length: 9 }, (_, i) => ({ key: mintedKey(i) })),
+        images: Array.from({ length: 11 }, (_, i) => ({ key: mintedKey(i) })),
       };
       await runUpdate();
       expectRejected("tooManyImages");

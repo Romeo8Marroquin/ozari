@@ -1,4 +1,4 @@
-﻿/**
+/**
  * The document's design tokens — the app's brand, restated in the units a PDF thinks in.
  *
  * A PDF has no CSS custom properties, so these are the one place the values live. They are the
@@ -155,6 +155,8 @@ export const COL_PRICE = 82;
 export const COL_TOTAL = 84;
 
 export const ROW_PADDING = 10;
+/** A row's vertical padding — the air above and below its text. */
+export const ROW_PADDING_Y = 5;
 /** A single-line row. The floor, not the height — a description that wraps makes its row taller. */
 export const ROW_MIN_HEIGHT = 21;
 /** The column-label band. Named because the keep-together rule has to reserve it by number. */
@@ -181,6 +183,47 @@ export const TABLE_HEAD_HEIGHT = 24;
  * header exists to serve. The title's own `marginBottom` is added by the engine, so it is not here.
  */
 export const GROUP_HEAD_AHEAD = TABLE_HEAD_HEIGHT + ROW_MIN_HEIGHT;
+
+/**
+ * The product photo beside a row's description (2026-10-29) — a SQUARE box the whole photo is
+ * fitted into (`objectFit: 'contain'`, centred), so a tall chair and a wide table are both shown
+ * entire and neither is ever cropped.
+ *
+ * ⚠️ **The size is the one-page target's, not taste's** (decisions #15/#20). The ordinary two-bank
+ * order (`pnpm doc:preview:free`) ended ~19pt above the foot with five rows, four of them one line,
+ * so every point a photo adds to a one-line row is paid four times over. The photo may reach into
+ * the row's padding (`THUMB_BLEED`) — the TEXT keeps all of its own — which is what lets the box be
+ * this large: a one-line row with a photo is 24pt instead of 22, a two-line row is unchanged, and
+ * the free fixture with a photo on EVERY line still ends on page one. Measured 2026-10-29 against
+ * the TIGHTEST one-page fixtures, not the plain one: `--free` alone holds up to 20pt, but
+ * `--free --deposit=held` and `--damage-report --banks=3` (both one page without photos) go to two
+ * pages at 19pt and 20pt and hold at 18pt. 18 is therefore the LARGEST size that keeps every
+ * documented one-page target. The owner's first idea, 28–36pt, adds ~12–20pt to every one-line
+ * row: two pages for the ordinary order. Re-run `pnpm doc:preview:free`, `-- --free
+ * --deposit=held` and `pnpm doc:preview:damage-report -- --banks=3` after ANY change here.
+ */
+export const THUMB_SIZE = 18;
+/** The air between the photo and its description. */
+export const THUMB_GAP = 7;
+/** The least air between a photo and its row's edge — tighter than the text's `ROW_PADDING_Y`. */
+export const THUMB_ROW_PADDING = 3;
+/**
+ * How far the photo reaches into the row's vertical padding, per side (a negative margin on its box).
+ * The photo is laid out as `THUMB_SIZE − 2 × THUMB_BLEED` tall, so a row is as tall as its TEXT needs
+ * whenever the text is the taller of the two — a wrapped description reads exactly like the same
+ * description without a photo, and only a one-line row grows (to `THUMB_ROW_HEIGHT`).
+ */
+export const THUMB_BLEED = ROW_PADDING_Y - THUMB_ROW_PADDING;
+/** A single-line row that carries a photo. */
+export const THUMB_ROW_HEIGHT = THUMB_SIZE + THUMB_ROW_PADDING * 2;
+
+/**
+ * {@link GROUP_HEAD_AHEAD} for a table whose rows may carry photos: the first row it reserves is the
+ * TALLER photo row, so the keep-together rule still holds a title, its labels and a whole first row.
+ * A table without photos reserves exactly what it always did.
+ */
+export const groupHeadAhead = (withThumbnails: boolean): number =>
+  withThumbnails ? TABLE_HEAD_HEIGHT + Math.max(ROW_MIN_HEIGHT, THUMB_ROW_HEIGHT) : GROUP_HEAD_AHEAD;
 
 /** The table's corner. Used by the header band AND by the last row, so a table is a rounded
  *  rectangle rather than a rounded top on a square bottom. */

@@ -11,6 +11,7 @@ import Button from '@components/Button';
 import MorphSwap from '@components/MorphSwap';
 import ActionRow from '../ActionRow';
 import DamageReportButton from '../documents/DamageReportButton';
+import { damageDisplayName } from '../documents/documentModel';
 import useMorphOnChange from '../useMorphOnChange';
 import { formatMoment } from './orderDayGroups';
 import { formatMoney } from './orderEstimate';
@@ -316,7 +317,7 @@ const OrderDepositCard: React.FC<{
               <MoneyLine
                 key={damage.lineId}
                 label={t(`${KEY}.damage`, {
-                  product: damage.productName,
+                  product: damageDisplayName(damage, order.lines),
                   quantity: damage.quantity,
                   unit: money(damage.unitAmount),
                 })}

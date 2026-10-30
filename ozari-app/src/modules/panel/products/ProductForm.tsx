@@ -12,7 +12,9 @@ import FormError from '@components/FormError';
 import { notify } from '@components/notifications/notify';
 import { QueryKeys } from '@constants/QueryKeys';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
-import { toFormError } from '@utils/apiError';
+import { getStatus, toFormError } from '@utils/apiError';
+import axios from 'axios';
+import { formatReference } from '../documents/documentModel';
 import { decimalInput, integerInput } from '@utils/numericInput';
 import {
   detailRowIn,
@@ -26,6 +28,7 @@ import FormDraftNote from '../FormDraftNote';
 import { usePanelNavigate } from '../PanelNavContext';
 import { useFormDraftsEnabled } from '../preferences/usePreferences';
 import PreferencesCta from '../PreferencesCta';
+import SlotSwap from '../SlotSwap';
 import type { CatalogOption, CurrencyCatalogOption, ProductCatalog } from './product.types';
 import {
   clearProductDraft,
@@ -43,9 +46,10 @@ import {
 import ProductImageGallery from './ProductImageGallery';
 import ProductsStatus from './ProductsStatus';
 import SectionReveal from './SectionReveal';
-import { useGalleryImages } from './useGalleryImages';
+import { useGalleryImages, type GalleryState } from './useGalleryImages';
 import { useProductImageUploads } from './useProductImageUploads';
-import type { Product } from './product.types';
+import type { Product, ProductVariantOutcome } from './product.types';
+import ProductVariationsEditor from './ProductVariationsEditor';
 import {
   BUSINESS_TYPE_RENT,
   createProductDefaultValues,
@@ -57,7 +61,9 @@ import {
   toUpdateProductBody,
   type CreateProductFormType,
   type UpdateProductImageRef,
+  type ValueImagesByKey,
 } from './SchemaCreateProduct';
+import { PRODUCT_IMAGE_MAX_COUNT, PRODUCT_IMAGE_MAX_TOTAL } from '@constants/Regex';
 import { useCreateProduct } from './useCreateProduct';
 import { useProductCatalog } from './useProductCatalog';
 import { useUpdateProduct } from './useUpdateProduct';
@@ -88,6 +94,22 @@ const isCatalogUsable = (catalog: ProductCatalog | null | undefined): catalog is
   );
 
 type FormView = 'form' | 'error' | 'config';
+
+/** The `data` of a variation 409: `variantInUse` lists the removed variations still held by open
+ *  orders; `stockModeInUse` lists the open orders holding the product's CURRENT stock mode. */
+interface VariationConflictData {
+  conflicts?: { variantId: number; label: string; orderIds: number[] }[];
+  orderIds?: number[];
+}
+
+/** A 409's variation payload, or `undefined` for anything else. */
+const conflictPayload = (error: unknown): VariationConflictData | undefined =>
+  axios.isAxiosError(error) && getStatus(error) === 409
+    ? (error.response?.data as { data?: VariationConflictData } | undefined)?.data
+    : undefined;
+
+/** Order ids as the documents print them (`PED-00042`), once each. */
+const formatOrderIds = (ids: number[]): string => [...new Set(ids)].map(formatReference).join(', ');
 
 /**
  * Decouples the TARGET view (form ↔ the catalog-error retry panel) from the RENDERED one so the
@@ -198,6 +220,9 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
   // existing photos (staged locally from then on); new files upload only at submit time — presigned
   // PUTs straight to R2 — so an abandoned form never leaves orphaned objects behind.
   const gallery = useGalleryImages(product?.images);
+  // Each option VALUE owns a photo set too (`ProductVariationsEditor` mounts one gallery per value
+  // and registers it here by value key) — read at submit, uploaded with the showcase in ONE presign.
+  const valueGalleries = useRef(new Map<string, GalleryState>());
   // Defaults to ON while the preference is in flight — see `useFormDraftsEnabled`.
   const { enabled: draftsEnabled } = useFormDraftsEnabled('products');
   const { uploadImages, isUploading, progress } = useProductImageUploads();
@@ -221,7 +246,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
     defaultValues: isEdit && product ? productToFormValues(product) : (draft ?? createProductDefaultValues),
     mode: 'onTouched',
   });
-  const { handleSubmit, setValue, clearErrors, reset, control } = methods;
+  const { handleSubmit, setValue, getValues, clearErrors, reset, control } = methods;
   const details = useFieldArray({ control, name: 'details' });
 
   // Detail rows animate OUT before RHF drops them (and IN when the user adds one) — so the list
@@ -270,6 +295,9 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
   // be a restored draft whose fields must survive untouched.
   const businessTypeId = useWatch({ control, name: 'businessTypeId' });
   const isRent = businessTypeId === BUSINESS_TYPE_RENT;
+  // With options every variation owns its stock, so the product's single quantity steps aside.
+  /* v8 ignore next -- `?? []`: RHF always yields the registered array */
+  const hasOptions = (useWatch({ control, name: 'options' }) ?? []).length > 0;
 
   // ONE detail per type: each row's select hides the types other rows already picked (its own
   // selection stays listed), and "Agregar detalle" caps out at the number of available types —
@@ -300,7 +328,18 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
       setValue('securityDeposit', '');
       clearErrors(['rentPrice', 'rentTimeUnitId', 'replacementPrice', 'securityDeposit']);
     }
-  }, [businessTypeId, setValue, clearErrors]);
+    // The variations' overrides follow the type too (the API answers `variantPricingMismatch`
+    // otherwise): the side that no longer applies is cleared on every row.
+    const rent = businessTypeId === BUSINESS_TYPE_RENT;
+    setValue(
+      'variants',
+      getValues('variants').map((row) =>
+        rent
+          ? { ...row, sellPrice: '' }
+          : { ...row, rentPrice: '', replacementPrice: '', securityDeposit: '' },
+      ),
+    );
+  }, [businessTypeId, setValue, getValues, clearErrors]);
 
   const discardDraft = (): void => {
     // Move focus off the note's button BEFORE its container turns aria-hidden/inert — Chrome
@@ -318,12 +357,31 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
   const submitWithImages = async (data: CreateProductFormType): Promise<void> => {
     setFormError(undefined);
 
+    // The photo sets that belong to THIS body: the showcase, plus the set of every value still in
+    // the form (a removed value's gallery unregistered itself as it unmounted).
+    const valueSets = data.options.flatMap((option) =>
+      option.values.flatMap((value) => {
+        const set = valueGalleries.current.get(value.key);
+        /* v8 ignore next -- defensive: every value on screen has registered its gallery */
+        return set ? [{ key: value.key, set }] : [];
+      }),
+    );
+    // One cap across every set (`maxImagesTotalPerProduct`) — checked before anything uploads.
+    const photoTotal =
+      gallery.images.length + valueSets.reduce((sum, { set }) => sum + set.images.length, 0);
+    if (photoTotal > PRODUCT_IMAGE_MAX_TOTAL) {
+      setFormError(
+        t(`${KEY}.errors.tooManyImagesTotal`, { max: PRODUCT_IMAGE_MAX_TOTAL, count: photoTotal }),
+      );
+      return;
+    }
+
     // Phase 1 — upload the staged NEW photos (presign + direct-to-R2 PUTs); kept photos are
     // already in R2 and travel by row id. A failure here keeps the staged files intact, surfaces
     // per the form doctrine, and never reaches the save call — the user just retries the submit.
     let keyByImageId: Record<string, string>;
     try {
-      keyByImageId = await uploadImages(gallery.images);
+      keyByImageId = await uploadImages(gallery.images, ...valueSets.map(({ set }) => set.images));
     } catch (error) {
       const { inline, toast } = toFormError(error, t(`${KEY}.gallery.errors.uploadFailed`));
       if (inline) setFormError(inline);
@@ -333,14 +391,35 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
 
     // The FINAL gallery, declaratively: array order = display order, the starred photo carries the
     // primary flag, kept photos by `id`, new photos by their freshly-minted `key`.
-    const finalGallery: UpdateProductImageRef[] = gallery.images.map((image) => ({
-      ...(image.existingId !== undefined
-        ? { id: image.existingId }
-        : { key: keyByImageId[image.id] }),
-      isPrimary: image.id === gallery.primaryId,
-    }));
+    const toRefs = (set: GalleryState): UpdateProductImageRef[] =>
+      set.images.map((image) => ({
+        ...(image.existingId !== undefined
+          ? { id: image.existingId }
+          : { key: keyByImageId[image.id] }),
+        isPrimary: image.id === set.primaryId,
+      }));
+    const finalGallery = toRefs(gallery);
+    const imagesByValueKey: ValueImagesByKey = Object.fromEntries(
+      valueSets.map(({ key, set }) => [key, toRefs(set)]),
+    );
 
     const onError = (error: unknown): void => {
+      // The variation 409s carry WHICH orders hold what — said in our words, with their numbers,
+      // rather than the generic banner (the server reports; the copy only branches on its report).
+      const payload = conflictPayload(error);
+      if (payload?.conflicts?.length) {
+        setFormError(
+          t(`${KEY}.errors.variantInUse`, {
+            labels: payload.conflicts.map((conflict) => conflict.label).join(', '),
+            orders: formatOrderIds(payload.conflicts.flatMap((conflict) => conflict.orderIds)),
+          }),
+        );
+        return;
+      }
+      if (payload?.orderIds?.length) {
+        setFormError(t(`${KEY}.errors.stockModeInUse`, { orders: formatOrderIds(payload.orderIds) }));
+        return;
+      }
       const { inline, toast } = toFormError(error, t(`${MODE_KEY}.errors.submitFallback`));
       if (inline) setFormError(inline);
       if (toast) notify.error(toast);
@@ -350,16 +429,32 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
     // backend diffs details + gallery in one transaction); create posts the new product.
     if (isEdit && product) {
       updateProduct(
-        { id: product.id, body: { ...toUpdateProductBody(data), images: finalGallery } },
+        {
+          id: product.id,
+          body: { ...toUpdateProductBody(data, imagesByValueKey), images: finalGallery },
+        },
         {
           onSuccess: (response) => {
             // The 200 payload IS the authoritative post-save product (the same role projection
             // the detail page renders) — write it straight into the detail cache so returning
             // shows the fresh data instantly, with no refetch flash mid-transition. The list
             // refreshes in the background (its pages keep rendering while they refetch).
-            const updated = response.data.data;
-            if (updated) {
+            const payload = response.data.data as
+              | (Product & { variantOutcome?: ProductVariantOutcome })
+              | undefined;
+            if (payload) {
+              // `variantOutcome` describes THIS save, not the product — it never enters the cache.
+              const { variantOutcome, ...updated } = payload;
               queryClient.setQueryData([QueryKeys.PRODUCT, product.id], updated);
+              const retired = variantOutcome?.retired ?? [];
+              if (retired.length > 0) {
+                notify.info(
+                  t(`${EDIT_KEY}.variantsRetired`, {
+                    count: retired.length,
+                    labels: retired.map((variant) => variant.label).join(', '),
+                  }),
+                );
+              }
             } else {
               // A 2xx without a payload shouldn't happen — refetch rather than serve stale data.
               void queryClient.invalidateQueries({ queryKey: [QueryKeys.PRODUCT, product.id] });
@@ -376,7 +471,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
 
     createProduct(
       {
-        ...toCreateProductBody(data),
+        ...toCreateProductBody(data, imagesByValueKey),
         // On create every staged photo is new, so each slot carries a key.
         ...(finalGallery.length > 0 && {
           images: finalGallery.map((slot) => ({
@@ -463,7 +558,9 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
         <form
           id={FORM_ID}
           noValidate
-          onSubmit={handleSubmit(onSubmit)}
+          // Wrapped so `handleSubmit` runs in the EVENT, never during render: the submit reads the
+          // value galleries' registry (a ref), which render must not touch.
+          onSubmit={(event) => void handleSubmit(onSubmit)(event)}
           aria-busy={isLoading}
           className="flex flex-col gap-6"
         >
@@ -533,7 +630,9 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
           <FormSection
             title={t(`${KEY}.sections.photos.title`)}
             // Edit gets its own copy: there is no draft here, and removals apply on save.
-            description={t(isEdit ? `${EDIT_KEY}.photosDescription` : `${KEY}.sections.photos.description`)}
+            description={t(isEdit ? `${EDIT_KEY}.photosDescription` : `${KEY}.sections.photos.description`, {
+              max: PRODUCT_IMAGE_MAX_COUNT,
+            })}
           >
             <SectionReveal
               loading={!catalogReady}
@@ -635,17 +734,48 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
                         />
                       </div>
                     )}
-                    <div className="reveal-item min-w-0">
-                      <CustomInputForm<CreateProductFormType>
-                        id="product-quantity"
-                        name="quantity"
-                        {...integerInput}
-                        label={t(`${KEY}.fields.quantityLabel`)}
-                        placeholder={t(`${KEY}.fields.quantityPlaceholder`)}
-                        aria-label={t(`${KEY}.fields.quantityLabel`)}
-                      />
-                    </div>
+                    {/* One stock for the product — or, with options, one per variation (below in
+                        Variaciones), and the API refuses a product quantity then. */}
+                    {/* The field gives way to the note (and back) as one movement — SlotSwap. */}
+                    <SlotSwap swapKey={hasOptions ? 'managed' : 'quantity'} className="reveal-item min-w-0">
+                      {hasOptions ? (
+                        <p className="text-sm text-charcoal/55">{t(`${KEY}.variations.quantityManaged`)}</p>
+                      ) : (
+                        <CustomInputForm<CreateProductFormType>
+                          id="product-quantity"
+                          name="quantity"
+                          {...integerInput}
+                          label={t(`${KEY}.fields.quantityLabel`)}
+                          placeholder={t(`${KEY}.fields.quantityPlaceholder`)}
+                          aria-label={t(`${KEY}.fields.quantityLabel`)}
+                        />
+                      )}
+                    </SlotSwap>
                   </div>
+                </div>
+              )}
+            </SectionReveal>
+          </FormSection>
+
+          <FormSection
+            title={t(`${KEY}.variations.title`)}
+            description={t(`${KEY}.variations.description`)}
+          >
+            <SectionReveal
+              loading={!catalogReady}
+              delaySeconds={SECTION_REVEAL_STEP * 3}
+              skeleton={<DetailsSkeleton />}
+            >
+              {catalog && (
+                <div className="reveal-item">
+                  <ProductVariationsEditor
+                    disabled={isBusy}
+                    product={product}
+                    galleries={valueGalleries}
+                    showcaseCount={gallery.images.length}
+                    progress={progress}
+                    isUploading={isUploading}
+                  />
                 </div>
               )}
             </SectionReveal>
@@ -657,7 +787,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
           >
             <SectionReveal
               loading={!catalogReady}
-              delaySeconds={SECTION_REVEAL_STEP * 3}
+              delaySeconds={SECTION_REVEAL_STEP * 4}
               skeleton={<DetailsSkeleton />}
             >
               {catalog && (

@@ -151,6 +151,26 @@ function configureMiddlewares(app: Express): void {
 
   // Body parsing with size limits
   app.use(cookieParser());
+  // The ONE exception to the 10kb cap (variations, 2026-10-29 — AUTH-AND-SECURITY.md): a product's
+  // full-state create/update body carries its options, values, photo sets and up to 60 variants, so
+  // POST /products and PUT /products/:id parse up to `productWriteBodyLimit` (100kb). Admin-only
+  // routes; the parser runs FIRST, and the global one below skips a body already parsed.
+  const productWriteJson = express.json({ limit: appConfig.productWriteBodyLimit });
+  const escapedBasePath = appConfig.basePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // eslint-disable-next-line security/detect-non-literal-regexp -- built ONLY from the static, escaped appConfig.basePath (never user input)
+  const productCreatePath = new RegExp(`^${escapedBasePath}/products/?$`);
+  // eslint-disable-next-line security/detect-non-literal-regexp -- same: static, escaped appConfig.basePath
+  const productUpdatePath = new RegExp(`^${escapedBasePath}/products/\\d+/?$`);
+  app.use((req, res, next) => {
+    const isProductWrite =
+      (req.method === "POST" && productCreatePath.test(req.path)) ||
+      (req.method === "PUT" && productUpdatePath.test(req.path));
+    if (isProductWrite) {
+      productWriteJson(req, res, next);
+      return;
+    }
+    next();
+  });
   app.use(express.json({ limit: "10kb" }));
   app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 

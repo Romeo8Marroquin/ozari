@@ -42,6 +42,12 @@ export function readOrderDraft(): CreateOrderFormType | null {
     lines: Array.isArray(stored.lines)
       ? stored.lines.map((row) => ({
           productId: typeof row?.productId === 'number' ? row.productId : (null as unknown as number),
+          // Drafts written before variations existed carry neither field — they read as "no
+          // variation picked yet", which the resolver then asks for when the product has some.
+          variantId: typeof row?.variantId === 'number' ? row.variantId : null,
+          pickedValues: Array.isArray(row?.pickedValues)
+            ? row.pickedValues.map((pick) => (typeof pick === 'number' ? pick : null))
+            : [],
           quantity: typeof row?.quantity === 'string' ? row.quantity : '',
           isRental: row?.isRental === true,
         }))

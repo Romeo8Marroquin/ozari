@@ -109,6 +109,10 @@ const NO_GUARANTEE = {
   replacementPrice: null,
   damagedQuantity: 0,
   damageNote: null,
+  // A line without a variation (the variant fields ride with every rich line).
+  variantId: null as number | null,
+  variantLabel: null as string | null,
+  variant: null,
 };
 
 /** The same order as the RICH include fetches it (full lines, extras, history, driver). */
@@ -124,7 +128,7 @@ const makeRawRichOrder = () => ({
       unitaryPrice: new Prisma.Decimal("6.00"),
       parcialPrice: new Prisma.Decimal("150.00"),
       ...NO_GUARANTEE,
-      product: { name: "Silla plegable" },
+      product: { name: "Silla plegable", productImages: [] },
     },
   ],
   serviceExtras: [],
@@ -395,6 +399,7 @@ const txRentalProduct = {
   sellPrice: null,
   securityDeposit: new Prisma.Decimal("40.00"),
   replacementPrice: new Prisma.Decimal("120.00"),
+  variants: [] as unknown[],
 };
 const txSaleProduct = {
   id: 4,
@@ -407,6 +412,7 @@ const txSaleProduct = {
   sellPrice: new Prisma.Decimal("3.50"),
   securityDeposit: null,
   replacementPrice: null,
+  variants: [] as unknown[],
 };
 
 /** The seeded timing rules as `loadOrderTimingPreferences` reads them. */
@@ -416,8 +422,9 @@ const TIMING_PREFERENCES = [
 ];
 
 /** One rented-in-window grouped row, as `serviceDetail.groupBy` returns it. */
-const rentedRow = (productId: number, rented: number) => ({
+const rentedRow = (productId: number, rented: number, variantId: number | null = null) => ({
   productId,
+  variantId,
   _sum: { quantity: rented },
 });
 
@@ -483,8 +490,8 @@ const createBody = () => ({
   // an owner, so the validator refuses a body without one.
   assignedUserId: 1,
   lines: [
-    { productId: 3, quantity: 25 },
-    { productId: 4, quantity: 10 },
+    { productId: 3, variantId: null, quantity: 25 },
+    { productId: 4, variantId: null, quantity: 10 },
   ],
 });
 
@@ -524,6 +531,8 @@ describe("createOrder", () => {
     expect(createArg.data.serviceDetails.create).toEqual([
       {
         productId: 3,
+        variantId: null,
+        variantLabel: null,
         quantity: 25,
         isRental: true,
         unitaryPrice: 6,
@@ -534,6 +543,8 @@ describe("createOrder", () => {
       },
       {
         productId: 4,
+        variantId: null,
+        variantLabel: null,
         quantity: 10,
         isRental: false,
         unitaryPrice: 3.5,
@@ -548,7 +559,7 @@ describe("createOrder", () => {
     expect(tx.product.update).toHaveBeenCalledTimes(1);
     expect(tx.product.update).toHaveBeenCalledWith({
       where: { id: 4 },
-      data: { quantity: { decrement: 10 } },
+      data: { quantity: { increment: -10 } },
     });
     expect(sendOzariSuccess).toHaveBeenCalledWith(
       expect.anything(),
@@ -575,7 +586,7 @@ describe("createOrder", () => {
 
   it("a purchase-only order never queries rental holds and bills a single day", async () => {
     const tx = mockCreateTx();
-    const body = { ...createBody(), pickupAt: undefined, lines: [{ productId: 4, quantity: 10 }] };
+    const body = { ...createBody(), pickupAt: undefined, lines: [{ productId: 4, variantId: null, quantity: 10 }] };
     await createOrder(buildCreateReq(body as ReturnType<typeof createBody>), {} as Response);
 
     expect(tx.serviceDetail.groupBy).not.toHaveBeenCalled();
@@ -686,6 +697,149 @@ describe("createOrder", () => {
     );
   });
 
+  describe("variant lines", () => {
+    const value = (name: string, sortOrder: number) => ({
+      optionValue: { name, option: { sortOrder } },
+    });
+    /** Tablecloths for SALE in two colours, each with its own shelf (the product row holds 0). */
+    const txVariantSale = {
+      ...txSaleProduct,
+      id: 7,
+      name: "Mantel",
+      quantity: 0,
+      variants: [
+        {
+          id: 71,
+          quantity: 6,
+          rentPrice: null,
+          sellPrice: null,
+          securityDeposit: null,
+          replacementPrice: null,
+          values: [value("Rojo", 0)],
+        },
+        {
+          id: 72,
+          quantity: 2,
+          rentPrice: null,
+          sellPrice: new Prisma.Decimal("5.00"),
+          securityDeposit: null,
+          replacementPrice: null,
+          values: [value("Azul", 0)],
+        },
+      ],
+    };
+    /** Chairs for RENT in one colour, with its own fleet. */
+    const txVariantRental = {
+      ...txRentalProduct,
+      id: 8,
+      name: "Silla Tiffany",
+      quantity: 0,
+      variants: [
+        {
+          id: 81,
+          quantity: 10,
+          rentPrice: null,
+          sellPrice: null,
+          securityDeposit: null,
+          replacementPrice: null,
+          values: [value("Dorada", 0)],
+        },
+      ],
+    };
+
+    it("prices per variant, snapshots its label, and takes sale units from the VARIANT's shelf", async () => {
+      const tx = mockCreateTx({
+        products: [txVariantSale],
+        driverCandidates: [],
+      }) as ReturnType<typeof mockCreateTx> & { productVariant: { update: Mock } };
+      tx.productVariant = { update: vi.fn().mockResolvedValue({}) };
+      await createOrder(
+        buildCreateReq({
+          ...createBody(),
+          pickupAt: undefined,
+          lines: [
+            { productId: 7, variantId: 71, quantity: 4 },
+            { productId: 7, variantId: 72, quantity: 2 },
+          ],
+        } as unknown as ReturnType<typeof createBody>),
+        {} as Response,
+      );
+
+      const createArg = (tx.service.create as Mock).mock.calls[0]?.[0] as {
+        data: { serviceDetails: { create: Array<Record<string, unknown>> } };
+      };
+      expect(createArg.data.serviceDetails.create).toEqual([
+        expect.objectContaining({ productId: 7, variantId: 71, variantLabel: "Rojo", unitaryPrice: 3.5 }),
+        expect.objectContaining({ productId: 7, variantId: 72, variantLabel: "Azul", unitaryPrice: 5 }),
+      ]);
+      expect(tx.productVariant.update).toHaveBeenCalledWith({
+        where: { id: 71 },
+        data: { quantity: { increment: -4 } },
+      });
+      expect(tx.productVariant.update).toHaveBeenCalledWith({
+        where: { id: 72 },
+        data: { quantity: { increment: -2 } },
+      });
+      expect(tx.product.update).not.toHaveBeenCalled();
+    });
+
+    it("counts a variant's rental holds against ITS fleet, naming it in the 409", async () => {
+      const tx = mockCreateTx({
+        products: [txVariantRental],
+        rented: [rentedRow(8, 7, 81), rentedRow(8, 50, null)],
+      });
+      await createOrder(
+        buildCreateReq({
+          ...createBody(),
+          lines: [{ productId: 8, variantId: 81, quantity: 4 }],
+        } as unknown as ReturnType<typeof createBody>),
+        {} as Response,
+      );
+      expect(tx.service.create).not.toHaveBeenCalled();
+      expect(sendOzariError).toHaveBeenCalledWith(
+        expect.anything(),
+        HttpEnum.CONFLICT,
+        "orders.createOrder.stockConflict",
+        undefined,
+        {
+          conflicts: [
+            {
+              productId: 8,
+              productName: "Silla Tiffany",
+              variantId: 81,
+              variantLabel: "Dorada",
+              requested: 4,
+              available: 3,
+            },
+          ],
+        },
+      );
+    });
+
+    it("a variant retired between validation and the lock is a conflict with available 0", async () => {
+      mockCreateTx({ products: [txVariantSale] });
+      await createOrder(
+        buildCreateReq({
+          ...createBody(),
+          pickupAt: undefined,
+          lines: [{ productId: 7, variantId: 79, quantity: 1 }],
+        } as unknown as ReturnType<typeof createBody>),
+        {} as Response,
+      );
+      expect(sendOzariError).toHaveBeenCalledWith(
+        expect.anything(),
+        HttpEnum.CONFLICT,
+        "orders.createOrder.stockConflict",
+        undefined,
+        {
+          conflicts: [
+            { productId: 7, productName: "Mantel", variantId: 79, requested: 1, available: 0 },
+          ],
+        },
+      );
+    });
+  });
+
   it("refuses with a 409 when the lifecycle has no initial step configured", async () => {
     const tx = mockCreateTx();
     (getStatusCatalog as Mock).mockResolvedValueOnce([]);
@@ -725,7 +879,7 @@ const existingSaleLine = {
   unitaryPrice: new Prisma.Decimal("3.50"),
   parcialPrice: new Prisma.Decimal("35.00"),
   ...NO_GUARANTEE,
-  product: { name: "Vasos desechables" },
+  product: { name: "Vasos desechables", productImages: [] },
 };
 
 type UpdateTxOverrides = TxOverrides & {
@@ -794,8 +948,8 @@ describe("updateOrder", () => {
     const body = {
       ...createBody(),
       lines: [
-        { productId: 3, quantity: 30 },
-        { productId: 4, quantity: 4 },
+        { productId: 3, variantId: null, quantity: 30 },
+        { productId: 4, variantId: null, quantity: 4 },
       ],
     };
     await updateOrder(buildUpdateReq(body), {} as Response);
@@ -804,6 +958,7 @@ describe("updateOrder", () => {
     expect(tx.serviceDetail.update).toHaveBeenCalledWith({
       where: { id: 31 },
       data: {
+        variantLabel: null,
         quantity: 30,
         isRental: true,
         unitaryPrice: 6,
@@ -816,6 +971,7 @@ describe("updateOrder", () => {
     expect(tx.serviceDetail.update).toHaveBeenCalledWith({
       where: { id: 32 },
       data: {
+        variantLabel: null,
         quantity: 4,
         isRental: false,
         unitaryPrice: 3.5,
@@ -861,13 +1017,15 @@ describe("updateOrder", () => {
       order: { ...makeRawRichOrder(), serviceDetails: [existingSaleLine] },
     });
     await updateOrder(
-      buildUpdateReq({ ...createBody(), lines: [{ productId: 3, quantity: 5 }] }),
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 3, variantId: null, quantity: 5 }] }),
       {} as Response,
     );
 
     expect(tx.serviceDetail.deleteMany).toHaveBeenCalledWith({ where: { id: { in: [32] } } });
     expect(tx.serviceDetail.create).toHaveBeenCalledWith({
       data: {
+        variantId: null,
+        variantLabel: null,
         quantity: 5,
         isRental: true,
         unitaryPrice: 6,
@@ -886,6 +1044,103 @@ describe("updateOrder", () => {
     });
   });
 
+  it("reconciles by (product, VARIANT): a colour swap drops one line, adds the other, and moves each shelf", async () => {
+    const value = (name: string) => ({ optionValue: { name, option: { sortOrder: 0 } } });
+    const variantSale = {
+      ...txSaleProduct,
+      id: 7,
+      name: "Mantel",
+      quantity: 0,
+      variants: [
+        { id: 71, quantity: 1, rentPrice: null, sellPrice: null, securityDeposit: null, replacementPrice: null, values: [value("Rojo")] },
+        { id: 72, quantity: 9, rentPrice: null, sellPrice: null, securityDeposit: null, replacementPrice: null, values: [value("Azul")] },
+      ],
+    };
+    // The order holds 3 red tablecloths; the edit wants 2 blue ones instead.
+    const redLine = {
+      ...existingSaleLine,
+      id: 40,
+      productId: 7,
+      quantity: 3,
+      variantId: 71,
+      variantLabel: "Rojo",
+      product: { name: "Mantel", productImages: [] },
+    };
+    const tx = mockUpdateTx({
+      order: { ...makeRawRichOrder(), serviceDetails: [redLine] },
+      products: [variantSale],
+    }) as ReturnType<typeof mockUpdateTx> & { productVariant: { update: Mock } };
+    tx.productVariant = { update: vi.fn().mockResolvedValue({}) };
+    await updateOrder(
+      buildUpdateReq({
+        ...createBody(),
+        pickupAt: undefined,
+        lines: [{ productId: 7, variantId: 72, quantity: 2 }],
+      } as unknown as ReturnType<typeof createBody>),
+      {} as Response,
+    );
+
+    expect(tx.serviceDetail.deleteMany).toHaveBeenCalledWith({ where: { id: { in: [40] } } });
+    expect(tx.serviceDetail.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ productId: 7, variantId: 72, variantLabel: "Azul", quantity: 2 }),
+    });
+    // The red units return to the RED shelf; the blue ones leave the BLUE shelf.
+    expect(tx.productVariant.update).toHaveBeenCalledWith({
+      where: { id: 71 },
+      data: { quantity: { increment: 3 } },
+    });
+    expect(tx.productVariant.update).toHaveBeenCalledWith({
+      where: { id: 72 },
+      data: { quantity: { increment: -2 } },
+    });
+    expect(tx.product.update).not.toHaveBeenCalled();
+  });
+
+  it("lets a VARIANT sale line grow into what the order holds of THAT variant only", async () => {
+    const value = (name: string) => ({ optionValue: { name, option: { sortOrder: 0 } } });
+    const variantSale = {
+      ...txSaleProduct,
+      id: 7,
+      name: "Mantel",
+      quantity: 0,
+      variants: [
+        { id: 71, quantity: 1, rentPrice: null, sellPrice: null, securityDeposit: null, replacementPrice: null, values: [value("Rojo")] },
+      ],
+    };
+    const redLine = {
+      ...existingSaleLine,
+      id: 40,
+      productId: 7,
+      quantity: 3,
+      variantId: 71,
+      variantLabel: "Rojo",
+    };
+    mockUpdateTx({
+      order: { ...makeRawRichOrder(), serviceDetails: [redLine] },
+      products: [variantSale],
+    });
+    await updateOrder(
+      buildUpdateReq({
+        ...createBody(),
+        pickupAt: undefined,
+        lines: [{ productId: 7, variantId: 71, quantity: 5 }],
+      } as unknown as ReturnType<typeof createBody>),
+      {} as Response,
+    );
+    // 1 left on the red shelf + 3 this order holds = 4 < 5.
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.updateOrder.stockConflict",
+      undefined,
+      {
+        conflicts: [
+          { productId: 7, productName: "Mantel", variantId: 71, variantLabel: "Rojo", requested: 5, available: 4 },
+        ],
+      },
+    );
+  });
+
   it("409s an edit that would contradict the recorded deposit settlement — nothing is written", async () => {
     // 2 chairs were recorded as broken; dropping the chairs would orphan that damage.
     const damagedChairs = {
@@ -901,7 +1156,7 @@ describe("updateOrder", () => {
       },
     });
     await updateOrder(
-      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, quantity: 10 }], pickupAt: undefined }),
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, variantId: null, quantity: 10 }], pickupAt: undefined }),
       {} as Response,
     );
 
@@ -946,7 +1201,7 @@ describe("updateOrder", () => {
       rented: [rentedRow(3, 40)],
     });
     await updateOrder(
-      buildUpdateReq({ ...createBody(), lines: [{ productId: 3, quantity: 30 }] }),
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 3, variantId: null, quantity: 30 }] }),
       {} as Response,
     );
 
@@ -1013,7 +1268,7 @@ describe("updateOrder", () => {
       products: [txRentalProduct, { ...txSaleProduct, quantity: 2 }],
     });
     await updateOrder(
-      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, quantity: 500 }], pickupAt: undefined }),
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, variantId: null, quantity: 500 }], pickupAt: undefined }),
       {} as Response,
     );
 
@@ -1030,7 +1285,7 @@ describe("updateOrder", () => {
       products: [txRentalProduct, { ...txSaleProduct, quantity: 15 }],
     });
     await updateOrder(
-      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, quantity: 25 }], pickupAt: undefined }),
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, variantId: null, quantity: 25 }], pickupAt: undefined }),
       {} as Response,
     );
     expect(tx.service.update).toHaveBeenCalled();
@@ -1041,7 +1296,7 @@ describe("updateOrder", () => {
       products: [txRentalProduct, { ...txSaleProduct, quantity: 15 }],
     });
     await updateOrder(
-      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, quantity: 26 }], pickupAt: undefined }),
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, variantId: null, quantity: 26 }], pickupAt: undefined }),
       {} as Response,
     );
     expect(tooMany.service.update).not.toHaveBeenCalled();
@@ -1117,7 +1372,7 @@ describe("updateOrder", () => {
   it("treats a product that vanished before the lock as a conflict, not a 500", async () => {
     mockUpdateTx({ products: [txRentalProduct] });
     await updateOrder(
-      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, quantity: 1 }], pickupAt: undefined }),
+      buildUpdateReq({ ...createBody(), lines: [{ productId: 4, variantId: null, quantity: 1 }], pickupAt: undefined }),
       {} as Response,
     );
 
@@ -1190,8 +1445,8 @@ describe("deleteOrder", () => {
     cancelledAt: null,
     deliveredAt: null,
     serviceDetails: [
-      { productId: 4, quantity: 10, isRental: false },
-      { productId: 3, quantity: 25, isRental: true },
+      { productId: 4, variantId: null, quantity: 10, isRental: false },
+      { productId: 3, variantId: null, quantity: 25, isRental: true },
     ],
     evidences: [{ r2Key: KEY }],
   }) {
@@ -1271,7 +1526,7 @@ describe("deleteOrder", () => {
       id: 12,
       cancelledAt: null,
       deliveredAt: new Date("2026-08-01T14:30:00.000Z"),
-      serviceDetails: [{ productId: 4, quantity: 10, isRental: false }],
+      serviceDetails: [{ productId: 4, variantId: null, quantity: 10, isRental: false }],
       evidences: [],
     });
     await deleteOrder(buildReq({}, { id: "12" }), {} as Response);
@@ -1285,7 +1540,7 @@ describe("deleteOrder", () => {
     const tx = mockDeleteTx({
       id: 12,
       cancelledAt: new Date("2026-07-20T10:00:00.000Z"),
-      serviceDetails: [{ productId: 4, quantity: 10, isRental: false }],
+      serviceDetails: [{ productId: 4, variantId: null, quantity: 10, isRental: false }],
       evidences: [],
     });
     await deleteOrder(buildReq({}, { id: "12" }), {} as Response);
@@ -1430,16 +1685,16 @@ describe("getOrderAvailability", () => {
 
   it("computes availability: sale = stock; rental = fleet minus what's held in the window", async () => {
     const groupBy = vi.fn().mockResolvedValue([
-      { productId: 3, _sum: { quantity: 20 } }, // 30 - 20 = 10
-      { productId: 6, _sum: { quantity: null } }, // null sum → 8 - 0 = 8
+      { productId: 3, variantId: null, _sum: { quantity: 20 } }, // 30 - 20 = 10
+      { productId: 6, variantId: null, _sum: { quantity: null } }, // null sum → 8 - 0 = 8
     ]);
     (getPrismaClient as Mock).mockResolvedValue({
       product: {
         findMany: vi.fn().mockResolvedValue([
-          { id: 3, quantity: 30, productBusinessTypeId: 1 }, // rental, held
-          { id: 5, quantity: 15, productBusinessTypeId: 1 }, // rental, none held → 15
-          { id: 6, quantity: 8, productBusinessTypeId: 1 }, // rental, null-sum row → 8
-          { id: 4, quantity: 120, productBusinessTypeId: 2 }, // sale → stock
+          { id: 3, quantity: 30, productBusinessTypeId: 1, variants: [] }, // rental, held
+          { id: 5, quantity: 15, productBusinessTypeId: 1, variants: [] }, // rental, none held → 15
+          { id: 6, quantity: 8, productBusinessTypeId: 1, variants: [] }, // rental, null-sum row → 8
+          { id: 4, quantity: 120, productBusinessTypeId: 2, variants: [] }, // sale → stock
         ]),
       },
       serviceDetail: { groupBy },
@@ -1476,7 +1731,7 @@ describe("getOrderAvailability", () => {
     const groupBy = vi.fn().mockResolvedValue([]);
     (getPrismaClient as Mock).mockResolvedValue({
       product: {
-        findMany: vi.fn().mockResolvedValue([{ id: 4, quantity: 120, productBusinessTypeId: 2 }]),
+        findMany: vi.fn().mockResolvedValue([{ id: 4, quantity: 120, productBusinessTypeId: 2, variants: [] }]),
       },
       serviceDetail: { groupBy },
       appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
@@ -1520,7 +1775,7 @@ describe("getOrderAvailability", () => {
     const findMany = vi.fn().mockResolvedValue([]);
     (getPrismaClient as Mock).mockResolvedValue({
       product: {
-        findMany: vi.fn().mockResolvedValue([{ id: 3, quantity: 30, productBusinessTypeId: 1 }]),
+        findMany: vi.fn().mockResolvedValue([{ id: 3, quantity: 30, productBusinessTypeId: 1, variants: [] }]),
       },
       serviceDetail: { groupBy },
       appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
@@ -1611,7 +1866,7 @@ describe("getOrderAvailability", () => {
   it("returns null for rentals when there is NO pickup window (skips the groupBy query)", async () => {
     const groupBy = vi.fn();
     (getPrismaClient as Mock).mockResolvedValue({
-      product: { findMany: vi.fn().mockResolvedValue([{ id: 3, quantity: 30, productBusinessTypeId: 1 }]) },
+      product: { findMany: vi.fn().mockResolvedValue([{ id: 3, quantity: 30, productBusinessTypeId: 1, variants: [] }]) },
       serviceDetail: { groupBy },
       // The probe answers with the same clock rules the create enforces (washing included).
       appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
@@ -1620,6 +1875,65 @@ describe("getOrderAvailability", () => {
 
     expect(groupBy).not.toHaveBeenCalled();
     expect(successData<OrderAvailabilityResponseModel>().availability).toEqual([{ productId: 3, available: null }]);
+  });
+
+  it("answers per VARIANT pool, the product's `available` being their sum", async () => {
+    const groupBy = vi.fn().mockResolvedValue([
+      { productId: 8, variantId: 81, _sum: { quantity: 4 } }, // 10 - 4 = 6
+      { productId: 8, variantId: 82, _sum: { quantity: 9 } }, // 5 - 9 → floored at 0
+    ]);
+    (getPrismaClient as Mock).mockResolvedValue({
+      product: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 8,
+            quantity: 0,
+            productBusinessTypeId: 1,
+            variants: [
+              { id: 81, quantity: 10 },
+              { id: 82, quantity: 5 },
+              { id: 83, quantity: 2 }, // nothing held → 2
+            ],
+          },
+          { id: 7, quantity: 0, productBusinessTypeId: 2, variants: [{ id: 71, quantity: 6 }] },
+        ]),
+      },
+      serviceDetail: { groupBy },
+      appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
+    });
+    await getOrderAvailability(availabilityReq({ ...window, productIds: [8, 7] }), {} as Response);
+
+    expect(successData<OrderAvailabilityResponseModel>().availability).toEqual([
+      {
+        productId: 8,
+        available: 8,
+        variants: [
+          { variantId: 81, available: 6 },
+          { variantId: 82, available: 0 },
+          { variantId: 83, available: 2 },
+        ],
+      },
+      { productId: 7, available: 6, variants: [{ variantId: 71, available: 6 }] },
+    ]);
+  });
+
+  it("a variant RENTAL without a window answers null for each variant and for the product", async () => {
+    (getPrismaClient as Mock).mockResolvedValue({
+      product: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 8, quantity: 0, productBusinessTypeId: 1, variants: [{ id: 81, quantity: 10 }] },
+        ]),
+      },
+      serviceDetail: { groupBy: vi.fn() },
+      appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
+    });
+    await getOrderAvailability(
+      availabilityReq({ deliveryAt: window.deliveryAt, pickupAt: undefined, productIds: [8] }),
+      {} as Response,
+    );
+    expect(successData<OrderAvailabilityResponseModel>().availability).toEqual([
+      { productId: 8, available: null, variants: [{ variantId: 81, available: null }] },
+    ]);
   });
 
   it("responds 500 when the query fails", async () => {

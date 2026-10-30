@@ -59,12 +59,19 @@ describe('orderDraft', () => {
     // the page rather than merely look wrong.
     Storage.set(StorageKeys.ORDER_CREATE_DRAFT, {
       deliveryName: 'María',
-      lines: [{ productId: 3, quantity: '2', isRental: true }, null, { quantity: 7 }],
+      lines: [
+        { productId: 3, quantity: '2', isRental: true },
+        null,
+        { quantity: 7 },
+        { productId: 7, variantId: 71, pickedValues: [1, 'x', null], quantity: '1', isRental: true },
+      ],
     });
+    // A draft written before variations existed reads as "no variation picked yet".
     expect(readOrderDraft()?.lines).toEqual([
-      { productId: 3, quantity: '2', isRental: true },
-      { productId: null, quantity: '', isRental: false },
-      { productId: null, quantity: '', isRental: false },
+      { productId: 3, variantId: null, pickedValues: [], quantity: '2', isRental: true },
+      { productId: null, variantId: null, pickedValues: [], quantity: '', isRental: false },
+      { productId: null, variantId: null, pickedValues: [], quantity: '', isRental: false },
+      { productId: 7, variantId: 71, pickedValues: [1, null, null], quantity: '1', isRental: true },
     ]);
   });
 

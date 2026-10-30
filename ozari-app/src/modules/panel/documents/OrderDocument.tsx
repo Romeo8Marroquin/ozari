@@ -46,7 +46,7 @@ import {
   DIVIDER_WIDTH,
   fillWidth,
   footerPadding,
-  GROUP_HEAD_AHEAD,
+  groupHeadAhead,
   HAIRLINE,
   HEADER_GAP,
   INK,
@@ -60,6 +60,7 @@ import {
   ROW_BASE,
   ROW_MIN_HEIGHT,
   ROW_PADDING,
+  ROW_PADDING_Y,
   SETTLEMENT_COLUMN_WIDTH,
   SETTLEMENT_GAP,
   SETTLEMENT_HEAD_AHEAD,
@@ -68,6 +69,9 @@ import {
   TABLE_HEAD,
   TABLE_HEAD_HEIGHT,
   TABLE_RADIUS,
+  THUMB_BLEED,
+  THUMB_GAP,
+  THUMB_SIZE,
   TINT,
   TOTALS_INNER_WIDTH,
   TOTALS_PADDING,
@@ -346,12 +350,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: ROW_MIN_HEIGHT,
-    paddingVertical: 5,
+    paddingVertical: ROW_PADDING_Y,
     paddingHorizontal: ROW_PADDING,
   },
   cell: { fontSize: 9, lineHeight: 1.35, color: INK },
   cellStrong: { fontSize: 9, lineHeight: 1.35, color: CHARCOAL },
   cellNote: { fontSize: 7.5, lineHeight: 1.4, color: MUTED },
+  // ── Row photos (2026-10-29) ──────────────────────────────────────────────────────────────────
+  thumbCell: { flexDirection: 'row', alignItems: 'center', gap: THUMB_GAP },
+  // A FIXED square the whole photo is fitted into — `contain`, centred on the other axis by
+  // react-pdf's default object position — so nothing is ever cropped and every description starts
+  // on the same vertical line. The negative margin lets the photo reach into the row's padding
+  // (`THUMB_BLEED`) while the text keeps all of its own: a wrapped description's row is exactly as
+  // tall as without a photo, and a one-line row grows only to `THUMB_ROW_HEIGHT` — the one-page
+  // target pays for every point (see `THUMB_SIZE`). A row without a photo keeps the gutter's WIDTH
+  // only (no height, no box drawn): the descriptions of one table stay aligned and the row stays
+  // exactly as tall as a text row.
+  thumbBox: { width: THUMB_SIZE, height: THUMB_SIZE, marginVertical: -THUMB_BLEED },
+  thumbGutter: { width: THUMB_SIZE },
+  thumbImage: { width: THUMB_SIZE, height: THUMB_SIZE, objectFit: 'contain' },
+  thumbText: { flex: 1 },
   /**
    * A SECTION divider, not the table's bottom border.
    *
@@ -904,7 +922,14 @@ interface TableRow {
   cells: string[];
   /** Caption lines under the FIRST cell (a damage note). Empty strings are skipped. */
   notes?: (string | undefined)[];
+  /** The product's photo, as an embeddable `data:` URI (`embedDocumentImages`), beside the first
+   *  cell. Absent = no photo; a table where NO row has one prints exactly as it did before photos. */
+  image?: string;
 }
+
+/** A row's `image` field from a model line's photo — present only when there is one. */
+const rowImage = (imageUrl: string | undefined): Pick<TableRow, 'image'> =>
+  imageUrl === undefined ? {} : { image: imageUrl };
 
 /**
  * A titled table: the group title, the `fixed` column header and the rows — with EVERY pagination
@@ -936,6 +961,9 @@ const LineTable: React.FC<{
     index === 0 ? fillWidth(columns.slice(1).map((other) => other.width)) : column.width,
   );
   const lastIndex = rows.length - 1;
+  /** Does ANY row carry a photo? Then every row reserves the photo's gutter, so the table's
+   *  descriptions share one left edge; when none does, the table is exactly what it was before. */
+  const thumbnails = rows.some((line) => line.image !== undefined);
   /** The rule that closes this table, drawn under its last row. */
   const closingRule = (
     <View
@@ -998,6 +1026,30 @@ const LineTable: React.FC<{
           const notes = (line.notes ?? []).filter(
             (note): note is string => note !== undefined && note !== '',
           );
+          const captions = notes.map((note) => (
+            <Text key={note} style={styles.cellNote}>
+              {note}
+            </Text>
+          ));
+          if (thumbnails) {
+            // The photo, then the description in what is left of the column. The numeric columns
+            // keep their fixed widths, so a photo can never push Cantidad/Días/Precio/Subtotal.
+            return (
+              <View key={cellIndex} style={[styles.thumbCell, { width }]}>
+                {line.image === undefined ? (
+                  <View style={styles.thumbGutter} />
+                ) : (
+                  <View style={styles.thumbBox}>
+                    <Image src={line.image} style={styles.thumbImage} />
+                  </View>
+                )}
+                <View style={styles.thumbText}>
+                  <Text style={style}>{cell}</Text>
+                  {captions}
+                </View>
+              </View>
+            );
+          }
           return notes.length === 0 ? (
             <Text key={cellIndex} style={[style, { width }]}>
               {cell}
@@ -1005,11 +1057,7 @@ const LineTable: React.FC<{
           ) : (
             <View key={cellIndex} style={{ width }}>
               <Text style={style}>{cell}</Text>
-              {notes.map((note) => (
-                <Text key={note} style={styles.cellNote}>
-                  {note}
-                </Text>
-              ))}
+              {captions}
             </View>
           );
         })}
@@ -1020,7 +1068,7 @@ const LineTable: React.FC<{
   return (
     <Fragment>
       <Text
-        minPresenceAhead={GROUP_HEAD_AHEAD}
+        minPresenceAhead={groupHeadAhead(thumbnails)}
         style={[styles.groupTitle, first ? styles.firstGroupTitle : {}]}
       >
         {title}
@@ -1450,6 +1498,7 @@ const OrderDocument: React.FC<OrderDocumentProps> = ({ model, copy, money, date,
                 money(line.unitPrice),
                 money(line.total),
               ],
+              ...rowImage(line.imageUrl),
             }))}
           />
         );
@@ -1590,6 +1639,7 @@ export const DamageReportDocument: React.FC<DamageReportDocumentProps> = ({
                 money(line.unitAmount),
                 money(line.total),
               ],
+              ...rowImage(line.imageUrl),
             })),
           },
         ]
@@ -1635,6 +1685,7 @@ export const DamageReportDocument: React.FC<DamageReportDocumentProps> = ({
                 money(replacement.amount),
               ],
               notes: [replacement.note],
+              ...rowImage(replacement.imageUrl),
             })),
           },
         ]

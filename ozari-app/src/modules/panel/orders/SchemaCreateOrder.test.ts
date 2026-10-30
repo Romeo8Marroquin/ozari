@@ -1,8 +1,11 @@
 import type { ResolverResult } from 'react-hook-form';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { Product, ProductVariant } from '../products/product.types';
 import {
   appendDriverConflictErrors,
   appendLineAvailabilityErrors,
+  appendLineVariantErrors,
+  availabilityMapFrom,
   createOrderDefaultValues,
   gapLabelKey,
   createOrderRequiredPatterns,
@@ -26,6 +29,22 @@ afterAll(() => vi.restoreAllMocks());
 
 const PIN = { lat: 14.634915, lng: -90.506883 };
 
+const variant = (overrides: Partial<ProductVariant> = {}): ProductVariant => ({
+  id: 71,
+  valueIds: [1],
+  label: 'Rojo',
+  isDefault: false,
+  ...overrides,
+});
+
+/** One form line (no variation unless given). */
+const ln = (
+  productId: number,
+  quantity: string,
+  isRental: boolean,
+  variantId: number | null = null,
+): CreateOrderFormType['lines'][number] => ({ productId, variantId, pickedValues: [], quantity, isRental });
+
 const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFormType => ({
   clientRegistryId: 3,
   eventTypeId: 1,
@@ -44,7 +63,7 @@ const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFor
   deliveryAmount: '',
   depositAmount: '',
   assignedUserId: 2,
-  lines: [{ productId: 3, quantity: '25', isRental: true }],
+  lines: [ln(3, '25', true)],
   ...overrides,
 });
 
@@ -88,7 +107,7 @@ describe('createOrderSchema', () => {
 
   it('accepts a purchase-only order with no pickup', () => {
     const result = parse(
-      validForm({ pickupAt: '', lines: [{ productId: 4, quantity: '10', isRental: false }] }),
+      validForm({ pickupAt: '', lines: [ln(4, '10', false)] }),
     );
     expect(result.success).toBe(true);
   });
@@ -134,13 +153,28 @@ describe('createOrderSchema', () => {
     const result = parse(
       validForm({
         lines: [
-          { productId: 3, quantity: '1', isRental: true },
-          { productId: 3, quantity: '2', isRental: true },
+          ln(3, '1', true),
+          ln(3, '2', true),
         ],
       }),
     );
     expect(result.success).toBe(false);
     expect(result.error?.issues.some((i) => i.path.join('.') === 'lines.1.productId')).toBe(true);
+  });
+
+  it('identifies a line by its (product, variation) PAIR: two colours pass, the same colour twice does not', () => {
+    expect(parse(validForm({ lines: [ln(7, '1', true, 71), ln(7, '2', true, 72)] })).success).toBe(true);
+    const result = parse(validForm({ lines: [ln(7, '1', true, 71), ln(7, '2', true, 71)] }));
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.some((i) => i.path.join('.') === 'lines.1.productId')).toBe(true);
+  });
+
+  it('sends the variation only on a line that has one, and an edit restores it', () => {
+    const body = toCreateOrderBody(validForm({ lines: [ln(7, '2', true, 71), ln(3, '1', true)] }));
+    expect(body.lines).toEqual([
+      { productId: 7, variantId: 71, quantity: 2 },
+      { productId: 3, quantity: 1 },
+    ]);
   });
 
   it('requires at least one line, a client, an event type, and the snapshots', () => {
@@ -155,7 +189,7 @@ describe('createOrderSchema', () => {
   });
 
   it('rejects invalid line quantities and money fields', () => {
-    expect(parse(validForm({ lines: [{ productId: 3, quantity: '0', isRental: true }] })).success).toBe(false);
+    expect(parse(validForm({ lines: [ln(3, '0', true)] })).success).toBe(false);
     expect(parse(validForm({ deliveryAmount: '-5' })).success).toBe(false);
     expect(parse(validForm({ depositAmount: 'abc' })).success).toBe(false);
   });
@@ -207,7 +241,7 @@ describe('toCreateOrderBody', () => {
 
   it('omits the pickup and money for a purchase-only order with none set', () => {
     const body = toCreateOrderBody(
-      validForm({ pickupAt: '', lines: [{ productId: 4, quantity: '10', isRental: false }] }),
+      validForm({ pickupAt: '', lines: [ln(4, '10', false)] }),
     );
     expect(body.pickupAt).toBeUndefined();
     expect(body.deliveryAmount).toBeUndefined();
@@ -240,24 +274,88 @@ describe('toCreateOrderBody', () => {
   });
 });
 
-describe('takeableFor', () => {
-  it('prefers the fetched window amount, else the product baseline, else undefined', () => {
-    const windowAvail = new Map<number, number | null>([
-      [3, 4],
-      [4, null], // a rental with no pickup yet → fall back to the baseline
+describe('availabilityMapFrom', () => {
+  it('keys every product AND every variation by its pair', () => {
+    const map = availabilityMapFrom([
+      { productId: 3, available: 4 },
+      { productId: 7, available: 9, variants: [{ variantId: 71, available: 5 }, { variantId: 72, available: null }] },
     ]);
-    const products = new Map<number, { available?: number }>([
-      [3, { available: 10 }],
-      [4, { available: 8 }],
-      [5, {}], // no baseline
-    ]);
-    expect(takeableFor(3, windowAvail, products)).toBe(4); // window amount wins
-    expect(takeableFor(4, windowAvail, products)).toBe(8); // window null → baseline
-    expect(takeableFor(5, new Map(), products)).toBeUndefined(); // no window, no baseline
-    expect(takeableFor(9, new Map(), products)).toBeUndefined(); // unknown product
+    expect(map.get('3:')).toBe(4);
+    expect(map.get('7:')).toBe(9);
+    expect(map.get('7:71')).toBe(5);
+    expect(map.get('7:72')).toBeNull();
   });
 });
 
+describe('takeableFor', () => {
+  const products = new Map<number, Pick<Product, 'available' | 'variants'>>([
+    [3, { available: 10 }],
+    [4, { available: 8 }],
+    [5, {}], // no baseline
+    [7, { available: 9, variants: [variant({ id: 71, available: 6 }), variant({ id: 72 })] }],
+  ]);
+
+  it('prefers the fetched window amount, else the product baseline, else undefined', () => {
+    const windowAvail = new Map<string, number | null>([
+      ['3:', 4],
+      ['4:', null], // a rental with no pickup yet → fall back to the baseline
+    ]);
+    expect(takeableFor(3, null, windowAvail, products)).toBe(4); // window amount wins
+    expect(takeableFor(4, undefined, windowAvail, products)).toBe(8); // window null → baseline
+    expect(takeableFor(5, null, new Map(), products)).toBeUndefined(); // no window, no baseline
+    expect(takeableFor(9, null, new Map(), products)).toBeUndefined(); // unknown product
+  });
+
+  it('answers per VARIATION: its window amount, else its own baseline — never the product sum', () => {
+    expect(takeableFor(7, 71, new Map([['7:71', 2]]), products)).toBe(2);
+    expect(takeableFor(7, 71, new Map(), products)).toBe(6);
+    expect(takeableFor(7, 72, new Map(), products)).toBeUndefined(); // no baseline on it
+    expect(takeableFor(7, 99, new Map(), products)).toBeUndefined(); // not offered
+    expect(takeableFor(8, 81, new Map(), products)).toBeUndefined(); // unknown product
+  });
+});
+
+describe('appendLineVariantErrors', () => {
+  const messages = { required: 'pick one', invalid: 'gone' };
+  const ok = (form: CreateOrderFormType): ResolverResult<CreateOrderFormType> => ({ values: form, errors: {} });
+  type LineErrors = ({ variantId?: { message?: string }; productId?: { message?: string } } | undefined)[];
+  const lineErrorsOf = (result: ResolverResult<CreateOrderFormType>): LineErrors | undefined =>
+    (result.errors as { lines?: LineErrors }).lines;
+  const products = new Map<number, Pick<Product, 'variants'>>([
+    [3, {}],
+    [7, { variants: [variant({ id: 71 })] }],
+  ]);
+
+  it('returns the same result when every line is fine', () => {
+    const form = validForm({
+      lines: [ln(3, '1', true), ln(7, '1', true, 71), ln(null as unknown as number, '1', true), ln(9, '1', true)],
+    });
+    const result = ok(form);
+    expect(appendLineVariantErrors(form, result, products, messages)).toBe(result);
+  });
+
+  it('requires a variation on a product that has them, and flags one no longer offered', () => {
+    const form = validForm({ lines: [ln(3, '1', true), ln(7, '1', true), ln(7, '2', true, 99)] });
+    const out = appendLineVariantErrors(form, ok(form), products, messages);
+    expect(out.values).toEqual({});
+    expect(lineErrorsOf(out)?.[0]).toBeUndefined();
+    expect(lineErrorsOf(out)?.[1]?.variantId?.message).toBe('pick one');
+    expect(lineErrorsOf(out)?.[2]?.variantId?.message).toBe('gone');
+  });
+
+  it('leaves a line whose PRODUCT already errs alone, and keeps base errors on other lines', () => {
+    const form = validForm({ lines: [ln(7, '1', true), ln(7, '1', true), ln(3, '1', true)] });
+    const base: ResolverResult<CreateOrderFormType> = {
+      values: {},
+      errors: { lines: [{ productId: { type: 'x', message: 'dup' } }, undefined, { productId: { type: 'x', message: 'own' } }] } as never,
+    };
+    const out = appendLineVariantErrors(form, base, products, messages);
+    expect(lineErrorsOf(out)?.[0]?.productId?.message).toBe('dup');
+    expect(lineErrorsOf(out)?.[0]?.variantId).toBeUndefined();
+    expect(lineErrorsOf(out)?.[1]?.variantId?.message).toBe('pick one');
+    expect(lineErrorsOf(out)?.[2]?.productId?.message).toBe('own');
+  });
+});
 describe('appendLineAvailabilityErrors', () => {
   const message = (available: number) => `max ${available}`;
   const ok = (form: CreateOrderFormType): ResolverResult<CreateOrderFormType> => ({ values: form, errors: {} });
@@ -266,7 +364,7 @@ describe('appendLineAvailabilityErrors', () => {
     (result.errors as { lines?: LineErrors }).lines;
 
   it('leaves a within-cap order untouched (returns the same result)', () => {
-    const form = validForm({ lines: [{ productId: 3, quantity: '4', isRental: true }] });
+    const form = validForm({ lines: [ln(3, '4', true)] });
     const result = ok(form);
     expect(appendLineAvailabilityErrors(form, result, () => 10, message)).toBe(result);
   });
@@ -274,11 +372,11 @@ describe('appendLineAvailabilityErrors', () => {
   it('flags a line over its cap, leaves a within-cap sibling clean, and marks the form invalid', () => {
     const form = validForm({
       lines: [
-        { productId: 3, quantity: '25', isRental: true }, // over cap → error
-        { productId: 4, quantity: '2', isRental: false }, // within cap → stays clean
+        ln(3, '25', true), // over cap → error
+        ln(4, '2', false), // within cap → stays clean
       ],
     });
-    const out = appendLineAvailabilityErrors(form, ok(form), (id) => (id === 3 ? 4 : 10), message);
+    const out = appendLineAvailabilityErrors(form, ok(form), (line) => (line.productId === 3 ? 4 : 10), message);
     expect(out.values).toEqual({});
     expect(lineErrorsOf(out)?.[0]?.quantity?.message).toBe('max 4');
     expect(lineErrorsOf(out)?.[1]).toBeUndefined();
@@ -287,16 +385,16 @@ describe('appendLineAvailabilityErrors', () => {
   it('never overwrites a schema error already on a quantity, and skips null-product / unknown-cap lines', () => {
     const form = validForm({
       lines: [
-        { productId: 3, quantity: '25', isRental: true }, // valid + over cap, but a schema error owns it
-        { productId: null as unknown as number, quantity: '5', isRental: false }, // no product → skipped
-        { productId: 5, quantity: '99', isRental: false }, // unknown cap → left to the server
+        ln(3, '25', true), // valid + over cap, but a schema error owns it
+        ln(null as unknown as number, '5', false), // no product → skipped
+        ln(5, '99', false), // unknown cap → left to the server
       ],
     });
     const base: ResolverResult<CreateOrderFormType> = {
       values: {},
       errors: { lines: [{ quantity: { type: 'too_small', message: 'schema' } }, undefined, undefined] } as never,
     };
-    const capFor = (id: number) => (id === 5 ? undefined : 1);
+    const capFor = (line: { productId: number }) => (line.productId === 5 ? undefined : 1);
     // Nothing new added anywhere → the original result is returned unchanged.
     expect(appendLineAvailabilityErrors(form, base, capFor, message)).toBe(base);
   });
@@ -304,8 +402,8 @@ describe('appendLineAvailabilityErrors', () => {
   it('adds an availability error while preserving a base error on another line', () => {
     const form = validForm({
       lines: [
-        { productId: 3, quantity: '25', isRental: true }, // over cap → availability error added
-        { productId: 4, quantity: '2', isRental: false }, // a base productId error must survive
+        ln(3, '25', true), // over cap → availability error added
+        ln(4, '2', false), // a base productId error must survive
       ],
     });
     const base: ResolverResult<CreateOrderFormType> = {
@@ -448,8 +546,8 @@ describe('orderToFormValues', () => {
     expect(values.deliveryAt).toBe('2026-08-01T14:00');
     expect(values.pickupAt).toBe('2026-08-02T10:30');
     expect(values.lines).toEqual([
-      { productId: 3, quantity: '25', isRental: true },
-      { productId: 4, quantity: '10', isRental: false },
+      ln(3, '25', true),
+      ln(4, '10', false),
     ]);
 
     const body = toCreateOrderBody(values);
@@ -468,6 +566,14 @@ describe('orderToFormValues', () => {
       ],
     });
     expect(new Date(body.deliveryAt).getTime()).toBe(new Date(order().deliveryAt).getTime());
+  });
+
+  it('restores a line VARIATION (and starts with no partial picks)', () => {
+    const values = orderToFormValues(
+      order({ lines: [{ productId: 7, variantId: 71, quantity: 2, isRental: true }] }),
+    );
+    expect(values.lines).toEqual([ln(7, '2', true, 71)]);
+    expect(toCreateOrderBody(values).lines).toEqual([{ productId: 7, variantId: 71, quantity: 2 }]);
   });
 
   it('leaves absent fields empty rather than inventing values', () => {

@@ -1,6 +1,7 @@
 import type { Response } from "express";
 import { Prisma } from "@prisma/client";
 import { i18next } from "@/config/i18n.js";
+import { appConfig } from "@/config/app.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { logger } from "@/config/logger.js";
 import { AuditAction, logAudit } from "@/config/auditLogger.js";
@@ -15,9 +16,11 @@ import {
   getStatusCatalog,
   holdingStatusIds,
 } from "../orders/lifecycle/lifecycle.service.js";
+import { stockKey } from "../orders/orders.service.js";
 import {
   type CreateProductImageUploadsRequestModel,
   type CreateProductRequestModel,
+  type DeleteProductResponseModel,
   type ProductCatalogResponseModel,
   type ProductDetailResponseModel,
   type ProductImageUploadsResponseModel,
@@ -25,21 +28,24 @@ import {
   type ProductListResponseModel,
   type UpdateProductDisplayOrderRequestModel,
   type UpdateProductRequestModel,
+  type UpdateProductResponseModel,
 } from "./products.models.js";
 import {
+  applyProductCreate,
   applyProductDelete,
   applyProductDisplayOrder,
   applyProductUpdate,
   arrangementQuery,
   buildPaginationMeta,
-  buildProductImagesCreate,
   buildProductListWhere,
   buildRentedNowWhere,
   isSqlProductSort,
+  loadVariantUsage,
   parseProductListQuery,
   ProductDisplayOrderConflictError,
   ProductStateConflictError,
-  productScalarData,
+  ProductStockModeInUseError,
+  ProductVariantInUseError,
   productSortSelect,
   projectArrangementItem,
   projectProductForRole,
@@ -51,14 +57,15 @@ import {
 } from "./products.service.js";
 
 /**
- * Units of each RENT product currently out on active rentals (`buildRentedNowWhere` is the business
- * rule), keyed by product id. Venta products are skipped (their `quantity` IS the availability) and
- * so is the query itself when the page has no rentals. Products without active rentals simply have
- * no entry — callers default to 0.
+ * Units of each RENT stock pool currently out on active rentals (`buildRentedNowWhere` is the
+ * business rule), keyed by `stockKey(productId, variantId)` — a product without variants is one pool,
+ * each variant of one is its own. Venta products are skipped (their `quantity` IS the availability)
+ * and so is the query itself when the page has no rentals. Pools without active rentals simply have
+ * no entry — the projection defaults to 0.
  */
-const loadRentedNowByProductId = async (
+const loadRentedNow = async (
   products: ReadonlyArray<Pick<RichProduct, "id" | "productBusinessTypeId">>,
-): Promise<Map<number, number>> => {
+): Promise<Map<string, number>> => {
   const ids = rentProductIds(products);
   if (ids.length === 0) {
     return new Map();
@@ -68,11 +75,13 @@ const loadRentedNowByProductId = async (
   // from its cached catalog — products never hardcodes a status id.
   const holding = holdingStatusIds(await getStatusCatalog());
   const grouped = await prismaClient.serviceDetail.groupBy({
-    by: ["productId"],
+    by: ["productId", "variantId"],
     where: buildRentedNowWhere(ids, new Date(), holding),
     _sum: { quantity: true },
   });
-  return new Map(grouped.map((row) => [row.productId, row._sum.quantity ?? 0]));
+  return new Map(
+    grouped.map((row) => [stockKey(row.productId, row.variantId), row._sum.quantity ?? 0]),
+  );
 };
 
 /**
@@ -138,11 +147,11 @@ export const getProducts = async (
     }
 
     // Derived availability: what each rental has OUT right now (one grouped query for the page).
-    const rentedNow = await loadRentedNowByProductId(rawProducts);
+    const rentedNow = await loadRentedNow(rawProducts);
 
     const response: ProductListResponseModel = {
       products: rawProducts.map((product) =>
-        projectProductForRole(product, role, rentedNow.get(product.id) ?? 0),
+        projectProductForRole(product, role, { rentedNow }),
       ),
       pagination: buildPaginationMeta(page, pageSize, total),
     };
@@ -216,13 +225,21 @@ export const getProductById = async (
       return;
     }
 
-    const rentedNow = await loadRentedNowByProductId([rawProduct]);
+    const rentedNow = await loadRentedNow([rawProduct]);
+    // How order lines use each variant — Admin only (the edit form branches its remove copy on it).
+    const usage =
+      role === RolesEnum.Admin && rawProduct.variants.length > 0
+        ? await loadVariantUsage(
+            prismaClient,
+            rawProduct.id,
+            holdingStatusIds(await getStatusCatalog()),
+          )
+        : undefined;
     const response: ProductDetailResponseModel = {
-      product: projectProductForRole(
-        rawProduct,
-        role,
-        rentedNow.get(rawProduct.id) ?? 0,
-      ),
+      product: projectProductForRole(rawProduct, role, {
+        rentedNow,
+        ...(usage && { usage }),
+      }),
     };
     logger.info(
       i18next.t("products.getProductById.logs.productFetched", { id }),
@@ -326,26 +343,13 @@ export const createProduct = async (
     // Fail-closed like the reads: the route guarantees Admin, but never assume it here.
     const role = req.user?.userRole ?? RolesEnum.Client;
 
-    // Gallery nested-create (or undefined): URLs derived server-side from the validated keys, and
-    // storage is only touched when images exist (see `buildProductImagesCreate`).
-    const productImages = buildProductImagesCreate(body.images);
-
+    // ONE transaction: the product, its details, every photo set (URLs derived server-side from the
+    // validated keys; storage only touched when images exist) and the variation structure.
     const prismaClient = await getPrismaClient();
-    const created = await prismaClient.product.create({
-      data: {
-        ...productScalarData(body),
-        ...(body.productDetails.length > 0 && {
-          productDetails: {
-            create: body.productDetails.map((detail) => ({
-              productDetailTypeId: detail.detailTypeId,
-              detail: detail.detail,
-            })),
-          },
-        }),
-        ...(productImages && { productImages }),
-      },
-      include: richProductInclude,
-    });
+    const created = await prismaClient.$transaction(async (tx) => {
+      const id = await applyProductCreate(tx, body);
+      return tx.product.findUniqueOrThrow({ where: { id }, include: richProductInclude });
+    }, appConfig.productWriteTransaction);
 
     logger.info(
       i18next.t("products.createProduct.logs.productCreated", {
@@ -489,17 +493,22 @@ export const updateProduct = async (
     const id = Number(req.params["id"]);
 
     const prismaClient = await getPrismaClient();
-    const { removedImageKeys, updated } = await prismaClient.$transaction(
+    // Which statuses HOLD stock is the lifecycle machine's call — read once, used by the 409 guards
+    // inside the transaction and by the `usage` the response reports.
+    const holding = holdingStatusIds(await getStatusCatalog());
+    const { removedImageKeys, variantOutcome, updated, usage } = await prismaClient.$transaction(
       async (tx) => {
-        const reconciled = await applyProductUpdate(tx, id, body);
+        const reconciled = await applyProductUpdate(tx, id, body, holding);
         return {
-          removedImageKeys: reconciled.removedImageKeys,
+          ...reconciled,
           updated: await tx.product.findUniqueOrThrow({
             where: { id },
             include: richProductInclude,
           }),
+          usage: await loadVariantUsage(tx, id, holding),
         };
       },
+      appConfig.productWriteTransaction,
     );
 
     // Post-commit, best-effort R2 cleanup: the DB rows are already gone, so a failed object delete
@@ -539,14 +548,52 @@ export const updateProduct = async (
       });
     }
 
-    const rentedNow = await loadRentedNowByProductId([updated]);
+    const rentedNow = await loadRentedNow([updated]);
+    const removedAny = variantOutcome.retired.length > 0 || variantOutcome.deleted > 0;
+    const response: UpdateProductResponseModel = {
+      ...projectProductForRole(updated, role, { rentedNow, usage }),
+      // Reported, never guessed: which removed variants history kept (retired) vs erased.
+      ...(removedAny && { variantOutcome }),
+    };
     sendOzariSuccess(
       res,
       HttpEnum.OK,
       i18next.t("products.updateProduct.productUpdated"),
-      projectProductForRole(updated, role, rentedNow.get(id) ?? 0),
+      response,
     );
   } catch (error) {
+    // The save would drop a variant open/future orders still use — blocked, orders listed.
+    if (error instanceof ProductVariantInUseError) {
+      logger.warn(
+        i18next.t("products.updateProduct.logs.variantInUse", {
+          variants: error.conflicts.map((conflict) => conflict.variantId).join(","),
+        }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.CONFLICT,
+        i18next.t("products.updateProduct.variantInUse"),
+        undefined,
+        { conflicts: error.conflicts },
+      );
+      return;
+    }
+    // The save would switch stock modes while open/future orders hold the vanishing pool.
+    if (error instanceof ProductStockModeInUseError) {
+      logger.warn(
+        i18next.t("products.updateProduct.logs.stockModeInUse", {
+          orderIds: error.orderIds.join(","),
+        }),
+      );
+      sendOzariError(
+        res,
+        HttpEnum.CONFLICT,
+        i18next.t("products.updateProduct.stockModeInUse"),
+        undefined,
+        { orderIds: error.orderIds },
+      );
+      return;
+    }
     // A kept image/detail id vanished between the validator's read and the transaction — another
     // admin's save/delete won the race. The transaction rolled back; the client reloads and retries.
     if (error instanceof ProductStateConflictError) {
@@ -605,6 +652,7 @@ export const deleteProduct = async (
     const prismaClient = await getPrismaClient();
     const { removedImageKeys, hardDeleted } = await prismaClient.$transaction(
       (tx) => applyProductDelete(tx, id),
+      appConfig.productWriteTransaction,
     );
 
     // Post-commit, batched, best-effort R2 cleanup (see the doc above). Awaited on purpose —
@@ -646,10 +694,15 @@ export const deleteProduct = async (
       });
     }
 
+    // Which NO-TRASH branch happened — the UI's copy branches on it, never guesses.
+    const response: DeleteProductResponseModel = {
+      outcome: hardDeleted ? "deleted" : "deactivated",
+    };
     sendOzariSuccess(
       res,
       HttpEnum.OK,
       i18next.t("products.deleteProduct.productDeleted"),
+      response,
     );
   } catch (error) {
     logger.error(

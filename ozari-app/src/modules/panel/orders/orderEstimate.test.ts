@@ -139,6 +139,46 @@ describe('estimateDepositTotal', () => {
   });
 });
 
+describe('VARIATIONS — effective prices and deposits', () => {
+  // A tablecloth whose Rojo overrides the price and drops the deposit (0 = none); Azul inherits.
+  const variants = [
+    { id: 71, valueIds: [1], label: 'Rojo', isDefault: false, rentPrice: 9, securityDeposit: 0 },
+    { id: 72, valueIds: [2], label: 'Azul', isDefault: true, rentPrice: 6, securityDeposit: 20 },
+  ];
+  const mantel = rental({ id: 7, securityDeposit: 20, variants });
+  const productsById = new Map<number, Product>([[7, mantel]]);
+
+  it('prices a line at its variation (and the product without one)', () => {
+    expect(lineUnitPrice(mantel, variants[0])).toBe(9);
+    expect(lineUnitPrice(mantel)).toBe(6);
+    expect(estimateLineSubtotal(mantel, 2, 3, variants[0])).toBe(54);
+    expect(
+      estimateOrderTotal(
+        [
+          { productId: 7, variantId: 71, quantity: '2' },
+          { productId: 7, variantId: 72, quantity: '1' },
+        ],
+        productsById,
+        null,
+        null,
+        0,
+      ),
+    ).toBe(24);
+  });
+
+  it('deposits per variation — a 0 override is none, never topped up from the product', () => {
+    expect(
+      estimateDepositTotal(
+        [
+          { productId: 7, variantId: 71, quantity: '5' },
+          { productId: 7, variantId: 72, quantity: '2' },
+        ],
+        productsById,
+      ),
+    ).toBe(40);
+  });
+});
+
 describe('billedDaysFromStrings / formatMoney', () => {
   it('adapts raw datetime strings', () => {
     expect(billedDaysFromStrings('2026-08-01T14:00', '2026-08-02T15:00')).toBe(2);

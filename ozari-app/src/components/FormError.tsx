@@ -14,7 +14,8 @@ interface FormErrorProps {
  * box/border. Two coordinated motions so nothing pops: the row height eases open/closed via a
  * `grid-template-rows` 0fr↔1fr trick (softly pushing the button), and the text itself gently
  * fades+slides in (`ease-in-out`) instead of snapping. The last message is kept while collapsing so
- * the text doesn't vanish mid-animation. `role="alert"` announces it to assistive tech.
+ * the text doesn't vanish mid-animation, and a message REPLACING another fades in rather than
+ * overwriting it. `role="alert"` announces it to assistive tech.
  */
 const FormError: React.FC<FormErrorProps> = ({ message, id }) => {
   // Keep the last non-empty message painted so it stays readable through the collapse animation
@@ -45,7 +46,14 @@ const FormError: React.FC<FormErrorProps> = ({ message, id }) => {
           }`}
         >
           <FiAlertCircle aria-hidden className="mt-0.5 size-4 shrink-0" />
-          <span>{displayed}</span>
+          {/* Keyed by the text: a NEW message (a resubmit's different 409, its order list) fades
+              in on its own instead of overwriting the old one in place (`@starting-style`). */}
+          <span
+            key={displayed}
+            className="min-w-0 transition-opacity duration-300 ease-in-out starting:opacity-0 motion-reduce:transition-none"
+          >
+            {displayed}
+          </span>
         </p>
       </div>
     </div>

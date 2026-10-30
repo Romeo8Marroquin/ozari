@@ -92,7 +92,42 @@ export const richOrderInclude = {
       replacementPrice: true,
       damagedQuantity: true,
       damageNote: true,
-      product: { select: { name: true } },
+      variantId: true,
+      variantLabel: true,
+      product: {
+        select: {
+          name: true,
+          // ONE photo per line, never the gallery: the flagged primary, else the first by display
+          // order — of the product's SHOWCASE set only (a value photo is the wrong colour for a line
+          // of another variant). Read through `lineImageUrl`.
+          productImages: {
+            where: { optionValueId: null },
+            orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
+            take: 1,
+            select: { url: true },
+          },
+        },
+      },
+      // The variation's photos come FIRST: each of its values (walked in option order by
+      // `lineImageUrl`) with that value's primary, else its first photo.
+      variant: {
+        select: {
+          values: {
+            select: {
+              optionValue: {
+                select: {
+                  option: { select: { sortOrder: true } },
+                  images: {
+                    orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }],
+                    take: 1,
+                    select: { url: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     },
   },
   serviceExtras: {
@@ -147,6 +182,73 @@ export type RichOrder = Prisma.ServiceGetPayload<{
 /** A Prisma `Decimal | null` money column → a plain `number` (or `undefined` when absent). */
 const toMoney = (value: Prisma.Decimal | null): number | undefined =>
   value !== null ? Number(value) : undefined;
+
+/**
+ * THE photo of an order line — the ONE place a line's `imageUrl` is decided (the detail page and
+ * the printed documents' thumbnails read it). The VARIATION's photo first: its values walked in
+ * option order, the first value with photos giving its primary (else its first). Then the product's
+ * SHOWCASE primary, else its first (never `coverImageUrl`, which falls back to the DEFAULT variant —
+ * the wrong colour for this line). None when neither exists: the row prints without one.
+ */
+export function lineImageUrl(
+  line: Pick<RichOrder["serviceDetails"][number], "product" | "variant">,
+): string | undefined {
+  const variantImage = [...(line.variant?.values ?? [])]
+    .sort((a, b) => a.optionValue.option.sortOrder - b.optionValue.option.sortOrder)
+    .find((value) => value.optionValue.images.length > 0)?.optionValue.images[0]?.url;
+  return variantImage ?? line.product.productImages[0]?.url;
+}
+
+/**
+ * The identity of a STOCK POOL — a product without variants (`variantId` null) or one of its
+ * variants. Order lines are identified by it, availability is counted per it, and sale stock moves
+ * per it; one key shape for products and orders so a map built by one is read by the other.
+ */
+export const stockKey = (productId: number, variantId: number | null | undefined): string =>
+  `${productId}:${variantId ?? ""}`;
+
+/** The separator between a variation's value names in its label. */
+export const VARIANT_LABEL_SEPARATOR = " · ";
+
+/**
+ * A variation's label — its values' names in OPTION order, joined by " · " ("Rojo · Redondo"). The
+ * one formatter for the products projection AND the order line snapshot.
+ */
+export function variantLabelOf(
+  values: ReadonlyArray<{ optionValue: { name: string; option: { sortOrder: number } } }>,
+): string {
+  return [...values]
+    .sort((a, b) => a.optionValue.option.sortOrder - b.optionValue.option.sortOrder)
+    .map((value) => value.optionValue.name)
+    .join(VARIANT_LABEL_SEPARATOR);
+}
+
+/**
+ * The `service_details` filter selecting every line that HOLDS inventory on an open or future order
+ * — whatever its window, unlike the "right now" / "in this window" availability rules: a RENTAL line
+ * whose order sits on an `OUT` or `WINDOW` status, or a SALE line whose order still holds its stock
+ * (`holdsSaleStock`: not delivered). Cancelled, finished (NONE) and inactive rows never hold.
+ *
+ * It answers "may this stock pool disappear?" — the products update refuses to remove a variant (409
+ * `variantInUse`) or to switch a product between product-level and per-variant stock (409
+ * `stockModeInUse`) while such lines exist, and reports `usage.holding` per variant.
+ */
+export function buildHoldingLinesWhere(holding: {
+  out: number[];
+  window: number[];
+}): Prisma.ServiceDetailWhereInput {
+  return {
+    isActive: true,
+    service: { isActive: true, cancelledAt: null },
+    OR: [
+      {
+        isRental: true,
+        service: { serviceStatusId: { in: [...holding.out, ...holding.window] } },
+      },
+      { isRental: false, service: { deliveredAt: null } },
+    ],
+  };
+}
 
 /** Round money HALF-UP to cents once, at the final multiplication. */
 const roundMoney = (value: number): number => Math.round(value * 100) / 100;
@@ -340,6 +442,8 @@ export function projectSecurityDeposit(order: RichOrder): OrderSecurityDepositRe
         return {
           lineId: line.id,
           productName: line.product.name,
+          variantId: line.variantId ?? undefined,
+          variantLabel: line.variantLabel ?? undefined,
           quantity: line.damagedQuantity,
           unitAmount,
           amount: roundMoney(unitAmount * line.damagedQuantity),
@@ -381,19 +485,24 @@ export class OrderSettlementConflictError extends Error {
 /**
  * Re-checks a recorded settlement against the order's NEW lines (an edit re-derives the deposit and
  * replacement snapshots from the products, exactly like the prices). `current` are the lines as they
- * stand (with their damage); `next` the re-priced final lines keyed by product.
+ * stand (with their damage); `next` the re-priced final lines, matched by LINE KEY (product +
+ * variant — `stockKey`), the same identity the edit reconciles lines by.
  */
 export function assertSettlementSurvivesEdit(
   order: {
     depositSettledAt: Date | null;
     depositRetainedAmount: Prisma.Decimal | null;
-    serviceDetails: ReadonlyArray<{ productId: number; damagedQuantity: number }>;
+    serviceDetails: ReadonlyArray<{
+      productId: number;
+      variantId: number | null;
+      damagedQuantity: number;
+    }>;
   },
   next: readonly PricedOrderLineModel[],
 ): void {
-  const nextByProduct = new Map(next.map((line) => [line.productId, line]));
+  const nextByKey = new Map(next.map((line) => [stockKey(line.productId, line.variantId), line]));
   for (const line of order.serviceDetails.filter((detail) => detail.damagedQuantity > 0)) {
-    const kept = nextByProduct.get(line.productId);
+    const kept = nextByKey.get(stockKey(line.productId, line.variantId));
     if (
       !kept?.isRental ||
       kept.replacementPrice === null ||
@@ -714,6 +823,9 @@ export function projectOrderDetail(
       id: line.id,
       productId: line.productId,
       productName: line.product.name,
+      variantId: line.variantId ?? undefined,
+      variantLabel: line.variantLabel ?? undefined,
+      imageUrl: lineImageUrl(line),
       isRental: line.isRental,
       quantity: line.quantity,
       unitaryPrice: Number(line.unitaryPrice),
@@ -923,11 +1035,92 @@ export function buildRentedInWindowWhere(
 
 // ── Stock across the lifecycle ───────────────────────────────────────────────────────────────────
 
-/** One active line, as the stock rules need it. */
+/** One active line, as the stock rules need it. `variantId` picks the stock POOL (null = the
+ *  product's own); `variantLabel` is the line's snapshot, quoted when a retired variant conflicts. */
 export interface StockLineModel {
   productId: number;
+  variantId: number | null;
+  variantLabel: string | null;
   quantity: number;
   isRental: boolean;
+}
+
+/**
+ * Moves SALE stock by `delta` on the line's pool — the ONE writer of a sale decrement/restock: the
+ * variant row's `quantity` when the line names a variant, else the product row's. Every caller holds
+ * the product row lock (`SELECT … FOR UPDATE` on `products`), which serializes a variant's writers
+ * too — the products update takes the same row first.
+ */
+export function moveSaleStock(
+  tx: Prisma.TransactionClient,
+  line: { productId: number; variantId: number | null },
+  delta: number,
+): Promise<unknown> {
+  return line.variantId !== null
+    ? tx.productVariant.update({
+        where: { id: line.variantId },
+        data: { quantity: { increment: delta } },
+      })
+    : tx.product.update({
+        where: { id: line.productId },
+        data: { quantity: { increment: delta } },
+      });
+}
+
+/** A line as the sale-delta reading needs it. */
+type SaleDeltaLine = Pick<StockLineModel, "productId" | "variantId" | "quantity" | "isRental">;
+
+/**
+ * How many SALE units an order edit moves, per stock pool: + what the order held before (given
+ * back), − what it takes now. A pool that left the order returns its whole quantity, a new one takes
+ * its whole quantity, an unchanged one nets to zero and is dropped. Feed each entry to
+ * `moveSaleStock` (only while the order still holds its sale stock).
+ */
+export function saleStockDeltas(
+  current: readonly SaleDeltaLine[],
+  next: readonly SaleDeltaLine[],
+): { productId: number; variantId: number | null; delta: number }[] {
+  const deltas = new Map<string, { productId: number; variantId: number | null; delta: number }>();
+  const add = (line: SaleDeltaLine, delta: number): void => {
+    const key = stockKey(line.productId, line.variantId);
+    const entry = deltas.get(key) ?? { productId: line.productId, variantId: line.variantId, delta: 0 };
+    entry.delta += delta;
+    deltas.set(key, entry);
+  };
+  current.filter((line) => !line.isRental).forEach((line) => add(line, line.quantity));
+  next.filter((line) => !line.isRental).forEach((line) => add(line, -line.quantity));
+  return [...deltas.values()].filter((entry) => entry.delta !== 0);
+}
+
+/** The variation fields of a stock-conflict item — present only for a variant line. */
+export const conflictVariantFields = (
+  variantId: number | null,
+  variantLabel: string | null,
+): Pick<OrderStockConflictItemModel, "variantId" | "variantLabel"> => ({
+  ...(variantId !== null && { variantId }),
+  ...(variantLabel !== null && { variantLabel }),
+});
+
+/** A product row (under the lock) with its ACTIVE variants' stock — what availability reads. */
+export interface StockPoolProductModel {
+  id: number;
+  quantity: number;
+  variants: ReadonlyArray<{ id: number; quantity: number }>;
+}
+
+/**
+ * The FLEET (rentals) or SHELF (sales) of one pool: the variant's own `quantity` for a variant line,
+ * else the product's. `null` = the variant is no longer ACTIVE on that product (retired or gone) —
+ * the callers answer it like a vanished product: a stock conflict with `available: 0`.
+ */
+export function poolQuantity(
+  product: StockPoolProductModel,
+  variantId: number | null,
+): number | null {
+  if (variantId === null) {
+    return product.quantity;
+  }
+  return product.variants.find((variant) => variant.id === variantId)?.quantity ?? null;
 }
 
 /**
@@ -968,12 +1161,7 @@ export async function releaseSaleStock(
   await Promise.all(
     lines
       .filter((line) => !line.isRental)
-      .map((line) =>
-        tx.product.update({
-          where: { id: line.productId },
-          data: { quantity: { increment: line.quantity } },
-        }),
-      ),
+      .map((line) => moveSaleStock(tx, line, line.quantity)),
   );
 }
 
@@ -1005,17 +1193,22 @@ export async function reclaimOrderStock(
   await tx.$queryRaw`SELECT id FROM products WHERE id IN (${Prisma.join(productIds)}) FOR UPDATE`;
   const products = await tx.product.findMany({
     where: { id: { in: productIds }, isActive: true },
-    select: { id: true, name: true, quantity: true },
+    select: {
+      id: true,
+      name: true,
+      quantity: true,
+      variants: { where: { isActive: true }, select: { id: true, quantity: true } },
+    },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
 
-  // What the FLEET already owes in this order's window. The order itself is still cancelled at this
-  // point, so its own lines aren't counted — no self-exclusion needed.
+  // What the FLEET already owes in this order's window, per stock pool. The order itself is still
+  // cancelled at this point, so its own lines aren't counted — no self-exclusion needed.
   const rentalIds = order.lines.filter((line) => line.isRental).map((line) => line.productId);
   const rentedRows =
     rentalIds.length > 0
       ? await tx.serviceDetail.groupBy({
-          by: ["productId"],
+          by: ["productId", "variantId"],
           where: buildRentedInWindowWhere(
             rentalIds,
             order.serviceStart,
@@ -1026,30 +1219,35 @@ export async function reclaimOrderStock(
           _sum: { quantity: true },
         })
       : [];
-  const rentedByProduct = new Map(
-    rentedRows.map((row) => [row.productId, row._sum.quantity ?? 0]),
+  const rentedByKey = new Map(
+    rentedRows.map((row) => [stockKey(row.productId, row.variantId), row._sum.quantity ?? 0]),
   );
 
   const conflicts: OrderStockConflictItemModel[] = [];
   for (const line of order.lines) {
     const product = productById.get(line.productId);
-    if (!product) {
-      // The product was deleted while the order sat cancelled — it can't come back as it was.
+    // The product was deleted, or the VARIANT retired, while the order sat cancelled — it can't
+    // come back as it was (a retired variant never holds anything, so nothing can be re-taken).
+    const pool = product ? poolQuantity(product, line.variantId) : null;
+    const variant = conflictVariantFields(line.variantId, line.variantLabel);
+    if (pool === null) {
       conflicts.push({
         productId: line.productId,
-        productName: `#${line.productId}`,
+        productName: product?.name ?? `#${line.productId}`,
+        ...variant,
         requested: line.quantity,
         available: 0,
       });
       continue;
     }
     const available = line.isRental
-      ? Math.max(0, product.quantity - (rentedByProduct.get(line.productId) ?? 0))
-      : product.quantity;
+      ? Math.max(0, pool - (rentedByKey.get(stockKey(line.productId, line.variantId)) ?? 0))
+      : pool;
     if (available < line.quantity) {
       conflicts.push({
-        productId: product.id,
-        productName: product.name,
+        productId: line.productId,
+        productName: (product as { name: string }).name,
+        ...variant,
         requested: line.quantity,
         available,
       });
@@ -1063,13 +1261,19 @@ export async function reclaimOrderStock(
   await Promise.all(
     order.lines
       .filter((line) => !line.isRental)
-      .map((line) =>
-        tx.product.update({
-          where: { id: line.productId },
-          data: { quantity: { decrement: line.quantity } },
-        }),
-      ),
+      .map((line) => moveSaleStock(tx, line, -line.quantity)),
   );
+}
+
+/** An ACTIVE variant as the pricing reads it: its overrides (NULL = inherit) and its values for the
+ *  label snapshot. */
+export interface OrderPricingVariantModel {
+  id: number;
+  rentPrice: Prisma.Decimal | null;
+  sellPrice: Prisma.Decimal | null;
+  securityDeposit: Prisma.Decimal | null;
+  replacementPrice: Prisma.Decimal | null;
+  values: ReadonlyArray<{ optionValue: { name: string; option: { sortOrder: number } } }>;
 }
 
 /** A product row as the pricing needs it (fetched under the creation lock). */
@@ -1082,11 +1286,17 @@ export interface OrderPricingProductModel {
   sellPrice: Prisma.Decimal | null;
   securityDeposit: Prisma.Decimal | null;
   replacementPrice: Prisma.Decimal | null;
+  /** ACTIVE variants only (`orderPricingProductSelect`). */
+  variants: readonly OrderPricingVariantModel[];
 }
 
 /** One priced line, ready for the nested `service_details` create. */
 export interface PricedOrderLineModel {
   productId: number;
+  /** The stock pool — null for a product without variants. */
+  variantId: number | null;
+  /** The label SNAPSHOT ("Rojo · Redondo") — re-derived on every save; null without a variant. */
+  variantLabel: string | null;
   quantity: number;
   isRental: boolean;
   unitaryPrice: number;
@@ -1109,10 +1319,28 @@ export const orderPricingProductSelect = {
   sellPrice: true,
   securityDeposit: true,
   replacementPrice: true,
+  // Only ACTIVE variants can be ordered: a variant retired between validation and the lock is
+  // simply absent here, and the caller answers it as a stock conflict with `available: 0`.
+  variants: {
+    where: { isActive: true },
+    select: {
+      id: true,
+      quantity: true,
+      rentPrice: true,
+      sellPrice: true,
+      securityDeposit: true,
+      replacementPrice: true,
+      values: {
+        select: { optionValue: { select: { name: true, option: { select: { sortOrder: true } } } } },
+      },
+    },
+  },
 } satisfies Prisma.ProductSelect;
 
-/** The snapshot columns a priced line writes on `service_details` (create and edit alike). */
+/** The snapshot columns a priced line writes on `service_details` (create and edit alike). The
+ *  line's identity (`productId` + `variantId`) is written by the create only — a kept row keeps it. */
 export const pricedLineData = (line: PricedOrderLineModel) => ({
+  variantLabel: line.variantLabel,
   quantity: line.quantity,
   isRental: line.isRental,
   unitaryPrice: line.unitaryPrice,
@@ -1129,14 +1357,28 @@ export const pricedLineData = (line: PricedOrderLineModel) => ({
  * by the validator — the MVP billing engine is day-based (owner: day is THE norm; the hourly door
  * stays open and gets real math when a product actually needs it, never silent wrong billing).
  * `null` = the product violates the conditional price rule (defensive; the validator checked).
+ *
+ * A line of a VARIATION (`variantId`) prices from the variant's EFFECTIVE values — each override,
+ * else the product's — for the price, the deposit and the replacement alike, and snapshots its
+ * label. `null` too when that variant is not an ACTIVE variant of the product (retired or gone under
+ * the lock — the caller answers it as a stock conflict with `available: 0`).
  */
 export function priceOrderLine(
   quantity: number,
   product: OrderPricingProductModel,
   billedDays: number,
+  variantId: number | null = null,
 ): PricedOrderLineModel | null {
   const isRental = product.productBusinessTypeId === BusinessTypeEnum.RENT;
-  const unitPrice = isRental ? product.rentPrice : product.sellPrice;
+  const variant =
+    variantId === null ? null : product.variants.find((candidate) => candidate.id === variantId);
+  if (variant === undefined) {
+    return null;
+  }
+  const effective = (
+    field: "rentPrice" | "sellPrice" | "securityDeposit" | "replacementPrice",
+  ): Prisma.Decimal | null => variant?.[field] ?? product[field];
+  const unitPrice = isRental ? effective("rentPrice") : effective("sellPrice");
   if (unitPrice === null) {
     return null;
   }
@@ -1150,12 +1392,14 @@ export function priceOrderLine(
     isRental && value !== null ? Number(value) : null;
   return {
     productId: product.id,
+    variantId,
+    variantLabel: variant ? variantLabelOf(variant.values) : null,
     quantity,
     isRental,
     unitaryPrice,
     parcialPrice: roundMoney(unitaryPrice * quantity * multiplier),
-    securityDeposit: rentalSnapshot(product.securityDeposit),
-    replacementPrice: rentalSnapshot(product.replacementPrice),
+    securityDeposit: rentalSnapshot(effective("securityDeposit")),
+    replacementPrice: rentalSnapshot(effective("replacementPrice")),
   };
 }
 

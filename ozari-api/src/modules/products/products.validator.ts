@@ -20,65 +20,101 @@ import {
   type UpdateProductImageRequestModel,
   type UpdateProductRequestModel,
 } from "./products.models.js";
+import {
+  buildProductImageKeyRegex,
+  parseProductVariations,
+  sanitizeOptionalMoney,
+  securityDepositViolation,
+  type ExistingProductVariations,
+  type ParsedProductVariations,
+  type ProductVariationsBody,
+  type RejectVariation,
+} from "./products.variations.js";
+
+/** The variations parser's rejection, in its own namespace (shared by create and update). */
+const rejectVariationWith =
+  (res: Response): RejectVariation =>
+  (key, logParams) => {
+    logger.warn(i18next.t(`products.variations.validators.logs.${key}`, logParams));
+    sendOzariError(
+      res,
+      HttpEnum.BAD_REQUEST,
+      i18next.t(`products.variations.validators.${key}`),
+    );
+  };
 
 /**
- * Matches an R2 object key OUR upload-url endpoint mints for product images:
- * `products/<uuid v4>.<whitelisted extension>`. Built from the same config the mint uses, so the
- * create endpoint only ever persists keys that could have come from our own presign flow — an
- * arbitrary client-invented key (path traversal, another prefix, another bucket's layout) is a 400.
+ * The stock rule both doors share once the variations are parsed: a product WITH options keeps its
+ * stock on each variant (the parser already refused a `quantity` — `quantityWithVariants`) and
+ * stores 0; one without options must carry its own valid `quantity`. `null` = rejected.
  */
-const buildProductImageKeyRegex = (): RegExp => {
-  const prefix = appConfig.storage.keyPrefixes.product;
-  const extensions = Object.values(appConfig.storage.allowedImageTypes).join("|");
-  // eslint-disable-next-line security/detect-non-literal-regexp -- built ONLY from static appConfig constants (never user input)
-  return new RegExp(
-    `^${prefix}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(?:${extensions})$`,
-  );
-};
-
-/**
- * Sanitizes an OPTIONAL money field: absent stays absent; a present value must be a number within
- * `[0, maxGlobalAmount]` and is truncated to 2 decimals (never rounded up — we don't invent cents).
- * `ok: false` means the field was present but invalid (the caller sends its own 400).
- */
-const sanitizeOptionalMoney = (
-  value: unknown,
-): { ok: true; value: number | undefined } | { ok: false } => {
-  if (value === undefined || value === null) {
-    return { ok: true, value: undefined };
+const resolveProductQuantity = (
+  res: Response,
+  variations: ParsedProductVariations,
+  quantity: unknown,
+): number | null => {
+  if (variations.options.length > 0) {
+    return 0;
   }
   if (
-    typeof value !== "number" ||
-    Number.isNaN(value) ||
-    value < 0 ||
-    value > appConfig.maxGlobalAmount
+    typeof quantity !== "number" ||
+    !Number.isInteger(quantity) ||
+    quantity < 0 ||
+    quantity > appConfig.maxGlobalQuantity
   ) {
-    return { ok: false };
+    rejectCreate(res, "invalidQuantity", { quantity });
+    return null;
   }
-  return { ok: true, value: Math.trunc(value * 100) / 100 };
+  return quantity;
 };
 
 /**
- * The security-deposit rule both doors share (owner 2026-10-27): the deposit is ALQUILER-only (a
- * sold item leaves for good — there is nothing to give back a guarantee on), and it never exceeds
- * the replacement price when both are set — it covers partial damage, and a total loss is billed at
- * the replacement value, so a bigger deposit would make "broken" cheaper than "scratched".
- * Returns the rejection key, or `undefined` when the pair is coherent.
+ * Both doors' variations step: the shared parser over the request + the already-sanitized scalars
+ * (`existing` = the product's ids today, `null` on create), then the stock rule it decides. `null` =
+ * rejected (the 400 is already sent).
  */
-const securityDepositViolation = (
-  isRent: boolean,
-  securityDeposit: number | undefined,
-  replacementPrice: number | undefined,
-): string | undefined => {
-  if (securityDeposit === undefined) {
-    return undefined;
+const parseVariationsAndStock = (
+  res: Response,
+  body: Record<string, unknown>,
+  scalars: Pick<ProductVariationsBody, "isRent" | "replacementPrice" | "securityDeposit" | "showcaseImages">,
+  existing: ExistingProductVariations | null,
+): { variations: ParsedProductVariations; quantity: number } | null => {
+  const variations = parseProductVariations(
+    { options: body["options"], variants: body["variants"], quantity: body["quantity"], ...scalars },
+    existing,
+    rejectVariationWith(res),
+  );
+  if (!variations) {
+    return null;
   }
-  if (!isRent) {
-    return "securityDepositForbidden";
+  const quantity = resolveProductQuantity(res, variations, body["quantity"]);
+  return quantity === null ? null : { variations, quantity };
+};
+
+/**
+ * The four optional money fields both doors sanitize (present ⇒ a number in range, truncated to
+ * cents), each rejecting with its own create key. `null` = rejected (the 400 is already sent).
+ */
+const sanitizeProductMoney = (
+  res: Response,
+  raw: { rentPrice: unknown; sellPrice: unknown; replacementPrice: unknown; securityDeposit: unknown },
+): Record<"rentMoney" | "sellMoney" | "replacementMoney" | "depositMoney", { value: number | undefined }> | null => {
+  const fields = [
+    ["rentMoney", "rentPrice", "invalidRentPrice"],
+    ["sellMoney", "sellPrice", "invalidSellPrice"],
+    ["replacementMoney", "replacementPrice", "invalidReplacementPrice"],
+    ["depositMoney", "securityDeposit", "invalidSecurityDeposit"],
+  ] as const;
+  const sanitized = {} as Record<(typeof fields)[number][0], { value: number | undefined }>;
+  for (const [target, field, key] of fields) {
+    const result = sanitizeOptionalMoney(raw[field]);
+    if (!result.ok) {
+      rejectCreate(res, key, { [field]: raw[field] });
+      return null;
+    }
+    sanitized[target] = result;
   }
-  return replacementPrice !== undefined && securityDeposit > replacementPrice
-    ? "securityDepositAboveReplacement"
-    : undefined;
+  return sanitized;
 };
 
 /** Log the create-validator warning for `key` and send its standard 400 (both share the key name). */
@@ -111,7 +147,6 @@ export const validateCreateProduct = async (
       images,
       name,
       productDetails,
-      quantity,
       rentPrice,
       rentTimeUnitId,
       replacementPrice,
@@ -233,40 +268,11 @@ export const validateCreateProduct = async (
       isPrimary: primaryCount === 0 ? index === 0 : image.isPrimary === true,
     }));
 
-    if (
-      (!quantity && quantity !== 0) ||
-      typeof quantity !== "number" ||
-      !Number.isInteger(quantity) ||
-      quantity < 0 ||
-      quantity > appConfig.maxGlobalQuantity
-    ) {
-      rejectCreate(res, "invalidQuantity", { quantity });
+    const money = sanitizeProductMoney(res, { rentPrice, sellPrice, replacementPrice, securityDeposit });
+    if (!money) {
       return;
     }
-
-    const rentMoney = sanitizeOptionalMoney(rentPrice);
-    if (!rentMoney.ok) {
-      rejectCreate(res, "invalidRentPrice", { rentPrice });
-      return;
-    }
-
-    const sellMoney = sanitizeOptionalMoney(sellPrice);
-    if (!sellMoney.ok) {
-      rejectCreate(res, "invalidSellPrice", { sellPrice });
-      return;
-    }
-
-    const replacementMoney = sanitizeOptionalMoney(replacementPrice);
-    if (!replacementMoney.ok) {
-      rejectCreate(res, "invalidReplacementPrice", { replacementPrice });
-      return;
-    }
-
-    const depositMoney = sanitizeOptionalMoney(securityDeposit);
-    if (!depositMoney.ok) {
-      rejectCreate(res, "invalidSecurityDeposit", { securityDeposit });
-      return;
-    }
+    const { rentMoney, sellMoney, replacementMoney, depositMoney } = money;
 
     // The CONDITIONAL price rule — a product is exactly ONE business type:
     // Alquiler → rentPrice + a valid rent time unit, sellPrice forbidden; Venta → sellPrice only,
@@ -314,6 +320,23 @@ export const validateCreateProduct = async (
       return;
     }
 
+    // Variations — the shared parser (create: every id forbidden), then the stock rule they decide.
+    const parsed = parseVariationsAndStock(
+      res,
+      req.body as Record<string, unknown>,
+      {
+        isRent,
+        replacementPrice: isRent ? replacementMoney.value : undefined,
+        securityDeposit: depositMoney.value,
+        showcaseImages: sanitizedImages,
+      },
+      null,
+    );
+    if (!parsed) {
+      return;
+    }
+    const { variations, quantity: resolvedQuantity } = parsed;
+
     const validatedBody: CreateProductRequestModel = {
       businessTypeId,
       categoryId,
@@ -322,7 +345,9 @@ export const validateCreateProduct = async (
       images: sanitizedImages,
       name: name.trim(),
       productDetails: sanitizedProductDetails,
-      quantity,
+      quantity: resolvedQuantity,
+      options: variations.options,
+      variants: variations.variants,
       rentPrice: isRent ? rentMoney.value : undefined,
       rentTimeUnitId: isRent ? rentTimeUnitId : undefined,
       replacementPrice: isRent ? replacementMoney.value : undefined,
@@ -390,7 +415,6 @@ export const validateUpdateProduct = async (
       images,
       name,
       productDetails,
-      quantity,
       rentPrice,
       rentTimeUnitId,
       replacementPrice,
@@ -408,8 +432,11 @@ export const validateUpdateProduct = async (
             where: { id: productId, isActive: true },
             select: {
               id: true,
+              // EVERY photo of the product (any set): a kept photo may move between sets.
               productImages: { select: { id: true } },
               productDetails: { select: { id: true } },
+              options: { select: { id: true, values: { select: { id: true } } } },
+              variants: { where: { isActive: true }, select: { id: true } },
             },
           })
         : null;
@@ -578,40 +605,11 @@ export const validateUpdateProduct = async (
       isPrimary: primaryCount === 0 ? index === 0 : image.isPrimary === true,
     }));
 
-    if (
-      (!quantity && quantity !== 0) ||
-      typeof quantity !== "number" ||
-      !Number.isInteger(quantity) ||
-      quantity < 0 ||
-      quantity > appConfig.maxGlobalQuantity
-    ) {
-      rejectCreate(res, "invalidQuantity", { quantity });
+    const money = sanitizeProductMoney(res, { rentPrice, sellPrice, replacementPrice, securityDeposit });
+    if (!money) {
       return;
     }
-
-    const rentMoney = sanitizeOptionalMoney(rentPrice);
-    if (!rentMoney.ok) {
-      rejectCreate(res, "invalidRentPrice", { rentPrice });
-      return;
-    }
-
-    const sellMoney = sanitizeOptionalMoney(sellPrice);
-    if (!sellMoney.ok) {
-      rejectCreate(res, "invalidSellPrice", { sellPrice });
-      return;
-    }
-
-    const replacementMoney = sanitizeOptionalMoney(replacementPrice);
-    if (!replacementMoney.ok) {
-      rejectCreate(res, "invalidReplacementPrice", { replacementPrice });
-      return;
-    }
-
-    const depositMoney = sanitizeOptionalMoney(securityDeposit);
-    if (!depositMoney.ok) {
-      rejectCreate(res, "invalidSecurityDeposit", { securityDeposit });
-      return;
-    }
+    const { rentMoney, sellMoney, replacementMoney, depositMoney } = money;
 
     // The CONDITIONAL price rule — identical to create (a product is exactly ONE business type),
     // and it applies to the product's NEW type: switching Alquiler → Venta must arrive with the
@@ -658,6 +656,28 @@ export const validateUpdateProduct = async (
       return;
     }
 
+    // Variations — the SAME parser as create, told what the product has today (ownership of every
+    // kept option/value/variant/photo id is checked against it; the transaction re-verifies).
+    const parsed = parseVariationsAndStock(
+      res,
+      req.body as Record<string, unknown>,
+      {
+        isRent,
+        replacementPrice: isRent ? replacementMoney.value : undefined,
+        securityDeposit: depositMoney.value,
+        showcaseImages: sanitizedImages,
+      },
+      {
+        imageIds: product.productImages.map((image) => image.id),
+        options: product.options,
+        activeVariantIds: product.variants.map((variant) => variant.id),
+      },
+    );
+    if (!parsed) {
+      return;
+    }
+    const { variations, quantity: resolvedQuantity } = parsed;
+
     const validatedBody: UpdateProductRequestModel = {
       businessTypeId,
       categoryId,
@@ -666,7 +686,9 @@ export const validateUpdateProduct = async (
       images: sanitizedImages,
       name: name.trim(),
       productDetails: sanitizedProductDetails,
-      quantity,
+      quantity: resolvedQuantity,
+      options: variations.options,
+      variants: variations.variants,
       rentPrice: isRent ? rentMoney.value : undefined,
       rentTimeUnitId: isRent ? rentTimeUnitId : undefined,
       replacementPrice: isRent ? replacementMoney.value : undefined,
@@ -722,10 +744,11 @@ export const validateCreateProductImageUploads = (
       rejectUploads(res, "invalidFiles", { files });
       return;
     }
-    if (files.length > appConfig.storage.maxImagesPerProduct) {
+    // One save's uploads in ONE presign call: every set of a product (showcase + each value's).
+    if (files.length > appConfig.storage.maxImagesTotalPerProduct) {
       rejectUploads(res, "tooManyFiles", {
         count: files.length,
-        max: appConfig.storage.maxImagesPerProduct,
+        max: appConfig.storage.maxImagesTotalPerProduct,
       });
       return;
     }

@@ -30,6 +30,73 @@ export interface ProductDetail {
   detailTypeId: number;
 }
 
+/** One value of a product OPTION ("Rojo" of "Color") — with its OWN photo set (its primary flagged,
+ *  else the first). Array order = `sortOrder`. */
+export interface ProductOptionValue {
+  id: number;
+  name: string;
+  sortOrder: number;
+  images: ProductImage[];
+}
+
+/** A product OPTION ("Color", "Tamaño"). Its order is the label order AND the photo precedence. */
+export interface ProductOption {
+  id: number;
+  name: string;
+  sortOrder: number;
+  values: ProductOptionValue[];
+}
+
+/** A variation's RAW override columns (Admin only) — what the edit form prefills; absent = inherits
+ *  the product's. A `securityDeposit` of 0 is an explicit "no deposit" for that variation. */
+export interface ProductVariantOverrides {
+  rentPrice?: number;
+  sellPrice?: number;
+  replacementPrice?: number;
+  securityDeposit?: number;
+  description?: string;
+}
+
+/** How many order lines reference a variation (detail + PUT only, Admin): `holding` of them still
+ *  reserve stock (open/future orders) — removing it is then refused (409 `variantInUse`); history
+ *  only (`lines` > 0) retires it; none deletes it. The form words its removal from THIS. */
+export interface ProductVariantUsage {
+  lines: number;
+  holding: number;
+}
+
+/**
+ * One OFFERED combination of option values (active variations only, canonical order). Prices,
+ * deposit and description are EFFECTIVE (the variation's override, else the product's) — computed
+ * by the API, never re-derived here. Exactly one carries `isDefault`.
+ */
+export interface ProductVariant {
+  id: number;
+  /** One value id per option, in option order. */
+  valueIds: number[];
+  /** Its option values only, e.g. "Rojo · Redondo" (a variation has no custom title). */
+  label: string;
+  isDefault: boolean;
+  rentPrice?: number;
+  sellPrice?: number;
+  securityDeposit?: number;
+  description?: string;
+  /** Its photo: the first of its values (in option order) that has photos gives its primary, else
+   *  the product's showcase primary; absent when neither exists. */
+  imageUrl?: string;
+  /** Admin only — its OWN stock (fleet for rent, shelf for sale). */
+  quantity?: number;
+  /** Admin only — takeable right now (same meaning as the product's). */
+  available?: number;
+  inStock?: boolean;
+  /** Admin only, Alquiler — the variation's whole fleet. */
+  total?: number;
+  /** Admin only — effective replacement value. */
+  replacementPrice?: number;
+  overrides?: ProductVariantOverrides;
+  usage?: ProductVariantUsage;
+}
+
 export interface ProductCurrency {
   id: number;
   iso4217Code: string;
@@ -59,7 +126,15 @@ export interface Product {
   /** Refundable security deposit per unit ("Depósito", Alquiler only) — a public commercial
    *  condition like the price, so every role receives it. Never part of a price. */
   securityDeposit?: number;
+  /** The product's SHOWCASE photos (the whole product, every variation) — never a value's photos. */
   images: ProductImage[];
+  /** What a tile shows: the showcase primary, else the DEFAULT variation's photo, else absent. */
+  coverImageUrl?: string;
+  /** The product's options (empty/absent = no variations). */
+  options?: ProductOption[];
+  /** Its ACTIVE variations, canonical order (empty/absent = no variations). For a product WITH
+   *  variations the product-level Admin stock (`available`/`total`/`inStock`) is their SUM. */
+  variants?: ProductVariant[];
   details: ProductDetail[];
   /** Availability signal (`available > 0`) — Admin only (never sent to Client). */
   inStock?: boolean;
@@ -94,6 +169,13 @@ export interface ProductListResponse {
 /** `GET /products/:id` — the same role-projected shape as a list item, single row. */
 export interface ProductDetailResponse {
   product: Product;
+}
+
+/** What `PUT /products/:id` did to the variations that left the body: those with order history were
+ *  RETIRED (kept for the history), the rest deleted. Absent when none left. */
+export interface ProductVariantOutcome {
+  retired: { id: number; label: string }[];
+  deleted: number;
 }
 
 /**

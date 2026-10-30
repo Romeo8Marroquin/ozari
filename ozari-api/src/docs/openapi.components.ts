@@ -17,6 +17,8 @@ type Response = OpenAPIV3.ResponseObject;
 
 // A syntactically-valid, obviously-fake example password (meets the policy). Not a real credential.
 const EXAMPLE_PASSWORD = "Ex4mple!Secret";
+// The illustrative variant label reused across the variation and order-line schemas.
+const EXAMPLE_VARIANT_LABEL = "Rojo · Redondo";
 
 // A schema `$ref` into `#/components/schemas`.
 const schemaRef = (name: string): OpenAPIV3.ReferenceObject => ({
@@ -391,25 +393,191 @@ export const schemas: Record<string, Schema> = {
           "the price, so every role receives it. Never part of a price.",
         example: 300,
       },
-      images: { type: "array", items: schemaRef("ProductImage") },
+      images: {
+        type: "array",
+        description: "The product's SHOWCASE photos only — each option value's photos live under `options[].values[].images`.",
+        items: schemaRef("ProductImage"),
+      },
+      coverImageUrl: {
+        type: "string",
+        format: "uri",
+        description:
+          "The photo a card / arrangement tile / picker shows: the showcase primary, else the DEFAULT " +
+          "variant's value photo, else absent. (An order line never uses it — the line shows its own " +
+          "variant's photo.)",
+        example: "https://cdn.example.com/products/7/hero.webp",
+      },
+      options: {
+        type: "array",
+        description: "Variation axes in their order (label order AND photo precedence) — empty for a product without variations.",
+        items: schemaRef("ProductOption"),
+      },
+      variants: {
+        type: "array",
+        description:
+          "The ACTIVE variants in canonical order (option order, then each option's value order) — " +
+          "empty for a product without variations. Exactly one has `isDefault: true`.",
+        items: schemaRef("ProductVariant"),
+      },
       details: { type: "array", items: schemaRef("ProductDetailItem") },
-      inStock: { type: "boolean", description: "Availability signal (`available > 0`) — **Admin only**.", example: true },
+      inStock: {
+        type: "boolean",
+        description: "Availability signal (`available > 0`) — **Admin only**. For a product WITH variants, Σ over its active variants.",
+        example: true,
+      },
       available: {
         type: "integer",
         description:
           "Units takeable right now — **Admin only**. Venta: the recorded stock. " +
-          "Alquiler: fleet minus units out on active rentals.",
+          "Alquiler: fleet minus units out on active rentals. For a product WITH variants: the Σ of " +
+          "its active variants' `available` (`products.quantity` is 0 and never read).",
         example: 35,
       },
       total: {
         type: "integer",
         description:
           "The whole rental fleet in circulation (`available` + currently rented) — **Admin only, " +
-          "Alquiler only** (absent for Venta, where it would duplicate `available`).",
+          "Alquiler only** (absent for Venta, where it would duplicate `available`). Σ over the " +
+          "active variants for a product with variants.",
         example: 40,
       },
       replacementPrice: { type: "number", description: "As-new replacement value — **Admin only**.", example: 900 },
       isActive: { type: "boolean", description: "Soft-delete flag — **Admin only**.", example: true },
+    },
+  },
+  ProductOptionValue: {
+    type: "object",
+    description: "One value of a variation option (\"Rojo\"), with its own photo set (display order, one flagged primary).",
+    properties: {
+      id: { type: "integer", example: 10 },
+      name: { type: "string", example: "Rojo" },
+      sortOrder: { type: "integer", example: 0 },
+      images: { type: "array", items: schemaRef("ProductImage") },
+    },
+  },
+  ProductOption: {
+    type: "object",
+    description: "One variation axis (\"Color\"), its values in order.",
+    properties: {
+      id: { type: "integer", example: 3 },
+      name: { type: "string", example: "Color" },
+      sortOrder: { type: "integer", example: 0 },
+      values: { type: "array", items: schemaRef("ProductOptionValue") },
+    },
+  },
+  ProductVariantOverrides: {
+    type: "object",
+    description:
+      "A variant's RAW override columns (**Admin only**) — what the edit form prefills; an absent " +
+      "field inherits the product's value. `securityDeposit: 0` = explicitly no deposit for this variant.",
+    properties: {
+      rentPrice: { type: "number", example: 60 },
+      sellPrice: { type: "number" },
+      replacementPrice: { type: "number", example: 850 },
+      securityDeposit: { type: "number", example: 0 },
+      description: { type: "string", example: "Mantel rojo de 3 m" },
+    },
+  },
+  ProductVariantUsage: {
+    type: "object",
+    description:
+      "How order lines use a variant (**Admin only**, `GET /products/{id}` and the PUT response " +
+      "only): `lines` = every line that references it (removing it RETIRES it), `holding` = those on " +
+      "open or future orders (removing it is a 409 `variantInUse`).",
+    properties: {
+      lines: { type: "integer", example: 4 },
+      holding: { type: "integer", example: 1 },
+    },
+  },
+  ProductVariant: {
+    type: "object",
+    description:
+      "One ACTIVE offered combination with EFFECTIVE values (its override, else the product's). " +
+      "`quantity`, `available`, `inStock`, `total`, `replacementPrice`, `overrides` and `usage` are " +
+      "**Admin only** (role-projected like the product's stock fields).",
+    properties: {
+      id: { type: "integer", example: 55 },
+      valueIds: {
+        type: "array",
+        description: "Its option value ids, in OPTION order.",
+        items: { type: "integer" },
+        example: [10, 21],
+      },
+      label: { type: "string", description: "Its values' names in option order, joined by \" · \".", example: EXAMPLE_VARIANT_LABEL },
+      isDefault: {
+        type: "boolean",
+        description: "Exactly one variant per product: the flagged one, else the first in canonical order.",
+        example: true,
+      },
+      rentPrice: { type: "number", example: 75 },
+      sellPrice: { type: "number" },
+      securityDeposit: { type: "number", example: 300 },
+      description: { type: "string", example: "Mesa para 8 personas" },
+      imageUrl: {
+        type: "string",
+        format: "uri",
+        description:
+          "Its values walked in option order — the first with photos gives its primary (flagged, " +
+          "else first); else the showcase primary; else absent.",
+        example: "https://cdn.example.com/products/7/rojo.webp",
+      },
+      quantity: { type: "integer", description: "Its OWN stock (fleet for Alquiler, shelf for Venta) — **Admin only**.", example: 20 },
+      available: { type: "integer", description: "Same rule as a product's `available` — **Admin only**.", example: 18 },
+      inStock: { type: "boolean", description: "`available > 0` — **Admin only**.", example: true },
+      total: { type: "integer", description: "**Admin only, Alquiler only**.", example: 20 },
+      replacementPrice: { type: "number", description: "EFFECTIVE replacement value — **Admin only**.", example: 900 },
+      overrides: schemaRef("ProductVariantOverrides"),
+      usage: schemaRef("ProductVariantUsage"),
+    },
+  },
+  ProductVariantOutcome: {
+    type: "object",
+    description:
+      "What a `PUT /products/{id}` did to the variants that left the body (NO-TRASH, reported — the " +
+      "UI never guesses): `retired` were referenced by order history and tombstoned; `deleted` were " +
+      "hard-deleted.",
+    properties: {
+      retired: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "integer", example: 54 },
+            label: { type: "string", example: "Azul · Cuadrado" },
+          },
+        },
+      },
+      deleted: { type: "integer", example: 1 },
+    },
+  },
+  UpdateProductResponse: {
+    description:
+      "The role-projected product (as in the list), plus `variantOutcome` — present only when the " +
+      "save removed at least one variant.",
+    allOf: [
+      schemaRef("ProductListItem"),
+      {
+        type: "object",
+        properties: { variantOutcome: schemaRef("ProductVariantOutcome") },
+      },
+    ],
+  },
+  DeleteProductResponse: {
+    type: "object",
+    description:
+      "Which NO-TRASH branch the delete took: `deleted` (no order ever referenced it — hard delete) " +
+      "or `deactivated` (order history keeps a soft-deleted row).",
+    properties: {
+      outcome: { type: "string", enum: ["deleted", "deactivated"], example: "deactivated" },
+    },
+  },
+  ProductVariantConflict: {
+    type: "object",
+    description: "One variant whose removal is blocked by HOLDING order lines (409 `variantInUse`).",
+    properties: {
+      variantId: { type: "integer", example: 55 },
+      label: { type: "string", example: EXAMPLE_VARIANT_LABEL },
+      orderIds: { type: "array", items: { type: "integer" }, example: [128, 131] },
     },
   },
   Pagination: {
@@ -873,6 +1041,28 @@ export const schemas: Record<string, Schema> = {
       id: { type: "integer", example: 31 },
       productId: { type: "integer", example: 3 },
       productName: { type: "string", example: "Silla plegable" },
+      imageUrl: {
+        type: "string",
+        format: "uri",
+        description:
+          "The line's photo — ONE image, never the gallery (the printed documents' row thumbnail): " +
+          "its VARIANT's photo first (the variant's values walked in option order, the first with " +
+          "photos giving its primary, else its first), then the product's SHOWCASE primary, else " +
+          "the showcase's first — never the product's `coverImageUrl` (that falls back to the " +
+          "default variant: the wrong colour for this line). Absent when none exists. Live, not a " +
+          "snapshot: it follows the catalog's current photos.",
+        example: "https://cdn.example.com/products/7/hero.webp",
+      },
+      variantId: {
+        type: "integer",
+        description: "The ordered variant (absent for a product without variations). May point at a RETIRED variant.",
+        example: 55,
+      },
+      variantLabel: {
+        type: "string",
+        description: "The variant's label SNAPSHOT (\"Rojo · Redondo\"), re-derived on every order save like the price.",
+        example: EXAMPLE_VARIANT_LABEL,
+      },
       isRental: { type: "boolean", example: true },
       quantity: { type: "integer", example: 25 },
       unitaryPrice: { type: "number", example: 6 },
@@ -903,6 +1093,8 @@ export const schemas: Record<string, Schema> = {
     properties: {
       lineId: { type: "integer", example: 31 },
       productName: { type: "string", example: "Silla plegable" },
+      variantId: { type: "integer", description: "The line's variant (absent without variations).", example: 55 },
+      variantLabel: { type: "string", description: "The line's variant label snapshot.", example: EXAMPLE_VARIANT_LABEL },
       quantity: { type: "integer", example: 2 },
       unitAmount: { type: "number", example: 120 },
       amount: { type: "number", example: 240 },
@@ -1257,11 +1449,25 @@ export const schemas: Record<string, Schema> = {
       lines: {
         type: "array",
         minItems: 1,
+        description:
+          "A line's identity is (`productId`, `variantId`): two colours of one product are two " +
+          "lines; the same pair twice is a `400` `duplicateLineProduct`.",
         items: {
           type: "object",
           required: ["productId", "quantity"],
           properties: {
             productId: { type: "integer", example: 3 },
+            variantId: {
+              type: "integer",
+              nullable: true,
+              description:
+                "The ordered variant. REQUIRED when the product has active variants (`400` " +
+                "`variantRequired`), FORBIDDEN when it has none (`400` `variantForbidden`); an " +
+                "unknown, retired or other-product id is `400` `invalidLineVariant`. Pricing, " +
+                "deposit and replacement use the variant's EFFECTIVE values (its override, else the " +
+                "product's), and its stock pool is the variant's own.",
+              example: 55,
+            },
             quantity: { type: "integer", minimum: 1, example: 25 },
           },
         },
@@ -1272,10 +1478,13 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     description:
       "One line the requested window cannot satisfy — carried in the creation 409's `data.conflicts` " +
-      "so the form can re-offer with the real numbers.",
+      "so the form can re-offer with the real numbers. A product or variant that vanished (deleted " +
+      "or retired) reports `available: 0`.",
     properties: {
       productId: { type: "integer", example: 3 },
       productName: { type: "string", example: "Silla plegable" },
+      variantId: { type: "integer", description: "The line's variant (absent without variations).", example: 55 },
+      variantLabel: { type: "string", description: "The variant's label.", example: EXAMPLE_VARIANT_LABEL },
       requested: { type: "integer", example: 25 },
       available: { type: "integer", example: 10 },
     },
@@ -1366,10 +1575,23 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     description:
       "One product's availability for the window. `available` is fleet-minus-held for rentals, " +
-      "current stock for sales, and `null` for a rental with no pickup window yet.",
+      "current stock for sales, and `null` for a rental with no pickup window yet. For a product " +
+      "WITH variants, `available` is the Σ of its variants' (`null` when any is) and `variants` " +
+      "carries each pool.",
     properties: {
       productId: { type: "integer", example: 3 },
       available: { type: "integer", nullable: true, example: 10 },
+      variants: {
+        type: "array",
+        description: "Per ACTIVE variant (id order) — present only for a product with variants.",
+        items: {
+          type: "object",
+          properties: {
+            variantId: { type: "integer", example: 55 },
+            available: { type: "integer", nullable: true, example: 6 },
+          },
+        },
+      },
     },
   },
   OrderAvailabilityResponse: {
@@ -2050,24 +2272,134 @@ export const schemas: Record<string, Schema> = {
       },
     },
   },
+  ProductVariationImageRequest: {
+    type: "object",
+    description:
+      "One photo slot of an option value's set: exactly ONE of `id` (update only — a kept photo of " +
+      "this product from ANY set; a photo may move between sets) or `key` (a new upload minted by " +
+      "`/products/images/upload-url`). Array order = `sortOrder`; at most one `isPrimary` per set " +
+      "(default: the first).",
+    properties: {
+      id: { type: "integer", example: 7 },
+      key: { type: "string", example: "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.jpg" },
+      isPrimary: { type: "boolean", example: true },
+    },
+  },
+  ProductOptionRequest: {
+    type: "object",
+    required: ["name", "values"],
+    description:
+      "One variation axis (array order = `sortOrder`: label order AND photo precedence). `id` is " +
+      "update-only (a kept option of THIS product). Names: 1–40 chars (`variationNameRegex`), unique " +
+      "per product case/accent-insensitively. 1–20 values.",
+    properties: {
+      id: { type: "integer", example: 3 },
+      name: { type: "string", minLength: 1, maxLength: 40, example: "Color" },
+      values: {
+        type: "array",
+        minItems: 1,
+        maxItems: 20,
+        items: {
+          type: "object",
+          required: ["key", "name", "images"],
+          properties: {
+            id: {
+              type: "integer",
+              description: "Update only: a kept value of THIS option (moving a value to another option is a `400`).",
+              example: 10,
+            },
+            key: {
+              type: "string",
+              pattern: "^[A-Za-z0-9_-]{1,40}$",
+              description: "Client-minted handle, unique in the body — variants reference values ONLY by key.",
+              example: "v10",
+            },
+            name: {
+              type: "string",
+              minLength: 1,
+              maxLength: 40,
+              description: "Unique within its option (case/accent-insensitive).",
+              example: "Rojo",
+            },
+            images: {
+              type: "array",
+              maxItems: 6,
+              items: schemaRef("ProductVariationImageRequest"),
+            },
+          },
+        },
+      },
+    },
+  },
+  ProductVariantRequest: {
+    type: "object",
+    required: ["valueKeys", "quantity"],
+    description:
+      "One OFFERED combination. `id` is update-only (an ACTIVE variant of this product — its stock " +
+      "and holds carry over, even when its combination changes). Overrides follow the product's " +
+      "business type — Alquiler: `rentPrice`/`replacementPrice`/`securityDeposit`; Venta: " +
+      "`sellPrice` only; anything else is `400` `variantPricingMismatch`. Absent = inherit the " +
+      "product's value. On EFFECTIVE values the deposit may not exceed the replacement (`400` " +
+      "`variantSecurityDepositAboveReplacement`).",
+    properties: {
+      id: { type: "integer", example: 55 },
+      valueKeys: {
+        type: "array",
+        description: "Exactly one value key per option; unique combination per product.",
+        items: { type: "string" },
+        example: ["v10", "t2"],
+      },
+      quantity: { type: "integer", minimum: 0, maximum: 5000, description: "The variant's OWN stock.", example: 20 },
+      rentPrice: { type: "number", minimum: 0, example: 60 },
+      sellPrice: { type: "number", minimum: 0 },
+      replacementPrice: { type: "number", minimum: 0, description: "Cannot be cleared per variant — absent inherits.", example: 850 },
+      securityDeposit: { type: "number", minimum: 0, description: "`0` = explicitly NO deposit for this variant.", example: 0 },
+      description: { type: "string", minLength: 5, maxLength: 500 },
+      isDefault: { type: "boolean", description: "At most one variant may be the default.", example: true },
+    },
+  },
   CreateProductRequest: {
     type: "object",
-    required: ["businessTypeId", "categoryId", "currencyId", "name", "quantity"],
+    required: ["businessTypeId", "categoryId", "currencyId", "name"],
     description:
+      "**Body limit 100kb** (this route and `PUT /products/{id}` only — every other route is 10kb). " +
       "Creates a product (+ nested details + gallery images). The CONDITIONAL price rule applies by " +
       "business type: **Alquiler** requires `rentPrice` + `rentTimeUnitId` and forbids `sellPrice`; " +
       "**Venta** requires `sellPrice` and forbids the rent fields AND `replacementPrice` (the " +
       "as-new value billed for a lost/damaged RENTAL — a sold item is consumed, nothing to " +
       "replace; optional for Alquiler). `images` reference R2 keys previously " +
       "minted by `/products/images/upload-url` (the files must already be uploaded); the public URL " +
-      "is derived server-side from each key.",
+      "is derived server-side from each key. **Variations**: `options` + `variants` (both empty or " +
+      "both present; every `id` anywhere in the body is FORBIDDEN on create — `400` " +
+      "`idsForbiddenOnCreate`). Limits: 3 options, 20 values per option, 60 variants, 6 photos per " +
+      "value, 10 showcase photos, 150 photos in total; image keys unique across the whole body.",
     properties: {
       name: { type: "string", minLength: 5, maxLength: 255, example: "Mesa redonda" },
       description: { type: "string", nullable: true, minLength: 5, maxLength: 500, example: "Mesa para 8 personas" },
       businessTypeId: { type: "integer", description: "1 = Alquiler, 2 = Venta.", example: 1 },
       categoryId: { type: "integer", example: 1 },
       currencyId: { type: "integer", example: 1 },
-      quantity: { type: "integer", minimum: 0, maximum: 5000, example: 40 },
+      quantity: {
+        type: "integer",
+        minimum: 0,
+        maximum: 5000,
+        description:
+          "REQUIRED when `options` is empty; FORBIDDEN when options exist (`400` " +
+          "`quantityWithVariants`) — each variant carries its own stock, and the product row stores 0.",
+        example: 40,
+      },
+      options: {
+        type: "array",
+        maxItems: 3,
+        description: "Variation axes, in order; empty or absent = a product without variations.",
+        items: schemaRef("ProductOptionRequest"),
+      },
+      variants: {
+        type: "array",
+        maxItems: 60,
+        description: "The offered combinations — at least one when options exist, none otherwise.",
+        items: schemaRef("ProductVariantRequest"),
+      },
       rentPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Alquiler; forbidden for Venta.", example: 75 },
       rentTimeUnitId: { type: "integer", nullable: true, description: "Required for Alquiler; forbidden for Venta.", example: 2 },
       replacementPrice: { type: "number", nullable: true, minimum: 0, example: 900 },
@@ -2097,9 +2429,10 @@ export const schemas: Record<string, Schema> = {
       },
       images: {
         type: "array",
-        maxItems: 8,
+        maxItems: 10,
         description:
-          "Optional gallery (max 8). Array order = `sortOrder`. At most ONE image may set " +
+          "Optional SHOWCASE gallery (max 10; value photos travel inside `options`). Array order = " +
+          "`sortOrder`. At most ONE image may set " +
           "`isPrimary: true`; when none does, the FIRST image becomes the primary.",
         items: {
           type: "object",
@@ -2118,8 +2451,9 @@ export const schemas: Record<string, Schema> = {
   },
   UpdateProductRequest: {
     type: "object",
-    required: ["businessTypeId", "categoryId", "currencyId", "name", "quantity"],
+    required: ["businessTypeId", "categoryId", "currencyId", "name"],
     description:
+      "**Body limit 100kb** (like `POST /products`). " +
       "The product's FULL desired state (declarative, never a partial patch — the RECONCILE " +
       "design): the same scalar rules as create (incl. the conditional price rule), plus the FINAL " +
       "details and gallery lists. `productDetails` rows with an `id` keep/update one of the " +
@@ -2127,14 +2461,38 @@ export const schemas: Record<string, Schema> = {
       "are deleted. `images` slots carry exactly ONE of `id` (a kept photo of this product) or " +
       "`key` (a new upload minted by `/products/images/upload-url`); array order = `sortOrder`, at " +
       "most one `isPrimary` (default: the first); existing photos absent from the list are deleted " +
-      "— DB row and R2 object.",
+      "— DB row and R2 object (across EVERY set: the showcase and each value's). **Variations** are " +
+      "reconciled the same way: kept option/value/variant ids update, id-less entries are created, " +
+      "absent ones are removed — a removed variant an order line references is RETIRED (tombstoned, " +
+      "reported in `variantOutcome.retired`), else hard-deleted. A value id must stay under its " +
+      "option; a variant id must be an ACTIVE variant of this product. Removing a variant that " +
+      "open/future orders HOLD is `409` `variantInUse`; adding the first options (or removing all " +
+      "of them) while open/future orders hold the current pool is `409` `stockModeInUse`.",
     properties: {
       name: { type: "string", minLength: 5, maxLength: 255, example: "Mesa redonda" },
       description: { type: "string", nullable: true, minLength: 5, maxLength: 500, example: "Mesa para 8 personas" },
       businessTypeId: { type: "integer", description: "1 = Alquiler, 2 = Venta.", example: 1 },
       categoryId: { type: "integer", example: 1 },
       currencyId: { type: "integer", example: 1 },
-      quantity: { type: "integer", minimum: 0, maximum: 5000, example: 40 },
+      quantity: {
+        type: "integer",
+        minimum: 0,
+        maximum: 5000,
+        description: "REQUIRED when `options` is empty; FORBIDDEN when options exist (`400` `quantityWithVariants`).",
+        example: 40,
+      },
+      options: {
+        type: "array",
+        maxItems: 3,
+        description: "The FINAL variation axes, in order; empty = no variations.",
+        items: schemaRef("ProductOptionRequest"),
+      },
+      variants: {
+        type: "array",
+        maxItems: 60,
+        description: "The FINAL offered combinations — at least one when options exist, none otherwise.",
+        items: schemaRef("ProductVariantRequest"),
+      },
       rentPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Alquiler; forbidden for Venta.", example: 75 },
       rentTimeUnitId: { type: "integer", nullable: true, description: "Required for Alquiler; forbidden for Venta.", example: 2 },
       replacementPrice: { type: "number", nullable: true, minimum: 0, example: 900 },
@@ -2165,9 +2523,9 @@ export const schemas: Record<string, Schema> = {
       },
       images: {
         type: "array",
-        maxItems: 8,
+        maxItems: 10,
         description:
-          "The FINAL gallery in display order (array order = `sortOrder`). Each slot carries " +
+          "The FINAL SHOWCASE gallery in display order (array order = `sortOrder`). Each slot carries " +
           "exactly ONE of `id`/`key`. At most ONE slot may set `isPrimary: true`; when none does, " +
           "the FIRST becomes the primary.",
         items: {
@@ -2189,14 +2547,16 @@ export const schemas: Record<string, Schema> = {
     type: "object",
     required: ["files"],
     description:
-      "Requests presigned R2 PUT URLs for product gallery uploads (1–8 per call). Each file's " +
+      "Requests presigned R2 PUT URLs for product photo uploads — every set at once, showcase and " +
+      "option values (1–150 per call, the per-product photo total — the body stays inside the " +
+      "global 10kb). Each file's " +
       "content type must be a whitelisted image type and its size within the 5 MB cap — both are " +
       "bound INTO the signature, so a minted URL only works for exactly that file.",
     properties: {
       files: {
         type: "array",
         minItems: 1,
-        maxItems: 8,
+        maxItems: 150,
         items: {
           type: "object",
           required: ["contentType", "contentLength"],
@@ -2272,7 +2632,9 @@ export const schemas: Record<string, Schema> = {
             imageUrl: {
               type: "string",
               format: "uri",
-              description: "The primary photo (else the first); absent when the product has none.",
+              description:
+                "The product's cover (`coverImageUrl`): the showcase primary (else its first), else " +
+                "the default variant's value photo; absent when there is none.",
               example: "https://cdn.example.com/products/7/hero.webp",
             },
             placed: {

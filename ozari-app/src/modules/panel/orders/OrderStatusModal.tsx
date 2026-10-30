@@ -7,6 +7,7 @@ import Modal from '@components/Modal';
 import { notify } from '@components/notifications/notify';
 import { toFormError } from '@utils/apiError';
 import { animateHeightFrom, animateListReflow, captureGalleryLayout } from '../pageMotion';
+import { lineDisplayName, stockKey } from '../products/productVariations';
 import { mintEvidencePhotos, revokeEvidencePhotos, type EvidencePhoto } from './evidencePhotos';
 import OrderEvidencePicker from './OrderEvidencePicker';
 import {
@@ -344,9 +345,10 @@ const OrderStatusModal: React.FC<OrderStatusModalProps> = ({ order, statuses, on
         {conflicts.length > 0 && (
           <ul className="modal-stagger flex flex-col gap-1 rounded-control bg-red-50 px-3 py-2 text-sm text-red-600">
             {conflicts.map((conflict) => (
-              <li key={conflict.productId}>
+              // One row per (product, variation) PAIR — two colours of a product are two lines.
+              <li key={stockKey(conflict.productId, conflict.variantId)}>
                 {t(`${KEY}.conflictLine`, {
-                  product: conflict.productName,
+                  product: lineDisplayName(conflict),
                   requested: conflict.requested,
                   available: conflict.available,
                 })}

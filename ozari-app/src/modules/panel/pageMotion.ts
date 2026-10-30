@@ -645,7 +645,9 @@ export function editorSlotIn(el: HTMLElement | null | undefined): void {
       duration: 0.35,
       ease: PAGE_ENTER.ease,
       overwrite: true,
-      clearProps: 'transform',
+      // Landed = its resting state: nothing inline may outlive the motion (an interrupted arrival
+      // never completes, so it never clears what the next tween now owns).
+      clearProps: 'transform,opacity,visibility',
     },
   );
   const fields = el.querySelectorAll<HTMLElement>('[data-editor-field]');
@@ -661,7 +663,7 @@ export function editorSlotIn(el: HTMLElement | null | undefined): void {
       stagger: EDITOR_FIELD_STEP,
       delay: EDITOR_FIELD_STEP,
       overwrite: true,
-      clearProps: 'transform',
+      clearProps: 'transform,opacity,visibility',
     },
   );
 }
@@ -976,17 +978,30 @@ const bounceThumbsIn = (targets: gsap.TweenTarget): void => {
 };
 
 /**
+ * The in-grid reflow's clock: the tiles' FLIP glide AND the grid container's height ease share it,
+ * so a grid gaining or losing a ROW reads as one movement — the tiles travel and the box (with
+ * everything below it) follows on the same frames, instead of the tiles gliding inside a box that
+ * already jumped (the owner's report, 2026-10-30).
+ */
+export const GALLERY_REFLOW = { duration: 0.4, ease: 'power3.out' } as const;
+
+/**
  * FLIP the gallery grid after an IN-GRID mutation: surviving tiles GLIDE from the captured layout
  * to their new cells (the "space" opens/closes smoothly instead of snapping) and brand-new tiles
  * bounce in softly. In-flow FLIP only (never absolute — pulling tiles out of flow collapses the
  * card under them). With no captured state (reduced motion returned null) only the entrance plays.
  * Removals are two-phase: the thumb tweens OUT first ({@link animateThumbOut}), then this reflows
  * the survivors. The empty ↔ grid boundary is a DIFFERENT move — {@link animateGalleryBoundary}.
+ *
+ * `container` + `fromHeight` (the box's height captured with the layout) ease the grid's own height
+ * on {@link GALLERY_REFLOW} — a no-op unless the row count changed.
  */
 export function animateGalleryLayout(
   scope: HTMLElement | null,
   state: Flip.FlipState | null,
+  height?: { container: HTMLElement | null; fromHeight: number },
 ): void {
+  if (height) animateHeightFrom(height.container, height.fromHeight, GALLERY_REFLOW);
   if (!scope || prefersReducedMotion()) return;
   const targets = scope.querySelectorAll('.gallery-flip');
   if (!state) {
@@ -995,8 +1010,9 @@ export function animateGalleryLayout(
   }
   Flip.from(state, {
     targets,
-    duration: 0.4,
-    ease: 'power3.out',
+    duration: GALLERY_REFLOW.duration,
+    ease: GALLERY_REFLOW.ease,
+    overwrite: true,
     onEnter: (elements) => bounceThumbsIn(elements),
   });
 }
@@ -1009,21 +1025,11 @@ export function animateGalleryLayout(
  * tiles pulls them out of flow, collapsing the card and floating them over the next section.)
  */
 export function animateGalleryBoundary(container: HTMLElement | null, fromHeight: number): void {
-  if (!container || prefersReducedMotion()) return;
-  const toHeight = container.offsetHeight;
-  if (fromHeight > 0 && fromHeight !== toHeight) {
-    gsap.fromTo(
-      container,
-      { height: fromHeight, overflow: 'hidden' },
-      {
-        height: toHeight,
-        duration: 0.45,
-        ease: 'power3.out',
-        overwrite: true,
-        clearProps: 'height,overflow',
-      },
-    );
-  }
+  if (!container) return;
+  // Through the shared height ease, so a boundary crossed mid-reflow (a quick add → remove) drops
+  // the running tween's pinned height before measuring instead of easing toward a stale target.
+  if (fromHeight > 0) animateHeightFrom(container, fromHeight, { duration: 0.45, ease: 'power3.out' });
+  if (prefersReducedMotion()) return;
   const list = container.querySelector('ul');
   if (list) {
     bounceThumbsIn(list.children);
@@ -1128,8 +1134,16 @@ export function galleryDragSettle(el: HTMLElement | null): Promise<void> {
 export function animateHeightFrom(
   container: HTMLElement | null,
   fromHeight: number,
+  timing: { duration: number; ease: string } = { duration: HEIGHT_MORPH_DURATION, ease: PAGE_ENTER.ease },
 ): void {
-  if (!container || prefersReducedMotion()) return;
+  if (!container) return;
+  // ⚠️ A height tween still running PINS an inline height. Measuring through it reads that stale
+  // frame as the "new" height — equal to `fromHeight`, so this used to no-op and leave the old tween
+  // to land on its OLD target and then snap (a rapid add → remove left the box at the wrong size
+  // until the snap). Release it first, so the measurement below is the content's real height and
+  // the new tween continues from the frame the caller captured.
+  releaseHeight(container);
+  if (prefersReducedMotion()) return;
   const toHeight = container.offsetHeight;
   if (fromHeight === toHeight) return;
   gsap.fromTo(
@@ -1137,12 +1151,88 @@ export function animateHeightFrom(
     { height: fromHeight, overflow: 'hidden' },
     {
       height: toHeight,
-      duration: HEIGHT_MORPH_DURATION,
-      ease: PAGE_ENTER.ease,
+      duration: timing.duration,
+      ease: timing.ease,
       overwrite: true,
       clearProps: 'height,overflow',
     },
   );
+}
+
+/** Drop a height ease mid-flight: the box returns to its natural (content) height at once. */
+function releaseHeight(container: HTMLElement): void {
+  if (!gsap.isTweening(container) && container.style.height === '') return;
+  gsap.killTweensOf(container, 'height');
+  gsap.set(container, { clearProps: 'height,overflow' });
+}
+
+/**
+ * A box whose height {@link animateHeightFrom} eases must NOT animate when the WINDOW reflows it — a
+ * resize re-wraps the content (a 5-column gallery becoming 3), and a tween pinned to the old target
+ * would hold the wrong height until it snapped. This watches the box's WIDTH and, the moment it
+ * changes, releases any height ease in flight so the layout simply follows the window. Only width:
+ * the box's own height changes on every frame of the ease. Returns the disconnect.
+ */
+export function releaseHeightOnResize(container: HTMLElement | null): () => void {
+  if (!container || typeof ResizeObserver === 'undefined') return () => undefined;
+  let width = container.getBoundingClientRect().width;
+  const observer = new ResizeObserver(() => {
+    const next = container.getBoundingClientRect().width;
+    if (next === width) return;
+    width = next;
+    releaseHeight(container);
+  });
+  observer.observe(container);
+  return () => observer.disconnect();
+}
+
+// ── A list's own items entering, leaving and reordering (`useListMotion`) ──────────────────────
+
+/**
+ * Snapshot `elements` for {@link glideReorder} — taken immediately BEFORE the reorder commits and
+ * consumed by the very next commit (the just-in-time rule for FLIP inside the scrolling panel).
+ * `null` under reduced motion (nothing will glide).
+ */
+export function captureElements(elements: HTMLElement[]): Flip.FlipState | null {
+  if (elements.length === 0 || prefersReducedMotion()) return null;
+  return Flip.getState(elements);
+}
+
+/**
+ * A REORDER of in-flow list items (an option moved up, a value moved later): every item glides from
+ * its captured box to its new one on the in-flow clock ({@link HEIGHT_MORPH_DURATION},
+ * `power3.out`), position only — the {@link animateListReflow} `inFlow` rule, for the same reason
+ * (a size tween in flow moves every later sibling under offsets already computed).
+ *
+ * Interruptible by construction: an item still ENTERING (`detailRowIn` mid-growth) or still gliding
+ * from a previous reorder is first released to its resting state — its height, margin, overflow,
+ * opacity and transform cleared — so no inline style can outlive the motion that set it, and the
+ * glide then starts from the frame the snapshot recorded. Items marked `data-leaving` are left alone:
+ * their exit owns them until they unmount.
+ */
+export function glideReorder(elements: HTMLElement[], state: Flip.FlipState | null): void {
+  const targets = elements.filter((element) => !element.hasAttribute('data-leaving'));
+  if (targets.length === 0) return;
+  gsap.killTweensOf(targets);
+  gsap.set(targets, { clearProps: 'height,marginBottom,overflow,opacity,visibility,transform' });
+  if (!state || prefersReducedMotion()) return;
+  Flip.from(state, {
+    targets,
+    duration: HEIGHT_MORPH_DURATION,
+    ease: 'power3.out',
+    overwrite: true,
+  });
+  gsap.killTweensOf(targets, 'width,height');
+  gsap.set(targets, { clearProps: 'width,height,minWidth,minHeight,maxWidth,maxHeight' });
+}
+
+/**
+ * Put a list item back to its resting state — the safety net for an item whose exit ran but whose
+ * removal never came (the commit kept it): nothing may stay collapsed, faded or offset.
+ */
+export function restoreListItem(element: HTMLElement): void {
+  gsap.killTweensOf(element);
+  gsap.set(element, { clearProps: 'height,marginBottom,overflow,opacity,visibility,transform' });
 }
 
 // ── A row's own state change (the agenda ticket advancing a step) ───────────────────────────────

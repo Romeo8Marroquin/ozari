@@ -309,6 +309,21 @@ describe('buildUnsavedSettlement', () => {
     });
   });
 
+  it('carries the line’s VARIATION onto its damage, like the API record', () => {
+    const unsaved = buildUnsavedSettlement(
+      order({
+        lines: [line({ variantId: 7, variantLabel: 'Rojo · Redondo' })],
+      }),
+      values({ damages: [{ lineId: 31, quantity: '1', note: '' }] }),
+      now,
+    );
+    expect(unsaved.damages[0]).toMatchObject({
+      productName: 'Mantel blanco',
+      variantId: 7,
+      variantLabel: 'Rojo · Redondo',
+    });
+  });
+
   it('a clean form claims nothing; unknown lines, zero and invalid counts are dropped', () => {
     const unsaved = buildUnsavedSettlement(
       order(),

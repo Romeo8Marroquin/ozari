@@ -18,7 +18,8 @@ const K = 'modules.panel.orders.detail.deposit';
 const order = {
   id: 12,
   currency: { id: 1, iso4217Code: 'GTQ', name: 'Quetzal', symbol: 'Q' },
-} as OrderDetail;
+  lines: [],
+} as unknown as OrderDetail;
 
 const settlement = (over: Partial<OrderDepositSettlement> = {}): OrderDepositSettlement => ({
   settledAt: new Date('2026-08-03T10:00:00').toISOString(),

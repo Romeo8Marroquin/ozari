@@ -1,4 +1,5 @@
-import type { Product } from '../products/product.types';
+import type { Product, ProductVariant } from '../products/product.types';
+import { effectivePricing, variantFor } from '../products/productVariations';
 import { parseDateTime, parseLineQuantity } from './SchemaCreateOrder';
 
 /** Seeded lookup ids mirrored from the backend enums (stable). */
@@ -22,25 +23,36 @@ export function computeBilledDays(deliveryAt: Date | null, pickupAt: Date | null
   return Math.max(1, Math.ceil((pickupAt.getTime() - deliveryAt.getTime()) / DAY_MS));
 }
 
+/** One line's UNIT price from its product row — or its VARIATION's effective one (the API sends a
+ *  variation's prices already effective); 0 when it has no applicable price. */
+export function lineUnitPrice(product: Product, variant?: ProductVariant): number {
+  const pricing = effectivePricing(product, variant);
+  const unit = isRentalProduct(product) ? pricing.rentPrice : pricing.sellPrice;
+  return unit ?? 0;
+}
+
 /** One line's ESTIMATED subtotal from its product row (mirrors the backend `priceOrderLine`): a
  *  Día rental bills unit × qty × billed days; other rentals (Evento) bill flat; a sale bills once.
- *  Returns 0 when the product has no applicable price (defensive). */
-export function estimateLineSubtotal(product: Product, quantity: number, billedDays: number): number {
+ *  A line holding a VARIATION is priced at the variation's effective price. Returns 0 when there is
+ *  no applicable price (defensive). */
+export function estimateLineSubtotal(
+  product: Product,
+  quantity: number,
+  billedDays: number,
+  variant?: ProductVariant,
+): number {
   const isRental = isRentalProduct(product);
-  const unit = isRental ? product.rentPrice : product.sellPrice;
+  const pricing = effectivePricing(product, variant);
+  const unit = isRental ? pricing.rentPrice : pricing.sellPrice;
   if (unit === undefined) return 0;
   const multiplier = isRental && product.rentTimeUnitId === RENT_UNIT_DAY ? billedDays : 1;
   return Math.round(unit * quantity * multiplier * 100) / 100;
 }
 
-/** One line's UNIT price from its product row (rent vs sale); 0 when it has no applicable price. */
-export function lineUnitPrice(product: Product): number {
-  const unit = isRentalProduct(product) ? product.rentPrice : product.sellPrice;
-  return unit ?? 0;
-}
-
 export interface EstimateLine {
   productId: number;
+  /** The line's variation (`null`/absent = none) — its effective price and deposit apply. */
+  variantId?: number | null;
   quantity: string;
 }
 
@@ -62,7 +74,7 @@ export function estimateOrderTotal(
     const product = productsById.get(line.productId);
     const quantity = parseLineQuantity(line.quantity);
     if (!product || quantity === null) return sum;
-    return sum + estimateLineSubtotal(product, quantity, billedDays);
+    return sum + estimateLineSubtotal(product, quantity, billedDays, variantFor(product, line.variantId));
   }, 0);
   return Math.round((linesTotal + deliveryAmount) * 100) / 100;
 }
@@ -78,7 +90,8 @@ export function estimateDepositTotal(lines: EstimateLine[], productsById: Map<nu
     const product = productsById.get(line.productId);
     const quantity = parseLineQuantity(line.quantity);
     if (!product || quantity === null || !isRentalProduct(product)) return sum;
-    return sum + (product.securityDeposit ?? 0) * quantity;
+    const { securityDeposit } = effectivePricing(product, variantFor(product, line.variantId));
+    return sum + (securityDeposit ?? 0) * quantity;
   }, 0);
   return Math.round(total * 100) / 100;
 }

@@ -237,6 +237,15 @@ export interface OrderLine {
   id: number;
   productId: number;
   productName: string;
+  /** The variation this line rents/sells (absent = the product has no variations). Line identity
+   *  is the (productId, variantId) PAIR — two colours are two lines. */
+  variantId?: number;
+  /** The variation's name AT THE LAST SAVE ("Rojo · Redondo") — a snapshot, so history reads it even
+   *  after the variation was retired. Print it with `lineDisplayName`. */
+  variantLabel?: string;
+  /** The line's photo — the product's primary image, else its first (the API's `lineImageUrl`);
+   *  absent when the product has none. The printed documents' row thumbnail. */
+  imageUrl?: string;
   isRental: boolean;
   quantity: number;
   unitaryPrice: number;
@@ -272,6 +281,8 @@ export interface OrderDepositHistoryEntry {
 export interface OrderDamage {
   lineId: number;
   productName: string;
+  variantId?: number;
+  variantLabel?: string;
   quantity: number;
   unitAmount: number;
   amount: number;
@@ -400,6 +411,10 @@ export interface OrderDetailEnvelope {
 export interface OrderStockConflictItem {
   productId: number;
   productName: string;
+  /** Present when the short line is a variation — the conflict maps onto the (productId, variantId)
+   *  pair, never onto every line of the product. */
+  variantId?: number;
+  variantLabel?: string;
   requested: number;
   available: number;
 }
@@ -422,6 +437,15 @@ export interface OrderAvailabilityBody {
  *  rental with no pickup window yet. */
 export interface ProductAvailability {
   productId: number;
+  /** For a product with variations: the SUM of its variations. */
+  available: number | null;
+  /** Present for a product with variations — each one's own takeable amount for the window. */
+  variants?: VariantAvailability[];
+}
+
+/** One variation's takeable amount for the window (same `null` meaning as the product's). */
+export interface VariantAvailability {
+  variantId: number;
   available: number | null;
 }
 
