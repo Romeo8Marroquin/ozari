@@ -3,6 +3,7 @@ import type { Product, ProductImage, ProductVariant } from './product.types';
 import {
   addValueCombinations,
   allValueKeys,
+  carryRowKeys,
   combinationOf,
   defaultVariant,
   dropOptionFromVariants,
@@ -19,6 +20,7 @@ import {
   orderedValueKeys,
   photoSetFor,
   picksForVariant,
+  rowKeyOf,
   stockKey,
   valueKeyForId,
   variantFor,
@@ -199,6 +201,46 @@ describe('combinations', () => {
       row(['a'], { id: 3 }),
     ]);
     expect(dropOptionFromVariants([row(['r'])], ['r', 'a'])).toEqual([]);
+  });
+});
+
+describe('row identity (rowKeyOf / carryRowKeys)', () => {
+  it('names a row by its given key, else by its own combination', () => {
+    expect(rowKeyOf(new Map(), ['b', 'a'])).toBe('a|b');
+    expect(rowKeyOf(new Map([['a|b', 'a']]), ['a', 'b'])).toBe('a');
+  });
+
+  it("carries rows through an option's first value: same rows, one more value", () => {
+    const { rowKeys, leaving } = carryRowKeys([['r'], ['z']], new Map(), (combo) => [...combo, 'g']);
+    expect([...rowKeys]).toEqual([
+      ['g|r', 'r'],
+      ['g|z', 'z'],
+    ]);
+    expect(leaving).toEqual([]);
+  });
+
+  it('merges rows when an option leaves — the first survives — and lets emptied rows go', () => {
+    const before = [
+      ['r', 'g'],
+      ['r', 'c'],
+      ['z', 'g'],
+    ];
+    const merged = carryRowKeys(before, new Map([['g|r', 'r']]), (combo) =>
+      combo.filter((key) => key !== 'g' && key !== 'c'),
+    );
+    expect([...merged.rowKeys]).toEqual([
+      ['r', 'r'],
+      ['z', 'g|z'],
+    ]);
+    expect(merged.leaving).toEqual(['c|r']);
+
+    const gone = carryRowKeys([['r']], new Map(), (combo) => combo.filter((key) => key !== 'r'));
+    expect(gone.rowKeys.size).toBe(0);
+    expect(gone.leaving).toEqual(['r']);
+
+    const dropped = carryRowKeys([['r'], ['z']], new Map(), (combo) => (combo.includes('r') ? null : combo));
+    expect([...dropped.rowKeys]).toEqual([['z', 'z']]);
+    expect(dropped.leaving).toEqual(['r']);
   });
 });
 

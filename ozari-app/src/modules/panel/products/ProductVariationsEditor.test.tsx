@@ -13,6 +13,7 @@ vi.mock('@constants/Regex', async (importOriginal) => ({
   PRODUCT_MAX_VARIANTS: 4,
 }));
 
+import { PRODUCT_IMAGE_MAX_TOTAL } from '@constants/Regex';
 import type { Product, ProductImage, ProductVariant } from './product.types';
 import ProductVariationsEditor from './ProductVariationsEditor';
 import { emptyVariantRow, generateCombinations, type OptionFormRow } from './productVariations';
@@ -261,6 +262,72 @@ describe('ProductVariationsEditor — building options', () => {
     expect(values().variants).toHaveLength(4);
   });
 
+  it('keeps each option and combination row the same node across moves and renames', async () => {
+    render(
+      <Harness
+        defaults={{
+          options: [colorOption(['Rojo', 'Azul']), { name: 'Tamaño', values: [] }],
+          variants: [emptyVariantRow(['n1']), emptyVariantRow(['n2'])],
+        }}
+      />,
+    );
+    const [color, size] = screen.getAllByRole('group');
+    const rojo = row('Rojo');
+    await userEvent.click(buttons('moveOptionDown')[0]);
+    expect(screen.getAllByRole('group')).toEqual([size, color]);
+    await userEvent.click(buttons('moveOptionUp')[1]);
+
+    // Tamaño's FIRST value completes every row: "Rojo" becomes "Rojo · Grande" — the same row.
+    await userEvent.click(buttons('addValue')[1]);
+    await userEvent.type(screen.getAllByRole('textbox', { name: `${KEY}.valueLabel` })[2], 'Grande');
+    expect(row('Rojo · Grande')).toBe(rojo);
+    expect(offerBox('Rojo · Grande')).toBeChecked();
+
+    // Removing Tamaño folds them back: still the same row.
+    await userEvent.click(buttons('removeOption')[1]);
+    expect(row('Rojo')).toBe(rojo);
+    expect(values().variants.map((variant) => variant.valueKeys)).toEqual([['n1'], ['n2']]);
+  });
+
+  it("empties a row's offer when its option loses its only value", async () => {
+    render(
+      <Harness
+        defaults={{
+          options: [colorOption(['Rojo']), { name: 'Tamaño', values: [{ key: 'n9', name: 'Grande' }] }],
+          variants: [emptyVariantRow(['n1', 'n9'])],
+        }}
+      />,
+    );
+    const rojo = row('Rojo · Grande');
+    await userEvent.click(buttons('removeValue')[1]);
+    expect(row('Rojo')).toBe(rojo);
+    expect(offerBox('Rojo')).not.toBeChecked();
+    expect(values().variants).toEqual([]);
+  });
+
+  it('moves focus to a neighbour after a removal, else to the add button', async () => {
+    render(
+      <Harness
+        defaults={{
+          options: [colorOption(['Rojo', 'Azul']), { name: 'Tamaño', values: [{ key: 'n9', name: 'Grande' }] }],
+          variants: [emptyVariantRow(['n1', 'n9'])],
+        }}
+      />,
+    );
+    // A value → the value before it.
+    await userEvent.click(buttons('removeValue')[1]);
+    expect(buttons('removeValue')[0]).toHaveFocus();
+    // An option's last value → that option's "add value".
+    await userEvent.click(buttons('removeValue')[1]);
+    expect(buttons('addValue')[1]).toHaveFocus();
+    // An option → the option after it.
+    await userEvent.click(buttons('removeOption')[0]);
+    expect(buttons('removeOption')[0]).toHaveFocus();
+    // The last option → "add option".
+    await userEvent.click(buttons('removeOption')[0]);
+    expect(screen.getByRole('button', { name: `${KEY}.actions.addOption` })).toHaveFocus();
+  });
+
   it('disables every control while the form is busy', () => {
     render(
       <Harness
@@ -398,10 +465,10 @@ describe('ProductVariationsEditor — a saved product', () => {
   });
 
   it("counts each value's photos toward the product total and toggles its panel", async () => {
-    render(<Harness product={product} showcaseCount={39} />);
+    render(<Harness product={product} showcaseCount={PRODUCT_IMAGE_MAX_TOTAL - 1} />);
     const toggles = screen.getAllByRole('button', { name: `${KEY}.photosToggle` });
     expect(within(toggles[0]).getByText('2')).toBeInTheDocument();
-    // 39 showcase + 2 on Rojo = 41 > 40 → the total turns red.
+    // (total − 1) showcase + 2 on Rojo = total + 1 → the total turns red.
     expect(screen.getByText(`${KEY}.photosTotal`)).toHaveClass('font-semibold');
 
     expect(toggles[1]).toHaveAttribute('aria-expanded', 'false');

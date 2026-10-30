@@ -1,6 +1,7 @@
 import type { Response } from "express";
 import { Prisma } from "@prisma/client";
 import { i18next } from "@/config/i18n.js";
+import { appConfig } from "@/config/app.js";
 import { getPrismaClient } from "@/services/prisma.service.js";
 import { logger } from "@/config/logger.js";
 import { AuditAction, logAudit } from "@/config/auditLogger.js";
@@ -348,7 +349,7 @@ export const createProduct = async (
     const created = await prismaClient.$transaction(async (tx) => {
       const id = await applyProductCreate(tx, body);
       return tx.product.findUniqueOrThrow({ where: { id }, include: richProductInclude });
-    });
+    }, appConfig.productWriteTransaction);
 
     logger.info(
       i18next.t("products.createProduct.logs.productCreated", {
@@ -507,6 +508,7 @@ export const updateProduct = async (
           usage: await loadVariantUsage(tx, id, holding),
         };
       },
+      appConfig.productWriteTransaction,
     );
 
     // Post-commit, best-effort R2 cleanup: the DB rows are already gone, so a failed object delete
@@ -650,6 +652,7 @@ export const deleteProduct = async (
     const prismaClient = await getPrismaClient();
     const { removedImageKeys, hardDeleted } = await prismaClient.$transaction(
       (tx) => applyProductDelete(tx, id),
+      appConfig.productWriteTransaction,
     );
 
     // Post-commit, batched, best-effort R2 cleanup (see the doc above). Awaited on purpose —

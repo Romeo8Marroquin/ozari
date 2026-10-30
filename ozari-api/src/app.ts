@@ -153,7 +153,7 @@ function configureMiddlewares(app: Express): void {
   app.use(cookieParser());
   // The ONE exception to the 10kb cap (variations, 2026-10-29 — AUTH-AND-SECURITY.md): a product's
   // full-state create/update body carries its options, values, photo sets and up to 60 variants, so
-  // POST /products and PUT /products/:id parse up to `productWriteBodyLimit` (32kb). Admin-only
+  // POST /products and PUT /products/:id parse up to `productWriteBodyLimit` (100kb). Admin-only
   // routes; the parser runs FIRST, and the global one below skips a body already parsed.
   const productWriteJson = express.json({ limit: appConfig.productWriteBodyLimit });
   const escapedBasePath = appConfig.basePath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

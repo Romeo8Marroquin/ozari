@@ -1,12 +1,14 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HiMiniStar, HiOutlinePhoto, HiOutlinePlus, HiOutlineXMark } from 'react-icons/hi2';
 import AnimatedMessage from '@components/AnimatedMessage';
+import Collapse from '@components/Collapse';
 import {
   animateGalleryBoundary,
   animateGalleryLayout,
   animateThumbOut,
   captureGalleryLayout,
+  releaseHeightOnResize,
 } from '../pageMotion';
 import { useGalleryDrag } from './useGalleryDrag';
 import type { GalleryState } from './useGalleryImages';
@@ -88,7 +90,11 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
   };
 
   // The gallery changed size → crossing the empty ↔ grid boundary eases the container height while
-  // the incoming view settles in; an in-grid change FLIPs the tiles from the captured layout.
+  // the incoming view settles in; an in-grid change FLIPs the tiles from the captured layout AND
+  // eases the container's height on the same clock (`GALLERY_REFLOW`), so gaining or losing a ROW
+  // moves the box — and everything below it — with the tiles instead of jumping under them. Both
+  // heights are measured from the frame captured just before the mutation (mid-ease included), so a
+  // rapid add → remove continues from where the box stands.
   const prevCount = useRef(images.length);
   useLayoutEffect(() => {
     if (images.length !== prevCount.current) {
@@ -96,12 +102,20 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
       if (crossedEmptyBoundary) {
         animateGalleryBoundary(swapRef.current, pendingHeight.current);
       } else {
-        animateGalleryLayout(swapRef.current, pendingLayout.current);
+        animateGalleryLayout(swapRef.current, pendingLayout.current, {
+          container: swapRef.current,
+          fromHeight: pendingHeight.current,
+        });
       }
     }
     prevCount.current = images.length;
     pendingLayout.current = null;
   }, [images]);
+
+  // A WINDOW resize re-wraps the grid (5 columns → 3) without any mutation: that reflow must simply
+  // follow the window, never animate — and an ease in flight is released rather than left to land
+  // on a height measured for the old width.
+  useEffect(() => releaseHeightOnResize(swapRef.current), []);
 
   const openPicker = (): void => {
     /* v8 ignore next -- `?.`: the ref is always attached while the component is mounted */
@@ -184,7 +198,7 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
         >
           <HiOutlinePhoto aria-hidden className={`${compact ? 'size-6' : 'size-8'} text-charcoal/35`} />
           <span className="text-sm font-medium text-charcoal/70">{t(`${KEY}.dropzone.cta`)}</span>
-          {!compact && <span className="text-xs text-charcoal/45">{t(`${KEY}.dropzone.hint`)}</span>}
+          {!compact && <span className="text-xs text-charcoal/45">{t(`${KEY}.dropzone.hint`, { max: maxCount })}</span>}
         </button>
       ) : (
         <ul
@@ -305,10 +319,13 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <AnimatedMessage id={errorId} errorMessage={error} />
-          {/* Discoverability: drag-to-reorder isn't guessable, so the grid says it out loud. */}
-          {images.length > 1 && (
-            <span className="text-xs text-charcoal/45">{t(`${KEY}.reorderHint`)}</span>
-          )}
+          {/* Discoverability: drag-to-reorder isn't guessable, so the grid says it out loud. It
+              eases open/closed rather than adding a line under the grid in one frame. */}
+          <Collapse open={images.length > 1} closedClassName="-mt-1">
+            {images.length > 1 && (
+              <span className="block text-xs text-charcoal/45">{t(`${KEY}.reorderHint`)}</span>
+            )}
+          </Collapse>
         </div>
         <span className="shrink-0 text-xs text-charcoal/45">
           {t(`${KEY}.counter`, { count: images.length, max: maxCount })}

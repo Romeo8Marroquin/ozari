@@ -671,7 +671,7 @@ async function copyImageSet(
 ): Promise<CopiedImage[]> {
   const copied: CopiedImage[] = [];
   for (const image of images) {
-    // eslint-disable-next-line no-await-in-loop -- ≤ 40 photos per product; sequential keeps memory flat
+    // eslint-disable-next-line no-await-in-loop -- ≤ 150 photos per product; sequential keeps memory flat
     const object = await source.s3
       .send(new GetObjectCommand({ Bucket: source.bucket, Key: image.r2Key }))
       .catch((error: unknown) => {

@@ -93,10 +93,12 @@ public reference data the edit form prefills from).
   - Values carry a client `key`, and variants reference values only by key.
   - `quantity` is required without options and forbidden with them (`quantityWithVariants`).
   - Every id is forbidden on create.
-  - Limits live in `appConfig`: 3 options, 20 values, 60 variants, 4 photos per value, 8 showcase
-    photos, 40 in total. The upload-url per-call cap is the 40.
+  - Limits live in `appConfig`: 3 options, 20 values, 60 variants, 6 photos per value, 10 showcase
+    photos, 150 in total (raised 2026-10-30; mirrored in the app's `constants/Regex.ts`). The
+    upload-url per-call cap is the 150.
   - Names use `variationNameRegex` (1–40 chars; the app mirrors it).
-  - **The two routes parse up to 32kb** (`productWriteBodyLimit`; AUTH-AND-SECURITY §1).
+  - **The two routes parse up to 100kb** (`productWriteBodyLimit`; the measured worst case and why:
+    AUTH-AND-SECURITY §1).
 - **Create** runs in ONE `$transaction` (`applyProductCreate`) through the same writers as the update.
 - **Update** reconciles in the existing transaction (`applyProductUpdate(tx, id, body, holding)`), in
   this order:
@@ -176,9 +178,18 @@ public reference data the edit form prefills from).
     (referencing values by key set); `productToFormValues` reads the RAW `overrides`, never the
     effective values, or the first save would freeze today's product price onto every variation.
     A type switch clears the overrides of the side it leaves (the API's `variantPricingMismatch`).
-  - Each option VALUE has its own compact photo set (`useGalleryImages(…, { maxCount: 4 })`,
-    registered by value key); submit uploads the showcase and every value set in ONE presign
-    (`uploadImages(...sets)`) after checking the 40-photo product total.
+  - Each option VALUE has its own compact photo set (`useGalleryImages(…, { maxCount:
+    PRODUCT_OPTION_VALUE_IMAGE_MAX_COUNT })`, 6, registered by value key); submit uploads the
+    showcase and every value set in ONE presign (`uploadImages(...sets)`) after checking the
+    150-photo product total (`PRODUCT_IMAGE_MAX_TOTAL`).
+  - **Motion** (FRONTEND-DOCTRINE §4 "Lists, slots and boxes"): options, values, combination rows
+    and a row's fields are `useListMotion` items — a removal slides out and closes its space FIRST,
+    then commits from the form's latest state, and focus moves to the neighbour's remove button or
+    the add button. Options are keyed by a client uid and rows by `carryRowKeys`, so a move, an
+    option's first value ("Rojo" → "Rojo · Grande") or a merge keeps the same row on screen. Notes
+    are `Collapse`s; the stock field ↔ "managed per variation" is a `SlotSwap`. On the detail page a
+    pick cross-fades the hero (the ghost layer), swaps the thumbnail strip (`SlotSwap`) and
+    cross-fades price/stock/deposit/description/note (`MorphSwap`) inside a height-eased region.
   - Removal copy is the SERVER's `usage`: a saved variation with `holding > 0` cannot leave (its
     checkbox and every value/option removal that would drop it are disabled with the reason);
     `lines > 0` says it will be retired, none says deleted; no `usage` says nothing. A withdrawn

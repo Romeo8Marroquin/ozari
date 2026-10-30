@@ -52,6 +52,12 @@ vi.mock('./useProductImageUploads', () => ({
 }));
 
 import { QueryKeys } from '@constants/QueryKeys';
+import {
+  PRODUCT_IMAGE_MAX_COUNT,
+  PRODUCT_IMAGE_MAX_TOTAL,
+  PRODUCT_MAX_OPTION_VALUES,
+  PRODUCT_OPTION_VALUE_IMAGE_MAX_COUNT,
+} from '@constants/Regex';
 import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from '@utils/storage';
 import { PanelNavContext, type PanelNav } from '../PanelNavContext';
@@ -768,10 +774,10 @@ describe('ProductForm — edit mode', () => {
 
 describe('ProductForm — variations', () => {
   const VARIATIONS = `${KEY}.variations`;
-  const COLORS = ['Rojo', 'Azul', 'Verde', 'Negro', 'Blanco', 'Gris', 'Rosa', 'Morado', 'Dorado'];
 
   /** A valid Alquiler draft whose stock lives on its variations (one per colour). */
-  const seedVariationDraft = (colors: string[] = ['Rojo']): void => {
+  const seedVariationDraft = (): void => {
+    const colors = ['Rojo'];
     Storage.set(StorageKeys.PRODUCT_CREATE_DRAFT, {
       ...createProductDefaultValues,
       name: 'Mantel redondo',
@@ -833,14 +839,41 @@ describe('ProductForm — variations', () => {
   });
 
   it('refuses a save over the per-product photo total before anything uploads', async () => {
-    seedVariationDraft(COLORS);
+    // A full showcase plus enough FULL value sets to cross the total by one set — derived from the
+    // mirrored caps, so the test follows them (10 + 24 × 6 = 154 > 150 today). More values than one
+    // option may hold, so they spill into a second option (20 colours + 4 sizes today).
+    const perValue = PRODUCT_OPTION_VALUE_IMAGE_MAX_COUNT;
+    const valueCount = Math.floor((PRODUCT_IMAGE_MAX_TOTAL - PRODUCT_IMAGE_MAX_COUNT) / perValue) + 1;
+    const names = Array.from({ length: valueCount }, (_, index) => `Valor ${index + 1}`);
+    const groups = [
+      names.slice(0, PRODUCT_MAX_OPTION_VALUES),
+      names.slice(PRODUCT_MAX_OPTION_VALUES),
+    ].filter((group) => group.length > 0);
+    let key = 0;
+    const options = groups.map((group, index) => ({
+      name: `Opción ${index + 1}`,
+      values: group.map((name) => ({ key: `n${(key += 1)}`, name })),
+    }));
+    Storage.set(StorageKeys.PRODUCT_CREATE_DRAFT, {
+      ...createProductDefaultValues,
+      name: 'Mantel redondo',
+      description: 'Mantel de tela para mesa redonda',
+      categoryId: 1,
+      quantity: '',
+      rentPrice: '25',
+      options,
+      variants: [{ ...emptyVariantRow(options.map((option) => option.values[0].key)), quantity: '6' }],
+    });
     renderForm();
     const inputs = fileInputs();
-    stageFiles(inputs[0], Array.from({ length: 8 }, (_, index) => `vitrina-${index}.png`));
-    COLORS.forEach((color, index) =>
-      stageFiles(inputs[index + 1], Array.from({ length: 4 }, (_, n) => `${color}-${n}.png`)),
+    stageFiles(
+      inputs[0],
+      Array.from({ length: PRODUCT_IMAGE_MAX_COUNT }, (_, index) => `vitrina-${index}.png`),
     );
-    await screen.findByAltText('Dorado-3.png');
+    names.forEach((name, index) =>
+      stageFiles(inputs[index + 1], Array.from({ length: perValue }, (_, n) => `${name}-${n}.png`)),
+    );
+    await screen.findByAltText(`${names[names.length - 1]}-${perValue - 1}.png`);
 
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
     expect(await screen.findByText(`${KEY}.errors.tooManyImagesTotal`)).toBeInTheDocument();

@@ -204,9 +204,10 @@ progress + optional client downscale, graceful single/zero-image. Reusable `Prod
   to prod with `sync-products.ps1`.
 
 **Coordinator decisions** (the planner's open questions):
-- **Body size:** a route-scoped `express.json({ limit: "32kb" })` for `POST /products` and
-  `PUT /products/:id` only (Admin-only routes), mounted before the global 10kb parser.
-  AUTH-AND-SECURITY §1 item 4 holds the rule.
+- **Body size:** a route-scoped `express.json({ limit: "100kb" })` for `POST /products` and
+  `PUT /products/:id` only (Admin-only routes), mounted before the global 10kb parser. Raised from
+  32kb on 2026-10-30 with the photo limits below: the measured worst case is ~95 kB fully accented.
+  AUTH-AND-SECURITY §1 item 4 holds the rule and the measurement.
 - **Removing a variation that has HOLDING lines (open or future orders) is BLOCKED**: `409
   variantInUse`, each variant listed with its order ids. History-only references RETIRE the variant
   (tombstone); unreferenced variants are hard-deleted. The `PUT` response reports which in
@@ -218,9 +219,13 @@ progress + optional client downscale, graceful single/zero-image. Reusable `Prod
 - **Variation `securityDeposit: 0` = explicitly none** for that variation. The replacement value
   cannot be cleared per variation (absent = inherit).
 - **Limits** (`appConfig`): 3 options (`maxProductOptions`), 20 values per option
-  (`maxOptionValues`), 60 variations (`maxProductVariants`), 4 photos per value
-  (`storage.maxImagesPerOptionValue`), 8 showcase photos (existing `maxImagesPerProduct`), 40 photos
-  in total (`storage.maxImagesTotalPerProduct`, also the upload-url per-call cap).
+  (`maxOptionValues`), 60 variations (`maxProductVariants`), 6 photos per value
+  (`storage.maxImagesPerOptionValue`), 10 showcase photos (existing `maxImagesPerProduct`), 150
+  photos in total (`storage.maxImagesTotalPerProduct`, also the upload-url per-call cap). **Raised
+  2026-10-30** (were 4 / 8 / 40) — the owner's rule is to **miss HIGH**: a cap the catalog outgrows
+  blocks a real save, while a generous one costs only storage on photos that are actually uploaded.
+  The total is what the size of a body follows, so raising it moved the product write parser to
+  100kb (above); the presign body still fits the global 10kb at 150 files.
 - **Deviation from the frozen contract — the name regex.** Option and value names are 1–40 chars
   through a NEW `variationNameRegex` (`helpers/regex.ts`). It uses the same character class as
   `fullNameRegex`, which could not be reused because of its 5-char minimum ("Rojo" has 4). **The app

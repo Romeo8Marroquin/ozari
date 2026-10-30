@@ -197,6 +197,48 @@ export function dropOptionFromVariants(
   return next;
 }
 
+/** A combination row's on-screen identity: the key it was given, else its own combination. */
+export const rowKeyOf = (
+  rowKeys: ReadonlyMap<string, string>,
+  valueKeys: readonly string[],
+): string => {
+  const combination = combinationOf(valueKeys);
+  return rowKeys.get(combination) ?? combination;
+};
+
+/**
+ * Carry each combination ROW's identity across a structural change, so a row that is the same row
+ * on screen keeps its React key (and its motion) even though its combination changed: adding an
+ * option's FIRST value turns "Rojo" into "Rojo · Grande" (the same variation, one more value), and
+ * removing an option MERGES "Rojo · Grande" and "Rojo · Chico" into "Rojo" (the first one survives,
+ * exactly as `dropOptionFromVariants` keeps the first variation). Keyed by combination alone, every
+ * such row would unmount and remount — the whole table collapsing and re-growing.
+ *
+ * `before` = the combinations listed before (option order); `project` maps one of them to the
+ * combination it becomes, or `null` when it leaves. Returns the identities of the rows that remain
+ * (by their NEW combination) and the identities of the rows that leave (gone, or merged away).
+ * Combinations that are new after the change are absent — they take their own combination.
+ */
+export function carryRowKeys(
+  before: readonly string[][],
+  rowKeys: ReadonlyMap<string, string>,
+  project: (valueKeys: readonly string[]) => readonly string[] | null,
+): { rowKeys: Map<string, string>; leaving: string[] } {
+  const next = new Map<string, string>();
+  const leaving: string[] = [];
+  for (const combo of before) {
+    const key = rowKeyOf(rowKeys, combo);
+    const projected = project(combo);
+    const target = projected && projected.length > 0 ? combinationOf(projected) : null;
+    if (target === null || next.has(target)) {
+      leaving.push(key);
+      continue;
+    }
+    next.set(target, key);
+  }
+  return { rowKeys: next, leaving };
+}
+
 /** A form override over the product's own field: the override when typed, else the inherited text —
  *  what the variation will EFFECTIVELY carry, and what its input shows as a placeholder. */
 export const effectiveFormValue = (override: string, inherited: string): string =>

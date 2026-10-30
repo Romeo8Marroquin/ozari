@@ -184,7 +184,7 @@ Product/asset **images** live in a Cloudflare **R2** bucket. R2 is S3-compatible
 `@aws-sdk/client-s3` (helper: `src/helpers/storage.ts`, policy: `appConfig.storage`). **Reads are
 public** (no private data); **writes/deletes** use credentials, and the browser uploads **directly to
 R2 via a short-lived presigned PUT URL** the API mints — image bytes never pass through Cloud Run, so
-the 10 kB body cap stands (the one exception, a 32 kB JSON cap on the product create/update bodies
+the 10 kB body cap stands (the one exception, a 100 kB JSON cap on the product create/update bodies
 that carry variations, is unrelated to images — `AUTH-AND-SECURITY.md` §1).
 
 | | staging | production |

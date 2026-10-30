@@ -70,7 +70,8 @@ const seedFromProduct = (initialImages: ProductImage[]): GalleryImage[] =>
  * the backend re-enforces every rule (the presign binds type+size into the signature; create/update
  * cap the list).
  *
- * `maxCount` is the SET's cap (default: the showcase's 8; an option value's set passes 4).
+ * `maxCount` is the SET's cap (default: the showcase's `PRODUCT_IMAGE_MAX_COUNT`; an option
+ * value's set passes `PRODUCT_OPTION_VALUE_IMAGE_MAX_COUNT`).
  *
  * `initialImages` (edit mode) seeds the grid with the product's EXISTING photos — read once on
  * mount; every movement after that (add/remove/reorder/star) is staged locally, zero network, and
