@@ -13,6 +13,7 @@ import {
   FOOTER_CLEARANCE,
   footerPadding,
   GROUP_HEAD_AHEAD,
+  groupHeadAhead,
   HAIRLINE,
   MARGIN,
   opticalCenterPad,
@@ -28,7 +29,12 @@ import {
   ROW_MIN_HEIGHT,
   TABLE_HEAD,
   TABLE_HEAD_HEIGHT,
+  THUMB_BLEED,
+  THUMB_ROW_HEIGHT,
+  THUMB_ROW_PADDING,
+  THUMB_SIZE,
   ROW_PADDING,
+  ROW_PADDING_Y,
   TOTALS_INNER_WIDTH,
   TOTALS_PADDING,
   TOTALS_WIDTH,
@@ -175,6 +181,19 @@ describe('GROUP_HEAD_AHEAD', () => {
     // heading end a page announcing a table that starts on the next one — which is also what left a
     // clipped band of the `fixed` header behind it.
     expect(GROUP_HEAD_AHEAD).toBe(TABLE_HEAD_HEIGHT + ROW_MIN_HEIGHT);
+  });
+
+  it('reserves the TALLER photo row for a table with thumbnails, and nothing new without them', () => {
+    expect(groupHeadAhead(false)).toBe(GROUP_HEAD_AHEAD);
+    expect(groupHeadAhead(true)).toBe(TABLE_HEAD_HEIGHT + THUMB_ROW_HEIGHT);
+    expect(THUMB_ROW_HEIGHT).toBe(THUMB_SIZE + THUMB_ROW_PADDING * 2);
+    // The photo reaches into the row's padding and no further: laid out shorter by its bleed, a
+    // one-line photo row lands exactly on THUMB_ROW_HEIGHT, and the TEXT keeps its full padding.
+    expect(THUMB_SIZE - THUMB_BLEED * 2 + ROW_PADDING_Y * 2).toBe(THUMB_ROW_HEIGHT);
+    expect(THUMB_BLEED).toBeGreaterThan(0);
+    expect(THUMB_BLEED).toBeLessThan(ROW_PADDING_Y);
+    // The photo row is the taller one — otherwise the reserve would be a single-line text row.
+    expect(THUMB_ROW_HEIGHT).toBeGreaterThan(ROW_MIN_HEIGHT);
   });
 });
 

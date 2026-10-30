@@ -2,11 +2,25 @@ import {
   FULLNAME_REGEX,
   PRODUCT_DESCRIPTION_REGEX,
   PRODUCT_MAX_AMOUNT,
+  PRODUCT_MAX_OPTION_VALUES,
+  PRODUCT_MAX_OPTIONS,
   PRODUCT_MAX_QUANTITY,
+  PRODUCT_MAX_VARIANTS,
+  VARIATION_KEY_REGEX,
+  VARIATION_NAME_REGEX,
 } from '@constants/Regex';
 import getZodRequiredPatterns from '@utils/getZodRequiredPatterns';
 import { t } from 'i18next';
 import { z } from 'zod';
+import type { Product } from './product.types';
+import {
+  combinationOf,
+  normalizeVariationName,
+  valueKeyForId,
+  variantRowIssues,
+  type OptionFormRow,
+  type VariantFormRow,
+} from './productVariations';
 
 const KEY = 'modules.panel.products.create.errors';
 
@@ -71,7 +85,9 @@ const baseCreateProductSchema = z.object({
   businessTypeId: z.number({ error: t(`${KEY}.requiredBusinessType`) }),
   categoryId: z.number({ error: t(`${KEY}.requiredCategory`) }),
   currencyId: z.number({ error: t(`${KEY}.requiredCurrency`) }),
-  quantity: z.string().refine((value) => parseQuantity(value) !== null, t(`${KEY}.invalidQuantity`)),
+  // REQUIRED without options, FORBIDDEN with them (each variation owns its stock — the API answers
+  // 400 `quantityWithVariants`), so the check lives in the cross-field rules below.
+  quantity: z.string(),
   rentPrice: moneyField(t(`${KEY}.invalidRentPrice`)).optional(),
   // `null` = the empty-selection sentinel (see CustomSelectForm) — the conditional rule below
   // enforces presence for Alquiler; a bare `.optional()` would reject the sentinel outright.
@@ -93,7 +109,122 @@ const baseCreateProductSchema = z.object({
         .refine((value) => FULLNAME_REGEX.test(value), t(`${KEY}.invalidDetail`)),
     }),
   ),
+  // VARIATIONS (2026-10-29). Array order = `sortOrder`. Names are checked in the cross-field rules
+  // (uniqueness needs the siblings); `key` is minted by the editor, never typed.
+  options: z.array(
+    z.object({
+      id: z.number().optional(),
+      name: z.string(),
+      values: z.array(z.object({ id: z.number().optional(), key: z.string(), name: z.string() })),
+    }),
+  ),
+  // One row per OFFERED combination; money/quantity TEXT like the product's own fields, `''` on an
+  // override = inherit.
+  variants: z.array(
+    z.object({
+      id: z.number().optional(),
+      valueKeys: z.array(z.string()),
+      quantity: z.string(),
+      rentPrice: z.string(),
+      sellPrice: z.string(),
+      replacementPrice: z.string(),
+      securityDeposit: z.string(),
+      description: z.string(),
+      isDefault: z.boolean(),
+    }),
+  ),
 });
+
+/**
+ * The VARIATION rules — the mirror of the API's `parseProductVariations`: at most
+ * `PRODUCT_MAX_OPTIONS` options, each with 1..`PRODUCT_MAX_OPTION_VALUES` values; names 1–40 chars of
+ * the full-name alphabet, unique case/accent-insensitively per product (options) and per option
+ * (values); value keys well-formed and unique; with options, 1..`PRODUCT_MAX_VARIANTS` variations,
+ * none without; each variation exactly one known key per option, a unique combination, its stock
+ * and overrides valid for the business type (`variantRowIssues`); at most one default. The product
+ * quantity is required only without options.
+ */
+function variationRules(data: z.infer<typeof baseCreateProductSchema>, ctx: z.RefinementCtx): void {
+  const issue = (path: (string | number)[], leaf: string, params?: Record<string, unknown>): void =>
+    ctx.addIssue({ code: 'custom', path, message: t(`${KEY}.${leaf}`, params) });
+  const hasOptions = data.options.length > 0;
+
+  if (!hasOptions && parseQuantity(data.quantity) === null) issue(['quantity'], 'invalidQuantity');
+  if (data.options.length > PRODUCT_MAX_OPTIONS) {
+    issue(['options'], 'tooManyOptions', { max: PRODUCT_MAX_OPTIONS });
+  }
+
+  const optionNames = new Set<string>();
+  const keys = new Set<string>();
+  data.options.forEach((option, optionIndex) => {
+    const name = option.name.trim();
+    if (!VARIATION_NAME_REGEX.test(name)) issue(['options', optionIndex, 'name'], 'invalidOptionName');
+    else if (optionNames.has(normalizeVariationName(name))) {
+      issue(['options', optionIndex, 'name'], 'duplicateOptionName');
+    } else optionNames.add(normalizeVariationName(name));
+
+    if (option.values.length === 0) issue(['options', optionIndex, 'values'], 'requiredOptionValues');
+    if (option.values.length > PRODUCT_MAX_OPTION_VALUES) {
+      issue(['options', optionIndex, 'values'], 'tooManyOptionValues', { max: PRODUCT_MAX_OPTION_VALUES });
+    }
+    const valueNames = new Set<string>();
+    option.values.forEach((value, valueIndex) => {
+      const path = ['options', optionIndex, 'values', valueIndex, 'name'];
+      const valueName = value.name.trim();
+      if (!VARIATION_NAME_REGEX.test(valueName)) issue(path, 'invalidOptionValueName');
+      else if (valueNames.has(normalizeVariationName(valueName))) issue(path, 'duplicateOptionValueName');
+      else valueNames.add(normalizeVariationName(valueName));
+      if (!VARIATION_KEY_REGEX.test(value.key) || keys.has(value.key)) {
+        issue(['options', optionIndex, 'values', valueIndex, 'key'], 'invalidVariants');
+      }
+      keys.add(value.key);
+    });
+  });
+
+  if (!hasOptions) {
+    if (data.variants.length > 0) issue(['variants'], 'invalidVariants');
+    return;
+  }
+  if (data.variants.length === 0) issue(['variants'], 'requiredVariants');
+  if (data.variants.length > PRODUCT_MAX_VARIANTS) {
+    issue(['variants'], 'tooManyVariants', { max: PRODUCT_MAX_VARIANTS });
+  }
+
+  const optionOfKey = new Map<string, number>();
+  data.options.forEach((option, optionIndex) =>
+    option.values.forEach((value) => optionOfKey.set(value.key, optionIndex)),
+  );
+  const isRent = data.businessTypeId === BUSINESS_TYPE_RENT;
+  const rowContext = {
+    isRent,
+    productReplacementPrice: data.replacementPrice ?? '',
+    productSecurityDeposit: data.securityDeposit ?? '',
+    parseMoney,
+    parseQuantity,
+    isValidDescription: (value: string) => PRODUCT_DESCRIPTION_REGEX.test(value),
+  };
+  const combinations = new Set<string>();
+  let defaults = 0;
+  data.variants.forEach((variant, index) => {
+    // Exactly one KNOWN key per option, and a combination offered once. The editor builds rows only
+    // from real combinations, so a failure here is a stale draft — reported on the row as a whole.
+    const coveredOptions = new Set(variant.valueKeys.map((key) => optionOfKey.get(key)));
+    const wellFormed =
+      variant.valueKeys.length === data.options.length &&
+      variant.valueKeys.every((key) => optionOfKey.has(key)) &&
+      coveredOptions.size === data.options.length;
+    const combination = combinationOf(variant.valueKeys);
+    if (!wellFormed || combinations.has(combination)) {
+      issue(['variants', index, 'valueKeys'], 'invalidVariants');
+    }
+    combinations.add(combination);
+    if (variant.isDefault) defaults += 1;
+    variantRowIssues(variant, rowContext).forEach(({ field, issue: leaf }) =>
+      issue(['variants', index, field], leaf),
+    );
+  });
+  if (defaults > 1) issue(['variants'], 'invalidVariants');
+}
 
 // The CONDITIONAL price rule (same as the backend): Alquiler → rentPrice + rent unit, no
 // sellPrice; Venta → sellPrice only. The UI clears the irrelevant fields on a type switch, so a
@@ -101,6 +232,7 @@ const baseCreateProductSchema = z.object({
 // ONE-DETAIL-PER-TYPE rule (a table can't have two "Color"s — mirrored from the backend); the UI
 // already filters used types out of each row's options, so a duplicate here means a stale draft.
 export const createProductSchema = baseCreateProductSchema.superRefine((data, ctx) => {
+  variationRules(data, ctx);
   const seenDetailTypes = new Set<number>();
   data.details.forEach((row, index) => {
     /* v8 ignore next -- defensive: Zod only runs refinements once the base schema (which already
@@ -188,12 +320,42 @@ export const createProductDefaultValues: CreateProductFormType = {
   securityDeposit: '',
   sellPrice: '',
   details: [],
+  options: [],
+  variants: [],
 };
 
 /** A gallery reference for the create body: an R2 key from the presign flow + the primary flag. */
 export interface CreateProductImageRef {
   key: string;
   isPrimary: boolean;
+}
+
+/** One option of the body (array order = `sortOrder`). `id` only on an UPDATE of a saved option. */
+export interface ProductOptionBody {
+  id?: number;
+  name: string;
+  values: {
+    id?: number;
+    /** The client key variations reference this value by (unique in the body). */
+    key: string;
+    name: string;
+    /** The value's OWN photo set — kept by `id`, new by uploaded `key`; one primary at most. */
+    images: UpdateProductImageRef[];
+  }[];
+}
+
+/** One offered combination of the body. Overrides only when typed (absent = inherit), following
+ *  the business type; `isDefault` only on the default. */
+export interface ProductVariantBody {
+  id?: number;
+  valueKeys: string[];
+  quantity: number;
+  rentPrice?: number;
+  sellPrice?: number;
+  replacementPrice?: number;
+  securityDeposit?: number;
+  description?: string;
+  isDefault?: true;
 }
 
 /** The `POST /products` body — numbers where the API wants numbers, absent fields omitted. */
@@ -203,7 +365,8 @@ export interface CreateProductBody {
   businessTypeId: number;
   categoryId: number;
   currencyId: number;
-  quantity: number;
+  /** The product's stock — present ONLY without options (each variation owns its stock). */
+  quantity?: number;
   rentPrice?: number;
   rentTimeUnitId?: number;
   replacementPrice?: number;
@@ -211,12 +374,70 @@ export interface CreateProductBody {
   securityDeposit?: number;
   sellPrice?: number;
   productDetails: { detailTypeId: number; detail: string }[];
-  /** Uploaded gallery photos (array order = display order). Omitted when there are none. */
+  /** Uploaded SHOWCASE photos (array order = display order). Omitted when there are none. */
   images?: CreateProductImageRef[];
+  /** Options + variations — both omitted for a product without variations ("absent = none"). */
+  options?: ProductOptionBody[];
+  variants?: ProductVariantBody[];
+}
+
+/** Each value's final photo set, by value KEY (assembled by the form after the uploads). */
+export type ValueImagesByKey = Record<string, UpdateProductImageRef[]>;
+
+/**
+ * The body's options + variations from the form (`withIds`: an UPDATE keeps the saved ids — a
+ * create never sends one). Overrides travel only when typed and only for the business type
+ * (Alquiler → rent/replacement/deposit, Venta → sell); a deposit of `0` is sent (explicitly none).
+ */
+function variationsBody(
+  data: CreateProductFormType,
+  imagesByValueKey: ValueImagesByKey,
+  withIds: boolean,
+): Pick<CreateProductBody, 'options' | 'variants'> {
+  if (data.options.length === 0) return {};
+  const money = (value: string): number | undefined => toCents(parseMoney(value));
+  const id = (row: { id?: number }) => (withIds && row.id !== undefined ? { id: row.id } : {});
+  const isRent = data.businessTypeId === BUSINESS_TYPE_RENT;
+  return {
+    options: data.options.map((option) => ({
+      ...id(option),
+      name: option.name.trim(),
+      values: option.values.map((value) => ({
+        ...id(value),
+        key: value.key,
+        name: value.name.trim(),
+        images: (imagesByValueKey[value.key] ?? []).map((image) =>
+          withIds ? image : { key: image.key as string, isPrimary: image.isPrimary },
+        ),
+      })),
+    })),
+    variants: data.variants.map((variant) => {
+      const overrides = isRent
+        ? {
+            rentPrice: money(variant.rentPrice),
+            replacementPrice: money(variant.replacementPrice),
+            securityDeposit: money(variant.securityDeposit),
+          }
+        : { sellPrice: money(variant.sellPrice) };
+      const description = variant.description.trim();
+      return {
+        ...id(variant),
+        valueKeys: variant.valueKeys,
+        /* v8 ignore next -- parseQuantity is guaranteed non-null by the schema */
+        quantity: parseQuantity(variant.quantity) ?? 0,
+        ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined)),
+        ...(description && { description }),
+        ...(variant.isDefault && { isDefault: true as const }),
+      };
+    }),
+  };
 }
 
 /** Maps the validated form values to the API body (money truncated to 2 decimals, like the backend). */
-export function toCreateProductBody(data: CreateProductFormType): CreateProductBody {
+export function toCreateProductBody(
+  data: CreateProductFormType,
+  imagesByValueKey: ValueImagesByKey = {},
+): CreateProductBody {
   const money = (value: string | undefined): number | undefined => toCents(parseMoney(value ?? ''));
   const isRent = data.businessTypeId === BUSINESS_TYPE_RENT;
   const description = data.description?.trim();
@@ -226,7 +447,9 @@ export function toCreateProductBody(data: CreateProductFormType): CreateProductB
     businessTypeId: data.businessTypeId,
     categoryId: data.categoryId,
     currencyId: data.currencyId,
-    quantity: parseQuantity(data.quantity) ?? 0,
+    // With options the stock is per variation — the API refuses a product quantity then.
+    ...(data.options.length === 0 && { quantity: parseQuantity(data.quantity) ?? 0 }),
+    ...variationsBody(data, imagesByValueKey, false),
     ...(isRent && { rentPrice: money(data.rentPrice), rentTimeUnitId: data.rentTimeUnitId ?? undefined }),
     ...(!isRent && { sellPrice: money(data.sellPrice) }),
     // Alquiler only — a Venta body never carries the key (the backend forbids it there).
@@ -247,7 +470,12 @@ export function toCreateProductBody(data: CreateProductFormType): CreateProductB
   };
 }
 
-export const createProductRequiredPatterns = getZodRequiredPatterns(baseCreateProductSchema);
+// A variation's overrides are blank-means-inherit (never required) — they show the inherited value
+// as their placeholder instead of an asterisk.
+const VARIANT_OVERRIDE_PATTERN = /variants.*(rentPrice|sellPrice|replacementPrice|securityDeposit|description|isDefault)/;
+export const createProductRequiredPatterns = getZodRequiredPatterns(baseCreateProductSchema).filter(
+  (pattern) => !VARIANT_OVERRIDE_PATTERN.test(pattern.source),
+);
 
 /**
  * One slot of the FINAL gallery for `PUT /products/:id` (the RECONCILE design): a kept photo by its
@@ -266,11 +494,16 @@ export interface UpdateProductBody extends Omit<CreateProductBody, 'images' | 'p
   images: UpdateProductImageRef[];
 }
 
-/** Maps the validated form values to the update body — the create mapping, keeping detail row ids. */
-export function toUpdateProductBody(data: CreateProductFormType): UpdateProductBody {
+/** Maps the validated form values to the update body — the create mapping, keeping detail row ids
+ *  and the saved option / value / variation ids (a removed one is simply absent). */
+export function toUpdateProductBody(
+  data: CreateProductFormType,
+  imagesByValueKey: ValueImagesByKey = {},
+): UpdateProductBody {
   const createBody = toCreateProductBody(data);
   return {
     ...createBody,
+    ...variationsBody(data, imagesByValueKey, true),
     productDetails: data.details.map((row) => ({
       ...(row.id !== undefined && { id: row.id }),
       detailTypeId: row.detailTypeId,
@@ -300,8 +533,37 @@ export function productToFormValues(product: {
   total?: number;
   available?: number;
   details: { id: number; detailTypeId: number; detail: string }[];
+  options?: Product['options'];
+  variants?: Product['variants'];
 }): CreateProductFormType {
   const money = (value: number | undefined): string => (value === undefined ? '' : String(value));
+  // Saved values travel under `v<id>` for the whole edit, so their variations keep pointing at them
+  // through renames and reorders.
+  const options: OptionFormRow[] = [...(product.options ?? [])]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((option) => ({
+      id: option.id,
+      name: option.name,
+      values: [...option.values]
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+        .map((value) => ({ id: value.id, key: valueKeyForId(value.id), name: value.name })),
+    }));
+  // The RAW override columns (`overrides`), never the effective values: an inherited price must
+  // stay inherited, or the first save would freeze today's product price onto every variation. The
+  // stock is the variation's own `quantity`.
+  const variants: VariantFormRow[] = options.length === 0
+    ? []
+    : (product.variants ?? []).map((variant) => ({
+        id: variant.id,
+        valueKeys: variant.valueIds.map(valueKeyForId),
+        quantity: String(variant.quantity ?? variant.total ?? variant.available ?? 0),
+        rentPrice: money(variant.overrides?.rentPrice),
+        sellPrice: money(variant.overrides?.sellPrice),
+        replacementPrice: money(variant.overrides?.replacementPrice),
+        securityDeposit: money(variant.overrides?.securityDeposit),
+        description: variant.overrides?.description ?? '',
+        isDefault: variant.isDefault,
+      }));
   return {
     name: product.name,
     description: product.description ?? '',
@@ -319,5 +581,7 @@ export function productToFormValues(product: {
       detailTypeId: detail.detailTypeId,
       detail: detail.detail,
     })),
+    options,
+    variants,
   };
 }

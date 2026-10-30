@@ -1305,3 +1305,243 @@ describe('OrderForm — silent draft', () => {
   });
 });
 
+// ── VARIATIONS ──────────────────────────────────────────────────────────────────────────────────
+// A tablecloth: Color (Rojo 1, Azul 2) × Tamaño (Redondo 3, Cuadrado 4). Azul · Cuadrado is sold out.
+const mantelValue = (id: number, name: string) => ({ id, name, sortOrder: id, images: [] });
+const mantel: Product = {
+  ...rentalProduct,
+  id: 7,
+  name: 'Mantel',
+  available: 12,
+  options: [
+    { id: 10, name: 'Color', sortOrder: 0, values: [mantelValue(1, 'Rojo'), mantelValue(2, 'Azul')] },
+    { id: 11, name: 'Tamaño', sortOrder: 1, values: [mantelValue(3, 'Redondo'), mantelValue(4, 'Cuadrado')] },
+  ],
+  variants: [
+    { id: 71, valueIds: [1, 3], label: 'Rojo · Redondo', isDefault: true, rentPrice: 9, available: 5 },
+    { id: 72, valueIds: [1, 4], label: 'Rojo · Cuadrado', isDefault: false, rentPrice: 6, available: 3 },
+    { id: 73, valueIds: [2, 3], label: 'Azul · Redondo', isDefault: false, rentPrice: 6, available: 4 },
+    { id: 74, valueIds: [2, 4], label: 'Azul · Cuadrado', isDefault: false, rentPrice: 6, available: 0 },
+  ],
+};
+// One option, one value, one variation — nothing to choose.
+const camino: Product = {
+  ...rentalProduct,
+  id: 8,
+  name: 'Camino de mesa',
+  options: [{ id: 20, name: 'Color', sortOrder: 0, values: [mantelValue(5, 'Dorado')] }],
+  variants: [{ id: 81, valueIds: [5], label: 'Dorado', isDefault: true, rentPrice: 4, available: 9 }],
+};
+
+describe('OrderForm — variations', () => {
+  beforeEach(() => {
+    useOrderProducts.mockReturnValue(q({ data: [rentalProduct, saleProduct, mantel, camino] }));
+  });
+
+  const optionValues = (select: HTMLElement) =>
+    within(select).getAllByRole('option').map((option) => option.textContent);
+
+  /** Client + event + window, then a line of the given product (no quantity). */
+  const startLine = async (container: HTMLElement, productId: string, index = 0): Promise<void> => {
+    const user = userEvent.setup();
+    if (index === 0) {
+      await user.selectOptions(byId(container, 'order-client'), '3');
+      await user.selectOptions(byId(container, 'order-event-type'), '1');
+      setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
+      setDateTime(byId(container, 'order-pickup-at'), '2026-08-02T15:00');
+    }
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    await user.selectOptions(byId(container, `order-line-product-${index}`), productId);
+  };
+
+  it('asks for the variation per option, cascades, prices it, and sends it', async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await startLine(container, '7');
+    const color = byId(container, 'order-line-0-option-10');
+    const size = byId(container, 'order-line-0-option-11');
+    expect(optionValues(color)).toEqual([`${KEY}.fields.lineOptionPlaceholder`, 'Rojo', 'Azul']);
+    // No variation yet → no stock figure of its own to quote.
+    expect(byId(container, 'order-line-quantity-0').closest('div')?.textContent).not.toContain(
+      `${KEY}.availability.count`,
+    );
+    await user.type(byId(container, 'order-line-quantity-0'), '2');
+
+    // Submitting without a variation names the problem on the line.
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    expect(await screen.findByText(`${KEY}.errors.requiredLineVariant`)).toBeInTheDocument();
+    expect(createOrder).not.toHaveBeenCalled();
+
+    // Azul: its sold-out Cuadrado is not offered (cascade + availability). A partial pick re-checks
+    // because the error is already showing.
+    await user.selectOptions(color, '2');
+    expect(optionValues(size)).toEqual([`${KEY}.fields.lineOptionPlaceholder`, 'Redondo']);
+    expect(screen.getByText(`${KEY}.errors.requiredLineVariant`)).toBeInTheDocument();
+
+    // Rojo · Redondo resolves the variation: the error clears and its OWN price is quoted.
+    await user.selectOptions(color, '1');
+    await user.selectOptions(size, '3');
+    await waitFor(() =>
+      expect(screen.queryByText(`${KEY}.errors.requiredLineVariant`)).not.toBeInTheDocument(),
+    );
+    expect(screen.getAllByText('Q 9.00').length).toBeGreaterThan(0);
+
+    // Clearing a pick takes the variation away again.
+    await user.selectOptions(size, '');
+    await user.selectOptions(size, '3');
+
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createOrder).toHaveBeenCalled());
+    expect(createOrder.mock.calls[0][0].lines).toEqual([{ productId: 7, variantId: 71, quantity: 2 }]);
+  });
+
+  it('a partial pick before any submit stays quiet', async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await startLine(container, '7');
+    await user.selectOptions(byId(container, 'order-line-0-option-10'), '1');
+    expect(screen.queryByText(`${KEY}.errors.requiredLineVariant`)).not.toBeInTheDocument();
+  });
+
+  it('identifies lines by PAIR: a second line of the product offers only what is left', async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await startLine(container, '7');
+    await user.selectOptions(byId(container, 'order-line-0-option-10'), '1');
+    await user.selectOptions(byId(container, 'order-line-0-option-11'), '3'); // Rojo · Redondo
+    await startLine(container, '7', 1);
+    await user.selectOptions(byId(container, 'order-line-1-option-10'), '1');
+    // Rojo · Redondo belongs to line 0 → only Cuadrado is left under Rojo.
+    expect(optionValues(byId(container, 'order-line-1-option-11'))).toEqual([
+      `${KEY}.fields.lineOptionPlaceholder`,
+      'Cuadrado',
+    ]);
+    await user.selectOptions(byId(container, 'order-line-1-option-11'), '4');
+    // Line 0 switching to Azul: Azul · Redondo is free, so the size is kept.
+    await user.selectOptions(byId(container, 'order-line-0-option-10'), '2');
+    expect((byId(container, 'order-line-0-option-11') as HTMLSelectElement).value).toBe('3');
+    // Rojo · Redondo freed again; take Azul's last one on a third line → the product is exhausted.
+    await startLine(container, '7', 2);
+    await user.selectOptions(byId(container, 'order-line-2-option-10'), '1');
+    await user.selectOptions(byId(container, 'order-line-2-option-11'), '3');
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    expect(optionValues(byId(container, 'order-line-product-3'))).not.toContain('Mantel');
+  });
+
+  it('takes the ONLY variation by itself, and a product change resets the pick', async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await startLine(container, '8');
+    await waitFor(() =>
+      expect((byId(container, 'order-line-0-option-20') as HTMLSelectElement).value).toBe('5'),
+    );
+    await user.type(byId(container, 'order-line-quantity-0'), '1');
+    // Its own stock is quoted once the variation is known.
+    expect(screen.getByText(`${KEY}.availability.count`)).toBeInTheDocument();
+    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    expect(byId(container, 'order-line-0-option-20')).toBeNull();
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createOrder).toHaveBeenCalled());
+    expect(createOrder.mock.calls[0][0].lines).toEqual([{ productId: 3, quantity: 1 }]);
+  });
+
+  it('re-checks a typed quantity against the variation once it is picked', async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await startLine(container, '7');
+    await user.type(byId(container, 'order-line-quantity-0'), '4');
+    await user.tab();
+    await user.selectOptions(byId(container, 'order-line-0-option-10'), '1');
+    await user.selectOptions(byId(container, 'order-line-0-option-11'), '4'); // Rojo · Cuadrado: 3
+    expect(await screen.findByText(`${KEY}.errors.lineUnavailable`)).toBeInTheDocument();
+  });
+
+  it('reconciles a line against ITS variation and names it with the variation', async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await startLine(container, '7');
+    await user.selectOptions(byId(container, 'order-line-0-option-10'), '1');
+    await user.selectOptions(byId(container, 'order-line-0-option-11'), '3');
+    await user.type(byId(container, 'order-line-quantity-0'), '5');
+    await startLine(container, '7', 1); // no variation yet → never reconciled
+    await user.type(byId(container, 'order-line-quantity-1'), '9');
+    await waitForFullProbe();
+    act(() =>
+      availabilityHandlers().onSuccess({
+        data: {
+          data: {
+            availability: [
+              { productId: 7, available: 2, variants: [{ variantId: 71, available: 2 }] },
+            ],
+          },
+        },
+      }),
+    );
+    await waitFor(() =>
+      expect((byId(container, 'order-line-quantity-0') as HTMLInputElement).value).toBe('2'),
+    );
+    expect((byId(container, 'order-line-quantity-1') as HTMLInputElement).value).toBe('9');
+    expect(warning).toHaveBeenCalled();
+  });
+
+  it('maps a stock 409 onto the line holding that (product, variation) pair', async () => {
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await startLine(container, '7');
+    await user.selectOptions(byId(container, 'order-line-0-option-10'), '1');
+    await user.selectOptions(byId(container, 'order-line-0-option-11'), '4');
+    await user.type(byId(container, 'order-line-quantity-0'), '1');
+    await startLine(container, '7', 1);
+    await user.selectOptions(byId(container, 'order-line-1-option-10'), '1');
+    await user.selectOptions(byId(container, 'order-line-1-option-11'), '3');
+    await user.type(byId(container, 'order-line-quantity-1'), '1');
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createOrder).toHaveBeenCalled());
+    const handlers = createOrder.mock.calls[0][1] as Handlers;
+    act(() =>
+      handlers.onError(
+        axiosError(409, 'Sin disponibilidad', {
+          conflicts: [{ productId: 7, productName: 'Mantel', variantId: 71, variantLabel: 'Rojo · Redondo', requested: 1, available: 0 }],
+        }),
+      ),
+    );
+    const quantity1 = byId(container, 'order-line-quantity-1');
+    await waitFor(() =>
+      expect(quantity1.closest('div')?.parentElement?.textContent).toContain(`${KEY}.errors.lineUnavailable`),
+    );
+    expect(screen.getAllByText(`${KEY}.errors.lineUnavailable`)).toHaveLength(1);
+  });
+});
+
+describe('OrderForm (edit mode) — variations', () => {
+  beforeEach(() => {
+    useOrderProducts.mockReturnValue(q({ data: [rentalProduct, saleProduct, mantel, camino] }));
+  });
+
+  it('reopens on the line VARIATION and sends it back untouched', async () => {
+    const order = {
+      ...existingOrder,
+      lines: [{ id: 41, productId: 7, productName: 'Mantel', variantId: 72, variantLabel: 'Rojo · Cuadrado', isRental: true, quantity: 2, unitaryPrice: 6, parcialPrice: 12 }],
+    } as unknown as OrderDetail;
+    const { container } = renderForm({ mode: 'edit', order });
+    expect((byId(container, 'order-line-0-option-10') as HTMLSelectElement).value).toBe('1');
+    expect((byId(container, 'order-line-0-option-11') as HTMLSelectElement).value).toBe('4');
+    await userEvent.click(screen.getByRole('button', { name: 'modules.panel.orders.edit.actions.submit' }));
+    await waitFor(() => expect(updateOrder).toHaveBeenCalled());
+    expect(updateOrder.mock.calls[0][0].body.lines).toEqual([{ productId: 7, variantId: 72, quantity: 2 }]);
+  });
+
+  it('asks again for a RETIRED variation, and drops one from a product that no longer has any', async () => {
+    const order = {
+      ...existingOrder,
+      lines: [
+        { id: 41, productId: 7, productName: 'Mantel', variantId: 99, variantLabel: 'Verde', isRental: true, quantity: 1, unitaryPrice: 6, parcialPrice: 6 },
+        { id: 42, productId: 3, productName: 'Silla plegable', variantId: 55, variantLabel: 'Negra', isRental: true, quantity: 1, unitaryPrice: 6, parcialPrice: 6 },
+      ],
+    } as unknown as OrderDetail;
+    renderForm({ mode: 'edit', order });
+    await userEvent.click(screen.getByRole('button', { name: 'modules.panel.orders.edit.actions.submit' }));
+    expect(await screen.findByText(`${KEY}.errors.invalidLineVariant`)).toBeInTheDocument();
+    expect(updateOrder).not.toHaveBeenCalled();
+  });
+});

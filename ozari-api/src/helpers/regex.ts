@@ -3,6 +3,15 @@ export const descriptionTextRegex =
 
 export const fullNameRegex = /^(?=.{5,255}$)[A-Za-zÀ-ÖØ-öø-ÿ0-9\s'-]+$/;
 
+// A product VARIATION option/value name ("Color", "Rojo", "XL"): `fullNameRegex`'s character class
+// with a 1–40 length (fullNameRegex's own 5-character floor would reject "Rojo"). Mirrored in the
+// app's `@constants/Regex`; tested against the TRIMMED value.
+export const variationNameRegex = /^(?=.{1,40}$)[A-Za-zÀ-ÖØ-öø-ÿ0-9\s'-]+$/;
+
+// The client-minted KEY of an option value in a product body — how variants reference values that
+// may not have an id yet (a value created in the same save).
+export const variationValueKeyRegex = /^[A-Za-z0-9_-]{1,40}$/;
+
 export const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 // Registry contact phone: allowed characters (digits + the usual separators) plus a digit COUNT

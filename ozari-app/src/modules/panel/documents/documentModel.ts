@@ -8,8 +8,15 @@ import { parseDateTime, parseLineQuantity, parseMoney } from '../orders/SchemaCr
 import type { CreateOrderFormType } from '../orders/SchemaCreateOrder';
 import { squareOrderBalance } from '../orders/orderBalance';
 import type { OrderBalance, OrderBalanceInput } from '../orders/orderBalance';
-import type { OrderDepositSettlement, OrderDetail } from '../orders/order.types';
+import type {
+  OrderDamage,
+  OrderDepositSettlement,
+  OrderDetail,
+  OrderLine,
+} from '../orders/order.types';
 import type { Product } from '../products/product.types';
+import { primaryImageUrl } from '../products/productPresentation';
+import { effectivePricing, lineDisplayName, variantFor } from '../products/productVariations';
 import type { PreferenceSetting } from '../preferences/preference.types';
 
 /** A day, for the quote's validity window. */
@@ -70,8 +77,18 @@ export interface DocumentBankAccount {
   holder: string;
 }
 
+/**
+ * A row's product photo, printed as a small thumbnail beside its description (2026-10-29). Absent
+ * when the product has none — and, once `embedDocumentImages` has run, absent too when the photo
+ * could not be fetched: the document never fails over a picture. Before embedding it is the
+ * catalog's URL; the template only ever receives a `data:` URI, so react-pdf never touches the network.
+ */
+export interface DocumentLineImage {
+  imageUrl?: string;
+}
+
 /** One priced row of a group. `days` is present only where it changes the arithmetic (rentals). */
-export interface DocumentLine {
+export interface DocumentLine extends DocumentLineImage {
   description: string;
   quantity: number;
   unitPrice: number;
@@ -254,6 +271,10 @@ export function printedConditions(model: DocumentModel): string[] {
 /** Money rounded the way every other amount in this codebase is — to the cent, never a float tail. */
 const cents = (value: number): number => Math.round(value * 100) / 100;
 
+/** A row's photo field — present only when there is a photo (never `imageUrl: undefined`). */
+const imageOf = (imageUrl: string | undefined): DocumentLineImage =>
+  imageUrl === undefined ? {} : { imageUrl };
+
 /**
  * Does the DÍAS column actually explain this line's total?
  *
@@ -315,10 +336,23 @@ export function isDepositNotReceived(order: Pick<OrderDetail, 'securityDeposit'>
 }
 
 /**
+ * The name a replacement prints: the damaged line's product + variation (`lineDisplayName`). The
+ * damage's OWN `variantLabel` wins (the API snapshots it with the settlement); a damage without one
+ * borrows its line's, so a report never names "Mantel" where the comprobante said "Mantel — Rojo".
+ */
+export function damageDisplayName(damage: OrderDamage, lines: readonly OrderLine[]): string {
+  return lineDisplayName({
+    productName: damage.productName,
+    variantLabel:
+      damage.variantLabel ?? lines.find((line) => line.id === damage.lineId)?.variantLabel,
+  });
+}
+
+/**
  * A recorded settlement → the charges it made, itemised (a retention, then each replacement), every
  * figure the API's own. Empty when the report was clean.
  */
-function claimsOf(settlement: OrderDepositSettlement): DocumentDepositClaim[] {
+function claimsOf(settlement: OrderDepositSettlement, lines: readonly OrderLine[]): DocumentDepositClaim[] {
   return [
     ...(settlement.retainedAmount > 0
       ? [
@@ -331,7 +365,7 @@ function claimsOf(settlement: OrderDepositSettlement): DocumentDepositClaim[] {
       : []),
     ...settlement.damages.map<DocumentDepositClaim>((damage) => ({
       kind: 'replacement',
-      description: damage.productName,
+      description: damageDisplayName(damage, lines),
       quantity: damage.quantity,
       unitAmount: damage.unitAmount,
       amount: damage.amount,
@@ -347,7 +381,7 @@ function damagesOf(order: OrderDetail): DocumentDamages | undefined {
   const deposit = order.securityDeposit;
   const settlement = deposit?.settlement;
   if (deposit === undefined || settlement === undefined) return undefined;
-  const claims = claimsOf(settlement);
+  const claims = claimsOf(settlement, order.lines);
   if (claims.length === 0) return undefined;
   return {
     withDeposit: deposit.held > 0 || settlement.retainedAmount > 0,
@@ -405,7 +439,11 @@ export function fromOrderDetail(
       const lines = order.lines
         .filter((line) => (kind === 'rental') === line.isRental)
         .map<DocumentLine>((line) => ({
-          description: line.productName,
+          // "Mantel — Rojo · Redondo": the line's own variation snapshot, never re-looked-up.
+          description: lineDisplayName(line),
+          // The API's per-line photo — already variation-aware (the value's photo, else the
+          // showcase primary); no client rule second-guesses it.
+          ...imageOf(line.imageUrl),
           quantity: line.quantity,
           unitPrice: line.unitaryPrice,
           // Days belong to the RENTAL table only: they are what makes `precio × cant. × días =
@@ -516,7 +554,16 @@ export function fromOrderForm(
     // nothing — exactly as it contributes nothing to the estimate the admin is reading.
     return product === undefined || quantity === null
       ? []
-      : [{ product, quantity, isRental: isRentalProduct(product) }];
+      : [
+          {
+            product,
+            // The variation the line picked (absent for a product without them, or an unfinished
+            // pick — which the resolver refuses before a quote is ever built).
+            variant: variantFor(product, line.variantId),
+            quantity,
+            isRental: isRentalProduct(product),
+          },
+        ];
   });
   // Destructured rather than length-checked so the currency below reads off a NARROWED value: with
   // `noUncheckedIndexedAccess` an index would need a `?? ''` fallback that can never be reached.
@@ -534,10 +581,19 @@ export function fromOrderForm(
       const lines = priced
         .filter((line) => (kind === 'rental') === line.isRental)
         .map<DocumentLine>((line) => {
-          const unitPrice = lineUnitPrice(line.product);
-          const total = estimateLineSubtotal(line.product, line.quantity, billedDays ?? 1);
+          // The variation's EFFECTIVE price when one is picked — the same figure the form's estimate
+          // shows beside the line.
+          const unitPrice = lineUnitPrice(line.product, line.variant);
+          const total = estimateLineSubtotal(line.product, line.quantity, billedDays ?? 1, line.variant);
           return {
-            description: line.product.name,
+            description: lineDisplayName({
+              productName: line.product.name,
+              variantLabel: line.variant?.label,
+            }),
+            // The variation's own photo, else the SHOWCASE primary (flagged, else first) — never
+            // `coverImageUrl`, which falls back to the DEFAULT variation and could print the wrong
+            // colour. The API's comprobante rule, read off the catalog the form already holds.
+            ...imageOf(line.variant?.imageUrl ?? primaryImageUrl(line.product) ?? undefined),
             quantity: line.quantity,
             unitPrice,
             ...(kind === 'rental' &&
@@ -566,7 +622,11 @@ export function fromOrderForm(
   const securityDeposit = cents(
     priced
       .filter((line) => line.isRental)
-      .reduce((sum, line) => sum + (line.product.securityDeposit ?? 0) * line.quantity, 0),
+      .reduce(
+        (sum, line) =>
+          sum + (effectivePricing(line.product, line.variant).securityDeposit ?? 0) * line.quantity,
+        0,
+      ),
   );
 
   return {
@@ -610,7 +670,7 @@ export function fromOrderForm(
 // ── The damage report ("REPORTE DE DAÑOS") ───────────────────────────────────────────────────────
 
 /** One rental line that carried a deposit: what the client handed over for it. */
-export interface DamageReportDepositLine {
+export interface DamageReportDepositLine extends DocumentLineImage {
   description: string;
   quantity: number;
   /** The per-unit deposit the line snapshotted at order time. */
@@ -619,7 +679,7 @@ export interface DamageReportDepositLine {
 }
 
 /** One lost/broken entry, billed at the line's replacement value — the API's figures, verbatim. */
-export interface DamageReportReplacement {
+export interface DamageReportReplacement extends DocumentLineImage {
   description: string;
   quantity: number;
   unitAmount: number;
@@ -699,7 +759,8 @@ export function fromDamageReport(
     return held > 0 && line.isRental && unitAmount > 0
       ? [
           {
-            description: line.productName,
+            description: lineDisplayName(line),
+            ...imageOf(line.imageUrl),
             quantity: line.quantity,
             unitAmount,
             total: cents(unitAmount * line.quantity),
@@ -730,7 +791,9 @@ export function fromDamageReport(
       },
     }),
     replacements: settlement.damages.map((damage) => ({
-      description: damage.productName,
+      description: damageDisplayName(damage, order.lines),
+      // The damaged LINE's photo — the same one its row carries on the comprobante.
+      ...imageOf(order.lines.find((line) => line.id === damage.lineId)?.imageUrl),
       quantity: damage.quantity,
       unitAmount: damage.unitAmount,
       amount: damage.amount,

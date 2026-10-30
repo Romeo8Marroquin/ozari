@@ -202,8 +202,12 @@ export const advanceOrder = async (
       }
 
       const storage = getStorage();
+      // Each line's STOCK POOL rides along (a variant's own shelf/fleet, else the product's), with
+      // its label snapshot — reopening onto a variant retired meanwhile is a 409 with available 0.
       const stockLines = order.serviceDetails.map((line) => ({
         productId: line.productId,
+        variantId: line.variantId,
+        variantLabel: line.variantLabel,
         quantity: line.quantity,
         isRental: line.isRental,
       }));

@@ -54,6 +54,13 @@
            NOTE: the BUCKET must also allow the app origins in its own CORS policy (DEPLOYMENT.md
            §3b.4) — CORS is a browser gate only; the real upload authorization is the presigned
            signature itself.
+         · The READ hosts are ALSO in connect-src (2026-10-29), pinned by name — `assets-stg.` and
+           `assets.`, never `*.partyrentalsgt.com`, which would open connections to every host on
+           the zone: the printed documents FETCH each row's product photo (`documentImages.ts`)
+           to re-encode it as a PNG/JPEG react-pdf can embed (it reads neither WebP nor AVIF).
+           That fetch is a CORS request, so it also needs the bucket's GET rule
+           (`modules/cloudflare-env/r2.tf`). Missing either, the PDFs still generate — without
+           photos — which is exactly the kind of silent failure this file exists to prevent.
          · connect-src ALSO lists every API origin the built app may call, because a CSP blocks what
            it does not name and the failure looks like a dead app, not a config error. It must stay
            in step with `VITE_API_URL` (Cloudflare Pages) — CHANGING THE API HOST MEANS CHANGING
@@ -120,7 +127,7 @@
         style-src 'self' 'unsafe-inline';
         script-src 'self' 'wasm-unsafe-eval';
         img-src 'self' data: blob: https://*.partyrentalsgt.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org;
-        connect-src 'self' data: https://api-staging.partyrentalsgt.com https://api.partyrentalsgt.com https://be7e742ff7f447afd256327ad57d8208.r2.cloudflarestorage.com https://nominatim.openstreetmap.org;
+        connect-src 'self' data: https://api-staging.partyrentalsgt.com https://api.partyrentalsgt.com https://be7e742ff7f447afd256327ad57d8208.r2.cloudflarestorage.com https://assets-stg.partyrentalsgt.com https://assets.partyrentalsgt.com https://nominatim.openstreetmap.org;
         worker-src 'self' blob:;
         font-src 'self';
       "

@@ -53,13 +53,17 @@ import {
   buildOrderListWhere,
   buildRentedInWindowWhere,
   computeBilledDays,
+  conflictVariantFields,
   holdsSaleStock,
   loadOrderProjectionContext,
   loadOrderTimingPreferences,
+  moveSaleStock,
+  saleStockDeltas,
   orderListInclude,
   orderListOrderBy,
   orderPricingProductSelect,
   parseOrderListQuery,
+  poolQuantity,
   priceOrderLine,
   pricedLineData,
   projectOrderDetail,
@@ -67,6 +71,7 @@ import {
   releaseSaleStock,
   richOrderInclude,
   sortAgendaRows,
+  stockKey,
   type PricedOrderLineModel,
 } from "./orders.service.js";
 
@@ -352,13 +357,17 @@ export const createOrder = async (
       const pricedLines: PricedOrderLineModel[] = [];
       for (const line of body.lines) {
         const product = productById.get(line.productId);
-        const priced = product ? priceOrderLine(line.quantity, product, billedDays) : null;
-        // A product deleted between validation and the lock = a conflict, not a server fault.
+        const priced = product
+          ? priceOrderLine(line.quantity, product, billedDays, line.variantId)
+          : null;
+        // A product deleted — or a variant retired — between validation and the lock = a
+        // conflict, not a server fault.
         if (!priced) {
           throw new OrderStockConflictError([
             {
               productId: line.productId,
               productName: product?.name ?? `#${line.productId}`,
+              ...conflictVariantFields(line.variantId, null),
               requested: line.quantity,
               available: 0,
             },
@@ -371,12 +380,13 @@ export const createOrder = async (
       // how long returned goods are being washed (which is part of how long they stay unavailable).
       const timing = await loadOrderTimingPreferences(tx);
 
-      // Availability, under the lock: rentals against the window, sales against remaining stock.
+      // Availability, under the lock, per STOCK POOL (product, or product + variant): rentals
+      // against the window, sales against remaining stock.
       const rentalIds = pricedLines.filter((line) => line.isRental).map((line) => line.productId);
       const rentedRows =
         rentalIds.length > 0 && body.pickupAt
           ? await tx.serviceDetail.groupBy({
-              by: ["productId"],
+              by: ["productId", "variantId"],
               where: buildRentedInWindowWhere(
                 rentalIds,
                 body.deliveryAt,
@@ -387,7 +397,9 @@ export const createOrder = async (
               _sum: { quantity: true },
             })
           : [];
-      const rentedByProduct = new Map(rentedRows.map((row) => [row.productId, row._sum.quantity ?? 0]));
+      const rentedByKey = new Map(
+        rentedRows.map((row) => [stockKey(row.productId, row.variantId), row._sum.quantity ?? 0]),
+      );
       const conflicts: OrderStockConflictItemModel[] = [];
       for (const line of pricedLines) {
         const product = productById.get(line.productId);
@@ -395,13 +407,16 @@ export const createOrder = async (
         if (!product) {
           continue;
         }
+        // A priced line's variant is active on its product (pricing refused it otherwise).
+        const pool = poolQuantity(product, line.variantId) ?? 0;
         const available = line.isRental
-          ? Math.max(0, product.quantity - (rentedByProduct.get(line.productId) ?? 0))
-          : product.quantity;
+          ? Math.max(0, pool - (rentedByKey.get(stockKey(line.productId, line.variantId)) ?? 0))
+          : pool;
         if (available < line.quantity) {
           conflicts.push({
             productId: product.id,
             productName: product.name,
+            ...conflictVariantFields(line.variantId, line.variantLabel),
             requested: line.quantity,
             available,
           });
@@ -420,16 +435,12 @@ export const createOrder = async (
         driverId: body.assignedUserId,
       });
 
-      // Sales consume stock permanently at confirmation (a sold unit never comes back).
+      // Sales consume stock permanently at confirmation (a sold unit never comes back) — from the
+      // variant's shelf for a variant line, else the product's (`moveSaleStock`).
       await Promise.all(
         pricedLines
           .filter((line) => !line.isRental)
-          .map((line) =>
-            tx.product.update({
-              where: { id: line.productId },
-              data: { quantity: { decrement: line.quantity } },
-            }),
-          ),
+          .map((line) => moveSaleStock(tx, line, -line.quantity)),
       );
 
       const linesTotal = pricedLines.reduce((sum, line) => sum + line.parcialPrice, 0);
@@ -476,6 +487,7 @@ export const createOrder = async (
           serviceDetails: {
             create: pricedLines.map((line) => ({
               productId: line.productId,
+              variantId: line.variantId,
               ...pricedLineData(line),
               currencyId,
             })),
@@ -635,12 +647,15 @@ export const updateOrder = async (
       const pricedLines: PricedOrderLineModel[] = [];
       for (const line of body.lines) {
         const product = productById.get(line.productId);
-        const priced = product ? priceOrderLine(line.quantity, product, billedDays) : null;
+        const priced = product
+          ? priceOrderLine(line.quantity, product, billedDays, line.variantId)
+          : null;
         if (!priced) {
           throw new OrderStockConflictError([
             {
               productId: line.productId,
               productName: product?.name ?? `#${line.productId}`,
+              ...conflictVariantFields(line.variantId, null),
               requested: line.quantity,
               available: 0,
             },
@@ -660,9 +675,10 @@ export const updateOrder = async (
         order.cancelledAt === null &&
         holding.out.concat(holding.window).includes(order.serviceStatusId);
       const holdsSale = holdsSaleStock(order);
-      // What THIS order currently has of each product, per inventory — the pool an edit gets back.
-      const currentByProduct = new Map(
-        order.serviceDetails.map((line) => [line.productId, line]),
+      // What THIS order currently has of each stock pool (product + variant — the LINE KEY), per
+      // inventory — the pool an edit gets back.
+      const currentByKey = new Map(
+        order.serviceDetails.map((line) => [stockKey(line.productId, line.variantId), line]),
       );
 
       const timing = await loadOrderTimingPreferences(tx);
@@ -671,7 +687,7 @@ export const updateOrder = async (
       const rentedRows =
         holdsRental && rentalIds.length > 0 && body.pickupAt
           ? await tx.serviceDetail.groupBy({
-              by: ["productId"],
+              by: ["productId", "variantId"],
               where: buildRentedInWindowWhere(rentalIds, body.deliveryAt, body.pickupAt, holding, {
                 turnaroundMinutes: timing.turnaroundMinutes,
                 // Excluding itself: the order is holding its own current lines, and an order can
@@ -681,47 +697,42 @@ export const updateOrder = async (
               _sum: { quantity: true },
             })
           : [];
-      const rentedByProduct = new Map(rentedRows.map((row) => [row.productId, row._sum.quantity ?? 0]));
+      const rentedByKey = new Map(
+        rentedRows.map((row) => [stockKey(row.productId, row.variantId), row._sum.quantity ?? 0]),
+      );
       for (const line of pricedLines) {
         const product = productById.get(line.productId);
         /* v8 ignore next 3 -- every priced line's product is in the map; the guard is defensive */
         if (!product) {
           continue;
         }
+        const key = stockKey(line.productId, line.variantId);
+        // A priced line's variant is active on its product (pricing refused it otherwise).
+        const pool = poolQuantity(product, line.variantId) ?? 0;
+        let available: number;
         if (line.isRental) {
           if (!holdsRental) {
             continue; // the order reserves no rental units — nothing to compete for
           }
-          const available = Math.max(
-            0,
-            product.quantity - (rentedByProduct.get(line.productId) ?? 0),
-          );
-          if (available < line.quantity) {
-            conflicts.push({
-              productId: product.id,
-              productName: product.name,
-              requested: line.quantity,
-              available,
-            });
+          available = Math.max(0, pool - (rentedByKey.get(key) ?? 0));
+        } else {
+          if (!holdsSale) {
+            // Symmetric with the rental branch: the order reserves no sale units (it was
+            // cancelled, or the goods were delivered and are with the client), so the edit moves
+            // no stock at all — nothing can be short, and refusing the paperwork would fix nothing.
+            continue;
           }
-          continue;
+          // Sale: the shelf ALREADY has this order's decrement applied, so what it may take is the
+          // remaining stock PLUS whatever it is currently holding of that pool.
+          const currentLine = currentByKey.get(key);
+          available =
+            pool + (currentLine !== undefined && !currentLine.isRental ? currentLine.quantity : 0);
         }
-        if (!holdsSale) {
-          // Symmetric with the rental branch: the order reserves no sale units (it was cancelled,
-          // or the goods were delivered and are with the client), so the edit moves no stock at all
-          // — nothing can be short, and refusing the paperwork would fix nothing.
-          continue;
-        }
-        // Sale: the shelf ALREADY has this order's decrement applied, so what it may take is the
-        // remaining stock PLUS whatever it is currently holding of that product.
-        const currentLine = currentByProduct.get(line.productId);
-        const heldHere =
-          currentLine !== undefined && !currentLine.isRental ? currentLine.quantity : 0;
-        const available = product.quantity + heldHere;
         if (available < line.quantity) {
           conflicts.push({
             productId: product.id,
             productName: product.name,
+            ...conflictVariantFields(line.variantId, line.variantLabel),
             requested: line.quantity,
             available,
           });
@@ -743,25 +754,14 @@ export const updateOrder = async (
         { gapMinutes: timing.spacingMinutes, driverId: body.assignedUserId, excludeServiceId: id },
       );
 
-      // Sale stock moves by the DIFFERENCE, and only while the order still holds it. A product that
-      // left the order gives its whole quantity back; a new one takes its whole quantity.
+      // Sale stock moves by the DIFFERENCE per stock pool, and only while the order still holds
+      // it. A pool that left the order gives its whole quantity back; a new one takes its whole
+      // quantity — on the variant's shelf or the product's (`moveSaleStock`).
       if (holdsSale) {
-        const deltas = new Map<number, number>();
-        for (const line of order.serviceDetails.filter((detail) => !detail.isRental)) {
-          deltas.set(line.productId, (deltas.get(line.productId) ?? 0) + line.quantity);
-        }
-        for (const line of pricedLines.filter((detail) => !detail.isRental)) {
-          deltas.set(line.productId, (deltas.get(line.productId) ?? 0) - line.quantity);
-        }
         await Promise.all(
-          [...deltas.entries()]
-            .filter(([, delta]) => delta !== 0)
-            .map(([productId, delta]) =>
-              tx.product.update({
-                where: { id: productId },
-                data: { quantity: { increment: delta } },
-              }),
-            ),
+          saleStockDeltas(order.serviceDetails, pricedLines).map((entry) =>
+            moveSaleStock(tx, entry, entry.delta),
+          ),
         );
       }
 
@@ -770,12 +770,15 @@ export const updateOrder = async (
       /* v8 ignore next -- the validator rejects mixed/empty currencies; the fallback is defensive */
       const currencyId = productById.get(pricedLines[0]?.productId ?? 0)?.currencyId ?? order.currencyId;
 
-      // Lines are reconciled BY PRODUCT: a line whose product survives keeps its row (and its id),
-      // one whose product left is deleted, a new product creates a row. `service_details` are part
-      // of the order's current state, not of its audit trail — the trail is `service_status_history`
-      // — so a dropped line hard-deletes, per the NO-TRASH policy.
-      const keptIds = new Set(pricedLines.map((line) => line.productId));
-      const removed = order.serviceDetails.filter((line) => !keptIds.has(line.productId));
+      // Lines are reconciled BY LINE KEY (product + variant): a line whose pool survives keeps its
+      // row (and its id), one whose pool left is deleted, a new pool creates a row — so switching a
+      // line's colour is "drop Rojo, add Azul". `service_details` are part of the order's current
+      // state, not of its audit trail — the trail is `service_status_history` — so a dropped line
+      // hard-deletes, per the NO-TRASH policy. Every kept row re-snapshots its `variantLabel`.
+      const keptKeys = new Set(pricedLines.map((line) => stockKey(line.productId, line.variantId)));
+      const removed = order.serviceDetails.filter(
+        (line) => !keptKeys.has(stockKey(line.productId, line.variantId)),
+      );
       if (removed.length > 0) {
         await tx.serviceDetail.deleteMany({
           where: { id: { in: removed.map((line) => line.id) } },
@@ -783,14 +786,19 @@ export const updateOrder = async (
       }
       await Promise.all(
         pricedLines.map((line) => {
-          const existing = currentByProduct.get(line.productId);
+          const existing = currentByKey.get(stockKey(line.productId, line.variantId));
           // The damage columns are deliberately NOT here: they belong to the settlement's door, and
           // the guard above already proved the new line can still carry them.
           const data = { ...pricedLineData(line), currencyId };
           return existing
             ? tx.serviceDetail.update({ where: { id: existing.id }, data })
             : tx.serviceDetail.create({
-                data: { ...data, serviceId: id, productId: line.productId },
+                data: {
+                  ...data,
+                  serviceId: id,
+                  productId: line.productId,
+                  variantId: line.variantId,
+                },
               });
         }),
       );
@@ -932,7 +940,15 @@ export const deleteOrder = async (
           id: true,
           cancelledAt: true,
           deliveredAt: true,
-          serviceDetails: { select: { productId: true, quantity: true, isRental: true } },
+          serviceDetails: {
+            select: {
+              productId: true,
+              variantId: true,
+              variantLabel: true,
+              quantity: true,
+              isRental: true,
+            },
+          },
           evidences: { select: { r2Key: true } },
         },
       });
@@ -1149,7 +1165,16 @@ export const getOrderAvailability = async (
     const holding = holdingStatusIds(await getStatusCatalog());
     const products = await prismaClient.product.findMany({
       where: { id: { in: body.productIds }, isActive: true },
-      select: { id: true, quantity: true, productBusinessTypeId: true },
+      select: {
+        id: true,
+        quantity: true,
+        productBusinessTypeId: true,
+        variants: {
+          where: { isActive: true },
+          orderBy: { id: "asc" },
+          select: { id: true, quantity: true },
+        },
+      },
     });
     const rentalIds = products
       .filter((product) => product.productBusinessTypeId === BusinessTypeEnum.RENT)
@@ -1172,7 +1197,7 @@ export const getOrderAvailability = async (
     const rentedRows =
       rentalIds.length > 0 && body.pickupAt
         ? await prismaClient.serviceDetail.groupBy({
-            by: ["productId"],
+            by: ["productId", "variantId"],
             where: buildRentedInWindowWhere(
               rentalIds,
               body.deliveryAt,
@@ -1188,19 +1213,33 @@ export const getOrderAvailability = async (
             _sum: { quantity: true },
           })
         : [];
-    const rentedByProduct = new Map(rentedRows.map((row) => [row.productId, row._sum.quantity ?? 0]));
+    const rentedByKey = new Map(
+      rentedRows.map((row) => [stockKey(row.productId, row.variantId), row._sum.quantity ?? 0]),
+    );
 
+    // Per STOCK POOL: the product's own, or each active variant's (the product's `available` is
+    // then their sum — `null` while a rental has no window, exactly like a plain rental).
     const availability: ProductAvailabilityModel[] = products.map((product) => {
       const isRental = product.productBusinessTypeId === BusinessTypeEnum.RENT;
-      let available: number | null;
-      if (!isRental) {
-        available = product.quantity;
-      } else if (body.pickupAt) {
-        available = Math.max(0, product.quantity - (rentedByProduct.get(product.id) ?? 0));
-      } else {
-        available = null;
+      const availableFor = (pool: number, variantId: number | null): number | null => {
+        if (!isRental) {
+          return pool;
+        }
+        return body.pickupAt
+          ? Math.max(0, pool - (rentedByKey.get(stockKey(product.id, variantId)) ?? 0))
+          : null;
+      };
+      if (product.variants.length === 0) {
+        return { productId: product.id, available: availableFor(product.quantity, null) };
       }
-      return { productId: product.id, available };
+      const variants = product.variants.map((variant) => ({
+        variantId: variant.id,
+        available: availableFor(variant.quantity, variant.id),
+      }));
+      const available = variants.some((variant) => variant.available === null)
+        ? null
+        : variants.reduce((sum, variant) => sum + (variant.available ?? 0), 0);
+      return { productId: product.id, available, variants };
     });
 
     // The DRIVER half — only when the form has reached the assignee. Same two-step rule as the

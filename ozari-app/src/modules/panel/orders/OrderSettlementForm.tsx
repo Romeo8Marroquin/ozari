@@ -15,6 +15,7 @@ import { decimalInput, integerInput } from '@utils/numericInput';
 import DamageReportButton from '../documents/DamageReportButton';
 import { usePanelNavigate } from '../PanelNavContext';
 import { FormSection } from '../products/ProductFormChrome';
+import { lineDisplayName } from '../products/productVariations';
 import { formatMoney } from './orderEstimate';
 import OrderDepositCollectionModal from './OrderDepositCollectionModal';
 import {
@@ -228,7 +229,7 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
                   className="flex min-w-0 flex-col gap-field rounded-control bg-charcoal/[0.03] p-4"
                 >
                   <p className="min-w-0 break-words text-sm font-medium text-charcoal">
-                    {line.productName}
+                    {lineDisplayName(line)}
                   </p>
                   {/* `gap-y-field`: a floated label paints above its own box, so the stacked
                       (phone) layout needs the clearance; the columns do not. */}
@@ -240,7 +241,7 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
                         {...integerInput}
                         label={t(`${KEY}.fields.damagedLabel`)}
                         placeholder={t(`${KEY}.fields.quantityPlaceholder`)}
-                        aria-label={t(`${KEY}.fields.damagedAria`, { product: line.productName })}
+                        aria-label={t(`${KEY}.fields.damagedAria`, { product: lineDisplayName(line) })}
                         instructions={t(`${KEY}.fields.damagedHint`, {
                           max: line.quantity,
                           unit: money(line.replacementPrice),
@@ -255,7 +256,7 @@ const OrderSettlementForm: React.FC<{ order: OrderDetail; deposit: OrderSecurity
                         optionalLabel
                         label={t(`${KEY}.fields.noteLabel`)}
                         placeholder={t(`${KEY}.fields.notePlaceholder`)}
-                        aria-label={t(`${KEY}.fields.noteAria`, { product: line.productName })}
+                        aria-label={t(`${KEY}.fields.noteAria`, { product: lineDisplayName(line) })}
                       />
                     </div>
                   </div>

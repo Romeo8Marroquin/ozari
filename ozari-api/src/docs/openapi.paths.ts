@@ -22,6 +22,7 @@ const EXAMPLE_EMAIL = "ana.garcia@example.com";
 // The illustrative product reused across every /products example.
 const EXAMPLE_PRODUCT_NAME = "Mesa redonda";
 const EXAMPLE_PRODUCT_DESCRIPTION = "Mesa para 8 personas";
+const EXAMPLE_PRODUCT_IMAGE_URL = "https://cdn.example.com/products/7/hero.webp";
 const EXAMPLE_CURRENCY_NAME = "Quetzal Guatemalteco";
 // The illustrative walk-in order reused across every /orders and /client-registries example.
 const EXAMPLE_CLIENT_NAME = "María López";
@@ -672,7 +673,7 @@ export const paths: OpenAPIV3.PathsObject = {
               sellPrice: null,
               rentTimeUnit: "Día",
               rentTimeUnitId: 2,
-              images: [{ id: 1, url: "https://cdn.example.com/products/7/hero.webp", isPrimary: true, sortOrder: 0 }],
+              images: [{ id: 1, url: EXAMPLE_PRODUCT_IMAGE_URL, isPrimary: true, sortOrder: 0 }],
               details: [{ id: 12, detail: "Blanco", detailType: "Color", detailTypeId: 1 }],
               inStock: true,
               available: 35,
@@ -698,7 +699,11 @@ export const paths: OpenAPIV3.PathsObject = {
         "**conditional price rule** applies by business type — Alquiler: `rentPrice` + " +
         "`rentTimeUnitId`, no `sellPrice`; Venta: `sellPrice` only. `images` reference R2 keys " +
         "minted by `/products/images/upload-url` (files already uploaded; at most one `isPrimary`, " +
-        "defaulting to the first). Any rule violation or unknown lookup id is a `400`. Returns the " +
+        "defaulting to the first). **Variations** (`options` + `variants`, see " +
+        "`CreateProductRequest`) are written in the SAME transaction; every `id` is forbidden on " +
+        "create, and `quantity` is forbidden once options exist (each variant has its own stock). " +
+        "**Body limit 32kb** for this route and the PUT (every other route stays 10kb). Any rule " +
+        "violation or unknown lookup id is a `400`. Returns the " +
         "created product in the SAME role-projected shape the list uses. Authenticated limiter " +
         "(100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
@@ -735,6 +740,8 @@ export const paths: OpenAPIV3.PathsObject = {
             rentTimeUnit: "Día",
             rentTimeUnitId: 2,
             images: [],
+            options: [],
+            variants: [],
             details: [{ id: 12, detail: "Blanco", detailType: "Color", detailTypeId: 1 }],
             inStock: true,
             available: 40,
@@ -747,7 +754,10 @@ export const paths: OpenAPIV3.PathsObject = {
         ),
         "400": errorResponse(
           "A field failed validation — bad lookup id, out-of-range value, a conditional-pricing " +
-            "violation, or an image key already owned by another product (unique `r2_key`).",
+            "violation, an image key already owned by another product (unique `r2_key`), or a " +
+            "variation rule (`quantityWithVariants`, `idsForbiddenOnCreate`, a limit, a duplicate " +
+            "option/value name or combination, `variantPricingMismatch`, " +
+            "`variantSecurityDepositAboveReplacement`, …).",
           400,
           "Los precios enviados no corresponden al tipo de negocio del producto.",
         ),
@@ -767,7 +777,9 @@ export const paths: OpenAPIV3.PathsObject = {
       description:
         "Returns a single **active** product in the exact role-projected shape of a list item " +
         "(Admin sees the availability + internal fields incl. the Alquiler fleet `total`, a Client " +
-        "sees only the shared catalog fields). A malformed id and an unknown/soft-deleted product " +
+        "sees only the shared catalog fields). For an Admin each variant also carries `usage` " +
+        "(`{ lines, holding }` — how order lines use it; the edit form's remove copy branches on " +
+        "it). A malformed id and an unknown/soft-deleted product " +
         "are both a plain `404`. **Admin + Client only** (any other role gets a `403`). " +
         "Authenticated limiter (100/min) — the same one as the list.",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
@@ -795,7 +807,60 @@ export const paths: OpenAPIV3.PathsObject = {
             sellPrice: null,
             rentTimeUnit: "Día",
             rentTimeUnitId: 2,
-            images: [{ id: 1, url: "https://cdn.example.com/products/7/hero.webp", isPrimary: true, sortOrder: 0 }],
+            images: [{ id: 1, url: EXAMPLE_PRODUCT_IMAGE_URL, isPrimary: true, sortOrder: 0 }],
+            coverImageUrl: EXAMPLE_PRODUCT_IMAGE_URL,
+            options: [
+              {
+                id: 3,
+                name: "Color",
+                sortOrder: 0,
+                values: [
+                  {
+                    id: 10,
+                    name: "Rojo",
+                    sortOrder: 0,
+                    images: [{ id: 7, url: "https://cdn.example.com/products/7/rojo.webp", isPrimary: true, sortOrder: 0 }],
+                  },
+                  { id: 11, name: "Azul", sortOrder: 1, images: [] },
+                ],
+              },
+            ],
+            variants: [
+              {
+                id: 55,
+                valueIds: [10],
+                label: "Rojo",
+                isDefault: true,
+                rentPrice: 75,
+                securityDeposit: 300,
+                description: EXAMPLE_PRODUCT_DESCRIPTION,
+                imageUrl: "https://cdn.example.com/products/7/rojo.webp",
+                quantity: 20,
+                available: 15,
+                inStock: true,
+                total: 20,
+                replacementPrice: 900,
+                overrides: {},
+                usage: { lines: 3, holding: 1 },
+              },
+              {
+                id: 56,
+                valueIds: [11],
+                label: "Azul",
+                isDefault: false,
+                rentPrice: 60,
+                securityDeposit: 0,
+                description: EXAMPLE_PRODUCT_DESCRIPTION,
+                imageUrl: EXAMPLE_PRODUCT_IMAGE_URL,
+                quantity: 20,
+                available: 20,
+                inStock: true,
+                total: 20,
+                replacementPrice: 900,
+                overrides: { rentPrice: 60, securityDeposit: 0 },
+                usage: { lines: 0, holding: 0 },
+              },
+            ],
             details: [{ id: 12, detail: "Blanco", detailType: "Color", detailTypeId: 1 }],
             inStock: true,
             available: 35,
@@ -821,8 +886,13 @@ export const paths: OpenAPIV3.PathsObject = {
         "current rows in ONE transaction (kept rows update, absent rows are deleted, new rows are " +
         "created; removed photos' R2 objects are deleted only AFTER the commit). Requires the " +
         "`Admin` role. The same conditional-price and gallery rules as create apply. A kept " +
-        "image/detail id that no longer exists (a concurrent edit) is a `409` — reload and retry. " +
-        "Returns the updated product in the role-projected list shape. Authenticated limiter (100/min).",
+        "image/detail/option/value/variant id that no longer exists (a concurrent edit) is a `409` " +
+        "— reload and retry. **Variations** reconcile in the same transaction (options → values → " +
+        "every photo set → variants with a two-phase combination-key write, so swapping two " +
+        "variants' combinations works); a removed variant an order line references is RETIRED " +
+        "(tombstoned), else hard-deleted, and the response reports which in `variantOutcome`. " +
+        "**Body limit 32kb.** Returns the updated product in the role-projected list shape (plus " +
+        "each variant's `usage` for an Admin). Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         {
@@ -851,11 +921,14 @@ export const paths: OpenAPIV3.PathsObject = {
           { id: 1, isPrimary: true },
           { key: "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c0f.webp" },
         ],
+        options: [],
+        variants: [],
       }),
       responses: {
         "200": dataResponse(
-          "The updated product, projected for the caller's role (Admin — full view).",
-          "ProductListItem",
+          "The updated product, projected for the caller's role (Admin — full view), plus " +
+            "`variantOutcome` when the save removed a variant.",
+          "UpdateProductResponse",
           {
             id: 7,
             name: EXAMPLE_PRODUCT_NAME,
@@ -869,20 +942,26 @@ export const paths: OpenAPIV3.PathsObject = {
             sellPrice: null,
             rentTimeUnit: "Día",
             rentTimeUnitId: 2,
-            images: [{ id: 1, url: "https://cdn.example.com/products/7/hero.webp", isPrimary: true, sortOrder: 0 }],
+            images: [{ id: 1, url: EXAMPLE_PRODUCT_IMAGE_URL, isPrimary: true, sortOrder: 0 }],
+            coverImageUrl: EXAMPLE_PRODUCT_IMAGE_URL,
+            options: [],
+            variants: [],
             details: [{ id: 12, detail: "Blanco", detailType: "Color", detailTypeId: 1 }],
             inStock: true,
             available: 35,
             total: 40,
             replacementPrice: 900,
             isActive: true,
+            variantOutcome: { retired: [{ id: 54, label: "Verde" }], deleted: 1 },
           },
           "Product updated",
         ),
         "400": errorResponse(
           "A field failed validation — bad lookup id, a conditional-pricing violation, a malformed " +
-            "gallery slot (must carry exactly one of `id`/`key`), an image/detail id that doesn't " +
-            "belong to the product, or an image key already owned by another product.",
+            "gallery slot (must carry exactly one of `id`/`key`), an image/detail/option/value/" +
+            "variant id that doesn't belong to the product (or a value moved to another option, or " +
+            "a retired variant's id), an image key already owned by another product, or any " +
+            "variation rule create enforces.",
           400,
           "Los precios enviados no corresponden al tipo de negocio del producto.",
         ),
@@ -890,8 +969,14 @@ export const paths: OpenAPIV3.PathsObject = {
         "403": adminOnly(),
         "404": errorResponse("Unknown, malformed, or soft-deleted product id.", 404, "Product not found"),
         "409": errorResponse(
-          "A kept image/detail id no longer exists — the product changed under the editor " +
-            "(a concurrent save/delete). Reload and retry.",
+          "Three causes, told apart by the message key and `data`: (1) `conflict` (no `data`) — a " +
+            "kept image/detail/option/value/variant id no longer exists, the product changed under " +
+            "the editor (a concurrent save/delete); reload and retry. (2) `variantInUse` — the save " +
+            "removes a variant that open or future orders HOLD; `data.conflicts` lists each one as " +
+            "`ProductVariantConflict` (`{ variantId, label, orderIds }`). (3) `stockModeInUse` — the " +
+            "save switches between product-level and per-variant stock (adds the first options, or " +
+            "removes them all) while open or future orders hold the pool that would vanish; " +
+            "`data.orderIds` lists them. Finished and cancelled orders never block.",
           409,
           "El producto cambió mientras lo editabas. Recarga la página e intenta de nuevo.",
         ),
@@ -906,9 +991,11 @@ export const paths: OpenAPIV3.PathsObject = {
       description:
         "Deletes a product under the NO-TRASH policy: the row survives as a soft-deleted tombstone " +
         "ONLY when order history references it (erasing it would falsify past orders); otherwise " +
-        "it is hard-deleted. Its detail and gallery rows are hard-deleted either way, and the " +
-        "gallery's R2 objects are removed after the commit in one batched call (best-effort). " +
-        "Requires the `Admin` role. Authenticated limiter (100/min).",
+        "it is hard-deleted. Its detail rows, EVERY photo set (showcase and option values) and its " +
+        "options/values are hard-deleted either way, and the photos' R2 objects are removed after " +
+        "the commit in one batched call (best-effort). Variants follow the same rule as the " +
+        "product: referenced by an order line → tombstoned, else hard-deleted. The response says " +
+        "WHICH branch happened (`outcome`). Requires the `Admin` role. Authenticated limiter (100/min).",
       security: [{ ApiKeyAuth: [], BearerAuth: [] }],
       parameters: [
         {
@@ -920,7 +1007,13 @@ export const paths: OpenAPIV3.PathsObject = {
         },
       ],
       responses: {
-        "200": messageResponse("The product is gone from the catalog.", "Product deleted"),
+        "200": dataResponse(
+          "The product is gone from the catalog; `outcome` says whether it was hard-deleted or " +
+            "deactivated (kept for order history).",
+          "DeleteProductResponse",
+          { outcome: "deactivated" },
+          "Product deleted",
+        ),
         "401": unauthorized(STALE_TOKEN_401),
         "403": adminOnly(),
         "404": errorResponse("Unknown, malformed, or already-deleted product id.", 404, "Product not found"),
@@ -938,7 +1031,8 @@ export const paths: OpenAPIV3.PathsObject = {
       description:
         "Returns short-lived (5 min) **presigned PUT URLs** so the browser uploads product photos " +
         "STRAIGHT to R2 — the image bytes never pass through the API. Requires the `Admin` role. " +
-        "1–8 files per call; each file's content type must be a whitelisted image type " +
+        "1–40 files per call (a product's photo total across its showcase and option values); " +
+        "each file's content type must be a whitelisted image type " +
         "(`image/jpeg`, `image/png`, `image/webp`, `image/avif`) and its exact size ≤ 5 MB — both " +
         "are bound into the signature, so a minted URL can't upload anything else. Reference the " +
         "returned `key`s in `POST /products`. Authenticated limiter (100/min).",
@@ -963,7 +1057,7 @@ export const paths: OpenAPIV3.PathsObject = {
           "Upload URLs created",
         ),
         "400": errorResponse(
-          "Missing/empty file list, more than 8 files, a non-whitelisted content type, or an invalid size.",
+          "Missing/empty file list, more than 40 files, a non-whitelisted content type, or an invalid size.",
           400,
           "El tipo de archivo no está permitido.",
         ),
@@ -996,7 +1090,7 @@ export const paths: OpenAPIV3.PathsObject = {
                 name: EXAMPLE_PRODUCT_NAME,
                 category: "Mesas",
                 businessType: "Alquiler",
-                imageUrl: "https://cdn.example.com/products/7/hero.webp",
+                imageUrl: EXAMPLE_PRODUCT_IMAGE_URL,
                 placed: true,
               },
             ],
@@ -1219,6 +1313,7 @@ export const paths: OpenAPIV3.PathsObject = {
                 id: 31,
                 productId: 3,
                 productName: EXAMPLE_LINE_PRODUCT_NAME,
+                imageUrl: "https://cdn.example.com/products/3/hero.webp",
                 isRental: true,
                 quantity: 25,
                 unitaryPrice: 6,
@@ -1241,14 +1336,16 @@ export const paths: OpenAPIV3.PathsObject = {
         "400": errorResponse(
           "Validation failed (unknown registry/event type/product, a delivery scheduled in the " +
             "past, incoherent pickup for the order's mode, bad snapshot fields, unsupported rent " +
-            "unit, mixed currencies…).",
+            "unit, mixed currencies, the same (product, variant) pair twice, a line's variant: " +
+            "`variantRequired` / `variantForbidden` / `invalidLineVariant`…).",
           400,
           "An order with rentals requires a pickup time",
         ),
         "401": unauthorized(STALE_TOKEN_401),
         "403": adminOnly(),
         "409": errorResponse(
-          "The window cannot be satisfied, and `data` says WHICH rule refused — the three payloads " +
+          "The window cannot be satisfied (stock is counted per POOL: a product without " +
+            "variations, or each variant), and `data` says WHICH rule refused — the three payloads " +
             "are deliberately distinct, because they land on different fields: `conflicts` (a list " +
             "of `OrderStockConflictItem`) = lines lacking stock → the line's quantity input; " +
             "`driverConflict` (`DriverConflict` + `driverName` + `gapMinutes`) = the assigned " +
@@ -1272,7 +1369,8 @@ export const paths: OpenAPIV3.PathsObject = {
         "**Admin only.** The order form's live probe, answering both scheduling questions on one " +
         "keystroke. **Goods:** each product's takeable amount for the window — rentals = fleet " +
         "minus what's held (`null` until a pickup is set), sales = current stock; exact counts " +
-        "(the admin runs the business). **Driver:** sent only when the body carries an " +
+        "(the admin runs the business). A product WITH variants answers per variant in " +
+        "`variants[]` (each its own pool) and its `available` is their sum. **Driver:** sent only when the body carries an " +
         "`assignedUserId` — whether either event would overlap a block already on that driver's " +
         "day, plus whether the order's own two events are too close to each other. An `EDIT` " +
         "passes `excludeOrderId` so both halves drop the order from their own counts, and a " +
@@ -1291,7 +1389,14 @@ export const paths: OpenAPIV3.PathsObject = {
         "200": dataResponse("Per-product availability for the window, plus the driver's.", "OrderAvailabilityResponse", {
           availability: [
             { productId: 3, available: 10 },
-            { productId: 4, available: 120 },
+            {
+              productId: 4,
+              available: 120,
+              variants: [
+                { variantId: 55, available: 80 },
+                { variantId: 56, available: 40 },
+              ],
+            },
           ],
           driver: {
             available: false,
@@ -1407,6 +1512,7 @@ export const paths: OpenAPIV3.PathsObject = {
                 id: 31,
                 productId: 3,
                 productName: EXAMPLE_LINE_PRODUCT_NAME,
+                imageUrl: "https://cdn.example.com/products/3/hero.webp",
                 isRental: true,
                 quantity: 25,
                 unitaryPrice: 6,
@@ -1452,9 +1558,11 @@ export const paths: OpenAPIV3.PathsObject = {
         "absent from the body on purpose, exactly as it never touches the lifecycle. This endpoint " +
         "rewrites what was AGREED; what HAPPENED belongs to its own door. Otherwise a declarative " +
         "full-state save would erase a recorded payment every time somebody fixed a typo.\n\n" +
-        "Everything is re-derived, nothing trusted: prices come from the product rows and the new " +
-        "billed window (so moving the dates re-bills the order), sale stock moves by the " +
-        "DIFFERENCE and only while the order still holds it (`holdsSaleStock`), and rental " +
+        "Everything is re-derived, nothing trusted: prices come from the product rows (a variant's " +
+        "EFFECTIVE values, and its label snapshot refreshes) and the new " +
+        "billed window (so moving the dates re-bills the order), lines reconcile by their " +
+        "(product, variant) pair, sale stock moves by the DIFFERENCE per pool (the variant row " +
+        "when the line has one) and only while the order still holds it (`holdsSaleStock`), and rental " +
         "availability plus the logistics pad are re-checked **excluding this order** — it is " +
         "holding its own current lines and already occupies its own blocks, so it can never " +
         "conflict with itself. The pad is checked against the NEW assignee, so handing the order " +
@@ -1512,6 +1620,7 @@ export const paths: OpenAPIV3.PathsObject = {
                   id: 31,
                   productId: 3,
                   productName: EXAMPLE_LINE_PRODUCT_NAME,
+                  imageUrl: "https://cdn.example.com/products/3/hero.webp",
                   isRental: true,
                   quantity: 30,
                   unitaryPrice: 6,
@@ -1534,8 +1643,9 @@ export const paths: OpenAPIV3.PathsObject = {
           "Order updated",
         ),
         "400": errorResponse(
-          "The body failed the order contract (same rules as create; plus the delivery may not be " +
-            "moved into the past).",
+          "The body failed the order contract (same rules as create — incl. the line variant rules " +
+            "`variantRequired` / `variantForbidden` / `invalidLineVariant`; plus the delivery may " +
+            "not be moved into the past).",
           400,
           "The pickup must be after the delivery.",
         ),

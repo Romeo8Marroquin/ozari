@@ -99,6 +99,8 @@ const rawOrder = (overrides: Record<string, unknown> = {}) => ({
     {
       id: 31,
       productId: 3,
+      variantId: null,
+      variantLabel: null,
       quantity: 25,
       isRental: true,
       unitaryPrice: new Prisma.Decimal("6.00"),
@@ -107,7 +109,7 @@ const rawOrder = (overrides: Record<string, unknown> = {}) => ({
       replacementPrice: null,
       damagedQuantity: 0,
       damageNote: null,
-      product: { name: "Silla plegable" },
+      product: { name: "Silla plegable", productImages: [] },
     },
   ],
   serviceExtras: [],
@@ -136,8 +138,8 @@ function mockTx(order: ReturnType<typeof rawOrder> | null = rawOrder()) {
     // Sale stock moves on cancel/reopen; reopening also re-checks the rental fleet.
     product: {
       findMany: vi.fn().mockResolvedValue([
-        { id: 3, name: "Silla plegable", quantity: 40 },
-        { id: 4, name: "Vasos desechables", quantity: 100 },
+        { id: 3, name: "Silla plegable", quantity: 40, variants: [] as Array<{ id: number; quantity: number }> },
+        { id: 4, name: "Vasos desechables", quantity: 100, variants: [] as Array<{ id: number; quantity: number }> },
       ]),
       update: vi.fn().mockResolvedValue({}),
     },
@@ -240,6 +242,8 @@ describe("advanceOrder", () => {
           {
             id: 31,
             productId: 3,
+            variantId: null,
+            variantLabel: null,
             quantity: 5,
             isRental: true,
             unitaryPrice: new Prisma.Decimal("6.00"),
@@ -248,7 +252,7 @@ describe("advanceOrder", () => {
             replacementPrice: new Prisma.Decimal("120"),
             damagedQuantity: 0,
             damageNote: null,
-            product: { name: "Silla plegable" },
+            product: { name: "Silla plegable", productImages: [] },
           },
         ],
         ...overrides,
@@ -422,20 +426,24 @@ describe("advanceOrder", () => {
           {
             id: 31,
             productId: 3,
+            variantId: null,
+            variantLabel: null,
             quantity: 25,
             isRental: true,
             unitaryPrice: new Prisma.Decimal("6.00"),
             parcialPrice: new Prisma.Decimal("150.00"),
-            product: { name: "Silla plegable" },
+            product: { name: "Silla plegable", productImages: [] },
           },
           {
             id: 32,
             productId: 4,
+            variantId: null,
+            variantLabel: null,
             quantity: 10,
             isRental: false,
             unitaryPrice: new Prisma.Decimal("3.50"),
             parcialPrice: new Prisma.Decimal("35.00"),
-            product: { name: "Vasos" },
+            product: { name: "Vasos", productImages: [] },
           },
         ],
       }),
@@ -541,11 +549,13 @@ describe("advanceOrder", () => {
           {
             id: 32,
             productId: 4,
+            variantId: null,
+            variantLabel: null,
             quantity: 10,
             isRental: false,
             unitaryPrice: new Prisma.Decimal("3.50"),
             parcialPrice: new Prisma.Decimal("35.00"),
-            product: { name: "Vasos" },
+            product: { name: "Vasos", productImages: [] },
           },
         ],
       }),
@@ -556,7 +566,7 @@ describe("advanceOrder", () => {
     expect(tx.$queryRaw).toHaveBeenCalled();
     expect(tx.product.update).toHaveBeenCalledWith({
       where: { id: 4 },
-      data: { quantity: { decrement: 10 } },
+      data: { quantity: { increment: -10 } },
     });
     expect(sendOzariSuccess).toHaveBeenCalled();
   });
@@ -572,8 +582,8 @@ describe("advanceOrder", () => {
     // The fleet is now fully committed for this order's window. (A null-sum row — a group with no
     // quantity — counts as zero held, like everywhere else availability is derived.)
     (tx.serviceDetail.groupBy as Mock).mockResolvedValue([
-      { productId: 3, _sum: { quantity: 40 } },
-      { productId: 99, _sum: { quantity: null } },
+      { productId: 3, variantId: null, _sum: { quantity: 40 } },
+      { productId: 99, variantId: null, _sum: { quantity: null } },
     ]);
 
     await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
@@ -611,6 +621,114 @@ describe("advanceOrder", () => {
       undefined,
       { conflicts: [{ productId: 3, productName: "#3", requested: 25, available: 0 }] },
     );
+  });
+
+  describe("reopening VARIANT lines", () => {
+    const cancelledWith = (serviceDetails: unknown[]) =>
+      rawOrder({
+        serviceStatusId: 2,
+        serviceStatus: { id: 2, name: "Cancelado" },
+        cancelledAt: new Date("2026-07-20T10:00:00.000Z"),
+        serviceDetails: serviceDetails as ReturnType<typeof rawOrder>["serviceDetails"],
+      });
+    const variantLine = (overrides: Record<string, unknown>) => ({
+      id: 33,
+      productId: 7,
+      variantId: 71,
+      variantLabel: "Rojo",
+      quantity: 3,
+      isRental: false,
+      unitaryPrice: new Prisma.Decimal("3.50"),
+      parcialPrice: new Prisma.Decimal("10.50"),
+      securityDeposit: null,
+      replacementPrice: null,
+      damagedQuantity: 0,
+      damageNote: null,
+      product: { name: "Mantel", productImages: [] },
+      variant: null,
+      ...overrides,
+    });
+
+    it("re-takes a variant's sale units from ITS shelf", async () => {
+      const tx = mockTx(cancelledWith([variantLine({})])) as ReturnType<typeof mockTx> & {
+        productVariant: { update: Mock };
+      };
+      tx.productVariant = { update: vi.fn().mockResolvedValue({}) };
+      (tx.product.findMany as Mock).mockResolvedValue([
+        { id: 7, name: "Mantel", quantity: 0, variants: [{ id: 71, quantity: 5 }] },
+      ]);
+      await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
+
+      expect(tx.productVariant.update).toHaveBeenCalledWith({
+        where: { id: 71 },
+        data: { quantity: { increment: -3 } },
+      });
+      expect(tx.product.update).not.toHaveBeenCalled();
+      expect(sendOzariSuccess).toHaveBeenCalled();
+    });
+
+    it("checks a variant RENTAL against its own fleet, and names it in the 409", async () => {
+      const tx = mockTx(
+        cancelledWith([variantLine({ productId: 8, variantId: 81, variantLabel: "Dorada", isRental: true, quantity: 4 })]),
+      );
+      (tx.product.findMany as Mock).mockResolvedValue([
+        { id: 8, name: "Silla Tiffany", quantity: 0, variants: [{ id: 81, quantity: 10 }] },
+      ]);
+      // 8 of the gold chairs are held elsewhere (the product-level row does not count against it).
+      (tx.serviceDetail.groupBy as Mock).mockResolvedValue([
+        { productId: 8, variantId: 81, _sum: { quantity: 8 } },
+        { productId: 8, variantId: null, _sum: { quantity: 30 } },
+      ]);
+      await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
+
+      expect(sendOzariError).toHaveBeenCalledWith(
+        expect.anything(),
+        HttpEnum.CONFLICT,
+        "orders.advance.stockConflict",
+        undefined,
+        {
+          conflicts: [
+            {
+              productId: 8,
+              productName: "Silla Tiffany",
+              variantId: 81,
+              variantLabel: "Dorada",
+              requested: 4,
+              available: 2,
+            },
+          ],
+        },
+      );
+    });
+
+    it("REFUSES to reopen onto a variant RETIRED meanwhile — available 0, label quoted", async () => {
+      const tx = mockTx(cancelledWith([variantLine({})]));
+      // The product is still there, but variant 71 is no longer one of its ACTIVE variants.
+      (tx.product.findMany as Mock).mockResolvedValue([
+        { id: 7, name: "Mantel", quantity: 0, variants: [{ id: 72, quantity: 9 }] },
+      ]);
+      await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
+
+      expect(tx.service.update).not.toHaveBeenCalled();
+      expect(sendOzariError).toHaveBeenCalledWith(
+        expect.anything(),
+        HttpEnum.CONFLICT,
+        "orders.advance.stockConflict",
+        undefined,
+        {
+          conflicts: [
+            {
+              productId: 7,
+              productName: "Mantel",
+              variantId: 71,
+              variantLabel: "Rojo",
+              requested: 3,
+              available: 0,
+            },
+          ],
+        },
+      );
+    });
   });
 
   it("reopens an order with NO lines without touching stock at all", async () => {
@@ -657,11 +775,13 @@ describe("advanceOrder", () => {
           {
             id: 31,
             productId: 4,
+            variantId: null,
+            variantLabel: null,
             quantity: 10,
             isRental: false,
             unitaryPrice: new Prisma.Decimal("3.50"),
             parcialPrice: new Prisma.Decimal("35.00"),
-            product: { name: "Vasos" },
+            product: { name: "Vasos", productImages: [] },
           },
         ],
       }),

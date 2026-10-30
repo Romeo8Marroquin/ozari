@@ -55,6 +55,20 @@ describe('useProductImageUploads', () => {
     expect(axiosPut).not.toHaveBeenCalled();
   });
 
+  it('uploads SEVERAL photo sets (showcase + option values) in ONE presign call', async () => {
+    apiPost.mockResolvedValue(presignResponse(['products/s.png', 'products/v1.png', 'products/v2.png']));
+    axiosPut.mockResolvedValue({});
+    const { result } = renderHook(() => useProductImageUploads());
+    const keys = await result.current.uploadImages(
+      [image('s'), existingImage('kept', 3)],
+      [image('v1')],
+      [],
+      [image('v2')],
+    );
+    expect(apiPost).toHaveBeenCalledTimes(1);
+    expect(keys).toEqual({ s: 'products/s.png', v1: 'products/v1.png', v2: 'products/v2.png' });
+  });
+
   it('mints presigned URLs then PUTs each file straight to R2, returning keys by local id', async () => {
     apiPost.mockResolvedValue(presignResponse(['products/k1.png', 'products/k2.png']));
     axiosPut.mockResolvedValue({});

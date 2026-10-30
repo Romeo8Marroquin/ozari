@@ -2,7 +2,7 @@
 
 > **Status: PHASES 0, 1 and 2 BUILT** (Phase 1 refined by the 1b legibility + layout pass,
 > 2026-08-25/26; Phase 2 — the cotización — 2026-08-26; the security deposit and the REPORTE DE
-> DAÑOS — §2b/§2c — 2026-10-27). Phase 3 planned. Owner decisions below are settled;
+> DAÑOS — §2b/§2c — 2026-10-27; a product photo per line and the variation name — §2d — 2026-10-29). Phase 3 planned. Owner decisions below are settled;
 > read this file before writing any of it. Fulfils EPIC-2-ORDERS §5 item 6 ("recibos + cotizaciones").
 >
 > **Scope: PDF only.** No FEL, no fiscal certification, no invoice numbering authority — the money
@@ -148,6 +148,35 @@ It is the same template file and the same furniture (`DocumentFrame`, `LineTable
 pagination rules lands on all three documents at once. It prints no standing notes (it is not an
 offer to accept), so its foot reserves no note lines.
 
+### 2d. The product photo on each line (owner, 2026-10-29)
+
+Every product row on all three documents can carry its product's MAIN photo as a small thumbnail
+beside the description.
+
+| # | Decision |
+|---|---|
+| 34 | **ONE photo per line, decided in ONE place.** The API sends `imageUrl` on every order line (`OrderLine` in OpenAPI), and `lineImageUrl()` in `orders.service.ts` is the only code that picks it: the primary photo, else the first by `sortOrder`, else none. The include fetches just that one row (`orderBy isPrimary desc, sortOrder asc` + `take: 1`). It is LIVE, not a snapshot: re-download an old order after its product's photo changed and the new photo prints. ⚠️ Product VARIATIONS (2026-10-29, #40) changed WHICH photo a line shows by changing that helper alone. No template, model or second field learns the rule. The cotización has no saved line, so `fromOrderForm` reads the same rule off the catalog product it already holds (`primaryImageUrl`). |
+| 35 | **Contain, never cropped, in a square.** An **18pt** box with `objectFit: 'contain'`, centred, so a tall chair and a wide table both show whole. A row with no photo looks exactly as before. In a table where ANY row has a photo, a row without one keeps an empty gutter of the same width (width only: no height, no box), so the descriptions stay in one column. A table with no photos at all is byte-for-byte the old JSX. |
+| 36 | **The size is the one-page targets', not taste's (#15, #20).** The photo reaches 2pt into the row's padding (`THUMB_BLEED`; the TEXT keeps all of its own). So a one-line row grows from 22pt to 24pt, and a wrapped row does not grow at all. Measured with a photo on EVERY line: plain `--free` holds up to 20pt, but `--free --deposit=held` and `--damage-report --banks=3` are one page without photos and go to two at 19pt and 20pt. 18pt is the largest size that keeps every documented one-page target, so the owner's 28–36pt (+12–20pt per one-line row) would push the ordinary order onto two pages. Group heads reserve the taller photo row (`groupHeadAhead(true)`), so §8a rule 3 still holds. **Re-run all three after ANY change to `THUMB_*` or `ROW_PADDING_Y`.** |
+| 37 | **The damage report has photos too**, on the deposit rows and the replacements (a replacement takes its line's photo, matched by `lineId`). It costs nothing on the default report and keeps `--banks=3` on one page at 18pt. If a later change threatens that page, drop the photos from the deposit table first: the replacements are the rows a client argues about. |
+| 38 | **A photo can never stop a document.** react-pdf embeds only PNG/JPEG, while the gallery stores WebP/AVIF. Its own fetch has no timeout, and a failure just leaves a blank. So before rendering, `documentImages.ts` loads each distinct URL ONCE, in parallel with the lazy renderer chunk. It fetches with CORS, `credentials: 'omit'` and a 6s timeout, decodes with `createImageBitmap`, scales to at most 160px on a canvas (never upscales), and returns a JPEG data URI (PNG when the photo has transparency). ANY failure (CORS, 404, offline, timeout, undecodable) drops that line's photo, and the line prints as a photo-less row. The template only ever sees data URIs. |
+| 39 | **The browser must be ALLOWED to fetch the photo** (two independent gates, both silent): CSP `connect-src` names the assets hosts (`assets-stg.` / `assets.partyrentalsgt.com`, `index.html`; §3a), and the R2 bucket CORS gained a `public-reads` rule (GET/HEAD from any origin, `modules/cloudflare-env/r2.tf`). Before it, CORS allowed only the presigned PUT. `*` is deliberate: the objects are already public, no credentials are involved, and one answer for every origin keeps the edge cache from serving one origin's CORS headers to another. **Owner applies it** (`tf.ps1 <env> cloudflare plan/apply`, staging then prod). If photos are still missing on staging afterwards, purge the assets host's cache for the stale pre-CORS responses. |
+| 40 | **A line of a product sold by VARIATION names it and shows ITS photo** (2026-10-29). **Name:** `lineDisplayName` (`products/productVariations.ts`) — the product, ` — `, then the variation's values joined by ` · `: *"Mantel — Rojo · Redondo"*. ONE separator pair, used on every document AND every screen that prints a line (order detail, damage report form, deposit card, status dialog), so paper and screen never disagree. The comprobante and the report read the line's `variantLabel` SNAPSHOT (re-written on each order save), so a retired variation still prints its old name; a replacement takes the damage's own `variantLabel`, else its line's (`damageDisplayName`). A line without a variation prints exactly as before. **Photo:** the comprobante and the report keep printing the API's per-line `imageUrl` — now variation-aware in `lineImageUrl()`: the variation's values in option order, first one with photos gives its primary, else the product's SHOWCASE primary. The cotización reads the same rule off the catalog it holds: `variant.imageUrl ?? showcase primary` (`primaryImageUrl`). **Never `coverImageUrl`** — it falls back to the DEFAULT variation, so a red tablecloth could print blue. Its prices and deposit are the variation's EFFECTIVE values (`effectivePricing`; a deposit override of 0 is none and never falls back to the product's). |
+
+**Previews:** the fixtures carry local photos (a TALL one, a WIDE bank logo, a square one, and a
+photo-less row in each table: the sales Piñata, every 4th filler row). `--no-photos` strips them
+all and composes with every other flag. Inspected 2026-10-29 at 18pt: default 2 pages (as before),
+`--long` 3 (repeated headers, totals whole), `--free` 1, `--free --deposit=held` 1, `--quote` 2 (as
+before), `--damage-report` 1, `--damage-report --banks=3` 1, `--damage-report --covered` 1.
+
+**Variation line (2026-10-29, #40):** the fixtures carry `Mantel — Rojo · Redondo` with its OWN photo
+(`photos.variation`) as a fourth rental row on the default and `--quote` documents, and a replacement
+on it in the damage report. On `--free` it takes the one-line `Mesas` row's place rather than adding a
+sixth line, because the one-page target is the ordinary FIVE-line order (#20) — a sixth row sends the
+closing block to page two, which is correct behaviour, not a regression. Inspected: `--free` 1,
+`--free --deposit=held` 1, `--damage-report` 1, `--damage-report --banks=3` 1, `--quote` 2 and the
+default 2 (both as before).
+
 ---
 
 ## 3. Library — `@react-pdf/renderer` (MIT)
@@ -199,6 +228,7 @@ these apply identically to local and deployed:
 | `connect-src data:` | It `fetch`es its wasm binary and font metrics from `data:` URIs it carries inline. Grants no reach: a `data:` URI cannot touch the network, so there is **no exfiltration channel**. |
 | `script-src 'wasm-unsafe-eval'` | Page layout is **yoga**, an Emscripten-compiled **WebAssembly** module calling `WebAssembly.instantiate`. |
 | `worker-src blob:` | Image streams are inflated in a Blob worker. Already present for Vite — do not remove it as dev-only tooling. |
+| `connect-src https://assets…` | Not react-pdf's own need but the document's (2026-10-29, §2d #39): the line photos are `fetch`ed from the R2 assets hosts to be re-encoded. Blocked, the PDF still generates, just without photos. |
 
 **`'wasm-unsafe-eval'` must never be relaxed to `'unsafe-eval'`.** The broad token re-enables
 string-to-code execution app-wide and would undo the one directive carrying real weight here; the

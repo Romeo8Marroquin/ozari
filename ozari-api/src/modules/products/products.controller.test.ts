@@ -29,6 +29,7 @@ import {
   type ProductCatalogResponseModel,
   type ProductListItemResponseModel,
   type ProductListResponseModel,
+  type UpdateProductResponseModel,
 } from "./products.models.js";
 
 vi.mock("@/config/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
@@ -73,11 +74,14 @@ const rawProduct = {
   rentTimeUnit: { name: "Día" },
   productDetails: [{ id: 12, detail: "Blanco", detailType: { name: "Color" } }],
   productImages: [{ id: 1, url: "https://cdn.example.com/a.webp", isPrimary: true, sortOrder: 0 }],
+  options: [],
+  variants: [],
 };
 
-/** One rented-now grouped row, as `serviceDetail.groupBy` returns it. */
-const rentedRow = (productId: number, rented: number | null) => ({
+/** One rented-now grouped row, as `serviceDetail.groupBy` returns it (per stock pool). */
+const rentedRow = (productId: number, rented: number | null, variantId: number | null = null) => ({
   productId,
+  variantId,
   _sum: { quantity: rented },
 });
 
@@ -124,7 +128,7 @@ describe("getProducts", () => {
 
     expect(groupBy).toHaveBeenCalledWith(
       expect.objectContaining({
-        by: ["productId"],
+        by: ["productId", "variantId"],
         where: expect.objectContaining({ productId: { in: [7] } }),
         _sum: { quantity: true },
       }),
@@ -326,6 +330,61 @@ describe("getProductById", () => {
     expect(data.product).toMatchObject({ available: 2, inStock: true, total: 40 });
   });
 
+  it("gives an Admin each variant's per-pool availability and its order-line usage", async () => {
+    const variantRows = [55, 56].map((id, index) => ({
+      id,
+      rentPrice: null,
+      sellPrice: null,
+      replacementPrice: null,
+      securityDeposit: null,
+      description: null,
+      quantity: 4,
+      isDefault: false,
+      values: [{ optionValueId: 10 + index }],
+    }));
+    const product = {
+      ...rawProduct,
+      quantity: 0,
+      options: [
+        {
+          id: 3,
+          name: "Color",
+          sortOrder: 0,
+          values: [
+            { id: 10, name: "Rojo", sortOrder: 0, images: [] },
+            { id: 11, name: "Azul", sortOrder: 1, images: [] },
+          ],
+        },
+      ],
+      variants: variantRows,
+    };
+    const { groupBy } = mockDetailPrisma(product, [rentedRow(7, 3, 55)]);
+    // 1st groupBy = rented now; 2nd/3rd = loadVariantUsage (all lines, then holding ones).
+    groupBy
+      .mockResolvedValueOnce([rentedRow(7, 3, 55)])
+      .mockResolvedValueOnce([{ variantId: 55, _count: { _all: 5 } }])
+      .mockResolvedValueOnce([{ variantId: 55, _count: { _all: 1 } }]);
+    await getProductById(buildDetailReq(RolesEnum.Admin, "7"), {} as Response);
+
+    const data = (sendOzariSuccess as Mock).mock.calls[0]?.[3] as {
+      product: ProductListItemResponseModel;
+    };
+    expect(data.product).toMatchObject({ available: 5, total: 8 });
+    expect(data.product.variants[0]).toMatchObject({
+      id: 55,
+      available: 1,
+      usage: { lines: 5, holding: 1 },
+    });
+    expect(data.product.variants[1]).toMatchObject({ id: 56, available: 4, usage: { lines: 0, holding: 0 } });
+  });
+
+  it("never loads usage for a Client", async () => {
+    const { groupBy } = mockDetailPrisma({ ...rawProduct, variants: [{ id: 55, values: [] }] });
+    await getProductById(buildDetailReq(RolesEnum.Client, "7"), {} as Response);
+    // Only the rented-now query ran.
+    expect(groupBy).toHaveBeenCalledTimes(1);
+  });
+
   it("projects minimally for a Client (and when the role is somehow absent)", async () => {
     mockDetailPrisma(rawProduct);
     await getProductById(buildDetailReq(undefined, "7"), {} as Response);
@@ -368,7 +427,10 @@ const createBody = {
   rentPrice: 75,
   rentTimeUnitId: 2,
   replacementPrice: 900,
+  securityDeposit: undefined,
   sellPrice: undefined,
+  options: [] as unknown[],
+  variants: [] as unknown[],
 };
 
 const buildCreateReq = (
@@ -381,35 +443,184 @@ const buildCreateReq = (
     user: role === null ? undefined : { userRole: role, userId: 1 },
   }) as unknown as CustomRequest;
 
+/** What the mock transaction serves as the product's CURRENT rows (create/update/delete). */
+interface TxSeed {
+  images?: { id: number; r2Key: string }[];
+  detailIds?: number[];
+  orderReferences?: number;
+  product?: unknown;
+  options?: { id: number; values: { id: number }[] }[];
+  variants?: {
+    id: number;
+    combinationKey: string;
+    values: { optionValue: { name: string; option: { sortOrder: number } } }[];
+  }[];
+  /** Served by every non-distinct `serviceDetail.findMany` (the 409 guards). */
+  holdingLines?: { serviceId: number; variantId: number | null }[];
+  /** Served by the distinct `serviceDetail.findMany` (which variants history references). */
+  referencedVariantIds?: number[];
+  /** Served by `serviceDetail.groupBy` inside the transaction (`loadVariantUsage`). */
+  usageRows?: unknown[];
+}
+
+/** A mock transaction client covering every write the product doors make. */
+function makeProductTx(seed: TxSeed = {}) {
+  let nextId = 100;
+  return {
+    product: {
+      create: vi.fn().mockResolvedValue({ id: 7 }),
+      update: vi.fn().mockResolvedValue({}),
+      delete: vi.fn().mockResolvedValue({}),
+      findUniqueOrThrow: vi.fn().mockResolvedValue(seed.product ?? rawProduct),
+    },
+    productImage: {
+      findMany: vi.fn().mockResolvedValue(seed.images ?? []),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      update: vi.fn().mockResolvedValue({}),
+      create: vi.fn().mockResolvedValue({}),
+    },
+    productDetail: {
+      findMany: vi.fn().mockResolvedValue((seed.detailIds ?? []).map((id) => ({ id }))),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      update: vi.fn().mockResolvedValue({}),
+      create: vi.fn().mockResolvedValue({}),
+    },
+    productOption: {
+      findMany: vi.fn().mockResolvedValue(seed.options ?? []),
+      create: vi.fn().mockImplementation(() => Promise.resolve({ id: nextId++ })),
+      update: vi.fn().mockImplementation((args: { where: { id: number } }) =>
+        Promise.resolve({ id: args.where.id }),
+      ),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    productOptionValue: {
+      create: vi.fn().mockImplementation(() => Promise.resolve({ id: nextId++ })),
+      update: vi.fn().mockResolvedValue({}),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    productVariant: {
+      findMany: vi.fn().mockResolvedValue(seed.variants ?? []),
+      create: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    serviceDetail: {
+      count: vi.fn().mockResolvedValue(seed.orderReferences ?? 0),
+      findMany: vi.fn().mockImplementation((args: { distinct?: string[] }) =>
+        Promise.resolve(
+          args.distinct
+            ? (seed.referencedVariantIds ?? []).map((variantId) => ({ variantId }))
+            : (seed.holdingLines ?? []),
+        ),
+      ),
+      groupBy: vi.fn().mockResolvedValue(seed.usageRows ?? []),
+    },
+  };
+}
+type ProductTx = ReturnType<typeof makeProductTx>;
+
+/** Wires a prisma client whose `$transaction` runs the callback on `tx`. */
+function mockTransactionPrisma(tx: ProductTx, rented: ReturnType<typeof rentedRow>[] = []) {
+  const $transaction = vi.fn(async (fn: (t: ProductTx) => Promise<unknown>) => fn(tx));
+  const groupBy = vi.fn().mockResolvedValue(rented);
+  (getPrismaClient as Mock).mockResolvedValue({ $transaction, serviceDetail: { groupBy } });
+  return { tx, $transaction, groupBy };
+}
+
+/** A variant product row (richProductInclude shape): Color = Rojo (10) / Azul (11). */
+const variantProduct = {
+  ...rawProduct,
+  quantity: 0,
+  options: [
+    {
+      id: 3,
+      name: "Color",
+      sortOrder: 0,
+      values: [
+        { id: 10, name: "Rojo", sortOrder: 0, images: [] },
+        { id: 11, name: "Azul", sortOrder: 1, images: [] },
+      ],
+    },
+  ],
+  variants: [55, 56].map((id, index) => ({
+    id,
+    rentPrice: null,
+    sellPrice: null,
+    replacementPrice: null,
+    securityDeposit: null,
+    description: null,
+    quantity: 4,
+    isDefault: false,
+    values: [{ optionValueId: 10 + index }],
+  })),
+};
+
+/** The current-variant rows the update reconcile reads for that product. */
+const currentColorVariants = [
+  { id: 55, combinationKey: "10", values: [{ optionValue: { name: "Rojo", option: { sortOrder: 0 } } }] },
+  { id: 56, combinationKey: "11", values: [{ optionValue: { name: "Azul", option: { sortOrder: 0 } } }] },
+];
+
+const colorBody = (variants: unknown[]) => ({
+  quantity: 0,
+  options: [
+    {
+      id: 3,
+      name: "Color",
+      values: [
+        { id: 10, key: "v10", name: "Rojo", images: [] },
+        { id: 11, key: "v11", name: "Azul", images: [] },
+      ],
+    },
+  ],
+  variants,
+});
+
+const keptVariant = (id: number, valueKey: string) => ({
+  id,
+  valueKeys: [valueKey],
+  quantity: 4,
+  rentPrice: undefined,
+  sellPrice: undefined,
+  replacementPrice: undefined,
+  securityDeposit: undefined,
+  description: undefined,
+  isDefault: false,
+});
+
 describe("createProduct", () => {
   function mockCreate(created: unknown = rawProduct) {
-    const create = vi.fn().mockResolvedValue(created);
-    (getPrismaClient as Mock).mockResolvedValue({ product: { create } });
-    return { create };
+    const tx = makeProductTx({ product: created });
+    return mockTransactionPrisma(tx);
   }
 
-  it("creates the product with nested details and responds 201 with the Admin projection", async () => {
-    const { create } = mockCreate();
+  it("creates the product with nested details IN ONE TRANSACTION and responds 201 with the Admin projection", async () => {
+    const { tx, $transaction } = mockCreate();
     await createProduct(buildCreateReq(), {} as Response);
 
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          name: "Mesa redonda",
-          productBusinessTypeId: 1,
-          productCategoryId: 1,
-          currencyId: 1,
-          quantity: 40,
-          rentPrice: 75,
-          sellPrice: null,
-          replacementPrice: 900,
-          rentTimeUnitId: 2,
-          productDetails: {
-            create: [{ productDetailTypeId: 1, detail: "Blanco" }],
-          },
-        }),
-      }),
-    );
+    expect($transaction).toHaveBeenCalledTimes(1);
+    expect(tx.product.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        name: "Mesa redonda",
+        productBusinessTypeId: 1,
+        productCategoryId: 1,
+        currencyId: 1,
+        quantity: 40,
+        rentPrice: 75,
+        sellPrice: null,
+        replacementPrice: 900,
+        rentTimeUnitId: 2,
+        productDetails: {
+          create: [{ productDetailTypeId: 1, detail: "Blanco" }],
+        },
+      }) as unknown,
+      select: { id: true },
+    });
+    // The response is the committed row, re-read inside the transaction.
+    expect(tx.product.findUniqueOrThrow).toHaveBeenCalledWith({
+      where: { id: 7 },
+      include: expect.anything() as unknown,
+    });
 
     expect(sendOzariSuccess).toHaveBeenCalledWith(
       expect.anything(),
@@ -420,11 +631,11 @@ describe("createProduct", () => {
     );
   });
 
-  it("nested-creates gallery images with server-derived URLs (never a client URL)", async () => {
+  it("creates gallery images with server-derived URLs (never a client URL)", async () => {
     (getStorage as Mock).mockReturnValue({
       getPublicUrl: (key: string) => `https://cdn.test/${key}`,
     });
-    const { create } = mockCreate();
+    const { tx } = mockCreate();
     const key1 = "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c01.webp";
     const key2 = "products/3f9d2c1a-8b4e-4f6a-9c2d-1e5b7a9d3c02.jpg";
     await createProduct(
@@ -438,30 +649,63 @@ describe("createProduct", () => {
       {} as Response,
     );
 
-    const data = (create.mock.calls[0]?.[0] as { data: Record<string, unknown> }).data;
-    expect(data["productImages"]).toEqual({
-      create: [
-        { r2Key: key1, url: `https://cdn.test/${key1}`, isPrimary: false, sortOrder: 0 },
-        { r2Key: key2, url: `https://cdn.test/${key2}`, isPrimary: true, sortOrder: 1 },
-      ],
-    });
+    expect(tx.productImage.create.mock.calls.map(([args]) => args as unknown)).toEqual([
+      {
+        data: {
+          productId: 7,
+          r2Key: key1,
+          url: `https://cdn.test/${key1}`,
+          isPrimary: false,
+          sortOrder: 0,
+          optionValueId: null,
+        },
+      },
+      {
+        data: {
+          productId: 7,
+          r2Key: key2,
+          url: `https://cdn.test/${key2}`,
+          isPrimary: true,
+          sortOrder: 1,
+          optionValueId: null,
+        },
+      },
+    ]);
   });
 
   it("never touches storage on an image-less create (works without the R2 env)", async () => {
-    const { create } = mockCreate();
+    const { tx } = mockCreate();
     await createProduct(buildCreateReq(), {} as Response);
 
     expect(getStorage).not.toHaveBeenCalled();
-    const data = (create.mock.calls[0]?.[0] as { data: Record<string, unknown> }).data;
-    expect(data).not.toHaveProperty("productImages");
+    expect(tx.productImage.create).not.toHaveBeenCalled();
   });
 
   it("omits the nested details create when the list is empty", async () => {
-    const { create } = mockCreate();
+    const { tx } = mockCreate();
     await createProduct(buildCreateReq({ ...createBody, productDetails: [] }), {} as Response);
 
-    const data = (create.mock.calls[0]?.[0] as { data: Record<string, unknown> }).data;
+    const data = (tx.product.create.mock.calls[0]?.[0] as { data: Record<string, unknown> }).data;
     expect(data).not.toHaveProperty("productDetails");
+  });
+
+  it("writes the variations in the same transaction", async () => {
+    const { tx } = mockCreate(variantProduct);
+    await createProduct(
+      buildCreateReq({
+        ...createBody,
+        quantity: 0,
+        options: [{ name: "Color", values: [{ key: "r", name: "Rojo", images: [] }] }],
+        variants: [{ ...keptVariant(0, "r"), id: undefined }],
+      }),
+      {} as Response,
+    );
+    expect(tx.productOption.create).toHaveBeenCalledTimes(1);
+    expect(tx.productVariant.create).toHaveBeenCalledTimes(1);
+    const item = (sendOzariSuccess as Mock).mock.calls[0]?.[3] as ProductListItemResponseModel;
+    // The product's Admin stock is Σ its variants.
+    expect(item).toMatchObject({ available: 8, total: 8 });
+    expect(item.variants).toHaveLength(2);
   });
 
   it("projects fail-closed (minimum fields) if the role is somehow absent", async () => {
@@ -494,7 +738,7 @@ describe("createProduct", () => {
 
   it("sends a 500 when the insert fails", async () => {
     (getPrismaClient as Mock).mockResolvedValue({
-      product: { create: vi.fn().mockRejectedValue(new Error("db down")) },
+      $transaction: vi.fn().mockRejectedValue(new Error("db down")),
     });
     await createProduct(buildCreateReq(), {} as Response);
     expect(sendOzariError).toHaveBeenCalled();
@@ -507,7 +751,7 @@ describe("createProduct", () => {
       { code: "P2002", clientVersion: "test", meta: { target: ["r2_key"] } },
     );
     (getPrismaClient as Mock).mockResolvedValue({
-      product: { create: vi.fn().mockRejectedValue(uniqueViolation) },
+      $transaction: vi.fn().mockRejectedValue(uniqueViolation),
     });
     await createProduct(buildCreateReq(), {} as Response);
 
@@ -533,7 +777,10 @@ describe("updateProduct", () => {
     rentPrice: 75,
     rentTimeUnitId: 2,
     replacementPrice: 900,
+    securityDeposit: undefined,
     sellPrice: undefined,
+    options: [] as unknown[],
+    variants: [] as unknown[],
   };
 
   const buildUpdateReq = (
@@ -548,41 +795,12 @@ describe("updateProduct", () => {
     }) as unknown as CustomRequest;
 
   /** A prisma mock whose $transaction hands the callback a tx seeded with the current rows. */
-  function mockUpdatePrisma(
-    currentImages: { id: number; r2Key: string }[] = [],
-    currentDetailIds: number[] = [],
-    updated: unknown = rawProduct,
-  ) {
-    const tx = {
-      product: {
-        update: vi.fn().mockResolvedValue({}),
-        findUniqueOrThrow: vi.fn().mockResolvedValue(updated),
-      },
-      productImage: {
-        findMany: vi.fn().mockResolvedValue(currentImages),
-        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-        update: vi.fn().mockResolvedValue({}),
-        create: vi.fn().mockResolvedValue({}),
-      },
-      productDetail: {
-        findMany: vi.fn().mockResolvedValue(currentDetailIds.map((id) => ({ id }))),
-        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-        update: vi.fn().mockResolvedValue({}),
-        create: vi.fn().mockResolvedValue({}),
-      },
-    };
-    const $transaction = vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx));
-    const groupBy = vi.fn().mockResolvedValue([]);
-    (getPrismaClient as Mock).mockResolvedValue({
-      $transaction,
-      serviceDetail: { groupBy },
-    });
-    return { tx, $transaction, groupBy };
+  function mockUpdatePrisma(seed: TxSeed = {}, rented: ReturnType<typeof rentedRow>[] = []) {
+    return mockTransactionPrisma(makeProductTx(seed), rented);
   }
 
   it("applies the reconcile in ONE transaction and responds 200 with the projection", async () => {
-    const { tx, $transaction, groupBy } = mockUpdatePrisma([], [], rawProduct);
-    groupBy.mockResolvedValue([{ productId: 7, _sum: { quantity: 5 } }]);
+    const { tx, $transaction } = mockUpdatePrisma({}, [rentedRow(7, 5)]);
 
     await updateProduct(buildUpdateReq(), {} as Response);
 
@@ -593,7 +811,7 @@ describe("updateProduct", () => {
     // The response reflects the state fetched INSIDE the transaction, rentals subtracted.
     expect(tx.product.findUniqueOrThrow).toHaveBeenCalledWith({
       where: { id: 7 },
-      include: expect.anything(),
+      include: expect.anything() as unknown,
     });
     expect(sendOzariSuccess).toHaveBeenCalledWith(
       expect.anything(),
@@ -601,18 +819,20 @@ describe("updateProduct", () => {
       "products.updateProduct.productUpdated",
       expect.objectContaining({ id: 7, available: 35, total: 40 }),
     );
+    // Nothing was removed → no outcome to report.
+    const item = (sendOzariSuccess as Mock).mock.calls[0]?.[3] as Record<string, unknown>;
+    expect(item).not.toHaveProperty("variantOutcome");
   });
 
   it("deletes the removed photos from R2 only AFTER the commit, best-effort", async () => {
     const deleteObject = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("r2 down"));
     (getStorage as Mock).mockReturnValue({ deleteObject });
-    mockUpdatePrisma(
-      [
+    mockUpdatePrisma({
+      images: [
         { id: 11, r2Key: "products/gone-1.webp" },
         { id: 12, r2Key: "products/gone-2.webp" },
       ],
-      [],
-    );
+    });
 
     await updateProduct(buildUpdateReq({ ...updateBody, images: [] }), {} as Response);
 
@@ -624,7 +844,7 @@ describe("updateProduct", () => {
   });
 
   it("never touches storage when nothing was removed and nothing is new", async () => {
-    mockUpdatePrisma([{ id: 1, r2Key: "products/keep.webp" }], []);
+    mockUpdatePrisma({ images: [{ id: 1, r2Key: "products/keep.webp" }] });
     await updateProduct(
       buildUpdateReq({ ...updateBody, images: [{ id: 1, isPrimary: true }] }),
       {} as Response,
@@ -635,7 +855,7 @@ describe("updateProduct", () => {
 
   it("maps a mid-save concurrency conflict to a clean 409 (reload and retry)", async () => {
     // The validator saw image 99, but by transaction time it's gone — another admin won the race.
-    mockUpdatePrisma([], []);
+    mockUpdatePrisma();
     await updateProduct(
       buildUpdateReq({ ...updateBody, images: [{ id: 99, isPrimary: true }] }),
       {} as Response,
@@ -647,6 +867,67 @@ describe("updateProduct", () => {
       "products.updateProduct.conflict",
     );
     expect(sendOzariSuccess).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 variantInUse with the blocked variants and their orders", async () => {
+    mockUpdatePrisma({
+      options: [{ id: 3, values: [{ id: 10 }, { id: 11 }] }],
+      variants: currentColorVariants,
+      holdingLines: [{ serviceId: 9, variantId: 56 }],
+    });
+    await updateProduct(
+      buildUpdateReq({ ...updateBody, ...colorBody([keptVariant(55, "v10")]) }),
+      {} as Response,
+    );
+
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "products.updateProduct.variantInUse",
+      undefined,
+      { conflicts: [{ variantId: 56, label: "Azul", orderIds: [9] }] },
+    );
+    expect(sendOzariSuccess).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 stockModeInUse with the orders holding the product's own stock", async () => {
+    mockUpdatePrisma({ holdingLines: [{ serviceId: 4, variantId: null }] });
+    await updateProduct(
+      buildUpdateReq({
+        ...updateBody,
+        quantity: 0,
+        options: [{ name: "Color", values: [{ key: "r", name: "Rojo", images: [] }] }],
+        variants: [{ ...keptVariant(0, "r"), id: undefined }],
+      }),
+      {} as Response,
+    );
+
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "products.updateProduct.stockModeInUse",
+      undefined,
+      { orderIds: [4] },
+    );
+  });
+
+  it("reports variantOutcome (retired vs deleted) and each variant's usage", async () => {
+    mockUpdatePrisma({
+      product: { ...variantProduct, variants: [variantProduct.variants[0]] },
+      options: [{ id: 3, values: [{ id: 10 }, { id: 11 }] }],
+      variants: currentColorVariants,
+      referencedVariantIds: [56],
+      usageRows: [{ variantId: 55, _count: { _all: 2 } }],
+    });
+    await updateProduct(
+      buildUpdateReq({ ...updateBody, ...colorBody([keptVariant(55, "v10")]) }),
+      {} as Response,
+    );
+
+    const item = (sendOzariSuccess as Mock).mock.calls[0]?.[3] as UpdateProductResponseModel;
+    expect(item.variantOutcome).toEqual({ retired: [{ id: 56, label: "Azul" }], deleted: 0 });
+    // Both groupBys of loadVariantUsage answer from the seed → lines 2, holding 2.
+    expect(item.variants[0]?.usage).toEqual({ lines: 2, holding: 2 });
   });
 
   it("maps the r2_key unique violation (P2002) to the same 400 as create", async () => {
@@ -722,30 +1003,16 @@ describe("deleteProduct", () => {
     }) as unknown as CustomRequest;
 
   /** A prisma mock whose $transaction hands the callback a tx seeded for the delete. */
-  function mockDeletePrisma(
-    imageKeys: string[] = [],
-    orderReferences = 0,
-  ) {
-    const tx = {
-      product: {
-        update: vi.fn().mockResolvedValue({}),
-        delete: vi.fn().mockResolvedValue({}),
-      },
-      productImage: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue(imageKeys.map((r2Key, index) => ({ id: index + 1, r2Key }))),
-        deleteMany: vi.fn().mockResolvedValue({ count: imageKeys.length }),
-      },
-      productDetail: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-      serviceDetail: { count: vi.fn().mockResolvedValue(orderReferences) },
-    };
-    const $transaction = vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx));
-    (getPrismaClient as Mock).mockResolvedValue({ $transaction });
-    return { tx, $transaction };
+  function mockDeletePrisma(imageKeys: string[] = [], orderReferences = 0) {
+    return mockTransactionPrisma(
+      makeProductTx({
+        images: imageKeys.map((r2Key, index) => ({ id: index + 1, r2Key })),
+        orderReferences,
+      }),
+    );
   }
 
-  it("runs the no-trash delete in ONE transaction and responds 200", async () => {
+  it("runs the no-trash delete in ONE transaction and responds 200 with outcome `deleted`", async () => {
     const { tx, $transaction } = mockDeletePrisma([], 0);
     await deleteProduct(buildDeleteReq(), {} as Response);
 
@@ -756,6 +1023,7 @@ describe("deleteProduct", () => {
       expect.anything(),
       HttpEnum.OK,
       "products.deleteProduct.productDeleted",
+      { outcome: "deleted" },
     );
   });
 
@@ -773,7 +1041,7 @@ describe("deleteProduct", () => {
     expect(sendOzariError).not.toHaveBeenCalled();
   });
 
-  it("tombstones instead of deleting when order history references the product", async () => {
+  it("tombstones instead of deleting when order history references the product (outcome `deactivated`)", async () => {
     const { tx } = mockDeletePrisma([], 2);
     await deleteProduct(buildDeleteReq(), {} as Response);
 
@@ -782,7 +1050,12 @@ describe("deleteProduct", () => {
       data: { isActive: false },
     });
     expect(tx.product.delete).not.toHaveBeenCalled();
-    expect(sendOzariSuccess).toHaveBeenCalled();
+    expect(sendOzariSuccess).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.OK,
+      "products.deleteProduct.productDeleted",
+      { outcome: "deactivated" },
+    );
   });
 
   it("audit-logs the deletion (with its mode) only in deployed environments", async () => {
@@ -932,6 +1205,8 @@ describe("getProductDisplayOrder", () => {
     category: { name: "Mesas" },
     businessType: { name: "Alquiler" },
     productImages: [{ url: "https://cdn.example.com/a.webp", isPrimary: true }],
+    options: [],
+    variants: [],
   };
 
   it("returns every active product in catalog order, a card's worth each", async () => {
@@ -993,6 +1268,8 @@ describe("updateProductDisplayOrder", () => {
       category: { name: "Mesas" },
       businessType: { name: "Alquiler" },
       productImages: [],
+      options: [],
+      variants: [],
     }));
     const tx = {
       product: {

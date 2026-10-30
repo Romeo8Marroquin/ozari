@@ -892,6 +892,8 @@ describe('OrderDetailPage', () => {
             id: 32,
             productId: 4,
             productName: 'Vasos',
+            variantId: 5,
+            variantLabel: 'Azul',
             isRental: false,
             quantity: 10,
             unitaryPrice: 3.5,
@@ -907,6 +909,8 @@ describe('OrderDetailPage', () => {
     expect(screen.getByText('Llamar al llegar')).toBeInTheDocument();
     expect(screen.getByText('Carlos Ruiz')).toBeInTheDocument();
     expect(screen.getByText('Efectivo')).toBeInTheDocument();
+    // A variation line is named by product AND variation (`lineDisplayName`).
+    expect(screen.getByText('Vasos — Azul')).toBeInTheDocument();
     expect(screen.getByText(`${KEY}.money.delivery`)).toBeInTheDocument();
     expect(screen.getByText(`${KEY}.money.discount`)).toBeInTheDocument();
     // A sale line reads as a sale, and the tracked actuals are all spelled out.

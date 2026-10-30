@@ -24,7 +24,15 @@ rate-limit tiers) — **read this file before touching anything under `ozari-api
    `Cache-Control: no-store` (its responses carry PII; also = no ETag/304 there — 304s elsewhere, e.g.
    `/products/catalog`, are the browser's normal conditional caching and fine).
 3. CORS: strict allowlist of `APP_HOST` only, `credentials: true`.
-4. Body size capped at `10kb`; 30s request/response timeout.
+4. Body size capped at `10kb`; 30s request/response timeout. **One exception** (variations,
+   2026-10-29): `POST /products` and `PUT /products/:id` parse up to **`32kb`**
+   (`appConfig.productWriteBodyLimit`). A product's full-state body carries its options, values,
+   every photo set and up to 60 variants, and a declarative save cannot be split. Both routes are
+   Admin-only. The parser is scoped by method AND path (`/products` and `/products/<digits>` —
+   `display-order` and `images/upload-url` stay at 10kb) and mounted in `app.ts` *before* the global
+   10kb parser, which skips a body already parsed. Every other route stays at 10kb. Pinned by
+   `tests/integration/bodyLimit.integration.test.ts`. Never widen the regex or raise the global cap
+   for convenience; a new big body needs its own owner decision.
 5. `validateApiKey` — requires `x-api-key` for non-browser callers; browser requests are trusted by
    `Origin === APP_HOST` (+ `sec-fetch-*` checks in deployed envs). Constant-time compare. Those are
    plain headers a script can send, so this filters honest callers; it is not a boundary (§12).

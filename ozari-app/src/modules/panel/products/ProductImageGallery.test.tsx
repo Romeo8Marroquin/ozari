@@ -42,12 +42,18 @@ const galleryState = (overrides: Partial<GalleryState> = {}): GalleryState => ({
   setPrimary: vi.fn(),
   moveImage: vi.fn(),
   isFull: false,
+  maxCount: 8,
   ...overrides,
 });
 
 const renderGallery = (
   gallery: GalleryState,
-  props: Partial<{ disabled: boolean; progress: Record<string, number>; isUploading: boolean }> = {},
+  props: Partial<{
+    disabled: boolean;
+    progress: Record<string, number>;
+    isUploading: boolean;
+    compact: boolean;
+  }> = {},
 ) =>
   render(
     <ProductImageGallery
@@ -55,8 +61,20 @@ const renderGallery = (
       disabled={props.disabled ?? false}
       progress={props.progress ?? {}}
       isUploading={props.isUploading ?? false}
+      compact={props.compact}
     />,
   );
+
+describe('ProductImageGallery — compact (an option value set)', () => {
+  it('drops the showcase hint, sizes columns by its own width and counts against its own cap', () => {
+    const { unmount } = renderGallery(galleryState({ maxCount: 4 }), { compact: true });
+    expect(screen.queryByText(`${KEY}.dropzone.hint`)).toBeNull();
+    unmount();
+    renderGallery(galleryState({ images: [image('a')], primaryId: 'a', maxCount: 4 }), { compact: true });
+    expect(screen.getByRole('list').className).toContain('@min-[28rem]:grid-cols-4');
+    expect(screen.getByText(`${KEY}.counter`)).toBeTruthy();
+  });
+});
 
 const fileInput = (): HTMLInputElement =>
   document.querySelector('input[type="file"]') as HTMLInputElement;

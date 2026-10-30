@@ -2,7 +2,6 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HiMiniStar, HiOutlinePhoto, HiOutlinePlus, HiOutlineXMark } from 'react-icons/hi2';
 import AnimatedMessage from '@components/AnimatedMessage';
-import { PRODUCT_IMAGE_MAX_COUNT } from '@constants/Regex';
 import {
   animateGalleryBoundary,
   animateGalleryLayout,
@@ -22,6 +21,14 @@ interface ProductImageGalleryProps {
   progress: Record<string, number>;
   /** True while the files are PUTting to R2 — dims the thumbnails under their progress bars. */
   isUploading: boolean;
+  /**
+   * The small form for an OPTION VALUE's photo set (inside the variations editor): a shorter empty
+   * drop surface without the showcase's hint, and columns from the gallery's OWN width (`@container`
+   * — inside the panel a viewport breakpoint measures the wrong box). The showcase keeps its layout.
+   */
+  compact?: boolean;
+  /** The validation message's element id — unique per gallery when several share a page. */
+  errorId?: string;
 }
 
 /**
@@ -49,6 +56,8 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
   disabled,
   progress,
   isUploading,
+  compact = false,
+  errorId = 'product-gallery-error',
 }) => {
   const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -62,7 +71,7 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
   const removingRef = useRef<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
 
-  const { images, primaryId, error, addFiles, removeImage, setPrimary, moveImage, isFull } =
+  const { images, primaryId, error, addFiles, removeImage, setPrimary, moveImage, isFull, maxCount } =
     gallery;
   const { draggingId, getThumbHandlers } = useGalleryDrag({
     disabled,
@@ -171,14 +180,21 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
           type="button"
           disabled={disabled}
           onClick={openPicker}
-          className={`flex w-full cursor-pointer flex-col items-center gap-2 rounded-control border-2 border-dashed px-6 py-10 text-center transition-[color,background-color,border-color,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta disabled:cursor-not-allowed disabled:opacity-60 ${dropzoneRing}`}
+          className={`flex w-full cursor-pointer flex-col items-center gap-2 rounded-control border-2 border-dashed text-center transition-[color,background-color,border-color,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta disabled:cursor-not-allowed disabled:opacity-60 ${compact ? 'px-4 py-5' : 'px-6 py-10'} ${dropzoneRing}`}
         >
-          <HiOutlinePhoto aria-hidden className="size-8 text-charcoal/35" />
+          <HiOutlinePhoto aria-hidden className={`${compact ? 'size-6' : 'size-8'} text-charcoal/35`} />
           <span className="text-sm font-medium text-charcoal/70">{t(`${KEY}.dropzone.cta`)}</span>
-          <span className="text-xs text-charcoal/45">{t(`${KEY}.dropzone.hint`)}</span>
+          {!compact && <span className="text-xs text-charcoal/45">{t(`${KEY}.dropzone.hint`)}</span>}
         </button>
       ) : (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5" role="list">
+        <ul
+          className={
+            compact
+              ? 'grid grid-cols-3 gap-2 @min-[28rem]:grid-cols-4 @min-[40rem]:grid-cols-5'
+              : 'grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'
+          }
+          role="list"
+        >
           {images.map((image) => {
             const isPrimary = image.id === primaryId;
             const isDragging = image.id === draggingId;
@@ -288,14 +304,14 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
 
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
-          <AnimatedMessage id="product-gallery-error" errorMessage={error} />
+          <AnimatedMessage id={errorId} errorMessage={error} />
           {/* Discoverability: drag-to-reorder isn't guessable, so the grid says it out loud. */}
           {images.length > 1 && (
             <span className="text-xs text-charcoal/45">{t(`${KEY}.reorderHint`)}</span>
           )}
         </div>
         <span className="shrink-0 text-xs text-charcoal/45">
-          {t(`${KEY}.counter`, { count: images.length, max: PRODUCT_IMAGE_MAX_COUNT })}
+          {t(`${KEY}.counter`, { count: images.length, max: maxCount })}
         </span>
       </div>
     </div>

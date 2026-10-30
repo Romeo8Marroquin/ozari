@@ -233,6 +233,9 @@ export function buildUnsavedSettlement(
       {
         lineId: line.id,
         productName: line.productName,
+        // The variation rides along like the API's own record, so the report names it the same.
+        ...(line.variantId !== undefined && { variantId: line.variantId }),
+        ...(line.variantLabel !== undefined && { variantLabel: line.variantLabel }),
         quantity,
         unitAmount: line.replacementPrice,
         amount: roundMoney(quantity * line.replacementPrice),

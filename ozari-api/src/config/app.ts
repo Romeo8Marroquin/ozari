@@ -175,8 +175,14 @@ export const appConfig = {
     uploadUrlTtlSeconds: 300, // 5 min: long enough to upload, short enough that a leaked URL dies fast.
     // Max upload size, bound INTO the presigned signature (ContentLength) so a client can't exceed it.
     maxUploadBytes: 5 * 1024 * 1024, // 5 MB
-    // Gallery cap per product — bounds both a single upload-url mint and the `images` a create accepts.
+    // SHOWCASE gallery cap per product — bounds the `images` a create/update accepts (the product's
+    // own photos, `option_value_id` NULL).
     maxImagesPerProduct: 8,
+    // Photo cap per option VALUE (variations, 2026-10-29) — each value has its own small set.
+    maxImagesPerOptionValue: 4,
+    // Every photo of one product across ALL its sets (showcase + every value). Also the per-call cap
+    // of `POST /products/images/upload-url`, so one save's uploads are one presign call.
+    maxImagesTotalPerProduct: 40,
     // Whitelisted upload content types → their canonical file extension (the object key's suffix).
     allowedImageTypes: {
       "image/jpeg": "jpg",
@@ -214,6 +220,16 @@ export const appConfig = {
   // Longest name-search string the list endpoint honours; longer input is truncated, not rejected
   // (the same clamp stance as the pagination params).
   maxProductSearchLength: 100,
+  // PRODUCT VARIATIONS limits (coordinator decision 2026-10-29, mirrored in the app's
+  // `@constants/Regex`): options per product, values per option (≥1 each) and offered combinations
+  // (≥1 when options exist). A name's 1–40 length lives in `variationNameRegex` (helpers/regex.ts).
+  maxProductOptions: 3,
+  maxOptionValues: 20,
+  maxProductVariants: 60,
+  // The ONE body-size exception (AUTH-AND-SECURITY.md): `POST /products` and `PUT /products/:id`
+  // carry a full variations matrix (3 options × 20 values, 60 variants, 40 photo refs), which does
+  // not fit the global 10 kB cap. Route-scoped and Admin-only routes; every other route keeps 10 kB.
+  productWriteBodyLimit: "32kb",
 
   // Order list pagination: the agenda/history views' default page size and hard cap (same clamp
   // stance as products — a single list call can never fetch an unbounded number of rows).

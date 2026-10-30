@@ -189,6 +189,81 @@ progress + optional client downscale, graceful single/zero-image. Reusable `Prod
    autosaves to sessionStorage (survives refresh/navigation, dies with the tab), restores with a
    visible note + an explicit discard, and clears on success and on logout (user-scoped state).
 
+## 3b. Product VARIATIONS — decision record (✅ BUILT, 2026-10-29)
+
+**Owner decisions.**
+- **Generic options and combinations.** A product declares up to 3 axes ("Color", "Tamaño"), each
+  with its values. The admin chooses which COMBINATIONS are offered (variants); not every product of
+  the cartesian set has to exist.
+- **Each variation has its OWN STOCK**: the fleet for Alquiler, the shelf for Venta. A variant product
+  writes `products.quantity = 0` and never reads it. Its Admin stock figures are Σ over the active
+  variants.
+- **Photos per OPTION VALUE plus the product's SHOWCASE photos.** Each set has its own order and its
+  own single primary. `product_images.option_value_id` NULL = showcase (every pre-existing row).
+- **No conversion script.** The existing per-colour products are rebuilt by hand on staging and copied
+  to prod with `sync-products.ps1`.
+
+**Coordinator decisions** (the planner's open questions):
+- **Body size:** a route-scoped `express.json({ limit: "32kb" })` for `POST /products` and
+  `PUT /products/:id` only (Admin-only routes), mounted before the global 10kb parser.
+  AUTH-AND-SECURITY §1 item 4 holds the rule.
+- **Removing a variation that has HOLDING lines (open or future orders) is BLOCKED**: `409
+  variantInUse`, each variant listed with its order ids. History-only references RETIRE the variant
+  (tombstone); unreferenced variants are hard-deleted. The `PUT` response reports which in
+  `variantOutcome`.
+- The product card shows **"Desde Q…"** when the active variations' effective prices differ (app).
+- **A variation's name is its option values only** ("Rojo · Redondo", option order, `" · "`). There
+  is no custom title. Order lines SNAPSHOT it (`service_details.variant_label`), re-derived on every
+  order save like the price.
+- **Variation `securityDeposit: 0` = explicitly none** for that variation. The replacement value
+  cannot be cleared per variation (absent = inherit).
+- **Limits** (`appConfig`): 3 options (`maxProductOptions`), 20 values per option
+  (`maxOptionValues`), 60 variations (`maxProductVariants`), 4 photos per value
+  (`storage.maxImagesPerOptionValue`), 8 showcase photos (existing `maxImagesPerProduct`), 40 photos
+  in total (`storage.maxImagesTotalPerProduct`, also the upload-url per-call cap).
+- **Deviation from the frozen contract — the name regex.** Option and value names are 1–40 chars
+  through a NEW `variationNameRegex` (`helpers/regex.ts`). It uses the same character class as
+  `fullNameRegex`, which could not be reused because of its 5-char minimum ("Rojo" has 4). **The app
+  mirrors it** (`constants/Regex.ts`). Names must be unique case- and accent-insensitively: options
+  per product, values per option. Value keys follow `^[A-Za-z0-9_-]{1,40}$`.
+
+**Model.**
+- New tables: `product_options` → `product_option_values` (each value has its photo set) and
+  `product_variants` (`combination_key` = its sorted value ids joined by `.`, unique per product;
+  NULL override columns inherit the product's value). The join table is `product_variant_values`
+  (cascade on both FKs).
+- `service_details.variant_id` uses `onDelete: Restrict`, so history can never lose its variant.
+- Only VARIANTS tombstone (`isActive: false`, `isDefault: false`, key `retired:<id>`). Options and
+  values are attributes and are hard-deleted; history reads the line's `variantLabel`.
+- Migration `20261029000000_product_variations` is purely additive.
+
+**API — the rules the server decides** (frozen-contract §3):
+
+| Case | Rule |
+|---|---|
+| Body shape | ONE parser for both doors: `products.variations.ts` (`parseProductVariations`, pure, 100%-covered). Values carry a client `key`, and variants reference values ONLY by key. `quantity` is REQUIRED without options and FORBIDDEN with them (`quantityWithVariants`). `variants` is empty exactly when `options` is. |
+| Ids | Create: every id is forbidden (`idsForbiddenOnCreate`). Update: an option or value id must belong to the product, and a value id must stay under its option (`valueMovedOption`). A variant id must be an ACTIVE variant of this product, so a retired id is a 400. An image id may move between sets. Kept ids are re-checked inside the transaction (409 `conflict`). |
+| Overrides | They follow the business type. Alquiler takes rent/replacement/deposit, Venta takes sell only, and anything else is `variantPricingMismatch`. Deposit ≤ replacement is checked on EFFECTIVE values (`variantSecurityDepositAboveReplacement`, the shared `securityDepositViolation`). A rent↔sale switch therefore rejects stale overrides (the form clears them). |
+| Swap / combination change of a kept variant | Allowed. Its id, stock and holds carry over. A TWO-PHASE key write (changed keys park on `tmp:<id>`, then take their final value) makes swaps safe under the unique index. Existing lines' labels refresh on their next save. |
+| Remove a variant | Holding lines → 409 `variantInUse`. History only → tombstone. Unreferenced → hard delete. Removing a value requires dropping every variant that uses it (the parser rejects a dangling key). |
+| Re-add a retired combination | Creates a new variant row. This is safe because a tombstone never has holding lines. |
+| Add options to a product with open or future lines without variant (or remove them all while variant lines hold) | 409 `stockModeInUse`, `data.orderIds`. Finished and cancelled orders do not block. "Holding" = `buildHoldingLinesWhere` (`orders.service.ts`): an active rental line on an OUT/WINDOW status, or a sale line still undelivered, on a live order. |
+| Stock reduced below holds | Allowed, as for products. Availability floors at 0. |
+| Default variant | At most one flag. The projection derives exactly one: the flagged variant, else the first canonical one (option order, then value order). If the default is deleted, the flag goes with the row. |
+| Photos | A variant's `imageUrl` walks its values in option order: the first with photos gives its primary, else the showcase primary. `coverImageUrl` (cards, arrangement tiles, pickers) = the showcase primary, else the DEFAULT variant's value photo. An order line uses its OWN variant's photo, then the showcase, and never the cover. |
+| Delete product | Images (all sets), details, options and values are hard-deleted. Referenced variants tombstone and the rest are deleted. The product is soft- or hard-deleted per the NO-TRASH rule. The response reports `outcome: deleted \| deactivated`. |
+| Orders | Line `variantId`: `variantRequired` / `variantForbidden` / `invalidLineVariant`. Identity = the `(productId, variantId)` pair. Prices and deposits use effective variant values. Stock pools are per variant (EPIC-2-ORDERS §6b, EPIC-2-ORDER-LIFECYCLE §6c). |
+
+**Sync across environments** (`sync-products.ps1`):
+- Products match by name + business type (as before).
+- Options and values match by normalized name.
+- A variant matches by its sorted normalized `option=value` pairs.
+- A MATCHED product is NEVER modified; variation differences are reported only.
+- A product absent from the target is copied completely: active variants only, and every photo set
+  with its primary normalized per set (flagged, else first).
+- Source products whose names collide after normalization are skipped and reported.
+- Idempotent; dry run by default.
+
 ## 4. Definition of done
 Admin fully manages inventory (CRUD + multi-image gallery + stock + pricing) from `/panel/productos`;
 employee sees a clean read-only view; a client is gracefully kept out of the panel; **every** endpoint
@@ -228,7 +303,8 @@ as the default landing.
   lookups re-resolved BY NAME (categories/detail types created when missing; business types, rent
   units and currencies must already be seeded), its photos downloaded from the source bucket and
   re-uploaded to the target's under fresh keys (the target never points at the source's storage), and
-  appended after the target's arranged catalog. Both databases must run this checkout's migrations.
+  appended after the target's arranged catalog. Variations follow the matching and copy rules of
+  §3b. Both databases must run this checkout's migrations.
   Each side uses its own app login + R2 token. Run the reconcile script on the target afterwards as
   the post-copy check. Rules live in the header of `ozari-api/scripts/sync-products.ts`.
 - **Custom domain BEFORE real mobile users (session-critical — a production-cutover GATE, not a

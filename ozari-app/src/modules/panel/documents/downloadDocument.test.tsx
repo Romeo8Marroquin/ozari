@@ -10,6 +10,15 @@ const { toBlob, pdf } = vi.hoisted(() => {
 });
 vi.mock('@react-pdf/renderer', () => ({ pdf }));
 vi.mock('./OrderDocument', () => ({ default: () => null, DamageReportDocument: () => null }));
+// The photo embedding has its own suite (`documentImages.test.ts`); here it only has to be shown
+// that the template receives the EMBEDDED model, never the one with network URLs.
+const { embedDocumentImages, embedDamageReportImages } = vi.hoisted(() => ({
+  embedDocumentImages: vi.fn((model: unknown) => Promise.resolve({ ...(model as object), embedded: true })),
+  embedDamageReportImages: vi.fn((model: unknown) =>
+    Promise.resolve({ ...(model as object), embedded: true }),
+  ),
+}));
+vi.mock('./documentImages', () => ({ embedDocumentImages, embedDamageReportImages }));
 
 import { downloadDamageReport, downloadDocument } from './downloadDocument';
 import type { DamageReportModel, DocumentModel } from './documentModel';
@@ -84,8 +93,9 @@ describe('downloadDocument', () => {
     const report = { reference: 42 } as unknown as DamageReportModel;
     await downloadDamageReport({ ...input, model: report, copy: {} as DamageReportCopy });
     const element = pdf.mock.calls[0]?.[0] as unknown as { props: Record<string, unknown> };
-    // The report's own model reaches the template — not a comprobante's.
-    expect(element.props['model']).toBe(report);
+    // The report's own model reaches the template — not a comprobante's — with its photos embedded.
+    expect(embedDamageReportImages).toHaveBeenCalledWith(report);
+    expect(element.props['model']).toEqual({ ...report, embedded: true });
     expect(element.props['money']).toBe(input.money);
     // Named after the order, with what the document IS in front.
     const anchor = click.mock.instances[0] as HTMLAnchorElement;
@@ -99,7 +109,9 @@ describe('downloadDocument', () => {
     // The template is pure layout: everything it renders arrives as props, which is what keeps the
     // currency symbol and the date language in ONE place instead of a second copy inside the PDF.
     const element = pdf.mock.calls[0]?.[0] as unknown as { props: Record<string, unknown> };
-    expect(element.props['model']).toBe(model);
+    // The row photos arrive EMBEDDED: the template never receives a network URL to fetch.
+    expect(embedDocumentImages).toHaveBeenCalledWith(model);
+    expect(element.props['model']).toEqual({ ...model, embedded: true });
     expect(element.props['money']).toBe(input.money);
     expect(element.props['dateTime']).toBe(input.dateTime);
   });

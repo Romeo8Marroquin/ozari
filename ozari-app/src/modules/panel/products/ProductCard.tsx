@@ -7,7 +7,7 @@ import { useRole } from '@hooks/useRole';
 import { usePanelNavigate } from '../PanelNavContext';
 import { beginProductImageMorph, estimateDetailHeroRect } from './productImageMorph';
 import { saveProductsScroll } from './productsScroll';
-import { formatProductPrice, primaryImageUrl } from './productPresentation';
+import { formatHeadlinePrice, primaryImageUrl } from './productPresentation';
 import type { Product } from './product.types';
 
 const KEY = 'modules.panel.products';
@@ -136,8 +136,14 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const role = useRole();
   const panelNavigate = usePanelNavigate();
   const imageRef = useRef<HTMLImageElement>(null);
-  const imageUrl = primaryImageUrl(product);
-  const price = formatProductPrice(product);
+  // The server's cover (showcase primary, else the DEFAULT variation's photo); the showcase primary
+  // when an older payload carries no cover.
+  const imageUrl = product.coverImageUrl ?? primaryImageUrl(product);
+  // With variations, "Desde Q50 / Día" when they are priced differently. The stock badge needs no
+  // such care — the product-level counts already sum the variations (server-side).
+  const headline = formatHeadlinePrice(product);
+  const price =
+    headline && (headline.from ? t(`${KEY}.card.priceFrom`, { price: headline.price }) : headline.price);
 
   // Navigate through the panel's animated transition. Order matters: save the grid's scroll (the
   // return restores it), lift the morph clone off (it snapshots the photo and starts travelling

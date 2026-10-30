@@ -43,6 +43,12 @@ const ProductFormSkeleton: React.FC = () => {
         <PricingSkeleton />
       </FormSection>
       <FormSection
+        title={t(`${KEY}.variations.title`)}
+        description={t(`${KEY}.variations.description`)}
+      >
+        <DetailsSkeleton />
+      </FormSection>
+      <FormSection
         title={t(`${KEY}.sections.details.title`)}
         description={t(`${KEY}.sections.details.description`)}
       >

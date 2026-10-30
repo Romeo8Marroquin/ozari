@@ -52,6 +52,16 @@ describe('productDraft', () => {
     expect(readProductDraft()?.details).toEqual([]);
   });
 
+  it('restores options/variations as typed and drops malformed ones', () => {
+    const options = [{ name: 'Color', values: [{ key: 'n1', name: 'Rojo' }] }];
+    const variants = [{ valueKeys: ['n1'], quantity: '2' }];
+    Storage.set(StorageKeys.PRODUCT_CREATE_DRAFT, { name: 'Mantel', options, variants });
+    expect(readProductDraft()).toMatchObject({ options, variants });
+
+    Storage.set(StorageKeys.PRODUCT_CREATE_DRAFT, { name: 'Mantel', options: 'x', variants: 3 });
+    expect(readProductDraft()).toMatchObject({ options: [], variants: [] });
+  });
+
   it('treats a stored draft equal to the defaults as no draft at all', () => {
     Storage.set(StorageKeys.PRODUCT_CREATE_DRAFT, createProductDefaultValues);
     expect(readProductDraft()).toBeNull();

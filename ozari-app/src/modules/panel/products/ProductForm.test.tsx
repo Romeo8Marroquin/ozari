@@ -23,7 +23,9 @@ vi.mock('./useUpdateProduct', () => ({
   useUpdateProduct: () => ({ updateProduct, isPending: updatePending.value }),
 }));
 
-const { notify } = vi.hoisted(() => ({ notify: { success: vi.fn(), error: vi.fn() } }));
+const { notify } = vi.hoisted(() => ({
+  notify: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+}));
 vi.mock('@components/notifications/notify', () => ({ notify }));
 
 // Only the draft SWITCH is stubbed; the rest of the preferences module stays real.
@@ -55,6 +57,7 @@ import { Storage } from '@utils/storage';
 import { PanelNavContext, type PanelNav } from '../PanelNavContext';
 import ProductForm from './ProductForm';
 import type { Product } from './product.types';
+import { emptyVariantRow } from './productVariations';
 import { BUSINESS_TYPE_SELL, createProductDefaultValues } from './SchemaCreateProduct';
 
 const KEY = 'modules.panel.products.create';
@@ -702,5 +705,167 @@ describe('ProductForm — edit mode', () => {
     const { navigate } = renderEdit();
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.cancel` }));
     expect(navigate).toHaveBeenCalledWith('/panel/productos/7');
+  });
+
+  it('a removed variation still held by open orders (409) names it and the orders in the banner', async () => {
+    renderEdit();
+    await userEvent.click(screen.getByRole('button', { name: `${EDIT_KEY}.actions.submit` }));
+    await waitFor(() => expect(updateProduct).toHaveBeenCalled());
+
+    act(() =>
+      lastUpdateHandlers().onError({
+        isAxiosError: true,
+        response: {
+          status: 409,
+          data: { data: { conflicts: [{ variantId: 3, label: 'Rojo', orderIds: [42, 7] }] } },
+        },
+      }),
+    );
+    expect(await screen.findByText(`${KEY}.errors.variantInUse`)).toBeInTheDocument();
+    expect(notify.error).not.toHaveBeenCalled();
+  });
+
+  it('a stock-mode switch blocked by open orders (409) names the orders in the banner', async () => {
+    renderEdit();
+    await userEvent.click(screen.getByRole('button', { name: `${EDIT_KEY}.actions.submit` }));
+    await waitFor(() => expect(updateProduct).toHaveBeenCalled());
+
+    act(() =>
+      lastUpdateHandlers().onError({
+        isAxiosError: true,
+        response: { status: 409, data: { data: { orderIds: [42, 42] } } },
+      }),
+    );
+    expect(await screen.findByText(`${KEY}.errors.stockModeInUse`)).toBeInTheDocument();
+  });
+
+  it("reports the variations the save retired, and keeps the save's outcome out of the cache", async () => {
+    const { setData } = renderEdit();
+    await userEvent.click(screen.getByRole('button', { name: `${EDIT_KEY}.actions.submit` }));
+    await waitFor(() => expect(updateProduct).toHaveBeenCalled());
+
+    const response = {
+      data: {
+        data: { ...editProduct, variantOutcome: { retired: [{ id: 3, label: 'Rojo' }], deleted: 1 } },
+      },
+    } as unknown as { data: { data?: Product } };
+    act(() => lastUpdateHandlers().onSuccess(response));
+    expect(setData).toHaveBeenCalledWith([QueryKeys.PRODUCT, 7], editProduct);
+    expect(notify.info).toHaveBeenCalledWith(expect.stringContaining(`${EDIT_KEY}.variantsRetired`));
+  });
+
+  it('says nothing extra when the save retired no variation', async () => {
+    renderEdit();
+    await userEvent.click(screen.getByRole('button', { name: `${EDIT_KEY}.actions.submit` }));
+    await waitFor(() => expect(updateProduct).toHaveBeenCalled());
+    const response = {
+      data: { data: { ...editProduct, variantOutcome: { retired: [], deleted: 2 } } },
+    } as unknown as { data: { data?: Product } };
+    act(() => lastUpdateHandlers().onSuccess(response));
+    expect(notify.info).not.toHaveBeenCalled();
+  });
+});
+
+describe('ProductForm — variations', () => {
+  const VARIATIONS = `${KEY}.variations`;
+  const COLORS = ['Rojo', 'Azul', 'Verde', 'Negro', 'Blanco', 'Gris', 'Rosa', 'Morado', 'Dorado'];
+
+  /** A valid Alquiler draft whose stock lives on its variations (one per colour). */
+  const seedVariationDraft = (colors: string[] = ['Rojo']): void => {
+    Storage.set(StorageKeys.PRODUCT_CREATE_DRAFT, {
+      ...createProductDefaultValues,
+      name: 'Mantel redondo',
+      description: 'Mantel de tela para mesa redonda',
+      categoryId: 1,
+      quantity: '',
+      rentPrice: '25',
+      options: [{ name: 'Color', values: colors.map((name, index) => ({ key: `n${index + 1}`, name })) }],
+      variants: colors.map((_, index) => ({
+        ...emptyVariantRow([`n${index + 1}`]),
+        quantity: '6',
+        rentPrice: index === 0 ? '30' : '',
+        securityDeposit: index === 0 ? '10' : '',
+      })),
+    });
+  };
+  const fileInputs = (): HTMLInputElement[] =>
+    Array.from(document.querySelectorAll('input[type="file"]'));
+  const stageFiles = (input: HTMLInputElement, names: string[]): void => {
+    fireEvent.change(input, {
+      target: { files: names.map((name) => new File(['x'], name, { type: 'image/png' })) },
+    });
+  };
+
+  it("hands the stock to the variations and uploads each value's photos in the same presign", async () => {
+    seedVariationDraft();
+    uploadImages.mockImplementation((...sets: { id: string; file?: File }[][]) =>
+      Promise.resolve(
+        Object.fromEntries(
+          sets.flat().filter((img) => img.file).map((img) => [img.id, `products/${img.file?.name}`]),
+        ),
+      ),
+    );
+    renderForm();
+
+    expect(screen.queryByLabelText(new RegExp(`${KEY}.fields.quantityLabel`))).not.toBeInTheDocument();
+    expect(screen.getByText(`${VARIATIONS}.quantityManaged`)).toBeInTheDocument();
+    stageFiles(fileInputs()[1], ['rojo.png']);
+    await screen.findByAltText('rojo.png');
+
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createProduct).toHaveBeenCalled());
+
+    expect(uploadImages).toHaveBeenCalledWith(
+      [],
+      [expect.objectContaining({ file: expect.objectContaining({ name: 'rojo.png' }) })],
+    );
+    const body = createProduct.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body).not.toHaveProperty('quantity');
+    expect(body).toMatchObject({
+      options: [
+        {
+          name: 'Color',
+          values: [{ key: 'n1', name: 'Rojo', images: [{ key: 'products/rojo.png', isPrimary: true }] }],
+        },
+      ],
+      variants: [{ valueKeys: ['n1'], quantity: 6, rentPrice: 30, securityDeposit: 10 }],
+    });
+  });
+
+  it('refuses a save over the per-product photo total before anything uploads', async () => {
+    seedVariationDraft(COLORS);
+    renderForm();
+    const inputs = fileInputs();
+    stageFiles(inputs[0], Array.from({ length: 8 }, (_, index) => `vitrina-${index}.png`));
+    COLORS.forEach((color, index) =>
+      stageFiles(inputs[index + 1], Array.from({ length: 4 }, (_, n) => `${color}-${n}.png`)),
+    );
+    await screen.findByAltText('Dorado-3.png');
+
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    expect(await screen.findByText(`${KEY}.errors.tooManyImagesTotal`)).toBeInTheDocument();
+    expect(uploadImages).not.toHaveBeenCalled();
+    expect(createProduct).not.toHaveBeenCalled();
+  }, 30_000);
+
+  it("clears the variations' overrides of the side a type switch leaves behind", async () => {
+    seedVariationDraft();
+    renderForm();
+    const rent = () => screen.getByRole('textbox', { name: `${VARIATIONS}.rentPriceLabel · Rojo` });
+    expect(rent()).toHaveValue('30');
+
+    await userEvent.selectOptions(
+      screen.getByLabelText(new RegExp(`${KEY}.fields.businessTypeLabel`)),
+      String(BUSINESS_TYPE_SELL),
+    );
+    const sell = await screen.findByRole('textbox', { name: `${VARIATIONS}.sellPriceLabel · Rojo` });
+    await userEvent.type(sell, '80');
+
+    await userEvent.selectOptions(
+      screen.getByLabelText(new RegExp(`${KEY}.fields.businessTypeLabel`)),
+      '1',
+    );
+    expect(await screen.findByRole('textbox', { name: `${VARIATIONS}.rentPriceLabel · Rojo` })).toHaveValue('');
+    expect(screen.getByRole('textbox', { name: `${VARIATIONS}.securityDepositLabel · Rojo` })).toHaveValue('');
   });
 });

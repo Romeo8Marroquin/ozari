@@ -109,6 +109,15 @@ export interface OrderLineResponseModel {
   id: number;
   productId: number;
   productName: string;
+  /** The VARIATION ordered (absent for a product without variants) — line identity is
+   *  (productId, variantId), so two colours of one product are two lines. */
+  variantId?: number | undefined;
+  /** The variation's label SNAPSHOT ("Rojo · Redondo"), re-derived on every order save — history
+   *  reads it, never the live options. Absent without a variant. */
+  variantLabel?: string | undefined;
+  /** The line's photo (`lineImageUrl`): the product's primary image, else its first; absent when
+   *  the product has none. Live, not a snapshot — it follows the catalog's current gallery. */
+  imageUrl: string | undefined;
   /** The line's rent-vs-sale snapshot (how it was ordered, immune to later product edits). */
   isRental: boolean;
   quantity: number;
@@ -127,6 +136,9 @@ export interface OrderLineResponseModel {
 export interface OrderDamageResponseModel {
   lineId: number;
   productName: string;
+  /** The damaged line's variation (absent without one) and its label snapshot. */
+  variantId?: number | undefined;
+  variantLabel?: string | undefined;
   quantity: number;
   /** The line's replacement-price snapshot — never typed by the admin. */
   unitAmount: number;
@@ -376,6 +388,9 @@ export interface OrderCatalogResponseModel {
  *  product row at creation time; a client-sent price is never trusted. */
 export interface CreateOrderLineRequestModel {
   productId: number;
+  /** REQUIRED (an active variant of that product) when the product has active variants; forbidden
+   *  (absent/null) when it has none. Line identity = (productId, variantId). */
+  variantId: number | null;
   quantity: number;
 }
 
@@ -446,6 +461,10 @@ export interface SettleOrderRequestModel {
 export interface OrderStockConflictItemModel {
   productId: number;
   productName: string;
+  /** The conflicting line's variation (absent without one) — the form maps the conflict by
+   *  (productId, variantId). A retired/vanished variant conflicts with `available: 0`. */
+  variantId?: number;
+  variantLabel?: string;
   requested: number;
   /** Units actually takeable for the requested window (rentals) or remaining stock (sales). */
   available: number;
@@ -475,8 +494,11 @@ export interface OrderAvailabilityRequestModel {
 export interface ProductAvailabilityModel {
   productId: number;
   /** Rentals: fleet minus what's held in the window; sales: current stock. `null` = a rental with
-   *  no pickup window yet (can't be computed until a pickup is chosen). */
+   *  no pickup window yet (can't be computed until a pickup is chosen). For a product WITH
+   *  variants: the sum over `variants` (`null` under the same rule). */
   available: number | null;
+  /** Per ACTIVE variant, same rules — present only for a product with variants. */
+  variants?: { variantId: number; available: number | null }[];
 }
 
 export interface OrderAvailabilityResponseModel {

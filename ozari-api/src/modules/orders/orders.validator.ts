@@ -15,7 +15,7 @@ import {
   type CreateOrderLineRequestModel,
   type CreateOrderRequestModel,
 } from "./orders.models.js";
-import { ASSIGNABLE_ROLES } from "./orders.service.js";
+import { ASSIGNABLE_ROLES, stockKey } from "./orders.service.js";
 
 /**
  * Grace absorbed when checking that a create delivery isn't in the PAST: the picker is minute-
@@ -163,20 +163,32 @@ async function parseOrderBody(
     reject("tooManyLines", { count: rawLines.length, max: appConfig.maxOrderLines });
     return null;
   }
-  const seenProducts = new Set<number>();
+  // Line identity is (productId, variantId): two colours of one product are two lines, the same
+  // pair twice is a duplicate.
+  const seenLines = new Set<string>();
   const lines: CreateOrderLineRequestModel[] = [];
   for (const rawLine of rawLines as Array<Record<string, unknown>>) {
     const productId = rawLine?.["productId"];
     const quantity = rawLine?.["quantity"];
+    const rawVariantId = rawLine?.["variantId"];
     if (typeof productId !== "number" || !Number.isInteger(productId) || productId < 1) {
       reject("invalidLineProduct", { productId });
       return null;
     }
-    if (seenProducts.has(productId)) {
-      reject("duplicateLineProduct", { productId });
+    const variantId = rawVariantId ?? null;
+    if (
+      variantId !== null &&
+      (typeof variantId !== "number" || !Number.isInteger(variantId) || variantId < 1)
+    ) {
+      reject("invalidLineVariant", { productId, variantId: rawVariantId });
       return null;
     }
-    seenProducts.add(productId);
+    const lineKey = stockKey(productId, variantId);
+    if (seenLines.has(lineKey)) {
+      reject("duplicateLineProduct", { productId, variantId });
+      return null;
+    }
+    seenLines.add(lineKey);
     if (
       typeof quantity !== "number" ||
       !Number.isInteger(quantity) ||
@@ -186,7 +198,7 @@ async function parseOrderBody(
       reject("invalidLineQuantity", { productId, quantity });
       return null;
     }
-    lines.push({ productId, quantity });
+    lines.push({ productId, variantId, quantity });
   }
 
   // Every line's product must be an ACTIVE catalog row; the products also decide the order's
@@ -200,6 +212,7 @@ async function parseOrderBody(
       rentTimeUnitId: true,
       rentPrice: true,
       sellPrice: true,
+      variants: { where: { isActive: true }, select: { id: true, rentPrice: true, sellPrice: true } },
     },
   });
   const productById = new Map(products.map((product) => [product.id, product]));
@@ -209,10 +222,30 @@ async function parseOrderBody(
       reject("unknownLineProduct", { productId: line.productId });
       return null;
     }
+    // The variation rule: a product with active variants is ordered BY variant, one without never.
+    const hasVariants = product.variants.length > 0;
+    if (hasVariants && line.variantId === null) {
+      reject("variantRequired", { productId: line.productId });
+      return null;
+    }
+    if (!hasVariants && line.variantId !== null) {
+      reject("variantForbidden", { productId: line.productId, variantId: line.variantId });
+      return null;
+    }
+    const variant = product.variants.find((candidate) => candidate.id === line.variantId);
+    if (line.variantId !== null && !variant) {
+      // Unknown, of another product, or retired — all the same to the caller.
+      reject("invalidLineVariant", { productId: line.productId, variantId: line.variantId });
+      return null;
+    }
     const isRental = product.productBusinessTypeId === BusinessTypeEnum.RENT;
     // Defensive: the catalog's conditional price rule guarantees these; a violating row must
-    // fail loudly here rather than price a line at 0.
-    if ((isRental ? product.rentPrice : product.sellPrice) === null) {
+    // fail loudly here rather than price a line at 0. A variant's price is its override, else the
+    // product's.
+    const price = isRental
+      ? (variant?.rentPrice ?? product.rentPrice)
+      : (variant?.sellPrice ?? product.sellPrice);
+    if (price === null) {
       reject("unknownLineProduct", { productId: line.productId });
       return null;
     }

@@ -11,7 +11,9 @@ import getZodRequiredPatterns from '@utils/getZodRequiredPatterns';
 import { t } from 'i18next';
 import type { ResolverResult } from 'react-hook-form';
 import { z } from 'zod';
-import type { DriverAvailability } from './order.types';
+import type { Product } from '../products/product.types';
+import { hasVariants, stockKey, variantFor } from '../products/productVariations';
+import type { DriverAvailability, ProductAvailability } from './order.types';
 
 const KEY = 'modules.panel.orders.create.errors';
 
@@ -146,6 +148,13 @@ const baseCreateOrderSchema = z.object({
     .array(
       z.object({
         productId: z.number({ error: t(`${KEY}.requiredLineProduct`) }),
+        // The VARIATION the line takes (`null` = none chosen / the product has none). Required
+        // exactly when the product has variations — the resolver checks it against the catalog
+        // (`requiredLineVariant`), because the schema alone cannot see the product.
+        variantId: z.number().nullable(),
+        // FORM-ONLY (never sent): the per-option value picks while the combination is incomplete,
+        // one entry per option in option order. Once complete they resolve to `variantId`.
+        pickedValues: z.array(z.number().nullable()),
         quantity: z
           .string()
           .refine((value) => parseLineQuantity(value) !== null, t(`${KEY}.invalidLineQuantity`)),
@@ -177,13 +186,16 @@ const orderCrossFieldRules = (
   data: z.infer<typeof baseCreateOrderSchema>,
   ctx: z.RefinementCtx,
 ): void => {
-  // No duplicate products in one order (mirrors the backend; the picker already hides picked ones).
-  const seen = new Set<number>();
+  // No duplicate LINES in one order (mirrors the backend; the picker already hides picked ones). A
+  // line's identity is the (product, variation) PAIR — the same tablecloth in two colours is two
+  // lines, the same colour twice is a duplicate.
+  const seen = new Set<string>();
   data.lines.forEach((line, index) => {
-    if (seen.has(line.productId)) {
+    const key = stockKey(line.productId, line.variantId);
+    if (seen.has(key)) {
       ctx.addIssue({ code: 'custom', path: ['lines', index, 'productId'], message: t(`${KEY}.duplicateLineProduct`) });
     }
-    seen.add(line.productId);
+    seen.add(key);
   });
 
   // Pickup coherence (Q-A): required + after delivery when any rental line exists; forbidden else.
@@ -249,7 +261,8 @@ export interface CreateOrderBody {
   deliveryAmount?: number;
   depositAmount?: number;
   assignedUserId: number;
-  lines: { productId: number; quantity: number }[];
+  /** `variantId` only on a line of a product with variations (omitted otherwise). */
+  lines: { productId: number; variantId?: number; quantity: number }[];
 }
 
 /** Maps the validated form values to the API body (money truncated to cents, like the backend). */
@@ -285,6 +298,7 @@ export function toCreateOrderBody(data: CreateOrderFormType): CreateOrderBody {
     assignedUserId: data.assignedUserId,
     lines: data.lines.map((line) => ({
       productId: line.productId,
+      ...(line.variantId != null && { variantId: line.variantId }),
       /* v8 ignore next -- parseLineQuantity is guaranteed non-null by the schema */
       quantity: parseLineQuantity(line.quantity) ?? 1,
     })),
@@ -326,7 +340,7 @@ export function orderToFormValues(order: {
   depositAmount?: number;
   paymentMethod?: { id: number };
   assignee?: { id: number };
-  lines: { productId: number; quantity: number; isRental: boolean }[];
+  lines: { productId: number; variantId?: number; quantity: number; isRental: boolean }[];
 }): CreateOrderFormType {
   return {
     ...createOrderDefaultValues,
@@ -348,6 +362,8 @@ export function orderToFormValues(order: {
     assignedUserId: order.assignee?.id as unknown as number,
     lines: order.lines.map((line) => ({
       productId: line.productId,
+      variantId: line.variantId ?? null,
+      pickedValues: [],
       quantity: String(line.quantity),
       isRental: line.isRental,
     })),
@@ -365,19 +381,81 @@ export const reconcileToastDuration = (changeCount: number): number =>
   Math.min(RECONCILE_TOAST_BASE_MS + changeCount * RECONCILE_TOAST_STEP_MS, RECONCILE_TOAST_MAX_MS);
 
 /**
- * Resolves how many of a product the admin may still pick: the fetched per-WINDOW amount when it's
- * known (`POST /orders/availability`), else the product's current stock/fleet count (the pre-window
- * baseline, so the cap exists even before dates are set). `undefined` = unknown (the product isn't in
- * the probe and carries no baseline, or a rental with no pickup yet) → left to the server to guard.
+ * The probe's answer as ONE map keyed by `stockKey(productId, variantId)`: each product's own amount
+ * (for a product with variations, their sum) AND each variation's — so a line looks up exactly the
+ * pair it holds.
+ */
+export function availabilityMapFrom(list: ProductAvailability[]): Map<string, number | null> {
+  const map = new Map<string, number | null>();
+  list.forEach((item) => {
+    map.set(stockKey(item.productId), item.available);
+    (item.variants ?? []).forEach((variant) =>
+      map.set(stockKey(item.productId, variant.variantId), variant.available),
+    );
+  });
+  return map;
+}
+
+/**
+ * Resolves how many of a product — or of ONE of its variations — the admin may still pick: the
+ * fetched per-WINDOW amount when it's known (`POST /orders/availability`, keyed by the pair), else
+ * the current stock/fleet count (the pre-window baseline, so the cap exists even before dates are
+ * set): the variation's own `available` when the line names one, else the product's. `undefined` =
+ * unknown (not in the probe and no baseline, or a rental with no pickup yet) → left to the server.
  */
 export function takeableFor(
   productId: number,
-  windowAvailability: Map<number, number | null>,
-  products: Map<number, { available?: number }>,
+  variantId: number | null | undefined,
+  windowAvailability: Map<string, number | null>,
+  products: Map<number, Pick<Product, 'available' | 'variants'>>,
 ): number | undefined {
-  const windowValue = windowAvailability.get(productId);
+  const windowValue = windowAvailability.get(stockKey(productId, variantId));
   if (windowValue != null) return windowValue;
-  return products.get(productId)?.available;
+  const product = products.get(productId);
+  if (variantId != null) return product ? variantFor(product, variantId)?.available : undefined;
+  return product?.available;
+}
+
+/**
+ * Layers the VARIATION rules the schema cannot see (it does not know the catalog), mirroring the
+ * API's 400s: a line whose product has variations must name one (`required` — `variantRequired`),
+ * and the one it names must still be OFFERED (`invalid` — `invalidLineVariant`: an edited order
+ * whose variation was retired since). A product without variations never carries one (the form
+ * clears it), and a line already erroring on its product is left alone. Pure, like its siblings.
+ */
+export function appendLineVariantErrors(
+  values: CreateOrderFormType,
+  result: ResolverResult<CreateOrderFormType>,
+  products: Map<number, Pick<Product, 'variants'>>,
+  messages: { required: string; invalid: string },
+): ResolverResult<CreateOrderFormType> {
+  const baseLines = result.errors.lines as unknown as
+    | ({ productId?: unknown; variantId?: unknown } | undefined)[]
+    | undefined;
+  const extra = new Map<number, string>();
+  values.lines.forEach((line, index) => {
+    if (line.productId == null || baseLines?.[index]?.productId) return;
+    const product = products.get(line.productId);
+    if (!product || !hasVariants(product)) return;
+    if (line.variantId == null) extra.set(index, messages.required);
+    else if (!variantFor(product, line.variantId)) extra.set(index, messages.invalid);
+  });
+  if (extra.size === 0) return result;
+  const lines: ({ variantId?: unknown } | undefined)[] = [];
+  values.lines.forEach((_, index) => {
+    const own = baseLines?.[index];
+    const message = extra.get(index);
+    if (own || message) {
+      lines[index] = {
+        ...(own ?? {}),
+        ...(message ? { variantId: { type: 'variant', message } } : {}),
+      };
+    }
+  });
+  return {
+    values: {},
+    errors: { ...result.errors, lines },
+  } as ResolverResult<CreateOrderFormType>;
 }
 
 // ── The logistics pad (driver availability) ──────────────────────────────────────────────────────
@@ -458,7 +536,7 @@ export function appendDriverConflictErrors(
 export function appendLineAvailabilityErrors(
   values: CreateOrderFormType,
   result: ResolverResult<CreateOrderFormType>,
-  capFor: (productId: number) => number | undefined,
+  capFor: (line: { productId: number; variantId: number | null }) => number | undefined,
   message: (available: number) => string,
 ): ResolverResult<CreateOrderFormType> {
   const baseLines = result.errors.lines as unknown as
@@ -467,7 +545,7 @@ export function appendLineAvailabilityErrors(
   const extra: Record<number, { type: string; message: string }> = {};
   values.lines.forEach((line, index) => {
     if (line.productId == null || baseLines?.[index]?.quantity) return;
-    const cap = capFor(line.productId);
+    const cap = capFor({ productId: line.productId, variantId: line.variantId ?? null });
     const quantity = parseLineQuantity(line.quantity);
     if (cap != null && quantity != null && quantity > cap) {
       extra[index] = { type: 'availability', message: message(cap) };
