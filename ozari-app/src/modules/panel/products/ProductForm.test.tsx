@@ -879,7 +879,8 @@ describe('ProductForm — variations', () => {
     expect(await screen.findByText(`${KEY}.errors.tooManyImagesTotal`)).toBeInTheDocument();
     expect(uploadImages).not.toHaveBeenCalled();
     expect(createProduct).not.toHaveBeenCalled();
-  }, 30_000);
+    // ~4s alone; the headroom is for the full parallel suite, where ~25 value rows render slowly.
+  }, 60_000);
 
   it("clears the variations' overrides of the side a type switch leaves behind", async () => {
     seedVariationDraft();
@@ -928,14 +929,19 @@ describe('ProductForm — variations', () => {
     });
     renderForm();
     // The general prices are optional defaults now — said where they are typed.
-    expect((await screen.findAllByText(`${VARIATIONS}.generalPriceHint`)).length).toBeGreaterThan(0);
+    // AnimatedMessage settles its text after a tween — give a loaded suite room.
+    expect(
+      (await screen.findAllByText(`${VARIATIONS}.generalPriceHint`, {}, { timeout: 5000 })).length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText(`${VARIATIONS}.quantityTotal`)).toBeInTheDocument();
 
     await userEvent.click(
       screen.getByRole('radio', { name: `${VARIATIONS}.stockMode.shared` }),
     );
     const quantity = await screen.findByRole('textbox', { name: `${KEY}.fields.quantityLabel` });
-    expect(await screen.findByText(`${VARIATIONS}.quantitySharedHint`)).toBeInTheDocument();
+    expect(
+      await screen.findByText(`${VARIATIONS}.quantitySharedHint`, {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
     await userEvent.type(quantity, '4');
 
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
