@@ -17,6 +17,7 @@ import {
   type ProductListItemResponseModel,
   type ProductListQueryModel,
   type ProductListSortModel,
+  type ProductOptionKindModel,
   type ProductOptionRequestModel,
   type ProductVariantConflictModel,
   type ProductVariantOutcomeModel,
@@ -63,12 +64,14 @@ export const richProductInclude = {
     select: {
       id: true,
       name: true,
+      kind: true,
       sortOrder: true,
       values: {
         orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
         select: {
           id: true,
           name: true,
+          colorHex: true,
           sortOrder: true,
           images: {
             orderBy: [{ sortOrder: "asc" }],
@@ -197,17 +200,35 @@ export function describeVariants<V extends VariationVariantRow>(
 }
 
 /**
- * The photo a card or tile shows for a product: its SHOWCASE primary, else the DEFAULT variant's
- * value photo, else none. (An order line never uses this — see orders' `lineImageUrl`.)
+ * The photo a card or tile shows for a product — the first that exists of (owner 2026-10-30): its
+ * SHOWCASE primary, the DEFAULT variant's value photo, the first variant's (canonical order) value
+ * photo, then any value's photo (option order, value order) — so a product shows a photo whenever ANY
+ * of its sets has one. (An order line never uses this — see orders' `lineImageUrl`.)
  */
 export function coverImageUrl(
   showcase: ReadonlyArray<{ url: string; isPrimary: boolean }>,
   described: ReadonlyArray<{ isDefault: boolean; valueImageUrl: string | undefined }>,
+  options: readonly VariationOptionRow[],
 ): string | undefined {
   return (
-    primaryImageUrl(showcase) ?? described.find((entry) => entry.isDefault)?.valueImageUrl
+    primaryImageUrl(showcase) ??
+    described.find((entry) => entry.isDefault)?.valueImageUrl ??
+    described.find((entry) => entry.valueImageUrl !== undefined)?.valueImageUrl ??
+    [...options]
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+      .flatMap((option) =>
+        [...option.values].sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id),
+      )
+      .map((value) => primaryImageUrl(value.images))
+      .find((url) => url !== undefined)
   );
 }
+
+/** The API's option kind ↔ the `ProductOptionKind` column (a structural enum, never a lookup id). */
+const optionKindColumn = (kind: ProductOptionKindModel): "GENERIC" | "COLOR" =>
+  kind === "color" ? "COLOR" : "GENERIC";
+const optionKindOf = (column: "GENERIC" | "COLOR"): ProductOptionKindModel =>
+  column === "COLOR" ? "color" : "generic";
 
 /** A Prisma `Decimal | null` money column → a plain `number` (or `undefined` when absent). */
 const toMoney = (value: Prisma.Decimal | null): number | undefined =>
@@ -267,13 +288,15 @@ export const isSqlProductSort = (
   sort: ProductListSortModel,
 ): sort is keyof typeof SQL_PRODUCT_ORDERS => sort in SQL_PRODUCT_ORDERS;
 
-/** The five scalar columns the in-memory sorts need — a deliberately tiny select. */
+/** The columns the in-memory sorts need — a deliberately tiny select (plus the active variants'
+ *  price overrides: a product with variations sorts by its cheapest one). */
 export const productSortSelect = {
   id: true,
   name: true,
   rentPrice: true,
   sellPrice: true,
   createdAt: true,
+  variants: { where: { isActive: true }, select: { rentPrice: true, sellPrice: true } },
 } satisfies Prisma.ProductSelect;
 
 /** A row fetched with `productSortSelect` — the in-memory sort's input. */
@@ -281,10 +304,18 @@ export type ProductSortRow = Prisma.ProductGetPayload<{
   select: typeof productSortSelect;
 }>;
 
-/** THE product's price under the conditional rule (rent XOR sell), or `null` when it has neither. */
+/** THE product's price under the conditional rule (rent XOR sell), or `null` when it has neither.
+ *  With variations it is the CHEAPEST variant's effective price (its override, else the product's
+ *  default) — the "Desde Q…" the card shows. */
 const effectivePrice = (row: ProductSortRow): number | null => {
-  const value = row.rentPrice ?? row.sellPrice;
-  return value !== null ? Number(value) : null;
+  const ownPrice = (prices: Pick<ProductSortRow, "rentPrice" | "sellPrice">) =>
+    prices.rentPrice ?? prices.sellPrice;
+  const candidates =
+    row.variants.length > 0
+      ? row.variants.map((variant) => ownPrice(variant) ?? ownPrice(row))
+      : [ownPrice(row)];
+  const prices = candidates.flatMap((value) => (value !== null ? [Number(value)] : []));
+  return prices.length > 0 ? Math.min(...prices) : null;
 };
 
 /** Newest first (id tiebreak) — every in-memory sort's tiebreaker, like the SQL orders' tail. */
@@ -421,7 +452,9 @@ export interface ProductProjectionExtras {
  * values (the variant's override, else the product's); the Admin tier adds each variant's stock,
  * its effective replacement value and its raw `overrides` (the form's prefill), and — when the
  * caller passes `usage` (detail + PUT only) — how order lines use it. A product WITH variants
- * reports its Admin stock as the Σ over them (`products.quantity` is 0 and never read).
+ * reports its Admin stock as the Σ over them (`products.quantity` is 0 and never read) — unless the
+ * stock is SHARED (2026-10-30): then `products.quantity` is the one pool, and the product and every
+ * variant report it. A variant's `description` is its OWN text (the app stacks it).
  *
  * `extras.rentedNow` holds the units out on rentals right now per stock pool (`stockKey` — callers
  * load it via `buildRentedNowWhere`); absent = none, correct for a just-created product and for
@@ -437,6 +470,21 @@ export function projectProductForRole(
   const isRent = product.productBusinessTypeId === BusinessTypeEnum.RENT;
   const showcasePrimary = primaryImageUrl(product.productImages);
   const described = describeVariants(product.options, product.variants);
+  const sharedStock = described.length > 0 && product.sharedStock;
+  // A SHARED pool: the product's own quantity, minus what every one of its variants has out (the
+  // rented-now rows are grouped per line identity — fold them back into the one pool).
+  const sharedPool = sharedStock
+    ? {
+        quantity: product.quantity,
+        available: computeAvailableQuantity(
+          product,
+          described.reduce(
+            (sum, { variant }) => sum + (rentedNow.get(stockKey(product.id, variant.id)) ?? 0),
+            rentedNow.get(stockKey(product.id, null)) ?? 0,
+          ),
+        ),
+      }
+    : undefined;
 
   let variantStock = { quantity: 0, available: 0 };
   const variants = described.map(({ variant, valueIds, label, valueImageUrl, isDefault }) => {
@@ -448,26 +496,30 @@ export function projectProductForRole(
       rentPrice: toMoney(variant.rentPrice ?? product.rentPrice),
       sellPrice: toMoney(variant.sellPrice ?? product.sellPrice),
       securityDeposit: toMoney(variant.securityDeposit ?? product.securityDeposit),
-      description: variant.description ?? product.description ?? undefined,
+      // Its OWN text: the app stacks it under the product's description (owner 2026-10-30).
+      description: variant.description ?? undefined,
       imageUrl: valueImageUrl ?? showcasePrimary,
     };
     if (!isAdmin) {
       return projected;
     }
-    const available = computeAvailableQuantity(
-      { quantity: variant.quantity, productBusinessTypeId: product.productBusinessTypeId },
-      rentedNow.get(stockKey(product.id, variant.id)) ?? 0,
-    );
+    const pool = sharedPool ?? {
+      quantity: variant.quantity,
+      available: computeAvailableQuantity(
+        { quantity: variant.quantity, productBusinessTypeId: product.productBusinessTypeId },
+        rentedNow.get(stockKey(product.id, variant.id)) ?? 0,
+      ),
+    };
     variantStock = {
-      quantity: variantStock.quantity + variant.quantity,
-      available: variantStock.available + available,
+      quantity: variantStock.quantity + pool.quantity,
+      available: variantStock.available + pool.available,
     };
     return {
       ...projected,
-      quantity: variant.quantity,
-      available,
-      inStock: available > 0,
-      ...(isRent && { total: variant.quantity }),
+      quantity: pool.quantity,
+      available: pool.available,
+      inStock: pool.available > 0,
+      ...(isRent && { total: pool.quantity }),
       replacementPrice: toMoney(variant.replacementPrice ?? product.replacementPrice),
       overrides: {
         rentPrice: toMoney(variant.rentPrice),
@@ -507,14 +559,16 @@ export function projectProductForRole(
       isPrimary: image.isPrimary,
       sortOrder: image.sortOrder,
     })),
-    coverImageUrl: coverImageUrl(product.productImages, described),
+    coverImageUrl: coverImageUrl(product.productImages, described, product.options),
     options: product.options.map((option) => ({
       id: option.id,
       name: option.name,
+      kind: optionKindOf(option.kind),
       sortOrder: option.sortOrder,
       values: option.values.map((value) => ({
         id: value.id,
         name: value.name,
+        ...(value.colorHex !== null && { color: value.colorHex }),
         sortOrder: value.sortOrder,
         images: value.images.map((image) => ({
           id: image.id,
@@ -525,6 +579,7 @@ export function projectProductForRole(
       })),
     })),
     variants,
+    sharedStock,
     details: product.productDetails.map((detail) => ({
       id: detail.id,
       detail: detail.detail,
@@ -534,10 +589,11 @@ export function projectProductForRole(
   };
 
   if (isAdmin) {
-    // A product with variants: its stock IS theirs (Σ); without, its own pool.
+    // A product with variants: its stock IS theirs (Σ), or the one pool they share; without, its
+    // own pool.
     const stock =
       described.length > 0
-        ? variantStock
+        ? (sharedPool ?? variantStock)
         : {
             quantity: product.quantity,
             available: computeAvailableQuantity(
@@ -688,8 +744,9 @@ export class ProductVariantInUseError extends Error {
 }
 
 /**
- * Thrown inside the update transaction when the body switches the product between product-level and
- * per-variant stock while HOLDING lines use the pool that would vanish — 409 `stockModeInUse`
+ * Thrown inside the update transaction when the body switches how the product counts stock
+ * (product-level, one shared pool, or per variant) while HOLDING lines use the pool that would
+ * vanish — 409 `stockModeInUse`
  * (`orderIds`: the orders to finish or edit first). Finished and cancelled orders never block.
  */
 export class ProductStockModeInUseError extends Error {
@@ -762,6 +819,7 @@ export function productScalarData(body: CreateProductRequestModel | UpdateProduc
     productCategoryId: body.categoryId,
     currencyId: body.currencyId,
     quantity: body.quantity,
+    sharedStock: body.sharedStock,
     rentPrice: body.rentPrice ?? null,
     sellPrice: body.sellPrice ?? null,
     replacementPrice: body.replacementPrice ?? null,
@@ -780,8 +838,9 @@ export function productScalarData(body: CreateProductRequestModel | UpdateProduc
  *   The scalar update runs FIRST: it takes the product row lock, which serializes this save against
  *   order writes on the same product (they lock it too) — the 409 pre-checks below read a stable
  *   state.
- * - 409 pre-checks (variations, 2026-10-29): switching between product-level and per-variant stock
- *   while HOLDING lines use the vanishing pool → {@link ProductStockModeInUseError}; dropping a
+ * - 409 pre-checks (variations, 2026-10-29): switching the stock MODE (product-level, shared, or
+ *   per-variant — 2026-10-30) while HOLDING lines use the vanishing pool →
+ *   {@link ProductStockModeInUseError}; dropping a
  *   variant HOLDING lines use → {@link ProductVariantInUseError}.
  * - Options, then values: kept ids update their name/order, new ones are created (key → id map).
  * - Images, across EVERY set (the showcase + each value's): kept rows (`id`) get their new set,
@@ -808,6 +867,10 @@ export async function applyProductUpdate(
   body: UpdateProductRequestModel,
   holding: HoldingStatusIds,
 ): Promise<{ removedImageKeys: string[]; variantOutcome: ProductVariantOutcomeModel }> {
+  // The row lock FIRST (it serializes this save against order writes and other saves of the
+  // product), reading the stock mode the save may be leaving — the guard below compares pools.
+  const [locked] = await tx.$queryRaw<{ shared_stock: boolean }[]>`
+    SELECT shared_stock FROM products WHERE id = ${productId} FOR UPDATE`;
   await tx.product.update({ where: { id: productId }, data: productScalarData(body) });
 
   const currentOptions = await tx.productOption.findMany({
@@ -829,8 +892,8 @@ export async function applyProductUpdate(
   const keptVariantIds = new Set(body.variants.flatMap((variant) => variant.id ?? []));
   const leaving = currentVariants.filter((variant) => !keptVariantIds.has(variant.id));
   await assertStockPoolsFree(tx, productId, holding, {
-    hadVariants: currentVariants.length > 0,
-    willHaveVariants: body.variants.length > 0,
+    from: stockModeOf(currentVariants.length > 0, locked?.shared_stock === true),
+    to: stockModeOf(body.variants.length > 0, body.sharedStock),
     leaving,
   });
 
@@ -905,25 +968,39 @@ function verifyKeptVariationIds(
 }
 
 /**
+ * How a product counts its stock: its own pool without variations, one SHARED pool its variants draw
+ * from, or a pool PER variant. A save that changes it moves every holding line to another pool.
+ */
+type StockMode = "product" | "shared" | "variant";
+
+const stockModeOf = (hasVariants: boolean, sharedStock: boolean): StockMode => {
+  if (!hasVariants) {
+    return "product";
+  }
+  return sharedStock ? "shared" : "variant";
+};
+
+/**
  * The two 409 guards (see {@link applyProductUpdate}). The stock-MODE check runs first: when the save
- * switches modes, every current variant leaves too, and "finish these orders before changing how
- * this product counts stock" is the truer message.
+ * switches modes, the holding lines' pool vanishes (or every current variant leaves too), and "finish
+ * these orders before changing how this product counts stock" is the truer message.
  */
 async function assertStockPoolsFree(
   tx: Prisma.TransactionClient,
   productId: number,
   holding: HoldingStatusIds,
   pools: {
-    hadVariants: boolean;
-    willHaveVariants: boolean;
+    from: StockMode;
+    to: StockMode;
     leaving: ReadonlyArray<{ id: number; values: Parameters<typeof variantLabelOf>[0] }>;
   },
 ): Promise<void> {
-  const { hadVariants, willHaveVariants, leaving } = pools;
+  const { from, to, leaving } = pools;
   const holdingWhere = buildHoldingLinesWhere(holding);
-  if (hadVariants !== willHaveVariants) {
+  if (from !== to) {
+    // The lines on the pool being LEFT: without variations they name none; otherwise a variant.
     const lines = await tx.serviceDetail.findMany({
-      where: { ...holdingWhere, productId, variantId: hadVariants ? { not: null } : null },
+      where: { ...holdingWhere, productId, variantId: from === "product" ? null : { not: null } },
       select: { serviceId: true },
     });
     if (lines.length > 0) {
@@ -962,7 +1039,11 @@ async function upsertOptionsAndValues(
   const valueIdByKey = new Map<string, number>();
   // Sequential on purpose: one connection per interactive transaction (same stance as the gallery).
   for (const [optionIndex, option] of options.entries()) {
-    const data = { name: option.name, sortOrder: optionIndex };
+    const data = {
+      name: option.name,
+      kind: optionKindColumn(option.kind),
+      sortOrder: optionIndex,
+    };
     const optionId =
       option.id === undefined
         ? // eslint-disable-next-line no-await-in-loop -- transactional writes must stay sequential
@@ -975,14 +1056,14 @@ async function upsertOptionsAndValues(
         // eslint-disable-next-line no-await-in-loop -- transactional writes must stay sequential
         await tx.productOptionValue.update({
           where: { id: value.id },
-          data: { name: value.name, sortOrder: valueIndex },
+          data: { name: value.name, colorHex: value.color ?? null, sortOrder: valueIndex },
         });
         valueIdByKey.set(value.key, value.id);
         continue;
       }
       // eslint-disable-next-line no-await-in-loop -- transactional writes must stay sequential
       const created = await tx.productOptionValue.create({
-        data: { optionId, name: value.name, sortOrder: valueIndex },
+        data: { optionId, name: value.name, colorHex: value.color ?? null, sortOrder: valueIndex },
         select: { id: true },
       });
       valueIdByKey.set(value.key, created.id);
@@ -1354,7 +1435,11 @@ export const arrangementQuery = {
 
 /** One arrangement tile — the photo the grid card shows (`coverImageUrl`). */
 export function projectArrangementItem(row: ArrangementRow): ProductArrangementItemModel {
-  const imageUrl = coverImageUrl(row.productImages, describeVariants(row.options, row.variants));
+  const imageUrl = coverImageUrl(
+    row.productImages,
+    describeVariants(row.options, row.variants),
+    row.options,
+  );
   return {
     id: row.id,
     name: row.name,

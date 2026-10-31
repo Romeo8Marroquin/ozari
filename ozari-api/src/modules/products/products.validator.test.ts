@@ -469,6 +469,7 @@ describe("Products Validator", () => {
         sellPrice: undefined,
         options: [],
         variants: [],
+        sharedStock: false,
       });
     });
 
@@ -494,6 +495,7 @@ describe("Products Validator", () => {
         sellPrice: 12.5,
         options: [],
         variants: [],
+        sharedStock: false,
       });
     });
 
@@ -547,6 +549,61 @@ describe("Products Validator", () => {
       mockReq.body = body;
       await run();
       expectRejected("invalidQuantity");
+    });
+
+    it("SHARED stock keeps (and requires) the product quantity; the variants carry none", async () => {
+      await mockValidPrisma();
+      mockReq.body = {
+        ...validRentBody(),
+        sharedStock: true,
+        options: colorOptions,
+        variants: [{ valueKeys: ["r"] }],
+      };
+      await run();
+      expect(sendOzariError).not.toHaveBeenCalled();
+      expect(mockReq.body).toMatchObject({
+        quantity: 40,
+        sharedStock: true,
+        variants: [{ valueKeys: ["r"], quantity: 0 }],
+      });
+
+      vi.clearAllMocks();
+      await mockValidPrisma();
+      const { quantity: _omit, ...body } = validRentBody();
+      mockReq.body = { ...body, sharedStock: true, options: colorOptions, variants: [{ valueKeys: ["r"] }] };
+      await run();
+      expectRejected("invalidQuantity");
+    });
+
+    it("makes the product price a DEFAULT with variations: absent is fine while every variant has one", async () => {
+      await mockValidPrisma();
+      const { quantity: _q, rentPrice: _r, ...body } = validRentBody();
+      mockReq.body = {
+        ...body,
+        options: colorOptions,
+        variants: [{ valueKeys: ["r"], quantity: 2, rentPrice: 60 }],
+      };
+      await run();
+      expect(sendOzariError).not.toHaveBeenCalled();
+      expect(mockReq.body).toMatchObject({ rentPrice: undefined, variants: [{ rentPrice: 60 }] });
+
+      vi.clearAllMocks();
+      await mockValidPrisma();
+      mockReq.body = { ...body, options: colorOptions, variants: [{ valueKeys: ["r"], quantity: 2 }] };
+      await run();
+      expect(lastErrorKey()).toBe("products.variations.validators.variantPriceRequired");
+
+      // Venta the same way (its sellPrice is the default).
+      vi.clearAllMocks();
+      await mockValidPrisma();
+      const { quantity: _sq, sellPrice: _s, ...sale } = validSellBody();
+      mockReq.body = {
+        ...sale,
+        options: colorOptions,
+        variants: [{ valueKeys: ["r"], quantity: 2, sellPrice: 9 }],
+      };
+      await run();
+      expect(sendOzariError).not.toHaveBeenCalled();
     });
 
     it("forbids ids on create (the parser runs with no existing state)", async () => {
@@ -775,6 +832,30 @@ describe("Products Validator", () => {
         await runUpdate();
         expect(lastErrorKey()).toBe("products.variations.validators.invalidVariantId");
       });
+
+      it("takes a product without its own price once variations price themselves (both types)", async () => {
+        await withColor();
+        const { rentPrice: _r, ...rent } = variationBody(
+          [{ id: 10, key: "v10", name: "Rojo" }],
+          [{ id: 55, valueKeys: ["v10"], quantity: 2, rentPrice: 80 }],
+        );
+        mockReq.body = rent;
+        await runUpdate();
+        expect(sendOzariError).not.toHaveBeenCalled();
+        expect(mockReq.body).toMatchObject({ rentPrice: undefined, sharedStock: false });
+
+        vi.clearAllMocks();
+        await withColor();
+        const { quantity: _q, sellPrice: _s, ...sale } = validSellBody();
+        mockReq.body = {
+          ...sale,
+          options: [{ id: 3, name: "Color", values: [{ id: 10, key: "v10", name: "Rojo" }] }],
+          variants: [{ id: 55, valueKeys: ["v10"], quantity: 2, sellPrice: 9 }],
+        };
+        await runUpdate();
+        expect(sendOzariError).not.toHaveBeenCalled();
+        expect(mockReq.body).toMatchObject({ sellPrice: undefined, variants: [{ sellPrice: 9 }] });
+      });
     });
 
     it("passes a valid full-state body through, sanitized", async () => {
@@ -805,6 +886,7 @@ describe("Products Validator", () => {
         sellPrice: undefined,
         options: [],
         variants: [],
+        sharedStock: false,
       });
     });
 

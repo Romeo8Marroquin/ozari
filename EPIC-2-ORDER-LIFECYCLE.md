@@ -456,8 +456,10 @@ point where a SALE order stops or resumes being real must move the line's stock 
 
 **Where sale units live (variations, 2026-10-29).** A line's stock POOL is the `(productId,
 variantId)` pair (`stockKey`). Without a variant the units sit on `products.quantity`; with one they
-sit on **that variant's own row** (`product_variants.quantity` — a variant product's
-`products.quantity` is 0 and never read). Every write goes through ONE helper,
+sit on **that variant's own row** (`product_variants.quantity` — a per-variation product's
+`products.quantity` is 0 and never read). **A SHARED-stock product (2026-10-30) is one pool,
+`(productId, null)`:** its variants store 0 and every line's units move `products.quantity`, and lines
+on the pool are summed before any check. Every write goes through ONE helper,
 `moveSaleStock(tx, { productId, variantId }, delta)`: create's decrement, the edit's deltas,
 `releaseSaleStock` and `reclaimOrderStock` all call it, so nothing else picks a column. The product row
 lock still serializes every pool of the product. Rental pools are derived per `(productId, variantId)`

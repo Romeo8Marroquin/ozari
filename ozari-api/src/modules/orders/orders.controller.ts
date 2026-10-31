@@ -63,15 +63,19 @@ import {
   orderListOrderBy,
   orderPricingProductSelect,
   parseOrderListQuery,
+  poolConflictItem,
+  poolKey,
   poolQuantity,
   priceOrderLine,
   pricedLineData,
   projectOrderDetail,
   projectOrderListItem,
   releaseSaleStock,
+  rentedRowQuantity,
   richOrderInclude,
   sortAgendaRows,
   stockKey,
+  sumByPool,
   type PricedOrderLineModel,
 } from "./orders.service.js";
 
@@ -397,9 +401,10 @@ export const createOrder = async (
               _sum: { quantity: true },
             })
           : [];
-      const rentedByKey = new Map(
-        rentedRows.map((row) => [stockKey(row.productId, row.variantId), row._sum.quantity ?? 0]),
-      );
+      const rentedByPool = sumByPool(rentedRows.map(rentedRowQuantity), productById);
+      // Lines of a SHARED-stock product compete for one pool: judged once, on their sum.
+      const requestedByPool = sumByPool(pricedLines, productById);
+      const checkedPools = new Set<string>();
       const conflicts: OrderStockConflictItemModel[] = [];
       for (const line of pricedLines) {
         const product = productById.get(line.productId);
@@ -407,19 +412,19 @@ export const createOrder = async (
         if (!product) {
           continue;
         }
+        const key = poolKey(product, line.variantId);
+        if (checkedPools.has(key)) {
+          continue;
+        }
+        checkedPools.add(key);
+        const requested = requestedByPool.get(key) as number;
         // A priced line's variant is active on its product (pricing refused it otherwise).
         const pool = poolQuantity(product, line.variantId) ?? 0;
         const available = line.isRental
-          ? Math.max(0, pool - (rentedByKey.get(stockKey(line.productId, line.variantId)) ?? 0))
+          ? Math.max(0, pool - (rentedByPool.get(key) ?? 0))
           : pool;
-        if (available < line.quantity) {
-          conflicts.push({
-            productId: product.id,
-            productName: product.name,
-            ...conflictVariantFields(line.variantId, line.variantLabel),
-            requested: line.quantity,
-            available,
-          });
+        if (available < requested) {
+          conflicts.push(poolConflictItem(product, line, requested, available));
         }
       }
       if (conflicts.length > 0) {
@@ -697,16 +702,27 @@ export const updateOrder = async (
               _sum: { quantity: true },
             })
           : [];
-      const rentedByKey = new Map(
-        rentedRows.map((row) => [stockKey(row.productId, row.variantId), row._sum.quantity ?? 0]),
+      const rentedByPool = sumByPool(rentedRows.map(rentedRowQuantity), productById);
+      // Per POOL (lines of a shared-stock product compete for one): what the edit asks, and the
+      // SALE units this order holds today.
+      const requestedByPool = sumByPool(pricedLines, productById);
+      const heldSaleByPool = sumByPool(
+        order.serviceDetails.filter((line) => !line.isRental),
+        productById,
       );
+      const checkedPools = new Set<string>();
       for (const line of pricedLines) {
         const product = productById.get(line.productId);
         /* v8 ignore next 3 -- every priced line's product is in the map; the guard is defensive */
         if (!product) {
           continue;
         }
-        const key = stockKey(line.productId, line.variantId);
+        const key = poolKey(product, line.variantId);
+        if (checkedPools.has(key)) {
+          continue;
+        }
+        checkedPools.add(key);
+        const requested = requestedByPool.get(key) as number;
         // A priced line's variant is active on its product (pricing refused it otherwise).
         const pool = poolQuantity(product, line.variantId) ?? 0;
         let available: number;
@@ -714,7 +730,7 @@ export const updateOrder = async (
           if (!holdsRental) {
             continue; // the order reserves no rental units — nothing to compete for
           }
-          available = Math.max(0, pool - (rentedByKey.get(key) ?? 0));
+          available = Math.max(0, pool - (rentedByPool.get(key) ?? 0));
         } else {
           if (!holdsSale) {
             // Symmetric with the rental branch: the order reserves no sale units (it was
@@ -724,18 +740,10 @@ export const updateOrder = async (
           }
           // Sale: the shelf ALREADY has this order's decrement applied, so what it may take is the
           // remaining stock PLUS whatever it is currently holding of that pool.
-          const currentLine = currentByKey.get(key);
-          available =
-            pool + (currentLine !== undefined && !currentLine.isRental ? currentLine.quantity : 0);
+          available = pool + (heldSaleByPool.get(key) ?? 0);
         }
-        if (available < line.quantity) {
-          conflicts.push({
-            productId: product.id,
-            productName: product.name,
-            ...conflictVariantFields(line.variantId, line.variantLabel),
-            requested: line.quantity,
-            available,
-          });
+        if (available < requested) {
+          conflicts.push(poolConflictItem(product, line, requested, available));
         }
       }
       if (conflicts.length > 0) {
@@ -1168,6 +1176,7 @@ export const getOrderAvailability = async (
       select: {
         id: true,
         quantity: true,
+        sharedStock: true,
         productBusinessTypeId: true,
         variants: {
           where: { isActive: true },
@@ -1213,12 +1222,15 @@ export const getOrderAvailability = async (
             _sum: { quantity: true },
           })
         : [];
-    const rentedByKey = new Map(
-      rentedRows.map((row) => [stockKey(row.productId, row.variantId), row._sum.quantity ?? 0]),
+    const rentedByPool = sumByPool(
+      rentedRows.map(rentedRowQuantity),
+      new Map(products.map((product) => [product.id, product])),
     );
 
     // Per STOCK POOL: the product's own, or each active variant's (the product's `available` is
-    // then their sum — `null` while a rental has no window, exactly like a plain rental).
+    // then their sum — `null` while a rental has no window, exactly like a plain rental). A
+    // SHARED-stock product has one pool: the product and every variant report it (`sharedStock`
+    // tells the form to cap the SUM of its lines).
     const availability: ProductAvailabilityModel[] = products.map((product) => {
       const isRental = product.productBusinessTypeId === BusinessTypeEnum.RENT;
       const availableFor = (pool: number, variantId: number | null): number | null => {
@@ -1226,11 +1238,20 @@ export const getOrderAvailability = async (
           return pool;
         }
         return body.pickupAt
-          ? Math.max(0, pool - (rentedByKey.get(stockKey(product.id, variantId)) ?? 0))
+          ? Math.max(0, pool - (rentedByPool.get(poolKey(product, variantId)) ?? 0))
           : null;
       };
       if (product.variants.length === 0) {
         return { productId: product.id, available: availableFor(product.quantity, null) };
+      }
+      if (product.sharedStock) {
+        const available = availableFor(product.quantity, null);
+        return {
+          productId: product.id,
+          available,
+          sharedStock: true,
+          variants: product.variants.map((variant) => ({ variantId: variant.id, available })),
+        };
       }
       const variants = product.variants.map((variant) => ({
         variantId: variant.id,
@@ -1239,7 +1260,7 @@ export const getOrderAvailability = async (
       const available = variants.some((variant) => variant.available === null)
         ? null
         : variants.reduce((sum, variant) => sum + (variant.available ?? 0), 0);
-      return { productId: product.id, available, variants };
+      return { productId: product.id, available, sharedStock: false, variants };
     });
 
     // The DRIVER half — only when the form has reached the assignee. Same two-step rule as the

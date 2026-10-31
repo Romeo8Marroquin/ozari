@@ -532,23 +532,42 @@ export function appendDriverConflictErrors(
  * over-stock the backend rejects with a 409 — but as the admin types, not only on submit. A schema
  * error already on a line is never overwritten, and an `undefined` cap (unknown window / rental with
  * no pickup) is left to the server. Pure: the resolver wrapper feeds it the live caps.
+ *
+ * `poolOf` names the stock POOL a line draws from (`poolKeyOf`): lines of a SHARED-stock product's
+ * different variations compete for one pool, so each line's cap is the pool's takeable amount minus
+ * what the OTHER lines of that pool already take (the API sums them the same way). Without it every
+ * line is its own pool.
  */
 export function appendLineAvailabilityErrors(
   values: CreateOrderFormType,
   result: ResolverResult<CreateOrderFormType>,
   capFor: (line: { productId: number; variantId: number | null }) => number | undefined,
   message: (available: number) => string,
+  poolOf: (line: { productId: number; variantId: number | null }) => string = (line) =>
+    stockKey(line.productId, line.variantId),
 ): ResolverResult<CreateOrderFormType> {
   const baseLines = result.errors.lines as unknown as
     | ({ quantity?: unknown } | undefined)[]
     | undefined;
+  const pools = values.lines.map((line) =>
+    line.productId == null ? null : poolOf({ productId: line.productId, variantId: line.variantId ?? null }),
+  );
+  const taken = new Map<string, number>();
+  values.lines.forEach((line, index) => {
+    const pool = pools[index];
+    if (pool !== null) taken.set(pool, (taken.get(pool) ?? 0) + (parseLineQuantity(line.quantity) ?? 0));
+  });
   const extra: Record<number, { type: string; message: string }> = {};
   values.lines.forEach((line, index) => {
     if (line.productId == null || baseLines?.[index]?.quantity) return;
     const cap = capFor({ productId: line.productId, variantId: line.variantId ?? null });
     const quantity = parseLineQuantity(line.quantity);
-    if (cap != null && quantity != null && quantity > cap) {
-      extra[index] = { type: 'availability', message: message(cap) };
+    if (cap == null || quantity == null) return;
+    // What THIS line may take: the pool's amount less what its siblings in the pool already take.
+    /* v8 ignore next -- `?? 0`: a line with a product always counted into its pool above */
+    const left = Math.max(0, cap - ((taken.get(pools[index] as string) ?? 0) - quantity));
+    if (quantity > left) {
+      extra[index] = { type: 'availability', message: message(left) };
     }
   });
   if (Object.keys(extra).length === 0) return result;

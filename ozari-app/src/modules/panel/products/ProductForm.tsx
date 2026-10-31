@@ -56,6 +56,7 @@ import {
   createProductRequiredPatterns,
   createProductSchema,
   DEFAULT_RENT_TIME_UNIT_ID,
+  parseQuantity,
   productToFormValues,
   toCreateProductBody,
   toUpdateProductBody,
@@ -295,9 +296,20 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
   // be a restored draft whose fields must survive untouched.
   const businessTypeId = useWatch({ control, name: 'businessTypeId' });
   const isRent = businessTypeId === BUSINESS_TYPE_RENT;
-  // With options every variation owns its stock, so the product's single quantity steps aside.
+  // With options every variation owns its stock, so the product's single quantity steps aside —
+  // unless the stock is SHARED, where it IS the pool every variation draws from. The general prices
+  // become optional defaults the variations inherit (owner 2026-10-30).
   /* v8 ignore next -- `?? []`: RHF always yields the registered array */
   const hasOptions = (useWatch({ control, name: 'options' }) ?? []).length > 0;
+  const sharedStock = useWatch({ control, name: 'sharedStock' });
+  /* v8 ignore next -- same */
+  const variantRows = useWatch({ control, name: 'variants' }) ?? [];
+  const quantityManaged = hasOptions && !sharedStock;
+  const variantTotal = variantRows.reduce((sum, row) => sum + (parseQuantity(row.quantity) ?? 0), 0);
+  // A general price is what an empty variation price inherits: re-check the rows as it moves.
+  const variantPriceDeps = (field: 'rentPrice' | 'sellPrice'): `variants.${number}.${typeof field}`[] =>
+    variantRows.map((_, index) => `variants.${index}.${field}` as const);
+  const generalPriceHint = hasOptions ? t(`${KEY}.variations.generalPriceHint`) : '';
 
   // ONE detail per type: each row's select hides the types other rows already picked (its own
   // selection stays listed), and "Agregar detalle" caps out at the number of available types —
@@ -671,9 +683,12 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
                           id="product-rent-price"
                           name="rentPrice"
                           {...decimalInput}
+                          optionalLabel={hasOptions}
                           label={t(`${KEY}.fields.rentPriceLabel`)}
                           placeholder={t(`${KEY}.fields.pricePlaceholder`)}
                           aria-label={t(`${KEY}.fields.rentPriceLabel`)}
+                          instructions={generalPriceHint}
+                          deps={variantPriceDeps('rentPrice')}
                         />
                       </div>
                       <div className="reveal-item min-w-0">
@@ -691,9 +706,12 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
                         id="product-sell-price"
                         name="sellPrice"
                         {...decimalInput}
+                        optionalLabel={hasOptions}
                         label={t(`${KEY}.fields.sellPriceLabel`)}
                         placeholder={t(`${KEY}.fields.pricePlaceholder`)}
                         aria-label={t(`${KEY}.fields.sellPriceLabel`)}
+                        instructions={generalPriceHint}
+                        deps={variantPriceDeps('sellPrice')}
                       />
                     </div>
                   )}
@@ -735,11 +753,17 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
                       </div>
                     )}
                     {/* One stock for the product — or, with options, one per variation (below in
-                        Variaciones), and the API refuses a product quantity then. */}
+                        Variaciones; the API refuses a product quantity then) unless the stock is
+                        SHARED, where this one quantity is the pool every variation draws from. */}
                     {/* The field gives way to the note (and back) as one movement — SlotSwap. */}
-                    <SlotSwap swapKey={hasOptions ? 'managed' : 'quantity'} className="reveal-item min-w-0">
-                      {hasOptions ? (
-                        <p className="text-sm text-charcoal/55">{t(`${KEY}.variations.quantityManaged`)}</p>
+                    <SlotSwap swapKey={quantityManaged ? 'managed' : 'quantity'} className="reveal-item min-w-0">
+                      {quantityManaged ? (
+                        <div className="flex flex-col gap-1 text-sm">
+                          <p className="text-charcoal/55">{t(`${KEY}.variations.quantityManaged`)}</p>
+                          <p className="font-medium tabular-nums text-charcoal/80">
+                            {t(`${KEY}.variations.quantityTotal`, { count: variantTotal })}
+                          </p>
+                        </div>
                       ) : (
                         <CustomInputForm<CreateProductFormType>
                           id="product-quantity"
@@ -748,6 +772,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ mode = 'create', product }) =
                           label={t(`${KEY}.fields.quantityLabel`)}
                           placeholder={t(`${KEY}.fields.quantityPlaceholder`)}
                           aria-label={t(`${KEY}.fields.quantityLabel`)}
+                          instructions={hasOptions ? t(`${KEY}.variations.quantitySharedHint`) : ''}
                         />
                       )}
                     </SlotSwap>

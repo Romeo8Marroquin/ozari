@@ -39,12 +39,14 @@ export function formatHeadlinePrice(product: Product): { price: string; from: bo
     const price = formatProductPrice(product);
     return price === null ? null : { price, from: false };
   }
-  // A variation carries its type's price only, and so does the product — the side it has is the
-  // side the lowest price goes on (a rental keeps its period).
-  const lowest =
-    product.rentPrice !== undefined
-      ? (formatProductPrice({ ...product, rentPrice: range.min }) as string)
-      : formatMoney(range.min, product.currency.symbol);
+  // A variation carries its type's price only — the side they have is the side the lowest price goes
+  // on (a rental keeps its period). Read off the VARIATIONS: with variations the product's own price
+  // is an optional default and may be absent.
+  /* v8 ignore next -- `?? []`: a price range means the product carries variants */
+  const isRental = (product.variants ?? []).some((variant) => variant.rentPrice !== undefined);
+  const lowest = isRental
+    ? (formatProductPrice({ ...product, rentPrice: range.min }) as string)
+    : formatMoney(range.min, product.currency.symbol);
   return { price: lowest, from: range.min !== range.max };
 }
 

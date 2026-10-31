@@ -13,13 +13,16 @@ import {
   emptyVariantRow,
   generateCombinations,
   hasVariants,
+  isLightColor,
   lineDisplayName,
   matchVariant,
   mintValueKey,
   normalizeVariationName,
   orderedValueKeys,
   photoSetFor,
+  pickedLabel,
   picksForVariant,
+  poolKeyOf,
   rowKeyOf,
   stockKey,
   valueKeyForId,
@@ -27,6 +30,7 @@ import {
   variantLabelFor,
   variantMatchesPicks,
   variantPriceRange,
+  variantRange,
   variantRowIssues,
   type OptionFormRow,
   type VariantFormRow,
@@ -41,8 +45,8 @@ const img = (id: number, isPrimary = false): ProductImage => ({
 });
 
 const colorSize: OptionFormRow[] = [
-  { name: 'Color', values: [{ key: 'r', name: 'Rojo' }, { key: 'a', name: 'Azul' }] },
-  { name: 'Tamaño', values: [{ key: 'red', name: 'Redondo' }] },
+  { name: 'Color', kind: 'generic', values: [{ key: 'r', name: 'Rojo', color: '' }, { key: 'a', name: 'Azul', color: '' }] },
+  { name: 'Tamaño', kind: 'generic', values: [{ key: 'red', name: 'Redondo', color: '' }] },
 ];
 
 const row = (valueKeys: string[], patch: Partial<VariantFormRow> = {}): VariantFormRow => ({
@@ -76,6 +80,7 @@ const product = (patch: Partial<Product> = {}): Product => ({
       id: 10,
       name: 'Color',
       sortOrder: 0,
+      kind: 'generic' as const,
       values: [
         { id: 1, name: 'Rojo', sortOrder: 0, images: [img(11)] },
         { id: 2, name: 'Azul', sortOrder: 1, images: [] },
@@ -85,6 +90,7 @@ const product = (patch: Partial<Product> = {}): Product => ({
       id: 20,
       name: 'Tamaño',
       sortOrder: 1,
+      kind: 'generic' as const,
       values: [{ id: 3, name: 'Redondo', sortOrder: 0, images: [img(33)] }],
     },
   ],
@@ -138,7 +144,7 @@ describe('combinations', () => {
 
   it('is empty without options or when an option has no value yet', () => {
     expect(generateCombinations([])).toEqual([]);
-    expect(generateCombinations([...colorSize, { name: 'Tela', values: [] }])).toEqual([]);
+    expect(generateCombinations([...colorSize, { name: 'Tela', kind: 'generic', values: [] }])).toEqual([]);
   });
 
   it('orders and labels keys by option, dropping unknown ones', () => {
@@ -149,7 +155,7 @@ describe('combinations', () => {
   it("completes every variation with an option's FIRST value", () => {
     const options: OptionFormRow[] = [
       colorSize[0],
-      { name: 'Tamaño', values: [{ key: 'red', name: 'Redondo' }] },
+      { name: 'Tamaño', kind: 'generic', values: [{ key: 'red', name: 'Redondo', color: '' }] },
     ];
     const next = addValueCombinations(options, [row(['r'], { id: 5, quantity: '3' })], 1, 'red');
     expect(next).toEqual([row(['r', 'red'], { id: 5, quantity: '3' })]);
@@ -157,8 +163,8 @@ describe('combinations', () => {
 
   it('offers the new combinations a further value creates, up to the cap', () => {
     const options: OptionFormRow[] = [
-      { name: 'Color', values: [{ key: 'r', name: 'Rojo' }, { key: 'a', name: 'Azul' }, { key: 'v', name: 'Verde' }] },
-      { name: 'Tamaño', values: [{ key: 'red', name: 'Redondo' }, { key: 'cu', name: 'Cuadrado' }] },
+      { name: 'Color', kind: 'generic', values: [{ key: 'r', name: 'Rojo', color: '' }, { key: 'a', name: 'Azul', color: '' }, { key: 'v', name: 'Verde', color: '' }] },
+      { name: 'Tamaño', kind: 'generic', values: [{ key: 'red', name: 'Redondo', color: '' }, { key: 'cu', name: 'Cuadrado', color: '' }] },
     ];
     const existing = [row(['r', 'red']), row(['a', 'red']), row(['r', 'cu'])];
     expect(addValueCombinations(options, existing, 1, 'cu').map((v) => v.valueKeys)).toEqual([
@@ -173,14 +179,14 @@ describe('combinations', () => {
 
   it("offers a product's very first value (nothing offered yet), ignoring options still empty", () => {
     const options: OptionFormRow[] = [
-      { name: 'Color', values: [{ key: 'r', name: 'Rojo' }] },
-      { name: 'Tamaño', values: [] },
+      { name: 'Color', kind: 'generic', values: [{ key: 'r', name: 'Rojo', color: '' }] },
+      { name: 'Tamaño', kind: 'generic', values: [] },
     ];
     expect(addValueCombinations(options, [], 0, 'r').map((v) => v.valueKeys)).toEqual([['r']]);
     // A further value while the other option is still empty offers its own combination too.
     const two: OptionFormRow[] = [
-      { name: 'Color', values: [{ key: 'r', name: 'Rojo' }, { key: 'a', name: 'Azul' }] },
-      { name: 'Tamaño', values: [] },
+      { name: 'Color', kind: 'generic', values: [{ key: 'r', name: 'Rojo', color: '' }, { key: 'a', name: 'Azul', color: '' }] },
+      { name: 'Tamaño', kind: 'generic', values: [] },
     ];
     expect(addValueCombinations(two, [row(['r'])], 0, 'a').map((v) => v.valueKeys)).toEqual([
       ['r'],
@@ -252,6 +258,8 @@ describe('variantRowIssues', () => {
   };
   const context = (patch: Partial<VariantRowContext> = {}): VariantRowContext => ({
     isRent: true,
+    sharedStock: false,
+    productPrice: '50',
     productReplacementPrice: '100',
     productSecurityDeposit: '20',
     parseMoney,
@@ -304,6 +312,21 @@ describe('variantRowIssues', () => {
     ).toEqual([]);
   });
 
+  it('needs a price from the row or the general one — blank over blank only', () => {
+    expect(variantRowIssues(row(['r'], { quantity: '1' }), context({ productPrice: '' }))).toEqual([
+      { field: 'rentPrice', issue: 'variantPriceRequired' },
+    ]);
+    expect(
+      variantRowIssues(row(['r'], { quantity: '1' }), context({ isRent: false, productPrice: ' ' })),
+    ).toEqual([{ field: 'sellPrice', issue: 'variantPriceRequired' }]);
+    // An invalid general price speaks on its own field; the row stays quiet.
+    expect(variantRowIssues(row(['r'], { quantity: '1' }), context({ productPrice: 'x' }))).toEqual([]);
+  });
+
+  it('skips the row stock when the stock is SHARED', () => {
+    expect(variantRowIssues(row(['r'], { quantity: '' }), context({ sharedStock: true }))).toEqual([]);
+  });
+
   it('shows the override when typed, else the inherited value', () => {
     expect(effectiveFormValue(' ', '20')).toBe('20');
     expect(effectiveFormValue('5', '20')).toBe('5');
@@ -330,7 +353,6 @@ describe('the saved product', () => {
       sellPrice: undefined,
       securityDeposit: 0,
       replacementPrice: undefined,
-      description: undefined,
     });
     expect(effectivePricing(subject).securityDeposit).toBe(20);
   });
@@ -349,6 +371,28 @@ describe('the saved product', () => {
     expect(stockKey(4)).toBe('4:');
     expect(stockKey(4, null)).toBe('4:');
     expect(stockKey(4, 7)).toBe('4:7');
+  });
+
+  it('counts a SHARED stock as one pool across its variations', () => {
+    expect(poolKeyOf({ sharedStock: true }, 4, 7)).toBe('4:');
+    expect(poolKeyOf({ sharedStock: false }, 4, 7)).toBe('4:7');
+    expect(poolKeyOf(undefined, 4, 7)).toBe('4:7');
+  });
+
+  it('ranges any effective figure, and names the picks so far', () => {
+    expect(variantRange(product(), (entry) => entry.securityDeposit)).toEqual({ min: 0, max: 0 });
+    expect(variantRange(product(), (entry) => entry.replacementPrice)).toBeNull();
+    expect(pickedLabel(product(), [2, null])).toBe('Azul');
+    expect(pickedLabel(product(), [2, 3])).toBe('Azul · Redondo');
+    expect(pickedLabel({ options: undefined }, [])).toBe('');
+  });
+
+  it('knows which colours need an outline on white', () => {
+    expect(isLightColor('#fffff0')).toBe(true);
+    expect(isLightColor('#FFFFFF')).toBe(true);
+    expect(isLightColor('#000000')).toBe(false);
+    expect(isLightColor('#0a0a0a')).toBe(false);
+    expect(isLightColor('marfil')).toBe(false);
   });
 
   it('maps a variation to per-option picks and back', () => {
@@ -387,9 +431,17 @@ describe('photoSetFor', () => {
 
   it("opens on the DEFAULT variation's photos when there is no showcase", () => {
     expect(photoSetFor(product({ images: [] }), []).map((i) => i.id)).toEqual([33]);
-    expect(photoSetFor(product({ images: [], variants: [] }), [])).toEqual([]);
+  });
+
+  it('walks the cover chain past a photoless default: next variation, then any value', () => {
+    // The default (Azul · Redondo) has none left → the next variation, Rojo · Redondo.
     const bare = product({ images: [] });
     bare.options![1].values[0].images = [];
+    expect(photoSetFor(bare, []).map((i) => i.id)).toEqual([11]);
+    // No variations offered at all → the first value that has photos.
+    expect(photoSetFor(product({ images: [], variants: [] }), []).map((i) => i.id)).toEqual([11]);
+    // Nothing anywhere → the (empty) showcase.
+    bare.options![0].values[0].images = [];
     expect(photoSetFor(bare, [])).toEqual([]);
   });
 });

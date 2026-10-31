@@ -651,20 +651,56 @@ describe("advanceOrder", () => {
 
     it("re-takes a variant's sale units from ITS shelf", async () => {
       const tx = mockTx(cancelledWith([variantLine({})])) as ReturnType<typeof mockTx> & {
-        productVariant: { update: Mock };
+        productVariant: { updateMany: Mock };
       };
-      tx.productVariant = { update: vi.fn().mockResolvedValue({}) };
+      tx.productVariant = { updateMany: vi.fn().mockResolvedValue({}) };
+      Object.assign(tx.product, { updateMany: vi.fn().mockResolvedValue({}) });
       (tx.product.findMany as Mock).mockResolvedValue([
-        { id: 7, name: "Mantel", quantity: 0, variants: [{ id: 71, quantity: 5 }] },
+        { id: 7, name: "Mantel", quantity: 0, sharedStock: false, variants: [{ id: 71, quantity: 5 }] },
       ]);
       await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
 
-      expect(tx.productVariant.update).toHaveBeenCalledWith({
-        where: { id: 71 },
+      expect(tx.productVariant.updateMany).toHaveBeenCalledWith({
+        where: { id: 71, product: { sharedStock: false } },
         data: { quantity: { increment: -3 } },
       });
       expect(tx.product.update).not.toHaveBeenCalled();
       expect(sendOzariSuccess).toHaveBeenCalled();
+    });
+
+    it("judges a SHARED pool once, on the sum of its lines, and names the product", async () => {
+      const tx = mockTx(
+        cancelledWith([
+          variantLine({ id: 33, productId: 9, variantId: 91, variantLabel: "Sin flores", isRental: true, quantity: 2 }),
+          variantLine({ id: 34, productId: 9, variantId: 92, variantLabel: "Con flores", isRental: true, quantity: 2 }),
+        ]),
+      );
+      (tx.product.findMany as Mock).mockResolvedValue([
+        {
+          id: 9,
+          name: "Arreglo floral",
+          quantity: 5,
+          sharedStock: true,
+          variants: [
+            { id: 91, quantity: 0 },
+            { id: 92, quantity: 0 },
+          ],
+        },
+      ]);
+      // Held elsewhere across BOTH configurations: 1 + 1 of the 5 shared units.
+      (tx.serviceDetail.groupBy as Mock).mockResolvedValue([
+        { productId: 9, variantId: 91, _sum: { quantity: 1 } },
+        { productId: 9, variantId: 92, _sum: { quantity: 1 } },
+      ]);
+      await advanceOrder(buildReq({ toStatusId: 5 }), {} as Response);
+
+      expect(sendOzariError).toHaveBeenCalledWith(
+        expect.anything(),
+        HttpEnum.CONFLICT,
+        "orders.advance.stockConflict",
+        undefined,
+        { conflicts: [{ productId: 9, productName: "Arreglo floral", requested: 4, available: 3 }] },
+      );
     });
 
     it("checks a variant RENTAL against its own fleet, and names it in the 409", async () => {

@@ -1314,8 +1314,8 @@ const mantel: Product = {
   name: 'Mantel',
   available: 12,
   options: [
-    { id: 10, name: 'Color', sortOrder: 0, values: [mantelValue(1, 'Rojo'), mantelValue(2, 'Azul')] },
-    { id: 11, name: 'Tamaño', sortOrder: 1, values: [mantelValue(3, 'Redondo'), mantelValue(4, 'Cuadrado')] },
+    { id: 10, name: 'Color', sortOrder: 0, kind: 'generic' as const, values: [mantelValue(1, 'Rojo'), mantelValue(2, 'Azul')] },
+    { id: 11, name: 'Tamaño', sortOrder: 1, kind: 'generic' as const, values: [mantelValue(3, 'Redondo'), mantelValue(4, 'Cuadrado')] },
   ],
   variants: [
     { id: 71, valueIds: [1, 3], label: 'Rojo · Redondo', isDefault: true, rentPrice: 9, available: 5 },
@@ -1329,7 +1329,7 @@ const camino: Product = {
   ...rentalProduct,
   id: 8,
   name: 'Camino de mesa',
-  options: [{ id: 20, name: 'Color', sortOrder: 0, values: [mantelValue(5, 'Dorado')] }],
+  options: [{ id: 20, name: 'Color', sortOrder: 0, kind: 'generic' as const, values: [mantelValue(5, 'Dorado')] }],
   variants: [{ id: 81, valueIds: [5], label: 'Dorado', isDefault: true, rentPrice: 4, available: 9 }],
 };
 
@@ -1395,6 +1395,39 @@ describe('OrderForm — variations', () => {
     expect(createOrder.mock.calls[0][0].lines).toEqual([{ productId: 7, variantId: 71, quantity: 2 }]);
   });
 
+  it('a SHARED-stock product: its variations draw on ONE pool across lines', async () => {
+    // A flower arrangement with or without a balloon — the same 5 arrangements either way.
+    const arreglo: Product = {
+      ...rentalProduct,
+      id: 9,
+      name: 'Arreglo',
+      available: 5,
+      sharedStock: true,
+      options: [
+        { id: 30, name: 'Extra', sortOrder: 0, kind: 'generic' as const, values: [mantelValue(6, 'Sin globo'), mantelValue(7, 'Con globo')] },
+      ],
+      variants: [
+        { id: 91, valueIds: [6], label: 'Sin globo', isDefault: true, rentPrice: 100, available: 5 },
+        { id: 92, valueIds: [7], label: 'Con globo', isDefault: false, rentPrice: 140, available: 5 },
+      ],
+    };
+    useOrderProducts.mockReturnValue(q({ data: [rentalProduct, arreglo] }));
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await startLine(container, '9');
+    await user.selectOptions(byId(container, 'order-line-0-option-30'), '6');
+    await user.type(byId(container, 'order-line-quantity-0'), '3');
+    await startLine(container, '9', 1);
+    await user.selectOptions(byId(container, 'order-line-1-option-30'), '7');
+    // Line 1 is quoted what line 0 leaves of the pool.
+    await waitFor(() => expect(screen.getAllByText(`${KEY}.availability.count`)).toHaveLength(2));
+    // 3 + 3 > 5: each variation alone would have room, the pool does not.
+    await user.type(byId(container, 'order-line-quantity-1'), '3');
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    expect(await screen.findAllByText(`${KEY}.errors.lineUnavailable`)).not.toHaveLength(0);
+    expect(createOrder).not.toHaveBeenCalled();
+  });
+
   it('a partial pick before any submit stays quiet', async () => {
     const user = userEvent.setup();
     const { container } = renderForm();
@@ -1437,7 +1470,7 @@ describe('OrderForm — variations', () => {
     );
     await user.type(byId(container, 'order-line-quantity-0'), '1');
     // Its own stock is quoted once the variation is known.
-    expect(screen.getByText(`${KEY}.availability.count`)).toBeInTheDocument();
+    expect(await screen.findByText(`${KEY}.availability.count`)).toBeInTheDocument();
     await user.selectOptions(byId(container, 'order-line-product-0'), '3');
     expect(byId(container, 'order-line-0-option-20')).toBeNull();
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));

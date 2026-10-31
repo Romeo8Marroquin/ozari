@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { Controller, useFormContext, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import {
   HiOutlineChevronDown,
@@ -8,12 +8,14 @@ import {
   HiOutlineChevronUp,
   HiOutlinePhoto,
   HiOutlinePlus,
+  HiOutlineSwatch,
   HiOutlineTrash,
 } from 'react-icons/hi2';
 import AnimatedMessage from '@components/AnimatedMessage';
 import Button from '@components/Button';
 import Collapse from '@components/Collapse';
 import CustomInputForm from '@components/CustomInputForm';
+import CustomSelect from '@components/CustomSelect';
 import {
   PRODUCT_IMAGE_MAX_TOTAL,
   PRODUCT_MAX_OPTION_VALUES,
@@ -22,19 +24,22 @@ import {
   PRODUCT_OPTION_VALUE_IMAGE_MAX_COUNT,
 } from '@constants/Regex';
 import { decimalInput, integerInput } from '@utils/numericInput';
+import SlotSwap from '../SlotSwap';
 import useListMotion from '../useListMotion';
-import type { Product, ProductImage, ProductVariantUsage } from './product.types';
+import type { Product, ProductImage, ProductOptionKind, ProductVariantUsage } from './product.types';
 import ProductImageGallery from './ProductImageGallery';
 import {
   addValueCombinations,
   allValueKeys,
   carryRowKeys,
+  COLOR_HEX_REGEX,
   combinationOf,
   dropOptionFromVariants,
   dropValueFromVariants,
   emptyVariantRow,
   generateCombinations,
   mintValueKey,
+  OPTION_KINDS,
   rowKeyOf,
   valueKeyForId,
   variantLabelFor,
@@ -79,6 +84,173 @@ const mintOptionUid = (): string => {
 const messageOf = (node: unknown): string | undefined => {
   const error = node as { message?: string; root?: { message?: string } } | undefined;
   return error?.message ?? error?.root?.message;
+};
+
+/**
+ * An option's TYPE select (owner 2026-10-30): `Genérica` for any axis, `Color` for the one axis whose
+ * values carry a real colour. A product has at most one color option, so `Color` is only listed where
+ * it can be chosen (this option already is one, or no other is). Picking `Color` on an unnamed option
+ * names it "Color" — the name the admin would have typed anyway.
+ */
+const OptionKindSelect: React.FC<{
+  optionIndex: number;
+  colorAllowed: boolean;
+  disabled: boolean;
+}> = ({ optionIndex, colorAllowed, disabled }) => {
+  const { t } = useTranslation();
+  const { control, getValues, setValue } = useFormContext<CreateProductFormType>();
+  return (
+    <Controller
+      control={control}
+      name={`options.${optionIndex}.kind`}
+      render={({ field }) => (
+        <CustomSelect
+          id={`product-option-kind-${optionIndex}`}
+          name={field.name}
+          ref={field.ref}
+          label={t(`${KEY}.kindLabel`)}
+          disabled={disabled}
+          value={field.value}
+          onBlur={field.onBlur}
+          onChange={(event) => {
+            const kind = event.target.value as ProductOptionKind;
+            field.onChange(kind);
+            if (kind === 'color' && getValues(`options.${optionIndex}.name`).trim() === '') {
+              setValue(`options.${optionIndex}.name`, t(`${KEY}.colorOptionName`), { shouldDirty: true });
+            }
+          }}
+          options={OPTION_KINDS.filter((kind) => kind !== 'color' || colorAllowed || field.value === 'color').map(
+            (kind) => ({ value: kind, label: t(`${KEY}.kinds.${kind}`) }),
+          )}
+        />
+      )}
+    />
+  );
+};
+
+/**
+ * A color value's SWATCH: the picked colour as a circle that opens the platform's colour picker (a
+ * real `<input type="color">` stretched invisibly over it — keyboard, screen readers and every
+ * mobile picker come for free). Not picked yet = a dashed ring with a swatch glyph. Its slot eases
+ * open and shut horizontally as the option switches kind (the `Collapse` recipe on the other axis),
+ * so the value's name field slides over instead of jumping.
+ */
+const ValueColorSlot: React.FC<{
+  optionIndex: number;
+  valueIndex: number;
+  open: boolean;
+  valueName: string;
+  disabled: boolean;
+}> = ({ optionIndex, valueIndex, open, valueName, disabled }) => {
+  const { t } = useTranslation();
+  const { control } = useFormContext<CreateProductFormType>();
+  return (
+    <div
+      aria-hidden={!open}
+      inert={!open}
+      className={`grid shrink-0 pt-1.5 transition-[grid-template-columns,opacity,margin] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
+        open ? 'grid-cols-[1fr] opacity-100' : '-mr-2 grid-cols-[0fr] opacity-0'
+      }`}
+    >
+      <div className="min-w-0 overflow-hidden p-0.5">
+        <Controller
+          control={control}
+          name={`options.${optionIndex}.values.${valueIndex}.color`}
+          render={({ field, fieldState: { error } }) => {
+            const picked = COLOR_HEX_REGEX.test(field.value);
+            return (
+              <label
+                title={picked ? field.value.toLowerCase() : undefined}
+                className={`relative grid size-9 cursor-pointer place-items-center rounded-full transition-[background-color,box-shadow] duration-200 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-magenta has-[:disabled]:cursor-not-allowed motion-reduce:transition-none ${
+                  picked
+                    ? 'ring-1 ring-charcoal/15'
+                    : `border-2 border-dashed text-charcoal/40 ${error ? 'border-red-400' : 'border-charcoal/20'}`
+                }`}
+                style={picked ? { backgroundColor: field.value } : undefined}
+              >
+                {!picked && <HiOutlineSwatch aria-hidden className="size-4" />}
+                <input
+                  ref={field.ref}
+                  type="color"
+                  name={field.name}
+                  disabled={disabled}
+                  // The native input cannot hold "nothing": it shows black until a colour is picked,
+                  // but the FORM keeps `''` (required) until the admin actually chooses one.
+                  value={picked ? field.value.toLowerCase() : '#000000'}
+                  onChange={(event) => field.onChange(event.target.value)}
+                  onBlur={field.onBlur}
+                  aria-label={t(`${KEY}.pickColor`, { name: valueName })}
+                  aria-invalid={Boolean(error) || undefined}
+                  className="absolute inset-0 size-full cursor-pointer rounded-full opacity-0 disabled:cursor-not-allowed"
+                />
+              </label>
+            );
+          }}
+        />
+      </div>
+    </div>
+  );
+};
+
+/**
+ * HOW the variations hold stock (owner 2026-10-30) — a two-card radio group: PER VARIATION (each is
+ * a different item with its own quantity: candles by colour) or SHARED (each is a configuration of
+ * the same unit: the arrangement with or without its add-on — one quantity on the product).
+ */
+const StockModeToggle: React.FC<{ disabled: boolean }> = ({ disabled }) => {
+  const { t } = useTranslation();
+  const { control, trigger, formState } = useFormContext<CreateProductFormType>();
+  return (
+    <Controller
+      control={control}
+      name="sharedStock"
+      render={({ field }) => (
+        <fieldset className="flex min-w-0 flex-col gap-2">
+          <legend className="mb-2 text-sm font-semibold text-charcoal">{t(`${KEY}.stockMode.title`)}</legend>
+          <div className="grid gap-2 @min-[34rem]:grid-cols-2">
+            {([false, true] as const).map((shared) => {
+              const leaf = shared ? 'shared' : 'perVariant';
+              const checked = field.value === shared;
+              return (
+                <label
+                  key={leaf}
+                  className={`flex min-w-0 cursor-pointer gap-2.5 rounded-control border p-3 transition-[border-color,background-color,box-shadow] duration-200 ease-[var(--ease-settle)] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-magenta has-[:disabled]:cursor-not-allowed motion-reduce:transition-none ${
+                    checked ? 'border-charcoal/40 bg-charcoal/[0.035]' : 'border-charcoal/[0.1] hover:border-charcoal/25'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="product-stock-mode"
+                    className="mt-0.5 size-4 shrink-0 cursor-pointer accent-charcoal disabled:cursor-not-allowed"
+                    checked={checked}
+                    disabled={disabled}
+                    // Named by its title, described by its hint — the two spans would otherwise
+                    // read as one run-on name.
+                    aria-labelledby={`product-stock-mode-${leaf}`}
+                    aria-describedby={`product-stock-mode-${leaf}-hint`}
+                    onChange={() => {
+                      field.onChange(shared);
+                      // The quantity rule moves with the mode (product ↔ rows): once the form has
+                      // spoken, re-check both sides so a stale message never lingers on either.
+                      if (formState.isSubmitted) void trigger(['quantity', 'variants']);
+                    }}
+                  />
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span id={`product-stock-mode-${leaf}`} className="text-sm font-medium text-charcoal">
+                      {t(`${KEY}.stockMode.${leaf}`)}
+                    </span>
+                    <span id={`product-stock-mode-${leaf}-hint`} className="text-xs text-charcoal/55">
+                      {t(`${KEY}.stockMode.${leaf}Hint`)}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+      )}
+    />
+  );
 };
 
 /**
@@ -176,6 +348,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
   const productSell = useWatch({ control, name: 'sellPrice' });
   const productReplacement = useWatch({ control, name: 'replacementPrice' });
   const productDeposit = useWatch({ control, name: 'securityDeposit' });
+  const sharedStock = useWatch({ control, name: 'sharedStock' });
   const isRent = businessTypeId === BUSINESS_TYPE_RENT;
   const errors = formState.errors;
   const motion = useListMotion();
@@ -283,7 +456,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
     const uid = mintOptionUid();
     motion.reveal(`opt:${uid}`);
     setOptionUids([...uids, uid]);
-    write([...options, { name: '', values: [] }], variants);
+    write([...options, { name: '', kind: 'generic', values: [] }], variants);
   };
   const removeOption = (index: number): void => {
     const uid = uids[index];
@@ -327,7 +500,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
     const key = mintValueKey(allValueKeys(options));
     const first = options[optionIndex].values.length === 0;
     const next = options.map((option, i) =>
-      i === optionIndex ? { ...option, values: [...option.values, { key, name: '' }] } : option,
+      i === optionIndex ? { ...option, values: [...option.values, { key, name: '', color: '' }] } : option,
     );
     motion.reveal(`val:${key}`);
     // An option's FIRST value extends every listed combination — the same rows, one more value.
@@ -419,6 +592,10 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
 
   const inherit = (value: string | undefined): string =>
     value && value.trim() !== '' ? t(`${KEY}.inherit`, { value }) : t(`${KEY}.inheritNone`);
+  /** The PRICE must come from somewhere: with no general price to inherit, the row's is required. */
+  const inheritPrice = (value: string | undefined): string =>
+    value && value.trim() !== '' ? t(`${KEY}.inherit`, { value }) : t(`${KEY}.priceNeeded`);
+  const colorTaken = options.some((option) => option.kind === 'color');
 
   // Saved variations that left the form and carry order history: retired on save (the server's
   // `usage`, never a guess). Holding ones cannot leave — every door that would drop them is disabled.
@@ -446,6 +623,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
         const optionName = option.name.trim() || t(`${KEY}.unnamedValue`);
         const optionKeys = option.values.map((value) => value.key);
         const optionBlocked = blocks(droppedBy(dropOptionFromVariants(variants, optionKeys)));
+        const isColor = option.kind === 'color';
         return (
           <fieldset
             // Keyed by the option's IDENTITY, so a move carries its node (and its motion) along; the
@@ -465,6 +643,17 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                   label={t(`${KEY}.optionLabel`)}
                   placeholder={t(`${KEY}.optionPlaceholder`)}
                   aria-label={t(`${KEY}.optionLabel`)}
+                />
+              </div>
+              <div className="min-w-0 grow basis-32 @min-[30rem]:max-w-44">
+                <OptionKindSelect
+                  optionIndex={optionIndex}
+                  colorAllowed={!colorTaken}
+                  disabled={disabled}
+                />
+                <AnimatedMessage
+                  id={`product-option-kind-error-${optionIndex}`}
+                  errorMessage={messageOf(errors.options?.[optionIndex]?.kind)}
                 />
               </div>
               <div className="flex flex-wrap items-center gap-1 pt-1.5">
@@ -517,15 +706,25 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                     className="flex min-w-0 flex-col gap-2"
                   >
                     <div className="flex flex-wrap items-start gap-2">
-                      <div className="min-w-0 grow basis-40">
-                        <CustomInputForm<CreateProductFormType>
-                          id={`product-option-${optionIndex}-value-${valueIndex}`}
-                          name={`options.${optionIndex}.values.${valueIndex}.name`}
-                          type="text"
-                          label={t(`${KEY}.valueLabel`)}
-                          placeholder={t(`${KEY}.valuePlaceholder`)}
-                          aria-label={t(`${KEY}.valueLabel`)}
+                      {/* The swatch and the name travel as one unit (a wrap never splits them). */}
+                      <div className="flex min-w-0 grow basis-40 items-start gap-2">
+                        <ValueColorSlot
+                          optionIndex={optionIndex}
+                          valueIndex={valueIndex}
+                          open={isColor}
+                          valueName={valueName}
+                          disabled={disabled}
                         />
+                        <div className="min-w-0 grow">
+                          <CustomInputForm<CreateProductFormType>
+                            id={`product-option-${optionIndex}-value-${valueIndex}`}
+                            name={`options.${optionIndex}.values.${valueIndex}.name`}
+                            type="text"
+                            label={t(`${KEY}.valueLabel`)}
+                            placeholder={t(isColor ? `${KEY}.colorValuePlaceholder` : `${KEY}.valuePlaceholder`)}
+                            aria-label={t(`${KEY}.valueLabel`)}
+                          />
+                        </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-1 pt-1.5">
                         <button
@@ -569,6 +768,12 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                         </button>
                       </div>
                     </div>
+                    <AnimatedMessage
+                      id={`product-option-${optionIndex}-value-${valueIndex}-color-error`}
+                      errorMessage={
+                        isColor ? messageOf(errors.options?.[optionIndex]?.values?.[valueIndex]?.color) : undefined
+                      }
+                    />
                     {/* Always mounted — collapsing must not lose the staged photos — and inert
                         while closed. */}
                     <Collapse open={photosOpen} closedClassName="-mt-2">
@@ -632,6 +837,9 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
 
       {options.length > 0 && (
         <div ref={motion.item('combos')} className="flex flex-col gap-3 border-t border-charcoal/[0.07] pt-5">
+          <div className="mb-2">
+            <StockModeToggle disabled={disabled} />
+          </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <div className="min-w-0 grow basis-56">
               <h4 className="text-sm font-semibold text-charcoal">{t(`${KEY}.combinationsTitle`)}</h4>
@@ -738,15 +946,24 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                         errorMessage={messageOf(errors.variants?.[index]?.valueKeys)}
                       />
                       <div className="grid gap-x-3 gap-y-field @min-[30rem]:grid-cols-2 @min-[52rem]:grid-cols-4">
-                        <div className="min-w-0">
-                          <CustomInputForm<CreateProductFormType>
-                            id={`product-variant-quantity-${index}`}
-                            name={`variants.${index}.quantity`}
-                            {...integerInput}
-                            label={t(`${KEY}.quantityLabel`)}
-                            aria-label={`${t(`${KEY}.quantityLabel`)} · ${label}`}
-                          />
-                        </div>
+                        {/* The cell stays in the grid either way (nothing beside it reflows); its
+                            content swaps between the row's own stock and the shared-pool note. The
+                            typed number survives the round trip — it is simply not sent. */}
+                        <SlotSwap swapKey={sharedStock ? 'shared' : 'own'} className="min-w-0">
+                          {sharedStock ? (
+                            <p className="flex min-h-11 items-center text-xs text-charcoal/55">
+                              {t(`${KEY}.stockMode.sharedCell`)}
+                            </p>
+                          ) : (
+                            <CustomInputForm<CreateProductFormType>
+                              id={`product-variant-quantity-${index}`}
+                              name={`variants.${index}.quantity`}
+                              {...integerInput}
+                              label={t(`${KEY}.quantityLabel`)}
+                              aria-label={`${t(`${KEY}.quantityLabel`)} · ${label}`}
+                            />
+                          )}
+                        </SlotSwap>
                         {isRent ? (
                           <>
                             <div className="min-w-0">
@@ -755,7 +972,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                                 name={`variants.${index}.rentPrice`}
                                 {...decimalInput}
                                 label={t(`${KEY}.rentPriceLabel`)}
-                                placeholder={inherit(productRent)}
+                                placeholder={inheritPrice(productRent)}
                                 aria-label={`${t(`${KEY}.rentPriceLabel`)} · ${label}`}
                               />
                             </div>
@@ -790,7 +1007,7 @@ const ProductVariationsEditor: React.FC<ProductVariationsEditorProps> = ({
                               name={`variants.${index}.sellPrice`}
                               {...decimalInput}
                               label={t(`${KEY}.sellPriceLabel`)}
-                              placeholder={inherit(productSell)}
+                              placeholder={inheritPrice(productSell)}
                               aria-label={`${t(`${KEY}.sellPriceLabel`)} · ${label}`}
                             />
                           </div>

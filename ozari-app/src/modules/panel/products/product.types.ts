@@ -37,13 +37,21 @@ export interface ProductOptionValue {
   name: string;
   sortOrder: number;
   images: ProductImage[];
+  /** `#rrggbb` — present exactly on the values of a `color` option (the swatch; the NAME is what
+   *  every text prints, e.g. "Marfil"). */
+  color?: string;
 }
+
+/** What an option IS (owner 2026-10-30): `generic` is any axis ("Tamaño", "Forma"); `color` is the
+ *  one special axis whose values carry a real colour and pick as swatches. One per product at most. */
+export type ProductOptionKind = 'generic' | 'color';
 
 /** A product OPTION ("Color", "Tamaño"). Its order is the label order AND the photo precedence. */
 export interface ProductOption {
   id: number;
   name: string;
   sortOrder: number;
+  kind: ProductOptionKind;
   values: ProductOptionValue[];
 }
 
@@ -66,9 +74,9 @@ export interface ProductVariantUsage {
 }
 
 /**
- * One OFFERED combination of option values (active variations only, canonical order). Prices,
- * deposit and description are EFFECTIVE (the variation's override, else the product's) — computed
- * by the API, never re-derived here. Exactly one carries `isDefault`.
+ * One OFFERED combination of option values (active variations only, canonical order). Prices and
+ * deposit are EFFECTIVE (the variation's override, else the product's) — computed by the API, never
+ * re-derived here. Exactly one carries `isDefault`.
  */
 export interface ProductVariant {
   id: number;
@@ -80,11 +88,13 @@ export interface ProductVariant {
   rentPrice?: number;
   sellPrice?: number;
   securityDeposit?: number;
+  /** The variation's OWN text only — it STACKS under the product's description, never replaces it. */
   description?: string;
   /** Its photo: the first of its values (in option order) that has photos gives its primary, else
    *  the product's showcase primary; absent when neither exists. */
   imageUrl?: string;
-  /** Admin only — its OWN stock (fleet for rent, shelf for sale). */
+  /** Admin only — its OWN stock (fleet for rent, shelf for sale); with `sharedStock`, the product's
+   *  one pool (every variation then reports the same figures). */
   quantity?: number;
   /** Admin only — takeable right now (same meaning as the product's). */
   available?: number;
@@ -115,9 +125,10 @@ export interface Product {
   /** The category's lookup id — same public-reference stance as `businessTypeId`. */
   categoryId: number;
   currency: ProductCurrency;
-  /** Rental price per `rentTimeUnit`; absent for sale-only products. */
+  /** Rental price per `rentTimeUnit`; absent for sale-only products — and possibly for a product
+   *  with variations, where it is only the DEFAULT the variations without their own inherit. */
   rentPrice?: number;
-  /** Outright sale price; absent for rent-only products. */
+  /** Outright sale price; absent for rent-only products (same variations caveat). */
   sellPrice?: number;
   /** The rental period the `rentPrice` applies to (e.g. "Día"); present with `rentPrice`. */
   rentTimeUnit?: string;
@@ -128,13 +139,19 @@ export interface Product {
   securityDeposit?: number;
   /** The product's SHOWCASE photos (the whole product, every variation) — never a value's photos. */
   images: ProductImage[];
-  /** What a tile shows: the showcase primary, else the DEFAULT variation's photo, else absent. */
+  /** What a tile shows: the showcase primary, else the DEFAULT variation's photo, else the first
+   *  variation (canonical order) with one, else any value's photo, else absent. */
   coverImageUrl?: string;
   /** The product's options (empty/absent = no variations). */
   options?: ProductOption[];
   /** Its ACTIVE variations, canonical order (empty/absent = no variations). For a product WITH
-   *  variations the product-level Admin stock (`available`/`total`/`inStock`) is their SUM. */
+   *  variations the product-level Admin stock (`available`/`total`/`inStock`) is their SUM — or,
+   *  with `sharedStock`, the one pool they all draw from. */
   variants?: ProductVariant[];
+  /** The variations are CONFIGURATIONS of the same units (an arrangement with or without its
+   *  add-on): one stock on the product that every variation takes from. `false` = each variation is
+   *  its own item with its own stock (candles by colour). Meaningless without variations. */
+  sharedStock?: boolean;
   details: ProductDetail[];
   /** Availability signal (`available > 0`) — Admin only (never sent to Client). */
   inStock?: boolean;

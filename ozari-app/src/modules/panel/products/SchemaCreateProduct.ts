@@ -14,6 +14,7 @@ import { t } from 'i18next';
 import { z } from 'zod';
 import type { Product } from './product.types';
 import {
+  COLOR_HEX_REGEX,
   combinationOf,
   normalizeVariationName,
   valueKeyForId,
@@ -85,9 +86,12 @@ const baseCreateProductSchema = z.object({
   businessTypeId: z.number({ error: t(`${KEY}.requiredBusinessType`) }),
   categoryId: z.number({ error: t(`${KEY}.requiredCategory`) }),
   currencyId: z.number({ error: t(`${KEY}.requiredCurrency`) }),
-  // REQUIRED without options, FORBIDDEN with them (each variation owns its stock — the API answers
-  // 400 `quantityWithVariants`), so the check lives in the cross-field rules below.
+  // REQUIRED without options or with a SHARED stock, FORBIDDEN otherwise (each variation owns its
+  // stock — the API answers 400 `quantityWithVariants`), so the check lives in the rules below.
   quantity: z.string(),
+  // With options: one stock on the product that every variation draws from (an arrangement with or
+  // without its add-on) instead of one per variation (candles by colour). Ignored without options.
+  sharedStock: z.boolean(),
   rentPrice: moneyField(t(`${KEY}.invalidRentPrice`)).optional(),
   // `null` = the empty-selection sentinel (see CustomSelectForm) — the conditional rule below
   // enforces presence for Alquiler; a bare `.optional()` would reject the sentinel outright.
@@ -110,12 +114,16 @@ const baseCreateProductSchema = z.object({
     }),
   ),
   // VARIATIONS (2026-10-29). Array order = `sortOrder`. Names are checked in the cross-field rules
-  // (uniqueness needs the siblings); `key` is minted by the editor, never typed.
+  // (uniqueness needs the siblings); `key` is minted by the editor, never typed. A `color` option's
+  // values carry their `#rrggbb` (owner 2026-10-30).
   options: z.array(
     z.object({
       id: z.number().optional(),
       name: z.string(),
-      values: z.array(z.object({ id: z.number().optional(), key: z.string(), name: z.string() })),
+      kind: z.enum(['generic', 'color']),
+      values: z.array(
+        z.object({ id: z.number().optional(), key: z.string(), name: z.string(), color: z.string() }),
+      ),
     }),
   ),
   // One row per OFFERED combination; money/quantity TEXT like the product's own fields, `''` on an
@@ -141,27 +149,34 @@ const baseCreateProductSchema = z.object({
  * the full-name alphabet, unique case/accent-insensitively per product (options) and per option
  * (values); value keys well-formed and unique; with options, 1..`PRODUCT_MAX_VARIANTS` variations,
  * none without; each variation exactly one known key per option, a unique combination, its stock
- * and overrides valid for the business type (`variantRowIssues`); at most one default. The product
- * quantity is required only without options.
+ * and overrides valid for the business type (`variantRowIssues`, which also wants a price from the
+ * row or the product); at most one default. At most ONE color option, and each of its values a real
+ * colour. The product quantity is required without options, or when the stock is SHARED.
  */
 function variationRules(data: z.infer<typeof baseCreateProductSchema>, ctx: z.RefinementCtx): void {
   const issue = (path: (string | number)[], leaf: string, params?: Record<string, unknown>): void =>
     ctx.addIssue({ code: 'custom', path, message: t(`${KEY}.${leaf}`, params) });
   const hasOptions = data.options.length > 0;
+  const sharedStock = hasOptions && data.sharedStock;
 
-  if (!hasOptions && parseQuantity(data.quantity) === null) issue(['quantity'], 'invalidQuantity');
+  if ((!hasOptions || sharedStock) && parseQuantity(data.quantity) === null) {
+    issue(['quantity'], 'invalidQuantity');
+  }
   if (data.options.length > PRODUCT_MAX_OPTIONS) {
     issue(['options'], 'tooManyOptions', { max: PRODUCT_MAX_OPTIONS });
   }
 
   const optionNames = new Set<string>();
   const keys = new Set<string>();
+  let colorOptions = 0;
   data.options.forEach((option, optionIndex) => {
     const name = option.name.trim();
     if (!VARIATION_NAME_REGEX.test(name)) issue(['options', optionIndex, 'name'], 'invalidOptionName');
     else if (optionNames.has(normalizeVariationName(name))) {
       issue(['options', optionIndex, 'name'], 'duplicateOptionName');
     } else optionNames.add(normalizeVariationName(name));
+    const isColor = option.kind === 'color';
+    if (isColor && ++colorOptions > 1) issue(['options', optionIndex, 'kind'], 'multipleColorOptions');
 
     if (option.values.length === 0) issue(['options', optionIndex, 'values'], 'requiredOptionValues');
     if (option.values.length > PRODUCT_MAX_OPTION_VALUES) {
@@ -178,6 +193,9 @@ function variationRules(data: z.infer<typeof baseCreateProductSchema>, ctx: z.Re
         issue(['options', optionIndex, 'values', valueIndex, 'key'], 'invalidVariants');
       }
       keys.add(value.key);
+      if (isColor && !COLOR_HEX_REGEX.test(value.color)) {
+        issue(['options', optionIndex, 'values', valueIndex, 'color'], 'requiredValueColor');
+      }
     });
   });
 
@@ -197,6 +215,8 @@ function variationRules(data: z.infer<typeof baseCreateProductSchema>, ctx: z.Re
   const isRent = data.businessTypeId === BUSINESS_TYPE_RENT;
   const rowContext = {
     isRent,
+    sharedStock,
+    productPrice: (isRent ? data.rentPrice : data.sellPrice) ?? '',
     productReplacementPrice: data.replacementPrice ?? '',
     productSecurityDeposit: data.securityDeposit ?? '',
     parseMoney,
@@ -250,8 +270,11 @@ export const createProductSchema = baseCreateProductSchema.superRefine((data, ct
   });
   const rent = parseMoney(data.rentPrice ?? '');
   const sell = parseMoney(data.sellPrice ?? '');
+  // With options the general price is only the DEFAULT the variations inherit (owner 2026-10-30) —
+  // each variation needs a price from somewhere, which `variantRowIssues` checks on its row.
+  const priceRequired = data.options.length === 0;
   if (data.businessTypeId === BUSINESS_TYPE_RENT) {
-    if (rent === undefined) {
+    if (priceRequired && rent === undefined) {
       ctx.addIssue({ code: 'custom', path: ['rentPrice'], message: t(`${KEY}.requiredRentPrice`) });
     }
     if (data.rentTimeUnitId === undefined || data.rentTimeUnitId === null) {
@@ -277,7 +300,7 @@ export const createProductSchema = baseCreateProductSchema.superRefine((data, ct
       });
     }
   } else if (data.businessTypeId === BUSINESS_TYPE_SELL) {
-    if (sell === undefined) {
+    if (priceRequired && sell === undefined) {
       ctx.addIssue({ code: 'custom', path: ['sellPrice'], message: t(`${KEY}.requiredSellPrice`) });
     }
     if (rent !== undefined) {
@@ -314,6 +337,7 @@ export const createProductDefaultValues: CreateProductFormType = {
   categoryId: null as unknown as number, // null = the category select opens on its placeholder
   currencyId: DEFAULT_CURRENCY_ID,
   quantity: '',
+  sharedStock: false,
   rentPrice: '',
   rentTimeUnitId: DEFAULT_RENT_TIME_UNIT_ID,
   replacementPrice: '',
@@ -334,22 +358,26 @@ export interface CreateProductImageRef {
 export interface ProductOptionBody {
   id?: number;
   name: string;
+  /** Sent only for the special kind (absent = `generic`). */
+  kind?: 'color';
   values: {
     id?: number;
     /** The client key variations reference this value by (unique in the body). */
     key: string;
     name: string;
+    /** `#rrggbb` — on a COLOR option's values only. */
+    color?: string;
     /** The value's OWN photo set — kept by `id`, new by uploaded `key`; one primary at most. */
     images: UpdateProductImageRef[];
   }[];
 }
 
 /** One offered combination of the body. Overrides only when typed (absent = inherit), following
- *  the business type; `isDefault` only on the default. */
+ *  the business type; `isDefault` only on the default. `quantity` is absent with a SHARED stock. */
 export interface ProductVariantBody {
   id?: number;
   valueKeys: string[];
-  quantity: number;
+  quantity?: number;
   rentPrice?: number;
   sellPrice?: number;
   replacementPrice?: number;
@@ -365,8 +393,11 @@ export interface CreateProductBody {
   businessTypeId: number;
   categoryId: number;
   currencyId: number;
-  /** The product's stock — present ONLY without options (each variation owns its stock). */
+  /** The product's stock — present without options, or with a SHARED stock (else each variation
+   *  owns its stock). */
   quantity?: number;
+  /** Sent only when true (with options): every variation draws from `quantity`. */
+  sharedStock?: true;
   rentPrice?: number;
   rentTimeUnitId?: number;
   replacementPrice?: number;
@@ -402,10 +433,14 @@ function variationsBody(
     options: data.options.map((option) => ({
       ...id(option),
       name: option.name.trim(),
+      ...(option.kind === 'color' && { kind: 'color' as const }),
       values: option.values.map((value) => ({
         ...id(value),
         key: value.key,
         name: value.name.trim(),
+        // A generic option keeps its values' colours in the FORM (a round trip back to Color loses
+        // nothing) but never sends them — the API refuses a colour there.
+        ...(option.kind === 'color' && { color: value.color.toLowerCase() }),
         images: (imagesByValueKey[value.key] ?? []).map((image) =>
           withIds ? image : { key: image.key as string, isPrimary: image.isPrimary },
         ),
@@ -423,8 +458,12 @@ function variationsBody(
       return {
         ...id(variant),
         valueKeys: variant.valueKeys,
-        /* v8 ignore next -- parseQuantity is guaranteed non-null by the schema */
-        quantity: parseQuantity(variant.quantity) ?? 0,
+        // A shared stock lives on the product: the rows keep what was typed (switching back to one
+        // stock per variation restores it) but send none.
+        ...(!data.sharedStock && {
+          /* v8 ignore next -- parseQuantity is guaranteed non-null by the schema */
+          quantity: parseQuantity(variant.quantity) ?? 0,
+        }),
         ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value !== undefined)),
         ...(description && { description }),
         ...(variant.isDefault && { isDefault: true as const }),
@@ -447,9 +486,15 @@ export function toCreateProductBody(
     businessTypeId: data.businessTypeId,
     categoryId: data.categoryId,
     currencyId: data.currencyId,
-    // With options the stock is per variation — the API refuses a product quantity then.
-    ...(data.options.length === 0 && { quantity: parseQuantity(data.quantity) ?? 0 }),
+    // With options the stock is per variation — the API refuses a product quantity then — unless it
+    // is SHARED, where the product's one quantity is the pool every variation draws from.
+    ...((data.options.length === 0 || data.sharedStock) && {
+      quantity: parseQuantity(data.quantity) ?? 0,
+    }),
+    ...(data.options.length > 0 && data.sharedStock && { sharedStock: true as const }),
     ...variationsBody(data, imagesByValueKey, false),
+    // A blank general price on a product with options is simply absent (the variations carry
+    // theirs); `money` already answers `undefined` for blank, and JSON drops the key.
     ...(isRent && { rentPrice: money(data.rentPrice), rentTimeUnitId: data.rentTimeUnitId ?? undefined }),
     ...(!isRent && { sellPrice: money(data.sellPrice) }),
     // Alquiler only — a Venta body never carries the key (the backend forbids it there).
@@ -535,6 +580,7 @@ export function productToFormValues(product: {
   details: { id: number; detailTypeId: number; detail: string }[];
   options?: Product['options'];
   variants?: Product['variants'];
+  sharedStock?: boolean;
 }): CreateProductFormType {
   const money = (value: number | undefined): string => (value === undefined ? '' : String(value));
   // Saved values travel under `v<id>` for the whole edit, so their variations keep pointing at them
@@ -544,9 +590,15 @@ export function productToFormValues(product: {
     .map((option) => ({
       id: option.id,
       name: option.name,
+      kind: option.kind,
       values: [...option.values]
         .sort((a, b) => a.sortOrder - b.sortOrder)
-        .map((value) => ({ id: value.id, key: valueKeyForId(value.id), name: value.name })),
+        .map((value) => ({
+          id: value.id,
+          key: valueKeyForId(value.id),
+          name: value.name,
+          color: value.color ?? '',
+        })),
     }));
   // The RAW override columns (`overrides`), never the effective values: an inherited price must
   // stay inherited, or the first save would freeze today's product price onto every variation. The
@@ -570,7 +622,9 @@ export function productToFormValues(product: {
     businessTypeId: product.businessTypeId,
     categoryId: product.categoryId,
     currencyId: product.currency.id,
+    // With a SHARED stock the product-level figures ARE the pool, so this reads it back the same way.
     quantity: String(product.total ?? product.available ?? 0),
+    sharedStock: options.length > 0 && product.sharedStock === true,
     rentPrice: money(product.rentPrice),
     rentTimeUnitId: product.rentTimeUnitId ?? null,
     replacementPrice: money(product.replacementPrice),
