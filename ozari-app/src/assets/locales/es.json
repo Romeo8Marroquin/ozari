@@ -1524,6 +1524,8 @@
           "securityDepositNote": "se devuelve al recoger",
           "options": "Variaciones de {{name}}",
           "pickHint": "Elige una combinación para ver su precio y su disponibilidad.",
+          "clearPicks": "Limpiar selección",
+          "swatchSoldOut": "{{name}} (agotado)",
           "notOffered": "Esta combinación no se ofrece.",
           "lightbox": {
             "open": "Ver fotos en tamaño completo"
@@ -1693,17 +1695,39 @@
             "variantPricingMismatch": "Este precio no corresponde al tipo de negocio del producto.",
             "tooManyImagesTotal": "Un producto puede tener hasta {{max}} fotos en total (ahora tiene {{count}}). Quita algunas para guardar.",
             "variantInUse": "No se puede quitar {{labels}}: tiene pedidos abiertos o próximos ({{orders}}). Termina o cambia esos pedidos primero.",
-            "stockModeInUse": "Hay pedidos abiertos o próximos de este producto ({{orders}}) con su inventario actual. Termina o cambia esos pedidos antes de agregar o quitar las variaciones."
+            "stockModeInUse": "Hay pedidos abiertos o próximos de este producto ({{orders}}) con su inventario actual. Termina o cambia esos pedidos antes de agregar o quitar las variaciones, o de cambiar cómo se maneja su inventario.",
+            "variantPriceRequired": "Escribe un precio aquí o un precio general para todas.",
+            "multipleColorOptions": "Un producto solo puede tener una opción de tipo color.",
+            "requiredValueColor": "Elige el color de este valor."
           },
           "variations": {
             "title": "Variaciones",
-            "description": "Opciones como color o tamaño. Cada combinación que ofrezcas tiene su propio inventario y puede cambiar el precio, el depósito, la reposición o la descripción; lo que dejes vacío se hereda del producto.",
+            "description": "Opciones como color o tamaño. Cada combinación que ofrezcas puede tener su propio precio, depósito, reposición y descripción; lo que dejes vacío se hereda de los valores generales.",
             "empty": "Este producto no tiene variaciones: se maneja con una sola cantidad.",
-            "quantityManaged": "Con variaciones, cada combinación lleva su propia cantidad (abajo, en Variaciones).",
+            "quantityManaged": "Con inventario por variación, cada combinación lleva su propia cantidad (abajo, en Variaciones).",
+            "quantityTotal": "Total: {{count}} entre todas las variaciones.",
+            "quantitySharedHint": "Inventario compartido: todas las variaciones toman de esta cantidad.",
+            "generalPriceHint": "Opcional con variaciones: lo heredan las que no tengan precio propio.",
             "optionLabel": "Opción",
-            "optionPlaceholder": "Ej. Color",
+            "optionPlaceholder": "Ej. Tamaño",
+            "kindLabel": "Tipo",
+            "kinds": {
+              "generic": "Genérica",
+              "color": "Color"
+            },
+            "colorOptionName": "Color",
             "valueLabel": "Valor",
-            "valuePlaceholder": "Ej. Rojo",
+            "valuePlaceholder": "Ej. Grande",
+            "colorValuePlaceholder": "Ej. Marfil",
+            "pickColor": "Elegir el color de {{name}}",
+            "stockMode": {
+              "title": "Inventario",
+              "perVariant": "Por variación",
+              "perVariantHint": "Cada variación es un artículo distinto con su propia cantidad (velas de colores).",
+              "shared": "Compartido",
+              "sharedHint": "Las variaciones son la misma unidad con otra configuración y comparten una cantidad (un arreglo con o sin su complemento).",
+              "sharedCell": "Usa el inventario compartido"
+            },
             "valuesTitle": "Valores",
             "unnamedValue": "(sin nombre)",
             "photosToggle": "Fotos de {{name}} ({{count}})",
@@ -1726,7 +1750,8 @@
             "descriptionLabel": "Descripción",
             "inherit": "Hereda: {{value}}",
             "inheritNone": "Hereda: sin valor",
-            "inheritDescription": "Hereda la descripción del producto",
+            "priceNeeded": "Requerido",
+            "inheritDescription": "Se muestra debajo de la descripción general",
             "holding_one": "Tiene {{count}} pedido abierto o próximo: no se puede quitar hasta que termine.",
             "holding_other": "Tiene {{count}} pedidos abiertos o próximos: no se puede quitar hasta que terminen.",
             "willRetire": "Se retirará al guardar: el historial de pedidos la conserva.",

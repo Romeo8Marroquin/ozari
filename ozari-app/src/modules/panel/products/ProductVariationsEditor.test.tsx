@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect, useRef } from 'react';
 import { FormProvider, useForm, type UseFormReturn } from 'react-hook-form';
@@ -67,7 +67,8 @@ const Harness: React.FC<{
 
 const colorOption = (names: string[]): OptionFormRow => ({
   name: 'Color',
-  values: names.map((name, index) => ({ key: `n${index + 1}`, name })),
+  kind: 'generic',
+  values: names.map((name, index) => ({ key: `n${index + 1}`, name, color: '' })),
 });
 
 /** The combination row (`<li>`) whose label reads `label`. */
@@ -118,7 +119,7 @@ describe('ProductVariationsEditor — building options', () => {
     render(
       <Harness
         defaults={{
-          options: [colorOption(['Rojo', 'Azul']), { name: 'Tamaño', values: [{ key: 'n3', name: 'Redondo' }] }],
+          options: [colorOption(['Rojo', 'Azul']), { name: 'Tamaño', kind: 'generic', values: [{ key: 'n3', name: 'Redondo', color: '' }] }],
           variants: [emptyVariantRow(['n1', 'n3']), emptyVariantRow(['n2', 'n3'])],
         }}
       />,
@@ -192,14 +193,18 @@ describe('ProductVariationsEditor — building options', () => {
         }}
       />,
     );
+    // No general price to inherit: the row's own price is what the line needs.
     expect(screen.getByRole('textbox', { name: `${KEY}.rentPriceLabel · Rojo` })).toHaveAttribute(
       'placeholder',
-      `${KEY}.inheritNone`,
+      `${KEY}.priceNeeded`,
     );
     expect(
       screen.getByRole('textbox', { name: `${KEY}.securityDepositLabel · Rojo` }),
     ).toHaveAttribute('placeholder', `${KEY}.inherit`);
-    expect(screen.getByRole('textbox', { name: `${KEY}.replacementPriceLabel · Rojo` })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: `${KEY}.replacementPriceLabel · Rojo` })).toHaveAttribute(
+      'placeholder',
+      `${KEY}.inheritNone`,
+    );
     expect(screen.queryByRole('textbox', { name: `${KEY}.sellPriceLabel · Rojo` })).not.toBeInTheDocument();
   });
 
@@ -224,11 +229,13 @@ describe('ProductVariationsEditor — building options', () => {
   it('holds every cap: options, values per option, variations (caps mocked to 2 / 3 / 4)', async () => {
     const color: OptionFormRow = {
       name: 'Color',
-      values: ['Rojo', 'Azul', 'Verde'].map((name, index) => ({ key: `c${index}`, name })),
+      kind: 'generic',
+      values: ['Rojo', 'Azul', 'Verde'].map((name, index) => ({ key: `c${index}`, name, color: '' })),
     };
     const size: OptionFormRow = {
       name: 'Tamaño',
-      values: ['Chico', 'Grande'].map((name, index) => ({ key: `s${index}`, name })),
+      kind: 'generic',
+      values: ['Chico', 'Grande'].map((name, index) => ({ key: `s${index}`, name, color: '' })),
     };
     const options = [color, size];
     const combos = generateCombinations(options);
@@ -266,15 +273,16 @@ describe('ProductVariationsEditor — building options', () => {
     render(
       <Harness
         defaults={{
-          options: [colorOption(['Rojo', 'Azul']), { name: 'Tamaño', values: [] }],
+          options: [colorOption(['Rojo', 'Azul']), { name: 'Tamaño', kind: 'generic', values: [] }],
           variants: [emptyVariantRow(['n1']), emptyVariantRow(['n2'])],
         }}
       />,
     );
+    // The options' fieldsets (the stock-mode fieldset follows them, outside the list).
     const [color, size] = screen.getAllByRole('group');
     const rojo = row('Rojo');
     await userEvent.click(buttons('moveOptionDown')[0]);
-    expect(screen.getAllByRole('group')).toEqual([size, color]);
+    expect(screen.getAllByRole('group').slice(0, 2)).toEqual([size, color]);
     await userEvent.click(buttons('moveOptionUp')[1]);
 
     // Tamaño's FIRST value completes every row: "Rojo" becomes "Rojo · Grande" — the same row.
@@ -293,7 +301,7 @@ describe('ProductVariationsEditor — building options', () => {
     render(
       <Harness
         defaults={{
-          options: [colorOption(['Rojo']), { name: 'Tamaño', values: [{ key: 'n9', name: 'Grande' }] }],
+          options: [colorOption(['Rojo']), { name: 'Tamaño', kind: 'generic', values: [{ key: 'n9', name: 'Grande', color: '' }] }],
           variants: [emptyVariantRow(['n1', 'n9'])],
         }}
       />,
@@ -309,7 +317,7 @@ describe('ProductVariationsEditor — building options', () => {
     render(
       <Harness
         defaults={{
-          options: [colorOption(['Rojo', 'Azul']), { name: 'Tamaño', values: [{ key: 'n9', name: 'Grande' }] }],
+          options: [colorOption(['Rojo', 'Azul']), { name: 'Tamaño', kind: 'generic', values: [{ key: 'n9', name: 'Grande', color: '' }] }],
           variants: [emptyVariantRow(['n1', 'n9'])],
         }}
       />,
@@ -367,6 +375,95 @@ describe('ProductVariationsEditor — errors', () => {
   });
 });
 
+describe('ProductVariationsEditor — a COLOR option', () => {
+  const kindSelect = (index: number) => document.getElementById(`product-option-kind-${index}`) as HTMLSelectElement;
+  const kinds = (index: number) => Array.from(kindSelect(index).options).map((option) => option.value);
+
+  it('names an unnamed option "Color" and opens a swatch beside each value', async () => {
+    render(<Harness defaults={{ options: [{ ...colorOption(['Marfil']), name: '' }], variants: [emptyVariantRow(['n1'])] }} />);
+    const valueBox = screen.getByRole('textbox', { name: `${KEY}.valueLabel` });
+    expect(valueBox).toHaveAttribute('placeholder', `${KEY}.valuePlaceholder`);
+    // Closed while generic: hidden from assistive tech and out of the tab order.
+    const slot = screen.getByLabelText(`${KEY}.pickColor`).closest('[aria-hidden]');
+    expect(slot).toHaveAttribute('aria-hidden', 'true');
+
+    await userEvent.selectOptions(kindSelect(0), 'color');
+    expect(values().options[0]).toMatchObject({ kind: 'color', name: `${KEY}.colorOptionName` });
+    expect(valueBox).toHaveAttribute('placeholder', `${KEY}.colorValuePlaceholder`);
+    expect(slot).toHaveAttribute('aria-hidden', 'false');
+
+    // Not picked yet: the native input shows black, the FORM keeps '' (required).
+    const picker = screen.getByLabelText(`${KEY}.pickColor`) as HTMLInputElement;
+    expect(picker.value).toBe('#000000');
+    expect(picker.closest('label')).not.toHaveAttribute('title');
+    fireEvent.input(picker, { target: { value: '#fffff0' } });
+    expect(values().options[0].values[0].color).toBe('#fffff0');
+    expect(picker.closest('label')).toHaveAttribute('title', '#fffff0');
+    expect(picker.closest('label')).toHaveStyle({ backgroundColor: '#fffff0' });
+  });
+
+  it('keeps a typed name when switching to Color, and lists Color only where it can be chosen', async () => {
+    render(
+      <Harness
+        defaults={{
+          options: [
+            { name: 'Tono', kind: 'color', values: [{ key: 'n1', name: 'Marfil', color: '#FFFFF0' }] },
+            { name: 'Tamaño', kind: 'generic', values: [{ key: 'n2', name: 'Grande', color: '' }] },
+          ],
+          variants: [emptyVariantRow(['n1', 'n2'])],
+        }}
+      />,
+    );
+    // The color option keeps Color; the other cannot take a second one.
+    expect(kinds(0)).toEqual(['generic', 'color']);
+    expect(kinds(1)).toEqual(['generic']);
+    await userEvent.selectOptions(kindSelect(0), 'generic');
+    expect(kinds(1)).toEqual(['generic', 'color']);
+    await userEvent.selectOptions(kindSelect(0), 'color');
+    expect(values().options[0].name).toBe('Tono');
+  });
+
+  it('flags a missing colour on its ring and under the value', async () => {
+    render(
+      <Harness
+        defaults={{
+          options: [{ name: 'Color', kind: 'color', values: [{ key: 'n1', name: 'Marfil', color: '' }] }],
+          variants: [emptyVariantRow(['n1'])],
+        }}
+      />,
+    );
+    act(() => api().setError('options.0.values.0.color', { type: 'custom', message: 'elige un color' }));
+    expect(await screen.findByText('elige un color', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByLabelText(`${KEY}.pickColor`)).toHaveAttribute('aria-invalid', 'true');
+  });
+});
+
+describe('ProductVariationsEditor — stock mode', () => {
+  const defaults = { options: [colorOption(['Rojo'])], variants: [emptyVariantRow(['n1'])] };
+  const radio = (leaf: string) =>
+    screen.getByRole('radio', { name: `${KEY}.stockMode.${leaf}`, description: `${KEY}.stockMode.${leaf}Hint` });
+
+  it('moves the stock off the rows when the variations share one', async () => {
+    render(<Harness defaults={defaults} />);
+    expect(radio('perVariant')).toBeChecked();
+    expect(screen.getByRole('textbox', { name: `${KEY}.quantityLabel · Rojo` })).toBeInTheDocument();
+
+    await userEvent.click(radio('shared'));
+    expect(values().sharedStock).toBe(true);
+    expect(await screen.findByText(`${KEY}.stockMode.sharedCell`)).toBeInTheDocument();
+  });
+
+  it('re-checks both quantity sides once the form has been submitted', async () => {
+    render(<Harness defaults={defaults} />);
+    await act(() => api().handleSubmit(() => {})());
+    act(() => api().setError('variants.0.quantity', { type: 'custom', message: 'cantidad' }));
+    expect(api().getFieldState('variants.0.quantity').error).toBeDefined();
+    // A stale per-row message must not survive the row losing its quantity.
+    await userEvent.click(radio('shared'));
+    await waitFor(() => expect(api().getFieldState('variants.0.quantity').error).toBeUndefined());
+  });
+});
+
 describe('ProductVariationsEditor — a saved product', () => {
   const image = (id: number): ProductImage => ({
     id,
@@ -411,6 +508,7 @@ describe('ProductVariationsEditor — a saved product', () => {
         id: 1,
         name: 'Color',
         sortOrder: 0,
+        kind: 'generic' as const,
         values: [
           { id: 1, name: 'Rojo', sortOrder: 0, images: [image(1), image(2)] },
           { id: 2, name: 'Azul', sortOrder: 1, images: [] },

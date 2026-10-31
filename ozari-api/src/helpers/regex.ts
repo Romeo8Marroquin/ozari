@@ -12,6 +12,10 @@ export const variationNameRegex = /^(?=.{1,40}$)[A-Za-zÀ-ÖØ-öø-ÿ0-9\s'-]+$
 // may not have an id yet (a value created in the same save).
 export const variationValueKeyRegex = /^[A-Za-z0-9_-]{1,40}$/;
 
+// The swatch of a COLOR option's value: `#rrggbb` (stored lowercased). Mirrored in the app's
+// `@constants/Regex`.
+export const variationColorRegex = /^#[0-9a-fA-F]{6}$/;
+
 export const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 // Registry contact phone: allowed characters (digits + the usual separators) plus a digit COUNT

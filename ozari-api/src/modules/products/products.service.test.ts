@@ -55,6 +55,7 @@ const makeProduct = (overrides: Partial<RichProduct> = {}): RichProduct =>
     replacementPrice: 900,
     securityDeposit: 300,
     quantity: 40,
+    sharedStock: false,
     isActive: true,
     createdAt: new Date("2026-07-01T00:00:00.000Z"),
     updatedAt: null,
@@ -79,28 +80,32 @@ const variationOptions = [
   {
     id: 3,
     name: "Color",
+    kind: "GENERIC",
     sortOrder: 0,
     values: [
       {
         id: 10,
         name: "Rojo",
+        colorHex: null,
         sortOrder: 0,
         images: [
           { id: 31, url: "https://cdn.test/rojo-1.webp", isPrimary: false, sortOrder: 0 },
           { id: 32, url: "https://cdn.test/rojo-2.webp", isPrimary: true, sortOrder: 1 },
         ],
       },
-      { id: 11, name: "Azul", sortOrder: 1, images: [] },
+      { id: 11, name: "Azul", colorHex: null, sortOrder: 1, images: [] },
     ],
   },
   {
     id: 4,
     name: "Tamaño",
+    kind: "GENERIC",
     sortOrder: 1,
     values: [
       {
         id: 20,
         name: "Grande",
+        colorHex: null,
         sortOrder: 0,
         images: [{ id: 41, url: "https://cdn.test/grande.webp", isPrimary: false, sortOrder: 0 }],
       },
@@ -239,10 +244,12 @@ describe("projectProductForRole — variations", () => {
   it("gives every role the options and the variants with EFFECTIVE values, in canonical order", () => {
     const result = projectProductForRole(withVariants(), RolesEnum.Client);
 
+    expect(result.sharedStock).toBe(false);
     expect(result.options).toEqual([
       {
         id: 3,
         name: "Color",
+        kind: "generic",
         sortOrder: 0,
         values: [
           {
@@ -260,6 +267,7 @@ describe("projectProductForRole — variations", () => {
       {
         id: 4,
         name: "Tamaño",
+        kind: "generic",
         sortOrder: 1,
         values: [
           {
@@ -293,7 +301,8 @@ describe("projectProductForRole — variations", () => {
         rentPrice: 75,
         sellPrice: undefined,
         securityDeposit: 300,
-        description: "Mesa para 8 personas",
+        // Its OWN text only: the product's description is stacked above it by the app.
+        description: undefined,
         // Azul has no photos → precedence moves to the next option's value (its first photo).
         imageUrl: "https://cdn.test/grande.webp",
       },
@@ -413,6 +422,56 @@ describe("projectProductForRole — variations", () => {
       undefined,
     ]);
   });
+
+  it("ships a COLOR option's kind and each value's swatch", () => {
+    const result = projectProductForRole(
+      withVariants({
+        options: variationOptions.map((option, index) =>
+          index === 0
+            ? {
+                ...option,
+                kind: "COLOR",
+                values: option.values.map((value) => ({ ...value, colorHex: "#fffff0" })),
+              }
+            : option,
+        ),
+      } as unknown as Partial<RichProduct>),
+      RolesEnum.Client,
+    );
+    expect(result.options.map((option) => option.kind)).toEqual(["color", "generic"]);
+    expect(result.options[0]?.values.map((value) => value.color)).toEqual(["#fffff0", "#fffff0"]);
+    expect(result.options[1]?.values[0]).not.toHaveProperty("color");
+  });
+
+  it("SHARED stock: the product and every variant report the ONE pool (rented folded in)", () => {
+    const shared = withVariants({ sharedStock: true, quantity: 3 } as unknown as Partial<RichProduct>);
+    const admin = projectProductForRole(shared, RolesEnum.Admin, {
+      rentedNow: new Map([
+        ["7:55", 1],
+        ["7:56", 1],
+      ]),
+    });
+    expect(admin.sharedStock).toBe(true);
+    expect(admin).toMatchObject({ total: 3, available: 1, inStock: true });
+    for (const variant of admin.variants) {
+      expect(variant).toMatchObject({ quantity: 3, available: 1, inStock: true, total: 3 });
+    }
+    // Nothing rented, a Venta shelf: the pool as recorded.
+    const sale = projectProductForRole(
+      withVariants({
+        sharedStock: true,
+        quantity: 2,
+        productBusinessTypeId: BusinessTypeEnum.SELL,
+      } as unknown as Partial<RichProduct>),
+      RolesEnum.Admin,
+    );
+    expect(sale).toMatchObject({ available: 2, inStock: true });
+    expect(sale.total).toBeUndefined();
+    // A stale flag on a product without variants changes nothing.
+    expect(projectProductForRole(makeProduct({ sharedStock: true } as Partial<RichProduct>), RolesEnum.Client).sharedStock).toBe(
+      false,
+    );
+  });
 });
 
 describe("describeVariants", () => {
@@ -479,15 +538,56 @@ describe("primaryImageUrl / coverImageUrl / combinationKeyOf", () => {
     expect(primaryImageUrl([])).toBeUndefined();
   });
 
-  it("covers with the showcase, else the default variant's value photo", () => {
+  it("covers with the showcase, the default variant's photo, any variant's, then any value's", () => {
     const showcase = [{ url: "s", isPrimary: true }];
     const described = [
       { isDefault: false, valueImageUrl: "x" },
       { isDefault: true, valueImageUrl: "d" },
     ];
-    expect(coverImageUrl(showcase, described)).toBe("s");
-    expect(coverImageUrl([], described)).toBe("d");
-    expect(coverImageUrl([], [])).toBeUndefined();
+    expect(coverImageUrl(showcase, described, [])).toBe("s");
+    expect(coverImageUrl([], described, [])).toBe("d");
+    // The default has none → the first variant (canonical order) that has one.
+    expect(
+      coverImageUrl(
+        [],
+        [
+          { isDefault: true, valueImageUrl: undefined },
+          { isDefault: false, valueImageUrl: undefined },
+          { isDefault: false, valueImageUrl: "v" },
+        ],
+        [],
+      ),
+    ).toBe("v");
+    // No variant has one → the first value with photos, in option order then value order (an
+    // unoffered value counts: it is still the product's photo).
+    const image = (url: string) => ({ url, isPrimary: false });
+    const options = [
+      {
+        id: 9,
+        name: "Forma",
+        sortOrder: 1,
+        values: [{ id: 90, name: "Redonda", sortOrder: 0, images: [image("forma")] }],
+      },
+      {
+        id: 8,
+        name: "Color",
+        sortOrder: 0,
+        values: [
+          { id: 81, name: "Negro", sortOrder: 1, images: [image("negro")] },
+          { id: 80, name: "Marfil", sortOrder: 0, images: [] },
+          { id: 82, name: "Rojo", sortOrder: 1, images: [image("rojo")] },
+        ],
+      },
+    ];
+    expect(coverImageUrl([], [{ isDefault: true, valueImageUrl: undefined }], options)).toBe("negro");
+    // Equal sortOrders tie-break by id, for options and values alike.
+    expect(
+      coverImageUrl([], [], [
+        { ...options[0]!, id: 7, sortOrder: 0, values: [{ ...options[0]!.values[0]!, images: [image("f")] }] },
+        { ...options[1]!, sortOrder: 0 },
+      ]),
+    ).toBe("f");
+    expect(coverImageUrl([], [], [])).toBeUndefined();
   });
 
   it("sorts value ids numerically into the combination key", () => {
@@ -562,6 +662,7 @@ const sortRow = (
     rentPrice: null,
     sellPrice: null,
     createdAt: new Date(Date.UTC(2026, 0, id)),
+    variants: [],
     ...overrides,
   }) as unknown as ProductSortRow;
 
@@ -575,6 +676,20 @@ describe("sortProductIdPage", () => {
     ];
     expect(sortProductIdPage(rows, "priceAsc", 1, 10)).toEqual([2, 4, 1, 3]);
     expect(sortProductIdPage(rows, "priceDesc", 1, 10)).toEqual([1, 4, 2, 3]);
+  });
+
+  it("prices a product with variations at its CHEAPEST variant (override, else the default)", () => {
+    const rows = [
+      // No default; variants Q90 / Q20 → Q20.
+      sortRow(1, { variants: [{ rentPrice: 90, sellPrice: null }, { rentPrice: 20, sellPrice: null }] }),
+      // Default Q50; one override Q60, one inheriting → Q50.
+      sortRow(2, { rentPrice: 50, variants: [{ rentPrice: 60, sellPrice: null }, { rentPrice: null, sellPrice: null }] }),
+      // A plain product at Q40.
+      sortRow(3, { rentPrice: 40 }),
+      // Variants with no price anywhere (a legacy row) → priceless, sinks.
+      sortRow(4, { variants: [{ rentPrice: null, sellPrice: null }] }),
+    ];
+    expect(sortProductIdPage(rows, "priceAsc", 1, 10)).toEqual([1, 3, 2, 4]);
   });
 
   it("orders by name with the Spanish collation (accents fold, ñ after n), both directions", () => {
@@ -762,6 +877,8 @@ interface TxState {
   holdingLines?: { serviceId: number; variantId: number | null }[];
   /** Variant ids ANY order line references (history included). */
   referencedVariantIds?: number[];
+  /** The stock mode the locked row reads (absent = per-variant / none). */
+  sharedStock?: boolean;
 }
 
 type VariantIdFilter = null | { not: null } | { in: number[] } | undefined;
@@ -785,6 +902,7 @@ const makeTx = (state: TxState = {}) => {
   let nextOptionId = 100;
   let nextValueId = 200;
   return {
+    $queryRaw: vi.fn().mockResolvedValue([{ shared_stock: state.sharedStock ?? false }]),
     product: {
       create: vi.fn().mockResolvedValue({ id: 7 }),
       update: vi.fn().mockResolvedValue({}),
@@ -860,7 +978,8 @@ const option = (
 ): ProductOptionRequestModel => ({
   ...(id !== undefined && { id }),
   name,
-  values: values.map((value) => ({ images: [], ...value })),
+  kind: "generic",
+  values: values.map((value) => ({ images: [], color: undefined, ...value })),
 });
 
 /** A body variant (no overrides unless given). */
@@ -902,6 +1021,7 @@ const runUpdate = (
       sellPrice: undefined,
       options: [],
       variants: [],
+      sharedStock: false,
       ...body,
     },
     HOLDING,
@@ -928,6 +1048,7 @@ describe("applyProductUpdate", () => {
         productCategoryId: 1,
         currencyId: 1,
         quantity: 40,
+        sharedStock: false,
         rentPrice: null,
         sellPrice: 12.5,
         replacementPrice: null,
@@ -1105,15 +1226,15 @@ describe("applyProductUpdate — variations", () => {
       select: { serviceId: true },
     });
     expect(tx.productOption.create).toHaveBeenCalledWith({
-      data: { productId: 7, name: "Color", sortOrder: 0 },
+      data: { productId: 7, name: "Color", kind: "GENERIC", sortOrder: 0 },
       select: { id: true },
     });
     expect(tx.productOptionValue.create).toHaveBeenNthCalledWith(1, {
-      data: { optionId: 100, name: "Rojo", sortOrder: 0 },
+      data: { optionId: 100, name: "Rojo", colorHex: null, sortOrder: 0 },
       select: { id: true },
     });
     expect(tx.productOptionValue.create).toHaveBeenNthCalledWith(2, {
-      data: { optionId: 100, name: "Azul", sortOrder: 1 },
+      data: { optionId: 100, name: "Azul", colorHex: null, sortOrder: 1 },
       select: { id: true },
     });
     // The value photo lands in ITS set (sortOrder from 0, own primary).
@@ -1191,6 +1312,65 @@ describe("applyProductUpdate — variations", () => {
       where: { id: { in: [10, 11] } },
     });
     expect(tx.productOption.deleteMany).toHaveBeenCalledWith({ where: { id: { in: [3] } } });
+  });
+
+  it("409 stockModeInUse when the variations switch between their own and a SHARED pool", async () => {
+    const keepBoth = {
+      options: [colorOption()],
+      variants: [variant(["v10"], { id: 55 }), variant(["v11"], { id: 56 })],
+    };
+    // Per-variant → shared while a variant line holds.
+    const toShared = makeTx(colorState({ holdingLines: [{ serviceId: 8, variantId: 55 }] }));
+    const error = await runUpdate(toShared, { ...keepBoth, sharedStock: true, quantity: 4 }).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(ProductStockModeInUseError);
+    expect((error as ProductStockModeInUseError).orderIds).toEqual([8]);
+    // The row lock is taken FIRST, before any write.
+    expect(toShared.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      toShared.product.update.mock.invocationCallOrder[0]!,
+    );
+
+    // Shared → per-variant, the same.
+    const toOwn = makeTx(
+      colorState({ sharedStock: true, holdingLines: [{ serviceId: 9, variantId: 56 }] }),
+    );
+    await expect(runUpdate(toOwn, { ...keepBoth, quantity: 0 })).rejects.toBeInstanceOf(
+      ProductStockModeInUseError,
+    );
+
+    // The mode unchanged (shared → shared): no mode check, the save goes through.
+    const unchanged = makeTx(
+      colorState({ sharedStock: true, holdingLines: [{ serviceId: 9, variantId: 56 }] }),
+    );
+    await runUpdate(unchanged, { ...keepBoth, sharedStock: true, quantity: 4 });
+    expect(unchanged.product.update).toHaveBeenCalledWith({
+      where: { id: 7 },
+      data: expect.objectContaining({ quantity: 4, sharedStock: true }) as unknown,
+    });
+  });
+
+  it("writes a COLOR option's kind and each value's swatch", async () => {
+    const tx = makeTx();
+    await runUpdate(tx, {
+      quantity: 0,
+      options: [
+        {
+          name: "Color",
+          kind: "color",
+          values: [{ key: "m", name: "Marfil", color: "#fffff0", images: [] }],
+        },
+      ],
+      variants: [variant(["m"])],
+    });
+    expect(tx.productOption.create).toHaveBeenCalledWith({
+      data: { productId: 7, name: "Color", kind: "COLOR", sortOrder: 0 },
+      select: { id: true },
+    });
+    expect(tx.productOptionValue.create).toHaveBeenCalledWith({
+      data: { optionId: 100, name: "Marfil", colorHex: "#fffff0", sortOrder: 0 },
+      select: { id: true },
+    });
   });
 
   it("409 variantInUse: removing a variant open orders still use lists it with its orders", async () => {
@@ -1278,12 +1458,12 @@ describe("applyProductUpdate — variations", () => {
     // Kept option and values update their names and positions in place.
     expect(tx.productOption.update).toHaveBeenCalledWith({
       where: { id: 3 },
-      data: { name: "Color", sortOrder: 0 },
+      data: { name: "Color", kind: "GENERIC", sortOrder: 0 },
       select: { id: true },
     });
     expect(tx.productOptionValue.update).toHaveBeenCalledWith({
       where: { id: 11 },
-      data: { name: "Azul", sortOrder: 1 },
+      data: { name: "Azul", colorHex: null, sortOrder: 1 },
     });
     expect(tx.productOptionValue.deleteMany).not.toHaveBeenCalled();
     expect(tx.productOption.deleteMany).not.toHaveBeenCalled();
@@ -1350,7 +1530,7 @@ describe("applyProductUpdate — variations", () => {
     });
 
     expect(tx.productOption.create).toHaveBeenCalledWith({
-      data: { productId: 7, name: "Tamaño", sortOrder: 1 },
+      data: { productId: 7, name: "Tamaño", kind: "GENERIC", sortOrder: 1 },
       select: { id: true },
     });
     // The photo now belongs to Grande (the new value 200), first slot, primary.

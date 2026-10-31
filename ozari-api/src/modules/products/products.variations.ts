@@ -1,10 +1,12 @@
 import { appConfig } from "@/config/app.js";
 import {
   descriptionTextRegex,
+  variationColorRegex,
   variationNameRegex,
   variationValueKeyRegex,
 } from "@helpers/regex.js";
 import type {
+  ProductOptionKindModel,
   ProductOptionRequestModel,
   ProductOptionValueRequestModel,
   ProductVariantRequestModel,
@@ -94,10 +96,16 @@ export const normalizeVariationName = (value: string): string =>
 export interface ProductVariationsBody {
   options: unknown;
   variants: unknown;
-  /** The raw `quantity` — forbidden when options exist (the stock then lives on each variant). */
+  /** The raw `quantity` — forbidden when options exist with per-variant stock (it then lives on
+   *  each variant); the validator checks it everywhere else. */
   quantity: unknown;
+  /** The raw stock mode (owner 2026-10-30): absent = per-variant; true = one shared pool. */
+  sharedStock: unknown;
   isRent: boolean;
-  /** The product's sanitized values — the inherited side of every EFFECTIVE check. */
+  /** The product's sanitized values — the inherited side of every EFFECTIVE check. With options
+   *  the product's price is only a DEFAULT, so each variant must resolve one (`variantPriceRequired`). */
+  rentPrice: number | undefined;
+  sellPrice: number | undefined;
   replacementPrice: number | undefined;
   securityDeposit: number | undefined;
   /** The sanitized SHOWCASE gallery — image keys/ids are unique across EVERY set of the body, and
@@ -119,6 +127,8 @@ export type RejectVariation = (key: string, logParams: Record<string, unknown>) 
 export interface ParsedProductVariations {
   options: ProductOptionRequestModel[];
   variants: ProductVariantRequestModel[];
+  /** Resolved stock mode — always false without options. */
+  sharedStock: boolean;
 }
 
 /** Mutable state threaded through one parse. */
@@ -170,7 +180,18 @@ export function parseProductVariations(
     reject("tooManyOptions", { count: rawOptions.length, max: appConfig.maxProductOptions });
     return null;
   }
-  if (rawOptions.length > 0 && isPresent(body.quantity)) {
+  // The stock mode: shared = the variants are configurations of the SAME units, so the stock is the
+  // product's one `quantity`; per-variant (the default) = each variant owns its stock.
+  if (isPresent(body.sharedStock) && typeof body.sharedStock !== "boolean") {
+    reject("invalidSharedStock", { sharedStock: body.sharedStock });
+    return null;
+  }
+  const sharedStock = body.sharedStock === true;
+  if (sharedStock && rawOptions.length === 0) {
+    reject("sharedStockWithoutVariants", { sharedStock });
+    return null;
+  }
+  if (rawOptions.length > 0 && !sharedStock && isPresent(body.quantity)) {
     reject("quantityWithVariants", { quantity: body.quantity });
     return null;
   }
@@ -180,11 +201,11 @@ export function parseProductVariations(
   if (!options) {
     return null;
   }
-  const variants = parseVariants(body, options, context);
+  const variants = parseVariants(body, options, sharedStock, context);
   if (!variants) {
     return null;
   }
-  return { options, variants };
+  return { options, variants, sharedStock };
 }
 
 /** The parse's starting state: what the product has today, and what the showcase already uses. */
@@ -240,6 +261,7 @@ function parseOptions(
   const options: ProductOptionRequestModel[] = [];
   const seenNames = new Set<string>();
   const seenIds = new Set<number>();
+  let colorOptions = 0;
   for (const raw of rawOptions) {
     const option = asRecord(raw);
     const id = checkId(
@@ -254,30 +276,64 @@ function parseOptions(
     if (id.id !== undefined) {
       seenIds.add(id.id);
     }
-    const name = sanitizeVariationName(option["name"]);
+    const name = parseOptionName(option["name"], seenNames, context);
     if (name === null) {
-      context.reject("invalidOptionName", { name: option["name"] });
       return null;
     }
-    const normalized = normalizeVariationName(name);
-    if (seenNames.has(normalized)) {
-      context.reject("duplicateOptionName", { name });
-      return null;
-    }
-    seenNames.add(normalized);
 
-    const values = parseValues(option["values"], id.id, context);
+    const kind = parseOptionKind(option["kind"]);
+    if (kind === null) {
+      context.reject("invalidOptionKind", { kind: option["kind"] });
+      return null;
+    }
+    // One colour axis per product: two swatch rows would be two answers to the same question.
+    colorOptions += Number(kind === "color");
+    if (colorOptions > 1) {
+      context.reject("multipleColorOptions", { count: colorOptions });
+      return null;
+    }
+
+    const values = parseValues(option["values"], id.id, kind, context);
     if (!values) {
       return null;
     }
-    options.push({ ...(id.id !== undefined && { id: id.id }), name, values });
+    options.push({ ...(id.id !== undefined && { id: id.id }), name, kind, values });
   }
   return options;
+}
+
+/** An option's name, unique per product (case/spacing-insensitive); `null` = rejected. */
+function parseOptionName(
+  raw: unknown,
+  seenNames: Set<string>,
+  context: ParseContext,
+): string | null {
+  const name = sanitizeVariationName(raw);
+  if (name === null) {
+    context.reject("invalidOptionName", { name: raw });
+    return null;
+  }
+  const normalized = normalizeVariationName(name);
+  if (seenNames.has(normalized)) {
+    context.reject("duplicateOptionName", { name });
+    return null;
+  }
+  seenNames.add(normalized);
+  return name;
+}
+
+/** An option's `kind`: absent = "generic"; `null` = not one of the known kinds. */
+function parseOptionKind(raw: unknown): ProductOptionKindModel | null {
+  if (!isPresent(raw)) {
+    return "generic";
+  }
+  return raw === "generic" || raw === "color" ? raw : null;
 }
 
 function parseValues(
   rawValues: unknown,
   optionId: number | undefined,
+  kind: ProductOptionKindModel,
   context: ParseContext,
 ): ProductOptionValueRequestModel[] | null {
   if (!Array.isArray(rawValues) || rawValues.length === 0) {
@@ -294,7 +350,7 @@ function parseValues(
   const values: ProductOptionValueRequestModel[] = [];
   const seenNames = new Set<string>();
   for (const raw of rawValues as unknown[]) {
-    const value = parseValue(asRecord(raw), optionId, context, seenNames);
+    const value = parseValue(asRecord(raw), optionId, kind, context, seenNames);
     if (!value) {
       return null;
     }
@@ -303,10 +359,12 @@ function parseValues(
   return values;
 }
 
-/** One value: its id (kept under the SAME option), key, name (unique in the option) and photos. */
+/** One value: its id (kept under the SAME option), key, name (unique in the option), its swatch
+ *  (exactly on a COLOR option) and photos. */
 function parseValue(
   value: Record<string, unknown>,
   optionId: number | undefined,
+  kind: ProductOptionKindModel,
   context: ParseContext,
   seenNames: Set<string>,
 ): ProductOptionValueRequestModel | null {
@@ -349,11 +407,41 @@ function parseValue(
   }
   seenNames.add(normalized);
 
+  const color = parseValueColor(value["color"], kind, context);
+  if (color === null) {
+    return null;
+  }
+
   const images = parseImageSet(value["images"], context);
   if (!images) {
     return null;
   }
-  return { ...(id.id !== undefined && { id: id.id }), key, name, images };
+  return { ...(id.id !== undefined && { id: id.id }), key, name, color: color.value, images };
+}
+
+/** A value's swatch: required (`#rrggbb`, lowercased) on a COLOR option, forbidden on a generic
+ *  one. `null` = rejected. */
+function parseValueColor(
+  raw: unknown,
+  kind: ProductOptionKindModel,
+  context: ParseContext,
+): { value: string | undefined } | null {
+  if (kind === "generic") {
+    if (isPresent(raw)) {
+      context.reject("valueColorForbidden", { color: raw });
+      return null;
+    }
+    return { value: undefined };
+  }
+  if (!isPresent(raw)) {
+    context.reject("valueColorRequired", {});
+    return null;
+  }
+  if (typeof raw !== "string" || !variationColorRegex.test(raw)) {
+    context.reject("invalidValueColor", { color: raw });
+    return null;
+  }
+  return { value: raw.toLowerCase() };
 }
 
 /** One value's photo set — the showcase gallery's rules, its own cap, and the body-wide total. */
@@ -442,6 +530,7 @@ function parseImageSlot(
 function parseVariants(
   body: ProductVariationsBody,
   options: readonly ProductOptionRequestModel[],
+  sharedStock: boolean,
   context: ParseContext,
 ): ProductVariantRequestModel[] | null {
   const list = body.variants ?? [];
@@ -471,6 +560,7 @@ function parseVariants(
       options.flatMap((option, index) => option.values.map((value) => [value.key, index])),
     ),
     seenIds: new Set<number>(),
+    sharedStock,
   };
   const variants: ProductVariantRequestModel[] = [];
   const seenCombinations = new Set<string>();
@@ -524,6 +614,34 @@ interface VariantStructure {
   optionOfKey: ReadonlyMap<string, number>;
   /** Variant ids already kept by an earlier entry. */
   seenIds: Set<number>;
+  /** The body's stock mode: shared ⇒ a variant carries no quantity (it stores 0). */
+  sharedStock: boolean;
+}
+
+/** A variant's own stock: required (an integer in range) per-variant, forbidden when shared — where
+ *  it resolves to 0. `null` = rejected. */
+function parseVariantQuantity(
+  raw: unknown,
+  sharedStock: boolean,
+  context: ParseContext,
+): number | null {
+  if (sharedStock) {
+    if (isPresent(raw)) {
+      context.reject("variantQuantityWithSharedStock", { quantity: raw });
+      return null;
+    }
+    return 0;
+  }
+  if (
+    typeof raw !== "number" ||
+    !Number.isInteger(raw) ||
+    raw < 0 ||
+    raw > appConfig.maxGlobalQuantity
+  ) {
+    context.reject("invalidVariantQuantity", { quantity: raw });
+    return null;
+  }
+  return raw;
 }
 
 // eslint-disable-next-line complexity, sonarjs/cognitive-complexity -- one linear pass over a variant's fields, each check rejecting with its own key
@@ -533,7 +651,7 @@ function parseVariant(
   body: ProductVariationsBody,
   context: ParseContext,
 ): ProductVariantRequestModel | null {
-  const { optionCount, optionOfKey, seenIds } = structure;
+  const { optionCount, optionOfKey, seenIds, sharedStock } = structure;
   const id = checkId(
     variant["id"],
     context,
@@ -551,14 +669,8 @@ function parseVariant(
     context.reject("invalidVariantValues", { valueKeys: variant["valueKeys"] });
     return null;
   }
-  const quantity = variant["quantity"];
-  if (
-    typeof quantity !== "number" ||
-    !Number.isInteger(quantity) ||
-    quantity < 0 ||
-    quantity > appConfig.maxGlobalQuantity
-  ) {
-    context.reject("invalidVariantQuantity", { quantity });
+  const quantity = parseVariantQuantity(variant["quantity"], sharedStock, context);
+  if (quantity === null) {
     return null;
   }
 
@@ -584,6 +696,15 @@ function parseVariant(
       money.securityDeposit !== undefined;
   if (mismatched) {
     context.reject("variantPricingMismatch", { isRent: body.isRent, ...money });
+    return null;
+  }
+  // With options the product's price is only a DEFAULT (owner 2026-10-30): every offered variant
+  // must still end up with one — its own, else the inherited one.
+  const effectivePrice = body.isRent
+    ? (money.rentPrice ?? body.rentPrice)
+    : (money.sellPrice ?? body.sellPrice);
+  if (effectivePrice === undefined) {
+    context.reject("variantPriceRequired", { valueKeys });
     return null;
   }
   // The deposit ceiling on EFFECTIVE values (the override, else the product's).

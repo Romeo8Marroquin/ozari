@@ -20,6 +20,7 @@ const validRent = (): CreateProductFormType => ({
   categoryId: 1,
   currencyId: 1,
   quantity: '40',
+  sharedStock: false,
   rentPrice: '75',
   rentTimeUnitId: 2,
   replacementPrice: '900',
@@ -350,6 +351,7 @@ describe('productToFormValues', () => {
       categoryId: 3,
       currencyId: 1,
       quantity: '40',
+      sharedStock: false,
       rentPrice: '75',
       rentTimeUnitId: 2,
       replacementPrice: '900',
@@ -369,12 +371,14 @@ describe('productToFormValues', () => {
           id: 2,
           name: 'Tamaño',
           sortOrder: 1,
+          kind: 'generic' as const,
           values: [{ id: 7, name: 'Redondo', sortOrder: 0, images: [] }],
         },
         {
           id: 1,
           name: 'Color',
           sortOrder: 0,
+          kind: 'generic' as const,
           values: [
             { id: 5, name: 'Azul', sortOrder: 1, images: [] },
             { id: 4, name: 'Rojo', sortOrder: 0, images: [] },
@@ -397,8 +401,8 @@ describe('productToFormValues', () => {
       ],
     });
     expect(values.options).toEqual([
-      { id: 1, name: 'Color', values: [{ id: 4, key: 'v4', name: 'Rojo' }, { id: 5, key: 'v5', name: 'Azul' }] },
-      { id: 2, name: 'Tamaño', values: [{ id: 7, key: 'v7', name: 'Redondo' }] },
+      { id: 1, name: 'Color', kind: 'generic', values: [{ id: 4, key: 'v4', name: 'Rojo', color: '' }, { id: 5, key: 'v5', name: 'Azul', color: '' }] },
+      { id: 2, name: 'Tamaño', kind: 'generic', values: [{ id: 7, key: 'v7', name: 'Redondo', color: '' }] },
     ]);
     expect(values.variants[0]).toEqual({
       id: 50,
@@ -506,8 +510,8 @@ describe('variations (mirrors the API parseProductVariations)', () => {
     ...validRent(),
     quantity: '',
     options: [
-      { name: 'Color', values: [{ key: 'r', name: 'Rojo' }, { key: 'a', name: 'Azul' }] },
-      { name: 'Tamaño', values: [{ key: 't', name: 'Redondo' }] },
+      { name: 'Color', kind: 'generic', values: [{ key: 'r', name: 'Rojo', color: '' }, { key: 'a', name: 'Azul', color: '' }] },
+      { name: 'Tamaño', kind: 'generic', values: [{ key: 't', name: 'Redondo', color: '' }] },
     ],
     variants: [variantRow(['r', 't'], { isDefault: true }), variantRow(['a', 't'], { rentPrice: '60' })],
     ...patch,
@@ -516,6 +520,118 @@ describe('variations (mirrors the API parseProductVariations)', () => {
   it('accepts options + variations and no longer needs the product quantity', () => {
     expect(errorPaths(withVariations())).toEqual([]);
     expect(errorPaths({ ...validRent(), quantity: '' })).toEqual(['quantity']);
+  });
+
+  const savedMantel = {
+    name: 'Mantel',
+    businessTypeId: BUSINESS_TYPE_RENT,
+    categoryId: 1,
+    currency: { id: 1 },
+    details: [],
+  };
+
+  it('makes the general price an optional default — each variation needs one from somewhere', () => {
+    // Rojo inherits the general 75, Azul carries its own 60: fine either way.
+    expect(errorPaths(withVariations())).toEqual([]);
+    // No general price: Azul still has its own, Rojo has nothing to inherit.
+    expect(errorPaths(withVariations({ rentPrice: '' }))).toEqual(['variants.0.rentPrice']);
+    // Venta mirrors it on the sell price.
+    expect(
+      errorPaths(
+        withVariations({
+          businessTypeId: BUSINESS_TYPE_SELL,
+          rentPrice: '',
+          rentTimeUnitId: undefined,
+          replacementPrice: '',
+          sellPrice: undefined,
+          variants: [variantRow(['r', 't'], { sellPrice: '9' }), variantRow(['a', 't'])],
+        }),
+      ),
+    ).toEqual(['variants.1.sellPrice']);
+    // A blank general price simply rides absent.
+    expect(toCreateProductBody(withVariations({ rentPrice: '' })).rentPrice).toBeUndefined();
+  });
+
+  it('moves the stock to the product with a SHARED stock — rows carry none', () => {
+    const shared = withVariations({ sharedStock: true, variants: [variantRow(['r', 't'], { quantity: '' })] });
+    expect(errorPaths(shared)).toEqual(['quantity']);
+    const body = toCreateProductBody({ ...shared, quantity: '3' });
+    expect(body).toMatchObject({ quantity: 3, sharedStock: true });
+    expect(body.variants).toEqual([{ valueKeys: ['r', 't'] }]);
+    // Ignored without options: no flag, the product's own quantity as always.
+    expect(toCreateProductBody({ ...validRent(), sharedStock: true }).sharedStock).toBeUndefined();
+    expect(
+      productToFormValues({ ...savedMantel, sharedStock: true, options: [] }).sharedStock,
+    ).toBe(false);
+  });
+
+  it('carries a COLOR option: one per product, each value a real colour, sent lowercased', () => {
+    const color = (values: { key: string; name: string; color: string }[]) => ({
+      name: 'Color',
+      kind: 'color' as const,
+      values,
+    });
+    const data = withVariations({
+      options: [
+        color([
+          { key: 'r', name: 'Marfil', color: '#FFFFF0' },
+          { key: 'a', name: 'Azul', color: '' },
+        ]),
+        { name: 'Tamaño', kind: 'color', values: [{ key: 't', name: 'Redondo', color: '#000000' }] },
+      ],
+    });
+    expect(errorPaths(data)).toEqual(['options.0.values.1.color', 'options.1.kind']);
+    const body = toCreateProductBody(
+      withVariations({
+        options: [
+          color([
+            { key: 'r', name: 'Marfil', color: '#FFFFF0' },
+            { key: 'a', name: 'Azul', color: '#0000ff' },
+          ]),
+          // A generic option keeps a colour in the form but never sends it.
+          { name: 'Tamaño', kind: 'generic', values: [{ key: 't', name: 'Redondo', color: '#123456' }] },
+        ],
+      }),
+    );
+    expect(body.options).toEqual([
+      {
+        name: 'Color',
+        kind: 'color',
+        values: [
+          { key: 'r', name: 'Marfil', color: '#fffff0', images: [] },
+          { key: 'a', name: 'Azul', color: '#0000ff', images: [] },
+        ],
+      },
+      { name: 'Tamaño', values: [{ key: 't', name: 'Redondo', images: [] }] },
+    ]);
+    // The edit form reads kind + colour back (a generic value reads as no colour).
+    expect(
+      productToFormValues({
+        ...savedMantel,
+        options: [
+          {
+            id: 1,
+            name: 'Color',
+            sortOrder: 0,
+            kind: 'color',
+            values: [
+              { id: 4, name: 'Marfil', sortOrder: 0, images: [], color: '#fffff0' },
+              { id: 5, name: 'Sin', sortOrder: 1, images: [] },
+            ],
+          },
+        ],
+      }).options,
+    ).toEqual([
+      {
+        id: 1,
+        name: 'Color',
+        kind: 'color',
+        values: [
+          { id: 4, key: 'v4', name: 'Marfil', color: '#fffff0' },
+          { id: 5, key: 'v5', name: 'Sin', color: '' },
+        ],
+      },
+    ]);
   });
 
   it('tolerates ABSENT product deposit/replacement strings', () => {
@@ -527,15 +643,16 @@ describe('variations (mirrors the API parseProductVariations)', () => {
         categoryId: 1,
         currency: { id: 1 },
         details: [],
-        options: [{ id: 1, name: 'Color', sortOrder: 0, values: [] }],
+        options: [{ id: 1, name: 'Color', sortOrder: 0, kind: 'generic' as const, values: [] }],
       }).variants,
     ).toEqual([]);
   });
 
   it('caps options, values and variations', () => {
-    const value = (index: number) => ({ key: `k${index}`, name: `Valor ${index}` });
+    const value = (index: number) => ({ key: `k${index}`, name: `Valor ${index}`, color: '' });
     const option = (name: string, count: number, offset: number) => ({
       name,
+      kind: 'generic' as const,
       values: Array.from({ length: count }, (_, i) => value(offset + i)),
     });
     expect(
@@ -555,8 +672,8 @@ describe('variations (mirrors the API parseProductVariations)', () => {
       errorPaths(
         withVariations({
           options: [
-            { name: 'Color!', values: [{ key: 'r', name: 'Rojo' }, { key: 'a', name: ' rójo ' }] },
-            { name: '', values: [{ key: 't', name: 'x'.repeat(41) }] },
+            { name: 'Color!', kind: 'generic', values: [{ key: 'r', name: 'Rojo', color: '' }, { key: 'a', name: ' rójo ', color: '' }] },
+            { name: '', kind: 'generic', values: [{ key: 't', name: 'x'.repeat(41), color: '' }] },
           ],
         }),
       ),
@@ -565,8 +682,8 @@ describe('variations (mirrors the API parseProductVariations)', () => {
       errorPaths(
         withVariations({
           options: [
-            { name: 'Color', values: [{ key: 'r', name: 'Rojo' }] },
-            { name: 'COLÓR', values: [{ key: 't', name: 'Redondo' }] },
+            { name: 'Color', kind: 'generic', values: [{ key: 'r', name: 'Rojo', color: '' }] },
+            { name: 'COLÓR', kind: 'generic', values: [{ key: 't', name: 'Redondo', color: '' }] },
           ],
           variants: [variantRow(['r', 't'])],
         }),
@@ -576,12 +693,12 @@ describe('variations (mirrors the API parseProductVariations)', () => {
 
   it('requires a value per option and well-formed unique keys', () => {
     expect(
-      errorPaths(withVariations({ options: [{ name: 'Color', values: [] }], variants: [variantRow([])] })),
+      errorPaths(withVariations({ options: [{ name: 'Color', kind: 'generic', values: [] }], variants: [variantRow([])] })),
     ).toEqual(expect.arrayContaining(['options.0.values', 'variants.0.valueKeys']));
     expect(
       errorPaths(
         withVariations({
-          options: [{ name: 'Color', values: [{ key: 'bad key', name: 'Rojo' }, { key: 'bad key', name: 'Azul' }] }],
+          options: [{ name: 'Color', kind: 'generic', values: [{ key: 'bad key', name: 'Rojo', color: '' }, { key: 'bad key', name: 'Azul', color: '' }] }],
           variants: [variantRow(['bad key'])],
         }),
       ),
@@ -636,7 +753,7 @@ describe('variations (mirrors the API parseProductVariations)', () => {
       errorPaths({
         ...validSell(),
         quantity: '',
-        options: [{ name: 'Color', values: [{ key: 'r', name: 'Rojo' }] }],
+        options: [{ name: 'Color', kind: 'generic', values: [{ key: 'r', name: 'Rojo', color: '' }] }],
         variants: [variantRow(['r'], { sellPrice: '9', rentPrice: '2' })],
       }),
     ).toEqual(['variants.0.rentPrice']);
@@ -691,7 +808,7 @@ describe('variations (mirrors the API parseProductVariations)', () => {
   it('maps a Venta variation to the sell override only', () => {
     const body = toCreateProductBody({
       ...validSell(),
-      options: [{ name: 'Color', values: [{ key: 'r', name: 'Rojo' }] }],
+      options: [{ name: 'Color', kind: 'generic', values: [{ key: 'r', name: 'Rojo', color: '' }] }],
       variants: [variantRow(['r'], { sellPrice: '9', rentPrice: '2' })],
     });
     expect(body.variants).toEqual([{ valueKeys: ['r'], quantity: 5, sellPrice: 9 }]);
@@ -700,7 +817,7 @@ describe('variations (mirrors the API parseProductVariations)', () => {
   it('keeps every saved id on an update (and never on a create)', () => {
     const data = withVariations({
       options: [
-        { id: 1, name: 'Color', values: [{ id: 4, key: 'v4', name: 'Rojo' }, { key: 'n1', name: 'Azul' }] },
+        { id: 1, name: 'Color', kind: 'generic', values: [{ id: 4, key: 'v4', name: 'Rojo', color: '' }, { key: 'n1', name: 'Azul', color: '' }] },
       ],
       variants: [variantRow(['v4'], { id: 50, isDefault: true }), variantRow(['n1'])],
     });

@@ -30,8 +30,9 @@ import { PrismaPg } from "@prisma/adapter-pg";
  *
  * WHAT IS COPIED, per new product: every scalar column of `products` (read from the generated Prisma
  * enum, so a column added later is carried with no change here — a new FOREIGN KEY stops the run
- * until it is mapped below; `quantity` copies as-is, 0 for a product with variations), its details,
- * its SHOWCASE photos, and its whole variation structure: options → values → each value's photos →
+ * until it is mapped below; `quantity` and `shared_stock` copy as-is — 0 for a product whose
+ * variations own their stock), its details, its SHOWCASE photos, and its whole variation structure:
+ * options (with their kind) → values (with their colour) → each value's photos →
  * its ACTIVE variants (tombstones are the source's history, not stock) with their override columns,
  * stock, default flag and value links; `combination_key` is rebuilt from the TARGET's value ids.
  * Every photo set (the showcase and each value's) gets exactly one primary — the flagged photo, else
@@ -106,11 +107,13 @@ const sourceInclude = {
     orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
     select: {
       name: true,
+      kind: true,
       values: {
         orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
         select: {
           id: true,
           name: true,
+          colorHex: true,
           images: {
             orderBy: [{ sortOrder: "asc" }],
             select: { r2Key: true, isPrimary: true, sortOrder: true },
@@ -756,14 +759,19 @@ async function createVariations(
   for (const [optionIndex, option] of product.options.entries()) {
     // eslint-disable-next-line no-await-in-loop -- one transaction = one connection: sequential
     const createdOption = await tx.productOption.create({
-      data: { productId, name: option.name, sortOrder: optionIndex },
+      data: { productId, name: option.name, kind: option.kind, sortOrder: optionIndex },
       select: { id: true },
     });
     for (const [valueIndex, value] of option.values.entries()) {
       const images = valueSets.byValueId.get(value.id) ?? [];
       // eslint-disable-next-line no-await-in-loop -- see above
       const createdValue = await tx.productOptionValue.create({
-        data: { optionId: createdOption.id, name: value.name, sortOrder: valueIndex },
+        data: {
+          optionId: createdOption.id,
+          name: value.name,
+          colorHex: value.colorHex,
+          sortOrder: valueIndex,
+        },
         select: { id: true },
       });
       targetValueId.set(value.id, createdValue.id);

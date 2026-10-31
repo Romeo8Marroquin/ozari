@@ -26,7 +26,19 @@ export function readProductDraft(): CreateProductFormType | null {
       : [],
     // Options/variations restore as typed (their photos cannot — Files never reach a draft); a
     // pre-variations or malformed draft reads as "no variations".
-    options: Array.isArray(stored.options) ? stored.options : [],
+    // A draft from before the option KIND (2026-10-30) reads its options as generic, colourless.
+    options: Array.isArray(stored.options)
+      ? stored.options.map((option) => ({
+          ...option,
+          kind: option?.kind === 'color' ? 'color' : 'generic',
+          values: Array.isArray(option?.values)
+            ? option.values.map((value) => ({
+                ...value,
+                color: typeof value?.color === 'string' ? value.color : '',
+              }))
+            : [],
+        }))
+      : [],
     variants: Array.isArray(stored.variants) ? stored.variants : [],
   } as CreateProductFormType;
   return isMeaningfulDraft(draft) ? draft : null;

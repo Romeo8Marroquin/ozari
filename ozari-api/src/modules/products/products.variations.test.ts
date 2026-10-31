@@ -19,7 +19,10 @@ const body = (overrides: Partial<ProductVariationsBody> = {}): ProductVariations
   options: undefined,
   variants: undefined,
   quantity: undefined,
+  sharedStock: undefined,
   isRent: true,
+  rentPrice: 50,
+  sellPrice: undefined,
   replacementPrice: 900,
   securityDeposit: 300,
   showcaseImages: [],
@@ -102,10 +105,13 @@ describe("shared product rules", () => {
 
 describe("parseProductVariations — structure", () => {
   it("returns no variations when both lists are absent or null", () => {
-    expect(parse(body()).result).toEqual({ options: [], variants: [] });
-    expect(parse(body({ options: null, variants: null, quantity: 4 })).result).toEqual({
+    expect(parse(body()).result).toEqual({ options: [], variants: [], sharedStock: false });
+    expect(
+      parse(body({ options: null, variants: null, quantity: 4, sharedStock: null })).result,
+    ).toEqual({
       options: [],
       variants: [],
+      sharedStock: false,
     });
   });
 
@@ -144,9 +150,11 @@ describe("parseProductVariations — structure", () => {
 
     expect(reject).not.toHaveBeenCalled();
     expect(result).toEqual({
+      sharedStock: false,
       options: [
         {
           name: "Color",
+          kind: "generic",
           values: [
             {
               key: "r",
@@ -167,7 +175,7 @@ describe("parseProductVariations — structure", () => {
             },
           ],
         },
-        { name: "Tamaño", values: [{ key: "g", name: "Grande", images: [] }] },
+        { name: "Tamaño", kind: "generic", values: [{ key: "g", name: "Grande", images: [] }] },
       ],
       variants: [
         {
@@ -578,5 +586,111 @@ describe("parseProductVariations — variants", () => {
     expectRejected(withVariants([{ valueKeys: ["r", "g"], quantity: 1, isDefault: "yes" }]), "invalidVariantDefault");
     const { result } = parse(withVariants([{ valueKeys: ["r", "g"], quantity: 1, description: null }]));
     expect(result?.variants[0]).toMatchObject({ description: undefined, isDefault: false });
+  });
+
+  it("makes every variant resolve a price — its own, else the product's DEFAULT", () => {
+    // No product default: a variant without its own price has none.
+    expectRejected(
+      withVariants(
+        [
+          { valueKeys: ["r", "g"], quantity: 1, rentPrice: 40 },
+          { valueKeys: ["a", "g"], quantity: 1 },
+        ],
+        { rentPrice: undefined },
+      ),
+      "variantPriceRequired",
+    );
+    // Each with its own price → no default needed (Venta reads sellPrice the same way).
+    const { reject } = parse(
+      withVariants([{ valueKeys: ["r", "g"], quantity: 1, sellPrice: 15 }], {
+        isRent: false,
+        rentPrice: undefined,
+        replacementPrice: undefined,
+        securityDeposit: undefined,
+      }),
+    );
+    expect(reject).not.toHaveBeenCalled();
+    expectRejected(
+      withVariants([{ valueKeys: ["r", "g"], quantity: 1 }], {
+        isRent: false,
+        rentPrice: undefined,
+        sellPrice: undefined,
+        replacementPrice: undefined,
+        securityDeposit: undefined,
+      }),
+      "variantPriceRequired",
+    );
+    // The default covers a variant without its own.
+    expect(parse(withVariants([{ valueKeys: ["r", "g"], quantity: 1 }])).reject).not.toHaveBeenCalled();
+  });
+});
+
+describe("parseProductVariations — option kind and colour", () => {
+  const colorOption = (values: unknown[], kind: unknown = "color") => ({ name: "Color", kind, values });
+
+  it("defaults the kind to generic and lowercases a colour option's swatches", () => {
+    const { result, reject } = parse(
+      body({
+        options: [
+          colorOption([
+            { key: "m", name: "Marfil", color: "#FFFFF0" },
+            { key: "n", name: "Negro", color: "#000000" },
+          ]),
+          { name: "Forma", kind: null, values: [{ key: "o", name: "Redonda" }] },
+        ],
+        variants: [{ valueKeys: ["m", "o"], quantity: 2 }],
+      }),
+    );
+    expect(reject).not.toHaveBeenCalled();
+    expect(result?.options.map((option) => option.kind)).toEqual(["color", "generic"]);
+    expect(result?.options[0]?.values.map((value) => value.color)).toEqual(["#fffff0", "#000000"]);
+    expect(result?.options[1]?.values[0]?.color).toBeUndefined();
+  });
+
+  it("rejects an unknown kind and a second colour option", () => {
+    expectRejected(body({ options: [colorOption([{ key: "m", name: "Marfil" }], "pattern")] }), "invalidOptionKind");
+    expectRejected(
+      body({
+        options: [
+          colorOption([{ key: "m", name: "Marfil", color: "#fffff0" }]),
+          { name: "Tono", kind: "color", values: [{ key: "t", name: "Claro", color: "#eeeeee" }] },
+        ],
+      }),
+      "multipleColorOptions",
+    );
+  });
+
+  it("requires a valid #rrggbb on a colour value and forbids one on a generic value", () => {
+    expectRejected(body({ options: [colorOption([{ key: "m", name: "Marfil" }])] }), "valueColorRequired");
+    for (const color of ["fffff0", "#fff", "#gggggg", 7]) {
+      expectRejected(body({ options: [colorOption([{ key: "m", name: "Marfil", color }])] }), "invalidValueColor");
+    }
+    expectRejected(
+      body({ options: [{ name: "Forma", values: [{ key: "o", name: "Redonda", color: "#000000" }] }] }),
+      "valueColorForbidden",
+    );
+  });
+});
+
+describe("parseProductVariations — stock mode", () => {
+  it("rejects a non-boolean mode and shared stock without options", () => {
+    expectRejected(withVariants([{ valueKeys: ["r", "g"], quantity: 1 }], { sharedStock: "yes" }), "invalidSharedStock");
+    expectRejected(body({ sharedStock: true, quantity: 3 }), "sharedStockWithoutVariants");
+  });
+
+  it("shared: the product keeps its quantity, and a variant carries none (stored 0)", () => {
+    const { result, reject } = parse(
+      withVariants([{ valueKeys: ["r", "g"] }, { valueKeys: ["a", "g"], quantity: null }], {
+        sharedStock: true,
+        quantity: 4,
+      }),
+    );
+    expect(reject).not.toHaveBeenCalled();
+    expect(result?.sharedStock).toBe(true);
+    expect(result?.variants.map((variant) => variant.quantity)).toEqual([0, 0]);
+    expectRejected(
+      withVariants([{ valueKeys: ["r", "g"], quantity: 2 }], { sharedStock: true }),
+      "variantQuantityWithSharedStock",
+    );
   });
 });

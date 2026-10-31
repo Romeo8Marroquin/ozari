@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -601,6 +601,7 @@ describe('ProductDetailPage — variations', () => {
         id: 1,
         name: 'Color',
         sortOrder: 0,
+        kind: 'generic' as const,
         values: [
           { id: 1, name: 'Rojo', sortOrder: 0, images: [photo(31, 'rojo')] },
           { id: 2, name: 'Azul', sortOrder: 1, images: [] },
@@ -610,6 +611,7 @@ describe('ProductDetailPage — variations', () => {
         id: 2,
         name: 'Tamaño',
         sortOrder: 1,
+        kind: 'generic' as const,
         values: [
           { id: 3, name: 'Redondo', sortOrder: 0, images: [photo(32, 'redondo')] },
           { id: 4, name: 'Cuadrado', sortOrder: 1, images: [] },
@@ -694,5 +696,142 @@ describe('ProductDetailPage — variations', () => {
     // Azul alone has no photos and there is no showcase → the brand mark (no ghost left behind).
     await userEvent.click(chip('Azul'));
     expect(hero()).not.toBeInTheDocument();
+  });
+
+  describe('a COLOR option', () => {
+    // Option order is Tamaño, Color — the swatches still lead on the page.
+    const stock = (available: number) => ({ available, total: 4, inStock: available > 0 });
+    const colored: Product = {
+      ...base,
+      options: [
+        {
+          id: 2,
+          name: 'Tamaño',
+          sortOrder: 0,
+          kind: 'generic' as const,
+          values: [
+            { id: 3, name: 'Redondo', sortOrder: 0, images: [] },
+            { id: 4, name: 'Cuadrado', sortOrder: 1, images: [] },
+          ],
+        },
+        {
+          id: 1,
+          name: 'Color',
+          sortOrder: 1,
+          kind: 'color' as const,
+          values: [
+            { id: 1, name: 'Marfil', sortOrder: 0, images: [], color: '#fffff0' },
+            { id: 2, name: 'Negro', sortOrder: 1, images: [], color: '#000000' },
+            // A colour-less value (never sent by the API for a color option) falls back to a chip.
+            { id: 5, name: 'Gris', sortOrder: 2, images: [] },
+          ],
+        },
+      ],
+      variants: [
+        { id: 20, valueIds: [3, 1], label: 'Redondo · Marfil', isDefault: true, rentPrice: 90, replacementPrice: 300, ...stock(0) },
+        { id: 21, valueIds: [3, 2], label: 'Redondo · Negro', isDefault: false, rentPrice: 90, replacementPrice: 500, ...stock(0) },
+        {
+          id: 22,
+          valueIds: [4, 5],
+          label: 'Cuadrado · Gris',
+          isDefault: false,
+          rentPrice: 90,
+          description: 'Gris de lino',
+          ...stock(2),
+        },
+      ],
+    };
+    const title = () => screen.getByRole('heading', { level: 2 });
+
+    beforeEach(() => useRole.mockReturnValue(Role.Admin));
+
+    it('leads with round, named swatches — sold-out ones struck through', () => {
+      setProduct({ data: colored });
+      renderPage();
+      const [first] = screen.getAllByRole('group', { name: `${D}.options` });
+      // Every value of Marfil and Negro is out → both read as sold out (the i18n mock returns the key).
+      const swatches = within(first).getAllByRole('button');
+      expect(swatches.map((button) => button.getAttribute('aria-label'))).toEqual([
+        `${D}.swatchSoldOut`,
+        `${D}.swatchSoldOut`,
+        null,
+      ]);
+      expect(swatches[0]).toHaveStyle({ backgroundColor: '#fffff0' });
+      // The strike contrasts with the swatch: dark on ivory, light on black.
+      expect(swatches[0].querySelector('span')?.className).toContain('bg-charcoal/50');
+      expect(swatches[1].querySelector('span')?.className).toContain('bg-white/80');
+      expect(swatches[2]).toHaveTextContent('Gris');
+      // A generic chip whose every variation is out reads sold out too.
+      const redondo = screen.getByText('Redondo', { selector: 'button' });
+      expect(redondo.className).toContain('line-through');
+      expect(redondo).toHaveAttribute('aria-label', `${D}.swatchSoldOut`);
+      // Before a pick the replacement speaks for the variations: "Desde" the lowest.
+      expect(screen.getByText(`${K}.card.priceFrom`)).toBeInTheDocument();
+    });
+
+    it('echoes the hovered or focused value in the heading, and the title follows the picks', async () => {
+      setProduct({ data: colored });
+      renderPage();
+      const [colorGroup] = screen.getAllByRole('group', { name: `${D}.options` });
+      const [marfil, negro, gris] = within(colorGroup).getAllByRole('button');
+      expect(within(colorGroup).queryByText('Color:')).not.toBeInTheDocument();
+
+      fireEvent.pointerEnter(negro);
+      expect(within(colorGroup).getByText('Color:')).toBeInTheDocument();
+      expect(within(colorGroup).getByText('Negro')).toBeInTheDocument();
+      fireEvent.pointerLeave(negro.parentElement as HTMLElement);
+      expect(within(colorGroup).queryByText('Color:')).not.toBeInTheDocument();
+
+      // Arrow keys walk the row (wrapping both ways); other keys are left alone.
+      act(() => marfil.focus());
+      expect(within(colorGroup).getByText('Marfil', { selector: 'span' })).toBeInTheDocument();
+      fireEvent.keyDown(marfil, { key: 'ArrowRight' });
+      expect(negro).toHaveFocus();
+      fireEvent.keyDown(negro, { key: 'Enter' });
+      expect(negro).toHaveFocus();
+      fireEvent.keyDown(negro, { key: 'ArrowLeft' });
+      fireEvent.keyDown(marfil, { key: 'ArrowLeft' });
+      expect(gris).toHaveFocus();
+      act(() => gris.blur());
+
+      await userEvent.click(gris);
+      expect(title()).toHaveTextContent('Gris');
+      await userEvent.click(screen.getByText('Cuadrado', { selector: 'button' }));
+      // Option order in the title (Tamaño first), whatever the picker order.
+      await waitFor(() => expect(title()).toHaveTextContent(/Cuadrado · Gris/));
+      // The general description stays; the variation's own text stacks under it.
+      expect(screen.getByText('Mesa para 8 personas')).toBeInTheDocument();
+      expect(screen.getByText('Gris de lino')).toBeInTheDocument();
+      // A pressed swatch rings; one that leads nowhere now is muted.
+      expect(marfil.className).toContain('opacity-45');
+    });
+
+    it('rings the pressed swatch, and "Limpiar selección" returns to the opening state', async () => {
+      setProduct({ data: colored });
+      renderPage();
+      // Nothing picked: the button is there (its row never reflows) but hidden and inert.
+      expect(screen.queryByRole('button', { name: `${D}.clearPicks` })).not.toBeInTheDocument();
+      const [colorGroup] = screen.getAllByRole('group', { name: `${D}.options` });
+      const [marfil, negro] = within(colorGroup).getAllByRole('button');
+      await userEvent.click(negro);
+      expect(negro).toHaveAttribute('aria-pressed', 'true');
+      expect(negro.className).toContain('ring-charcoal');
+
+      await userEvent.click(screen.getByRole('button', { name: `${D}.clearPicks` }));
+      expect(negro).toHaveAttribute('aria-pressed', 'false');
+      // The clear button goes inert — focus lands on the first picker, never on <body>.
+      expect(marfil).toHaveFocus();
+      expect(title()).toHaveTextContent(/^Mesa redonda$/);
+      expect(screen.getByText(`${D}.pickHint`)).toBeInTheDocument();
+    });
+
+    it('shows only the variation text when the product has no general description', async () => {
+      setProduct({ data: { ...colored, description: undefined } });
+      renderPage();
+      await userEvent.click(screen.getByText('Cuadrado', { selector: 'button' }));
+      await userEvent.click(screen.getByText('Gris', { selector: 'button' }));
+      expect(await screen.findByText('Gris de lino')).toBeInTheDocument();
+      expect(screen.queryByText(`${K}.card.noDescription`)).not.toBeInTheDocument();
+    });
   });
 });

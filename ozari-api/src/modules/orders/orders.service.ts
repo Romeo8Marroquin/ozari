@@ -200,12 +200,51 @@ export function lineImageUrl(
 }
 
 /**
- * The identity of a STOCK POOL — a product without variants (`variantId` null) or one of its
- * variants. Order lines are identified by it, availability is counted per it, and sale stock moves
- * per it; one key shape for products and orders so a map built by one is read by the other.
+ * The identity of a LINE — a product without variants (`variantId` null) or one of its variants —
+ * and, for every product that does not share its stock, of its STOCK POOL too. Order lines are
+ * identified by it, and availability is counted per its pool (`poolKey`); one key shape for products
+ * and orders so a map built by one is read by the other.
  */
 export const stockKey = (productId: number, variantId: number | null | undefined): string =>
   `${productId}:${variantId ?? ""}`;
+
+/**
+ * The STOCK POOL a line draws from (owner 2026-10-30): its variant's own — unless the product
+ * SHARES one pool across its variants (configurations of the same units), where every variant line
+ * draws from the product's. Keyed like `stockKey`.
+ */
+export const poolKey = (
+  product: { id: number; sharedStock: boolean },
+  variantId: number | null,
+): string => stockKey(product.id, product.sharedStock ? null : variantId);
+
+/**
+ * Sums `quantity` per stock POOL — rented rows grouped by line identity, a form's demand, an order's
+ * held lines. A product absent from `productById` keeps the line's own identity.
+ */
+export function sumByPool(
+  lines: ReadonlyArray<{ productId: number; variantId: number | null; quantity: number }>,
+  productById: ReadonlyMap<number, { id: number; sharedStock: boolean }>,
+): Map<string, number> {
+  const sums = new Map<string, number>();
+  for (const line of lines) {
+    const product = productById.get(line.productId);
+    const key = product ? poolKey(product, line.variantId) : stockKey(line.productId, line.variantId);
+    sums.set(key, (sums.get(key) ?? 0) + line.quantity);
+  }
+  return sums;
+}
+
+/** A `groupBy(["productId","variantId"])` rented row as `sumByPool` reads it. */
+export const rentedRowQuantity = (row: {
+  productId: number;
+  variantId: number | null;
+  _sum: { quantity: number | null };
+}): { productId: number; variantId: number | null; quantity: number } => ({
+  productId: row.productId,
+  variantId: row.variantId,
+  quantity: row._sum.quantity ?? 0,
+});
 
 /** The separator between a variation's value names in its label. */
 export const VARIANT_LABEL_SEPARATOR = " · ";
@@ -1047,24 +1086,27 @@ export interface StockLineModel {
 
 /**
  * Moves SALE stock by `delta` on the line's pool — the ONE writer of a sale decrement/restock: the
- * variant row's `quantity` when the line names a variant, else the product row's. Every caller holds
- * the product row lock (`SELECT … FOR UPDATE` on `products`), which serializes a variant's writers
- * too — the products update takes the same row first.
+ * variant row's `quantity` when the line names a variant, else the product row's. A variant of a
+ * SHARED-stock product draws from the product's one pool instead (`poolKey`): the two conditional
+ * writes below let the stored mode decide, so no caller has to load it — exactly one of them
+ * matches. Every caller holds the product row lock (`SELECT … FOR UPDATE` on `products`), which
+ * serializes a variant's writers too — the products update takes the same row first.
  */
 export function moveSaleStock(
   tx: Prisma.TransactionClient,
   line: { productId: number; variantId: number | null },
   delta: number,
 ): Promise<unknown> {
+  const data = { quantity: { increment: delta } };
   return line.variantId !== null
-    ? tx.productVariant.update({
-        where: { id: line.variantId },
-        data: { quantity: { increment: delta } },
-      })
-    : tx.product.update({
-        where: { id: line.productId },
-        data: { quantity: { increment: delta } },
-      });
+    ? Promise.all([
+        tx.productVariant.updateMany({
+          where: { id: line.variantId, product: { sharedStock: false } },
+          data,
+        }),
+        tx.product.updateMany({ where: { id: line.productId, sharedStock: true }, data }),
+      ])
+    : tx.product.update({ where: { id: line.productId }, data });
 }
 
 /** A line as the sale-delta reading needs it. */
@@ -1105,13 +1147,16 @@ export const conflictVariantFields = (
 export interface StockPoolProductModel {
   id: number;
   quantity: number;
+  /** One pool shared by every variant (`products.quantity`) — see `poolKey`. */
+  sharedStock: boolean;
   variants: ReadonlyArray<{ id: number; quantity: number }>;
 }
 
 /**
  * The FLEET (rentals) or SHELF (sales) of one pool: the variant's own `quantity` for a variant line,
- * else the product's. `null` = the variant is no longer ACTIVE on that product (retired or gone) —
- * the callers answer it like a vanished product: a stock conflict with `available: 0`.
+ * else the product's — also for a variant of a SHARED-stock product. `null` = the variant is no
+ * longer ACTIVE on that product (retired or gone) — the callers answer it like a vanished product:
+ * a stock conflict with `available: 0`.
  */
 export function poolQuantity(
   product: StockPoolProductModel,
@@ -1120,7 +1165,31 @@ export function poolQuantity(
   if (variantId === null) {
     return product.quantity;
   }
-  return product.variants.find((variant) => variant.id === variantId)?.quantity ?? null;
+  const variant = product.variants.find((candidate) => candidate.id === variantId);
+  if (!variant) {
+    return null;
+  }
+  return product.sharedStock ? product.quantity : variant.quantity;
+}
+
+/**
+ * The conflict item for a short POOL. A shared pool names the PRODUCT (no variant fields — every
+ * configuration competes for the same units) and reports what all its lines asked for together;
+ * a variant's own pool names that variant, as before.
+ */
+export function poolConflictItem(
+  product: { id: number; name: string; sharedStock: boolean },
+  line: { variantId: number | null; variantLabel: string | null },
+  requested: number,
+  available: number,
+): OrderStockConflictItemModel {
+  return {
+    productId: product.id,
+    productName: product.name,
+    ...(product.sharedStock ? {} : conflictVariantFields(line.variantId, line.variantLabel)),
+    requested,
+    available,
+  };
 }
 
 /**
@@ -1197,6 +1266,7 @@ export async function reclaimOrderStock(
       id: true,
       name: true,
       quantity: true,
+      sharedStock: true,
       variants: { where: { isActive: true }, select: { id: true, quantity: true } },
     },
   });
@@ -1219,9 +1289,10 @@ export async function reclaimOrderStock(
           _sum: { quantity: true },
         })
       : [];
-  const rentedByKey = new Map(
-    rentedRows.map((row) => [stockKey(row.productId, row.variantId), row._sum.quantity ?? 0]),
-  );
+  const rentedByPool = sumByPool(rentedRows.map(rentedRowQuantity), productById);
+  // What the order asks of each POOL (lines of a shared-stock product compete for one pool).
+  const requestedByPool = sumByPool(order.lines, productById);
+  const checkedPools = new Set<string>();
 
   const conflicts: OrderStockConflictItemModel[] = [];
   for (const line of order.lines) {
@@ -1229,28 +1300,29 @@ export async function reclaimOrderStock(
     // The product was deleted, or the VARIANT retired, while the order sat cancelled — it can't
     // come back as it was (a retired variant never holds anything, so nothing can be re-taken).
     const pool = product ? poolQuantity(product, line.variantId) : null;
-    const variant = conflictVariantFields(line.variantId, line.variantLabel);
     if (pool === null) {
       conflicts.push({
         productId: line.productId,
         productName: product?.name ?? `#${line.productId}`,
-        ...variant,
+        ...conflictVariantFields(line.variantId, line.variantLabel),
         requested: line.quantity,
         available: 0,
       });
       continue;
     }
+    const stockProduct = product as NonNullable<typeof product>;
+    const key = poolKey(stockProduct, line.variantId);
+    if (checkedPools.has(key)) {
+      continue; // a shared pool is judged once, on everything its lines ask for together
+    }
+    checkedPools.add(key);
+    // Every line was summed into its pool above — never absent.
+    const requested = requestedByPool.get(key) as number;
     const available = line.isRental
-      ? Math.max(0, pool - (rentedByKey.get(stockKey(line.productId, line.variantId)) ?? 0))
+      ? Math.max(0, pool - (rentedByPool.get(key) ?? 0))
       : pool;
-    if (available < line.quantity) {
-      conflicts.push({
-        productId: line.productId,
-        productName: (product as { name: string }).name,
-        ...variant,
-        requested: line.quantity,
-        available,
-      });
+    if (available < requested) {
+      conflicts.push(poolConflictItem(stockProduct, line, requested, available));
     }
   }
   if (conflicts.length > 0) {
@@ -1312,6 +1384,7 @@ export const orderPricingProductSelect = {
   id: true,
   name: true,
   quantity: true,
+  sharedStock: true,
   currencyId: true,
   productBusinessTypeId: true,
   rentTimeUnitId: true,

@@ -497,6 +497,9 @@ export interface ProductAvailabilityModel {
    *  no pickup window yet (can't be computed until a pickup is chosen). For a product WITH
    *  variants: the sum over `variants` (`null` under the same rule). */
   available: number | null;
+  /** Present only for a product with variants: true = its variants SHARE one pool (each reports
+   *  it, and `available` is that pool, not a sum) — the form caps the SUM of its lines. */
+  sharedStock?: boolean;
   /** Per ACTIVE variant, same rules — present only for a product with variants. */
   variants?: { variantId: number; available: number | null }[];
 }

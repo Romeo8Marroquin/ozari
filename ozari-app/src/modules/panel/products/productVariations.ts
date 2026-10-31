@@ -1,5 +1,5 @@
 import { PRODUCT_MAX_VARIANTS } from '@constants/Regex';
-import type { Product, ProductImage, ProductVariant } from './product.types';
+import type { Product, ProductImage, ProductOptionKind, ProductVariant } from './product.types';
 
 /**
  * PRODUCT VARIATIONS — the pure half (owner, 2026-10-29). A product may declare up to three OPTIONS
@@ -45,18 +45,41 @@ export function normalizeVariationName(name: string): string {
 
 // ── The form's state ──────────────────────────────────────────────────────────────────────────
 
-/** One option value in the form. `id` = a saved value (edit); `key` is what variations reference. */
+/** One option value in the form. `id` = a saved value (edit); `key` is what variations reference.
+ *  `color` is its `#rrggbb` (`''` = not picked yet) — kept while the option is generic too, so a
+ *  Color → Genérico → Color round trip loses nothing; only a COLOR option sends it. */
 export interface OptionValueFormRow {
   id?: number;
   key: string;
   name: string;
+  color: string;
 }
 
 /** One option in the form; array order = `sortOrder` (label order AND photo precedence). */
 export interface OptionFormRow {
   id?: number;
   name: string;
+  kind: ProductOptionKind;
   values: OptionValueFormRow[];
+}
+
+/** The option kinds, in the order the type select lists them. */
+export const OPTION_KINDS: readonly ProductOptionKind[] = ['generic', 'color'];
+
+/** A colour as the API stores it: `#` + six hex digits (the native colour input's own format). */
+export const COLOR_HEX_REGEX = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * Does this colour need an OUTLINE to be seen on white? Relative luminance above ~0.8 — whites,
+ * creams, "Marfil" — would otherwise melt into the card. Pure arithmetic on the sRGB channels.
+ */
+export function isLightColor(hex: string): boolean {
+  if (!COLOR_HEX_REGEX.test(hex)) return false;
+  const channel = (offset: number): number => {
+    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5) > 0.8;
 }
 
 /** One offered combination in the form. Money/quantity are TEXT (the numeric-field rule); `''` on an
@@ -253,11 +276,15 @@ export type VariantIssue =
   | 'invalidSecurityDeposit'
   | 'variantPricingMismatch'
   | 'securityDepositAboveReplacement'
+  | 'variantPriceRequired'
   | 'invalidDescription';
 
 export interface VariantRowContext {
   isRent: boolean;
-  /** The product's own replacement / deposit TEXT, inherited by an empty override. */
+  /** One stock on the product (the rows carry none — the API refuses a row quantity then). */
+  sharedStock: boolean;
+  /** The product's own price / replacement / deposit TEXT, inherited by an empty override. */
+  productPrice: string;
   productReplacementPrice: string;
   productSecurityDeposit: string;
   /** Money parser: number, `undefined` = blank, `null` = invalid (the form's `parseMoney`). */
@@ -272,17 +299,20 @@ const toCents = (value: number | undefined | null): number | undefined =>
   value === undefined || value === null ? undefined : Math.trunc(value * 100) / 100;
 
 /**
- * Every problem with ONE variation row — the API's per-variant rules: stock an integer in range;
- * overrides parse and FOLLOW THE BUSINESS TYPE (Alquiler → rent/replacement/deposit, Venta → sell
- * only, else `variantPricingMismatch`); and on the EFFECTIVE values (override, else the product's)
- * the deposit is never above the replacement. A deposit override of 0 is "none" and always passes.
+ * Every problem with ONE variation row — the API's per-variant rules: its own stock an integer in
+ * range (unless the stock is SHARED — then the row has none); overrides parse and FOLLOW THE
+ * BUSINESS TYPE (Alquiler → rent/replacement/deposit, Venta → sell only, else
+ * `variantPricingMismatch`); a PRICE from somewhere — its own, else the product's general one
+ * (`variantPriceRequired`, owner 2026-10-30: with variations the general price is only a default);
+ * and on the EFFECTIVE values (override, else the product's) the deposit is never above the
+ * replacement. A deposit override of 0 is "none" and always passes.
  */
 export function variantRowIssues(
   row: VariantFormRow,
   context: VariantRowContext,
 ): { field: keyof VariantFormRow; issue: VariantIssue }[] {
   const issues: { field: keyof VariantFormRow; issue: VariantIssue }[] = [];
-  if (context.parseQuantity(row.quantity) === null) {
+  if (!context.sharedStock && context.parseQuantity(row.quantity) === null) {
     issues.push({ field: 'quantity', issue: 'invalidVariantQuantity' });
   }
   const moneyFields = [
@@ -300,6 +330,15 @@ export function variantRowIssues(
     else if (parsed !== undefined && forbidden.has(field)) {
       issues.push({ field, issue: 'variantPricingMismatch' });
     }
+  }
+  // The price the line will be charged at must come from SOMEWHERE. An invalid override (or an
+  // invalid general price) already has its own message; only blank-over-blank lands here.
+  const priceField = context.isRent ? 'rentPrice' : 'sellPrice';
+  if (
+    context.parseMoney(row[priceField]) === undefined &&
+    context.parseMoney(context.productPrice) === undefined
+  ) {
+    issues.push({ field: priceField, issue: 'variantPriceRequired' });
   }
   if (context.isRent) {
     const deposit = toCents(
@@ -340,16 +379,16 @@ export const defaultVariant = (product: Pick<Product, 'variants'>): ProductVaria
 
 /** What a line of this product + variation is priced and deposited at. The API sends a variation's
  *  values already EFFECTIVE, so a variation's fields are taken AS IS — never topped up from the
- *  product's (a deposit override of 0 must not fall back to the product's deposit). */
+ *  product's (a deposit override of 0 must not fall back to the product's deposit). The description
+ *  is not pricing: a variation's own text STACKS under the product's (see the detail page). */
 export function effectivePricing(
-  product: Pick<Product, 'rentPrice' | 'sellPrice' | 'securityDeposit' | 'replacementPrice' | 'description'>,
+  product: Pick<Product, 'rentPrice' | 'sellPrice' | 'securityDeposit' | 'replacementPrice'>,
   variant?: ProductVariant,
 ): {
   rentPrice?: number;
   sellPrice?: number;
   securityDeposit?: number;
   replacementPrice?: number;
-  description?: string;
 } {
   const source = variant ?? product;
   return {
@@ -357,9 +396,20 @@ export function effectivePricing(
     sellPrice: source.sellPrice,
     securityDeposit: source.securityDeposit,
     replacementPrice: source.replacementPrice,
-    description: source.description,
   };
 }
+
+/**
+ * The stock POOL a line of this product + variation draws from — the API's rule: each variation is
+ * its own pool, unless the product's stock is SHARED, where every configuration takes from the one
+ * product pool (two lines of the same arrangement, with and without its add-on, compete for it).
+ * Line IDENTITY stays the pair (`stockKey`); this is only what availability is counted against.
+ */
+export const poolKeyOf = (
+  product: Pick<Product, 'sharedStock'> | undefined,
+  productId: number,
+  variantId?: number | null,
+): string => stockKey(productId, product?.sharedStock ? null : variantId);
 
 /** The headline price range over the offered variations (a variation carries only its type's
  *  price — rent for Alquiler, sell for Venta — like `formatProductPrice` reads the product);
@@ -367,11 +417,29 @@ export function effectivePricing(
 export function variantPriceRange(
   product: Pick<Product, 'variants'>,
 ): { min: number; max: number } | null {
-  const prices = (product.variants ?? [])
-    .map((variant) => variant.rentPrice ?? variant.sellPrice)
-    .filter((price): price is number => price !== undefined);
-  if (prices.length === 0) return null;
-  return { min: Math.min(...prices), max: Math.max(...prices) };
+  return variantRange(product, (variant) => variant.rentPrice ?? variant.sellPrice);
+}
+
+/** The range of one EFFECTIVE figure (deposit, replacement…) over the offered variations — what the
+ *  detail page says before a pick ("Q50", or "Desde Q50" when they differ); `null` when none has it. */
+export function variantRange(
+  product: Pick<Product, 'variants'>,
+  read: (variant: ProductVariant) => number | undefined,
+): { min: number; max: number } | null {
+  const values = (product.variants ?? [])
+    .map(read)
+    .filter((value): value is number => value !== undefined);
+  if (values.length === 0) return null;
+  return { min: Math.min(...values), max: Math.max(...values) };
+}
+
+/** The picked values' names so far, option order — the detail page's title tail as the visitor
+ *  picks ("Negro", then "Negro · Redondo"). Unpicked options are skipped. */
+export function pickedLabel(product: Pick<Product, 'options'>, picks: readonly (number | null)[]): string {
+  return (product.options ?? [])
+    .flatMap((option, index) => option.values.filter((value) => value.id === picks[index]))
+    .map((value) => value.name)
+    .join(VARIANT_LABEL_SEPARATOR);
 }
 
 /** One availability key per (product, variation) pair — line identity on the order side. */
@@ -409,11 +477,25 @@ export const variantMatchesPicks = (
   return picks.every((pick, index) => pick == null || own[index] === pick);
 };
 
+/** The first value of `variant` (option order) that has photos — its set, else `undefined`. */
+function variantPhotoSet(
+  options: NonNullable<Product['options']>,
+  variant: ProductVariant,
+): ProductImage[] | undefined {
+  const ids = new Set(variant.valueIds);
+  for (const option of options) {
+    const value = option.values.find((candidate) => ids.has(candidate.id));
+    if (value && value.images.length > 0) return value.images;
+  }
+  return undefined;
+}
+
 /**
  * Which photos the detail page's gallery shows for the current picks (option order): the first
  * picked value that HAS photos gives its set; otherwise the showcase. With nothing picked and no
- * showcase, the DEFAULT variation's photo set — the same photo the grid's tile shows
- * (`coverImageUrl`), so the morph from the card lands on it.
+ * showcase, the API's `coverImageUrl` chain (owner 2026-10-30) — the DEFAULT variation's set, else
+ * the first variation (canonical order) that has one, else any value's — the same photo the grid's
+ * tile shows, so the morph from the card lands on it.
  */
 export function photoSetFor(product: Product, picks: readonly (number | null)[]): ProductImage[] {
   const options = product.options ?? [];
@@ -422,12 +504,16 @@ export function photoSetFor(product: Product, picks: readonly (number | null)[])
     if (value && value.images.length > 0) return value.images;
   }
   if (product.images.length > 0 || picks.some((pick) => pick != null)) return product.images;
+  const variants = product.variants ?? [];
   const fallback = defaultVariant(product);
-  if (!fallback) return product.images;
-  const ids = new Set(fallback.valueIds);
+  const ordered = fallback ? [fallback, ...variants.filter((variant) => variant !== fallback)] : [];
+  for (const variant of ordered) {
+    const set = variantPhotoSet(options, variant);
+    if (set) return set;
+  }
   for (const option of options) {
-    const value = option.values.find((candidate) => ids.has(candidate.id));
-    if (value && value.images.length > 0) return value.images;
+    const value = option.values.find((candidate) => candidate.images.length > 0);
+    if (value) return value.images;
   }
   return product.images;
 }

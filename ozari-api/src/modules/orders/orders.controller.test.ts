@@ -751,8 +751,9 @@ describe("createOrder", () => {
       const tx = mockCreateTx({
         products: [txVariantSale],
         driverCandidates: [],
-      }) as ReturnType<typeof mockCreateTx> & { productVariant: { update: Mock } };
-      tx.productVariant = { update: vi.fn().mockResolvedValue({}) };
+      }) as ReturnType<typeof mockCreateTx> & { productVariant: { updateMany: Mock } };
+      tx.productVariant = { updateMany: vi.fn().mockResolvedValue({}) };
+      Object.assign(tx.product, { updateMany: vi.fn().mockResolvedValue({}) });
       await createOrder(
         buildCreateReq({
           ...createBody(),
@@ -772,15 +773,49 @@ describe("createOrder", () => {
         expect.objectContaining({ productId: 7, variantId: 71, variantLabel: "Rojo", unitaryPrice: 3.5 }),
         expect.objectContaining({ productId: 7, variantId: 72, variantLabel: "Azul", unitaryPrice: 5 }),
       ]);
-      expect(tx.productVariant.update).toHaveBeenCalledWith({
-        where: { id: 71 },
+      expect(tx.productVariant.updateMany).toHaveBeenCalledWith({
+        where: { id: 71, product: { sharedStock: false } },
         data: { quantity: { increment: -4 } },
       });
-      expect(tx.productVariant.update).toHaveBeenCalledWith({
-        where: { id: 72 },
+      expect(tx.productVariant.updateMany).toHaveBeenCalledWith({
+        where: { id: 72, product: { sharedStock: false } },
         data: { quantity: { increment: -2 } },
       });
       expect(tx.product.update).not.toHaveBeenCalled();
+    });
+
+    it("judges a SHARED pool once, on the SUM of its lines, naming the product", async () => {
+      // An arrangement in two configurations of the SAME 3 units, 1 out elsewhere in the window.
+      const shared = {
+        ...txVariantRental,
+        id: 9,
+        name: "Arreglo floral",
+        quantity: 3,
+        sharedStock: true,
+        variants: [
+          { ...txVariantRental.variants[0]!, id: 91, quantity: 0, values: [value("Sin flores", 0)] },
+          { ...txVariantRental.variants[0]!, id: 92, quantity: 0, values: [value("Con flores", 0)] },
+        ],
+      };
+      const tx = mockCreateTx({ products: [shared], rented: [rentedRow(9, 1, 92)] });
+      await createOrder(
+        buildCreateReq({
+          ...createBody(),
+          lines: [
+            { productId: 9, variantId: 91, quantity: 2 },
+            { productId: 9, variantId: 92, quantity: 1 },
+          ],
+        } as unknown as ReturnType<typeof createBody>),
+        {} as Response,
+      );
+      expect(tx.service.create).not.toHaveBeenCalled();
+      expect(sendOzariError).toHaveBeenCalledWith(
+        expect.anything(),
+        HttpEnum.CONFLICT,
+        "orders.createOrder.stockConflict",
+        undefined,
+        { conflicts: [{ productId: 9, productName: "Arreglo floral", requested: 3, available: 2 }] },
+      );
     });
 
     it("counts a variant's rental holds against ITS fleet, naming it in the 409", async () => {
@@ -1069,8 +1104,9 @@ describe("updateOrder", () => {
     const tx = mockUpdateTx({
       order: { ...makeRawRichOrder(), serviceDetails: [redLine] },
       products: [variantSale],
-    }) as ReturnType<typeof mockUpdateTx> & { productVariant: { update: Mock } };
-    tx.productVariant = { update: vi.fn().mockResolvedValue({}) };
+    }) as ReturnType<typeof mockUpdateTx> & { productVariant: { updateMany: Mock } };
+    tx.productVariant = { updateMany: vi.fn().mockResolvedValue({}) };
+    Object.assign(tx.product, { updateMany: vi.fn().mockResolvedValue({}) });
     await updateOrder(
       buildUpdateReq({
         ...createBody(),
@@ -1085,15 +1121,52 @@ describe("updateOrder", () => {
       data: expect.objectContaining({ productId: 7, variantId: 72, variantLabel: "Azul", quantity: 2 }),
     });
     // The red units return to the RED shelf; the blue ones leave the BLUE shelf.
-    expect(tx.productVariant.update).toHaveBeenCalledWith({
-      where: { id: 71 },
+    expect(tx.productVariant.updateMany).toHaveBeenCalledWith({
+      where: { id: 71, product: { sharedStock: false } },
       data: { quantity: { increment: 3 } },
     });
-    expect(tx.productVariant.update).toHaveBeenCalledWith({
-      where: { id: 72 },
+    expect(tx.productVariant.updateMany).toHaveBeenCalledWith({
+      where: { id: 72, product: { sharedStock: false } },
       data: { quantity: { increment: -2 } },
     });
     expect(tx.product.update).not.toHaveBeenCalled();
+  });
+
+  it("lets a SHARED pool's sale lines swap configurations against the units the order holds", async () => {
+    const value = (name: string) => ({ optionValue: { name, option: { sortOrder: 0 } } });
+    // One shared shelf of 1 left; the order already holds 3 (as "Sin flores") and wants 2 + 2.
+    const sharedSale = {
+      ...txSaleProduct,
+      id: 9,
+      name: "Arreglo",
+      quantity: 1,
+      sharedStock: true,
+      variants: [
+        { id: 91, quantity: 0, rentPrice: null, sellPrice: null, securityDeposit: null, replacementPrice: null, values: [value("Sin flores")] },
+        { id: 92, quantity: 0, rentPrice: null, sellPrice: null, securityDeposit: null, replacementPrice: null, values: [value("Con flores")] },
+      ],
+    };
+    const heldLine = { ...existingSaleLine, id: 40, productId: 9, quantity: 3, variantId: 91, variantLabel: "Sin flores" };
+    mockUpdateTx({ order: { ...makeRawRichOrder(), serviceDetails: [heldLine] }, products: [sharedSale] });
+    await updateOrder(
+      buildUpdateReq({
+        ...createBody(),
+        pickupAt: undefined,
+        lines: [
+          { productId: 9, variantId: 91, quantity: 2 },
+          { productId: 9, variantId: 92, quantity: 3 },
+        ],
+      } as unknown as ReturnType<typeof createBody>),
+      {} as Response,
+    );
+    // 1 on the shelf + 3 held = 4 < 5 asked across both configurations — ONE item for the pool.
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.CONFLICT,
+      "orders.updateOrder.stockConflict",
+      undefined,
+      { conflicts: [{ productId: 9, productName: "Arreglo", requested: 5, available: 4 }] },
+    );
   });
 
   it("lets a VARIANT sale line grow into what the order holds of THAT variant only", async () => {
@@ -1907,13 +1980,14 @@ describe("getOrderAvailability", () => {
       {
         productId: 8,
         available: 8,
+        sharedStock: false,
         variants: [
           { variantId: 81, available: 6 },
           { variantId: 82, available: 0 },
           { variantId: 83, available: 2 },
         ],
       },
-      { productId: 7, available: 6, variants: [{ variantId: 71, available: 6 }] },
+      { productId: 7, available: 6, sharedStock: false, variants: [{ variantId: 71, available: 6 }] },
     ]);
   });
 
@@ -1932,7 +2006,45 @@ describe("getOrderAvailability", () => {
       {} as Response,
     );
     expect(successData<OrderAvailabilityResponseModel>().availability).toEqual([
-      { productId: 8, available: null, variants: [{ variantId: 81, available: null }] },
+      { productId: 8, available: null, sharedStock: false, variants: [{ variantId: 81, available: null }] },
+    ]);
+  });
+
+  it("answers a SHARED pool once: the product and every variant report it (all configurations' holds)", async () => {
+    const groupBy = vi.fn().mockResolvedValue([
+      { productId: 9, variantId: 91, _sum: { quantity: 1 } },
+      { productId: 9, variantId: 92, _sum: { quantity: 2 } },
+    ]);
+    (getPrismaClient as Mock).mockResolvedValue({
+      product: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 9,
+            quantity: 5,
+            sharedStock: true,
+            productBusinessTypeId: 1,
+            variants: [
+              { id: 91, quantity: 0 },
+              { id: 92, quantity: 0 },
+            ],
+          },
+        ]),
+      },
+      serviceDetail: { groupBy },
+      appPreference: { findMany: vi.fn().mockResolvedValue(TIMING_PREFERENCES) },
+    });
+    await getOrderAvailability(availabilityReq({ ...window, productIds: [9] }), {} as Response);
+
+    expect(successData<OrderAvailabilityResponseModel>().availability).toEqual([
+      {
+        productId: 9,
+        available: 2,
+        sharedStock: true,
+        variants: [
+          { variantId: 91, available: 2 },
+          { variantId: 92, available: 2 },
+        ],
+      },
     ]);
   });
 

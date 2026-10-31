@@ -367,6 +367,11 @@ model Product {
   rentTimeUnitId        Int?      @map("rent_time_unit_id")
   currencyId            Int       @map("currency_id")
   quantity              Int
+  // STOCK MODE of a product WITH options (owner 2026-10-30): false = each variant owns its stock
+  // (candles — `quantity` stays 0, Σ variants); true = the variants are CONFIGURATIONS of the same
+  // units (an arrangement with or without an add-on) — `quantity` IS the one pool every variant
+  // draws from and each variant row stores 0. Always false without options.
+  sharedStock           Boolean   @default(false) @map("shared_stock")
   // The admin's CATALOG ORDER (owner 2026-10-27) — the grid's default sort, `display_order ASC`
   // then newest first. 0 = "not placed yet": a new product LEADS the grid until it is arranged, and
   // a catalog nobody has arranged is all zeros, which ties into exactly the old newest-first order
@@ -400,10 +405,13 @@ model Product {
 // first option whose value has photos wins). No DB uniqueness on names/sortOrder — the validator
 // enforces normalized uniqueness per product.
 model ProductOption {
-  id        Int       @id @default(autoincrement())
-  productId Int       @map("product_id")
+  id        Int               @id @default(autoincrement())
+  productId Int               @map("product_id")
   name      String
-  sortOrder Int       @map("sort_order")
+  // How the option is picked (owner 2026-10-30): GENERIC = named values; COLOR = each value also
+  // carries a swatch (`product_option_values.color_hex`). At most one COLOR option per product.
+  kind      ProductOptionKind @default(GENERIC)
+  sortOrder Int               @map("sort_order")
   updatedAt DateTime? @updatedAt @map("updated_at")
   createdAt DateTime  @default(now()) @map("created_at")
 
@@ -414,6 +422,12 @@ model ProductOption {
   @@map("product_options")
 }
 
+// The picker an option renders (API: "generic" | "color"). A structural enum, not a lookup table.
+enum ProductOptionKind {
+  GENERIC
+  COLOR
+}
+
 // One value of an option ("Rojo", "Redondo"), with its OWN photo set (`product_images.option_value_id`).
 // An attribute row like its option: deleting it cascades its join rows (a tombstoned variant loses
 // that link; its lines keep their `variantLabel`).
@@ -421,6 +435,8 @@ model ProductOptionValue {
   id        Int       @id @default(autoincrement())
   optionId  Int       @map("option_id")
   name      String
+  // `#rrggbb` (lowercase) — set exactly on the values of a COLOR option, NULL otherwise.
+  colorHex  String?   @map("color_hex")
   sortOrder Int       @map("sort_order")
   updatedAt DateTime? @updatedAt @map("updated_at")
   createdAt DateTime  @default(now()) @map("created_at")
