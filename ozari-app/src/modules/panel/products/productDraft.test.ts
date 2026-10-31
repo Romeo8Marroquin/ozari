@@ -53,10 +53,20 @@ describe('productDraft', () => {
   });
 
   it('restores options/variations as typed and drops malformed ones', () => {
-    const options = [{ name: 'Color', values: [{ key: 'n1', name: 'Rojo' }] }];
+    const options = [{ name: 'Color', kind: 'color', values: [{ key: 'n1', name: 'Rojo', color: '#ff0000' }] }];
     const variants = [{ valueKeys: ['n1'], quantity: '2' }];
     Storage.set(StorageKeys.PRODUCT_CREATE_DRAFT, { name: 'Mantel', options, variants });
     expect(readProductDraft()).toMatchObject({ options, variants });
+
+    // A draft from before the option KIND reads as generic and colourless.
+    Storage.set(StorageKeys.PRODUCT_CREATE_DRAFT, {
+      name: 'Mantel',
+      options: [{ name: 'Tamaño', values: [{ key: 'n1', name: 'Grande' }] }, { name: 'Tela' }],
+    });
+    expect(readProductDraft()?.options).toEqual([
+      { name: 'Tamaño', kind: 'generic', values: [{ key: 'n1', name: 'Grande', color: '' }] },
+      { name: 'Tela', kind: 'generic', values: [] },
+    ]);
 
     Storage.set(StorageKeys.PRODUCT_CREATE_DRAFT, { name: 'Mantel', options: 'x', variants: 3 });
     expect(readProductDraft()).toMatchObject({ options: [], variants: [] });

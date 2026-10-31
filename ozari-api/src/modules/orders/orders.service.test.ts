@@ -17,8 +17,12 @@ import {
   conflictVariantFields,
   moveSaleStock,
   saleStockDeltas,
+  poolConflictItem,
+  poolKey,
   poolQuantity,
+  rentedRowQuantity,
   stockKey,
+  sumByPool,
   variantLabelOf,
   buildRentedInWindowWhere,
   canRecordDepositCollection,
@@ -786,14 +790,19 @@ describe("variation helpers", () => {
     });
   });
 
-  it("moveSaleStock writes the VARIANT row for a variant line, else the product row", async () => {
+  it("moveSaleStock writes the VARIANT row for a variant line (the product's on SHARED stock), else the product row", async () => {
     const tx = {
-      product: { update: vi.fn().mockResolvedValue({}) },
-      productVariant: { update: vi.fn().mockResolvedValue({}) },
+      product: { update: vi.fn().mockResolvedValue({}), updateMany: vi.fn().mockResolvedValue({}) },
+      productVariant: { updateMany: vi.fn().mockResolvedValue({}) },
     } as unknown as Prisma.TransactionClient;
     await moveSaleStock(tx, { productId: 3, variantId: 31 }, -2);
-    expect(tx.productVariant.update).toHaveBeenCalledWith({
-      where: { id: 31 },
+    // The stored mode decides which of the two conditional writes matches.
+    expect(tx.productVariant.updateMany).toHaveBeenCalledWith({
+      where: { id: 31, product: { sharedStock: false } },
+      data: { quantity: { increment: -2 } },
+    });
+    expect(tx.product.updateMany).toHaveBeenCalledWith({
+      where: { id: 3, sharedStock: true },
       data: { quantity: { increment: -2 } },
     });
     expect(tx.product.update).not.toHaveBeenCalled();
@@ -830,10 +839,59 @@ describe("variation helpers", () => {
   });
 
   it("poolQuantity reads the product's own stock, an ACTIVE variant's, or null when retired", () => {
-    const product = { id: 3, quantity: 0, variants: [{ id: 31, quantity: 12 }] };
+    const product = { id: 3, quantity: 0, sharedStock: false, variants: [{ id: 31, quantity: 12 }] };
     expect(poolQuantity({ ...product, quantity: 7 }, null)).toBe(7);
     expect(poolQuantity(product, 31)).toBe(12);
     expect(poolQuantity(product, 99)).toBeNull();
+    // SHARED: an active variant reads the product's one pool; a retired one is still gone.
+    const shared = { id: 3, quantity: 4, sharedStock: true, variants: [{ id: 31, quantity: 0 }] };
+    expect(poolQuantity(shared, 31)).toBe(4);
+    expect(poolQuantity(shared, 99)).toBeNull();
+  });
+
+  it("poolKey / sumByPool fold a SHARED product's variant lines into its one pool", () => {
+    const own = { id: 3, sharedStock: false };
+    const shared = { id: 4, sharedStock: true };
+    expect(poolKey(own, 31)).toBe(stockKey(3, 31));
+    expect(poolKey(shared, 41)).toBe(stockKey(4, null));
+    const sums = sumByPool(
+      [
+        { productId: 3, variantId: 31, quantity: 2 },
+        { productId: 3, variantId: 32, quantity: 1 },
+        { productId: 4, variantId: 41, quantity: 2 },
+        { productId: 4, variantId: 42, quantity: 3 },
+        // A product the map does not know keeps the line's own identity.
+        { productId: 9, variantId: 91, quantity: 1 },
+      ],
+      new Map([
+        [3, own],
+        [4, shared],
+      ]),
+    );
+    expect(Object.fromEntries(sums)).toEqual({ "3:31": 2, "3:32": 1, "4:": 5, "9:91": 1 });
+    expect(rentedRowQuantity({ productId: 4, variantId: 41, _sum: { quantity: null } })).toEqual({
+      productId: 4,
+      variantId: 41,
+      quantity: 0,
+    });
+  });
+
+  it("poolConflictItem names the PRODUCT for a shared pool and the variant otherwise", () => {
+    const line = { variantId: 41, variantLabel: "Con flores" };
+    expect(poolConflictItem({ id: 4, name: "Arreglo", sharedStock: true }, line, 3, 1)).toEqual({
+      productId: 4,
+      productName: "Arreglo",
+      requested: 3,
+      available: 1,
+    });
+    expect(poolConflictItem({ id: 4, name: "Arreglo", sharedStock: false }, line, 3, 1)).toEqual({
+      productId: 4,
+      productName: "Arreglo",
+      variantId: 41,
+      variantLabel: "Con flores",
+      requested: 3,
+      available: 1,
+    });
   });
 });
 

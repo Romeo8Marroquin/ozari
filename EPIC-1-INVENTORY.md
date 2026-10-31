@@ -195,9 +195,33 @@ progress + optional client downscale, graceful single/zero-image. Reusable `Prod
 - **Generic options and combinations.** A product declares up to 3 axes ("Color", "Tamaño"), each
   with its values. The admin chooses which COMBINATIONS are offered (variants); not every product of
   the cartesian set has to exist.
-- **Each variation has its OWN STOCK**: the fleet for Alquiler, the shelf for Venta. A variant product
-  writes `products.quantity = 0` and never reads it. Its Admin stock figures are Σ over the active
-  variants.
+- **Two stock modes** (`products.shared_stock`, owner 2026-10-30), chosen on the form as **Por
+  variación / Compartido**:
+  - **Per variation** (default): each variation is a different item with its OWN STOCK (candles by
+    colour) — the fleet for Alquiler, the shelf for Venta. The product writes `products.quantity = 0`
+    and never reads it; its Admin stock figures are Σ over the active variants (a variation at 0 is
+    shown, not hidden).
+  - **Shared**: each variation is a configuration of the SAME unit (an arrangement with or without its
+    add-on). `products.quantity` IS the pool every variation draws on; every variant stores 0 and
+    the body may not send a variant `quantity` (`variantQuantityWithSharedStock`). `sharedStock`
+    without options is `sharedStockWithoutVariants`.
+- **Typed options** (owner 2026-10-30): `product_options.kind` = `GENERIC | COLOR`, at most one COLOR
+  option per product (`multipleColorOptions`). A COLOR option's values each carry `color_hex`
+  (`#rrggbb`, stored lowercase; `valueColorRequired` / `invalidValueColor`; a generic value with one
+  is `valueColorForbidden`). The NAME is what every text surface shows (titles, order lines, PDFs);
+  the colour is only drawn as the detail page's swatches. New kinds extend the enum + the app's
+  `OPTION_KINDS`.
+- **General fields with options** (owner 2026-10-30): the product's price / deposit / replacement
+  are OPTIONAL DEFAULTS the variations inherit — but every offered variation must resolve a price,
+  its own or the product's (`variantPriceRequired`, mirrored by the form). The rent time unit stays
+  product-wide. The DESCRIPTION stacks: the product's general text always, the picked variation's
+  own text under it (`variants[].description` in the projection is the variation's OWN text only,
+  never inherited).
+- **Detail page before a full pick** shows the product as the grid does: price "Desde" the lowest
+  effective variation price, deposit/replacement as one figure or "Desde", total stock, the general
+  description. After a full pick it speaks for that variation; the title names the picks ("Mantel —
+  Negro · Redondo"), the COLOR swatches lead, sold-out values are struck through, and "Limpiar
+  selección" returns to the opening state.
 - **Photos per OPTION VALUE plus the product's SHOWCASE photos.** Each set has its own order and its
   own single primary. `product_images.option_value_id` NULL = showcase (every pre-existing row).
 - **No conversion script.** The existing per-colour products are rebuilt by hand on staging and copied
@@ -240,32 +264,35 @@ progress + optional client downscale, graceful single/zero-image. Reusable `Prod
 - `service_details.variant_id` uses `onDelete: Restrict`, so history can never lose its variant.
 - Only VARIANTS tombstone (`isActive: false`, `isDefault: false`, key `retired:<id>`). Options and
   values are attributes and are hard-deleted; history reads the line's `variantLabel`.
-- Migration `20261029000000_product_variations` is purely additive.
+- Migration `20261029000000_product_variations` is purely additive, and so is
+  `20261030000000_product_variations_v2` (`ProductOptionKind` enum, `product_options.kind`,
+  `product_option_values.color_hex`, `products.shared_stock`).
 
 **API — the rules the server decides** (frozen-contract §3):
 
 | Case | Rule |
 |---|---|
-| Body shape | ONE parser for both doors: `products.variations.ts` (`parseProductVariations`, pure, 100%-covered). Values carry a client `key`, and variants reference values ONLY by key. `quantity` is REQUIRED without options and FORBIDDEN with them (`quantityWithVariants`). `variants` is empty exactly when `options` is. |
+| Body shape | ONE parser for both doors: `products.variations.ts` (`parseProductVariations`, pure, 100%-covered). Values carry a client `key`, and variants reference values ONLY by key. The product `quantity` is REQUIRED without options or with `sharedStock`, and FORBIDDEN with per-variation stock (`quantityWithVariants`). The product price is optional with options (`variantPriceRequired` instead). `variants` is empty exactly when `options` is. |
 | Ids | Create: every id is forbidden (`idsForbiddenOnCreate`). Update: an option or value id must belong to the product, and a value id must stay under its option (`valueMovedOption`). A variant id must be an ACTIVE variant of this product, so a retired id is a 400. An image id may move between sets. Kept ids are re-checked inside the transaction (409 `conflict`). |
 | Overrides | They follow the business type. Alquiler takes rent/replacement/deposit, Venta takes sell only, and anything else is `variantPricingMismatch`. Deposit ≤ replacement is checked on EFFECTIVE values (`variantSecurityDepositAboveReplacement`, the shared `securityDepositViolation`). A rent↔sale switch therefore rejects stale overrides (the form clears them). |
 | Swap / combination change of a kept variant | Allowed. Its id, stock and holds carry over. A TWO-PHASE key write (changed keys park on `tmp:<id>`, then take their final value) makes swaps safe under the unique index. Existing lines' labels refresh on their next save. |
 | Remove a variant | Holding lines → 409 `variantInUse`. History only → tombstone. Unreferenced → hard delete. Removing a value requires dropping every variant that uses it (the parser rejects a dangling key). |
 | Re-add a retired combination | Creates a new variant row. This is safe because a tombstone never has holding lines. |
-| Add options to a product with open or future lines without variant (or remove them all while variant lines hold) | 409 `stockModeInUse`, `data.orderIds`. Finished and cancelled orders do not block. "Holding" = `buildHoldingLinesWhere` (`orders.service.ts`): an active rental line on an OUT/WINDOW status, or a sale line still undelivered, on a live order. |
+| Add options to a product with open or future lines without variant (or remove them all while variant lines hold), or flip `sharedStock` while any line holds | 409 `stockModeInUse`, `data.orderIds`. The update locks the product row (`SELECT shared_stock … FOR UPDATE`) so the check cannot race another save. Finished and cancelled orders do not block. "Holding" = `buildHoldingLinesWhere` (`orders.service.ts`): an active rental line on an OUT/WINDOW status, or a sale line still undelivered, on a live order. |
 | Stock reduced below holds | Allowed, as for products. Availability floors at 0. |
 | Default variant | At most one flag. The projection derives exactly one: the flagged variant, else the first canonical one (option order, then value order). If the default is deleted, the flag goes with the row. |
-| Photos | A variant's `imageUrl` walks its values in option order: the first with photos gives its primary, else the showcase primary. `coverImageUrl` (cards, arrangement tiles, pickers) = the showcase primary, else the DEFAULT variant's value photo. An order line uses its OWN variant's photo, then the showcase, and never the cover. |
+| Photos | A variant's `imageUrl` walks its values in option order: the first with photos gives its primary, else the showcase primary. `coverImageUrl` (cards, arrangement tiles, pickers) = the showcase primary → the DEFAULT variant's value photo → the first variant (canonical order) with a photo → any value's photo. The detail page opens on the same chain (`photoSetFor`). An order line uses its OWN variant's photo, then the showcase, and never the cover. |
 | Delete product | Images (all sets), details, options and values are hard-deleted. Referenced variants tombstone and the rest are deleted. The product is soft- or hard-deleted per the NO-TRASH rule. The response reports `outcome: deleted \| deactivated`. |
-| Orders | Line `variantId`: `variantRequired` / `variantForbidden` / `invalidLineVariant`. Identity = the `(productId, variantId)` pair. Prices and deposits use effective variant values. Stock pools are per variant (EPIC-2-ORDERS §6b, EPIC-2-ORDER-LIFECYCLE §6c). |
+| Orders | Line `variantId`: `variantRequired` / `variantForbidden` / `invalidLineVariant`. Identity = the `(productId, variantId)` pair. Prices and deposits use effective variant values. The stock POOL is `(productId, shared ? null : variantId)` — per variant, or the product's one pool when shared — and lines on one pool are summed before the check (EPIC-2-ORDERS §6b, EPIC-2-ORDER-LIFECYCLE §6c). Sorting by price uses the cheapest active variation's effective price. |
 
 **Sync across environments** (`sync-products.ps1`):
 - Products match by name + business type (as before).
 - Options and values match by normalized name.
 - A variant matches by its sorted normalized `option=value` pairs.
 - A MATCHED product is NEVER modified; variation differences are reported only.
-- A product absent from the target is copied completely: active variants only, and every photo set
-  with its primary normalized per set (flagged, else first).
+- A product absent from the target is copied completely: its stock mode, options with their kind,
+  values with their colour, active variants only, and every photo set with its primary normalized per
+  set (flagged, else first).
 - Source products whose names collide after normalization are skipped and reported.
 - Idempotent; dry run by default.
 

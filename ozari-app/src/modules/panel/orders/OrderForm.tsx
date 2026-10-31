@@ -43,6 +43,7 @@ import {
   hasVariants,
   lineDisplayName,
   matchVariant,
+  poolKeyOf,
   stockKey,
   variantFor,
 } from '../products/productVariations';
@@ -422,6 +423,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
             (line) =>
               takeableFor(line.productId, line.variantId, availabilityRef.current, productsByIdRef.current),
             (available) => t(`${KEY}.errors.lineUnavailable`, { available }),
+            // A SHARED-stock product's variations compete for one pool (the API sums them).
+            (line) => poolKeyOf(productsByIdRef.current.get(line.productId), line.productId, line.variantId),
           )
         : result;
       // The variation rule needs the CATALOG (does this product have variations, is the one picked
@@ -666,16 +669,29 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
       // per line. Iterate bottom-up so removals don't shift the indices still to process.
       const adjusted: { name: string; from: number; to: number }[] = [];
       const removed: string[] = [];
+      // What each line may keep, top-down: a SHARED-stock product's lines draw on one pool, so the
+      // first lines keep theirs and the later ones get what is left (each pool counted once).
+      const left = new Map<string, number>();
+      const allowed = current.map((line) => {
+        if (line.productId == null) return null;
+        const product = productsById.get(line.productId);
+        // A line of a product WITH variations reconciles against ITS variation (or the shared pool)
+        // — the product's own figure is their sum, which says nothing about this colour. No
+        // variation picked yet ⇒ nothing to reconcile.
+        if (product && hasVariants(product) && line.variantId == null) return null;
+        const available = map.get(stockKey(line.productId, line.variantId));
+        if (available == null) return null;
+        const pool = poolKeyOf(product, line.productId, line.variantId);
+        const remaining = left.get(pool) ?? available;
+        const keep = Math.min(parseLineQuantity(line.quantity) ?? 0, remaining);
+        left.set(pool, remaining - keep);
+        return remaining;
+      });
       for (let index = current.length - 1; index >= 0; index -= 1) {
         const line = current[index];
-        if (line.productId == null) continue;
+        const available = allowed[index];
+        if (line.productId == null || available == null) continue;
         const product = productsById.get(line.productId);
-        // A line of a product WITH variations reconciles against ITS variation — the product's own
-        // figure is their sum, which says nothing about this colour. No variation picked yet ⇒
-        // nothing to reconcile.
-        if (product && hasVariants(product) && line.variantId == null) continue;
-        const available = map.get(stockKey(line.productId, line.variantId));
-        if (available == null) continue;
         const qty = parseLineQuantity(line.quantity);
         if (qty == null || qty <= available) continue;
         // `?? ''` / `product ?`: a line with availability holds a loaded product.
@@ -1056,21 +1072,35 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   // field, and it must be ABSENT wherever the cap isn't real: on an order that reserves nothing
   // there is no ceiling, and the hint would otherwise quote a number that is not one. A product with
   // variations has no figure of its own to quote until the variation is chosen.
+  // A SHARED-stock product's variations draw on one pool, so the figure is what the OTHER lines of that
+  // pool leave over (`index` = this line).
   const availableFor = (
     line: { productId: number | null; variantId: number | null } | undefined,
+    index: number,
   ): number | undefined => {
     if (line?.productId == null || !enforcesStock) return undefined;
     const product = productsById.get(line.productId);
     if (product && hasVariants(product) && line.variantId == null) return undefined;
-    return takeableFor(line.productId, line.variantId, availability, productsById);
+    const takeable = takeableFor(line.productId, line.variantId, availability, productsById);
+    if (takeable === undefined || !product?.sharedStock) return takeable;
+    const pool = poolKeyOf(product, line.productId, line.variantId);
+    const others = lineValues.reduce(
+      (sum, other, at) =>
+        at !== index && other.productId != null && poolKeyOf(product, other.productId, other.variantId) === pool
+          ? sum + (parseLineQuantity(other.quantity) ?? 0)
+          : sum,
+      0,
+    );
+    return Math.max(0, takeable - others);
   };
   // A quiet hint under the quantity: how many of the picked product are takeable (the window amount
   // once dated, else its general availability). Empty until a product is chosen — and the field's own
   // "only N available" error replaces it — so the number surfaces once, right where it's relevant.
   const availabilityHint = (
     line: { productId: number | null; variantId: number | null } | undefined,
+    index: number,
   ): string => {
-    const amount = availableFor(line);
+    const amount = availableFor(line, index);
     if (amount == null) return '';
     return amount === 0 ? t(`${KEY}.availability.soldOut`) : t(`${KEY}.availability.count`, { count: amount });
   };
@@ -1338,7 +1368,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                                 // hint below), which is a moving number the browser cannot know and
                                 // would only block the submit over, in its own untranslated words.
                                 {...integerInput}
-                                instructions={availabilityHint(lineValues[index])}
+                                instructions={availabilityHint(lineValues[index], index)}
                                 label={t(`${KEY}.fields.lineQuantityLabel`)}
                                 aria-label={t(`${KEY}.fields.lineQuantityLabel`)}
                               />

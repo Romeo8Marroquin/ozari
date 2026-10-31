@@ -86,12 +86,16 @@ public reference data the edit form prefills from).
   - `product_variants` = the OFFERED combinations: own `quantity`, nullable override columns
     (NULL = inherit), `is_default`, and `combination_key` = sorted value ids joined by `.`, unique
     per product. The join table is `product_variant_values`.
-  - A variant product stores `products.quantity = 0`, and nothing reads it for availability.
+  - A per-variation product stores `products.quantity = 0`, and nothing reads it for availability.
+    A SHARED one (`products.shared_stock`, migration `20261030000000_product_variations_v2`) is the
+    reverse: `products.quantity` is the pool and every variant stores 0.
+  - `product_options.kind` (`GENERIC | COLOR`) and `product_option_values.color_hex` (same migration).
 - **Body.**
   - POST and PUT share ONE parser, `products.variations.ts` `parseProductVariations` (pure,
     coverage-held), with keys under `products.variations.validators.*`.
   - Values carry a client `key`, and variants reference values only by key.
-  - `quantity` is required without options and forbidden with them (`quantityWithVariants`).
+  - `quantity` is required without options or with `sharedStock`, and forbidden with per-variation
+    stock (`quantityWithVariants`).
   - Every id is forbidden on create.
   - Limits live in `appConfig`: 3 options, 20 values, 60 variants, 6 photos per value, 10 showcase
     photos, 150 in total (raised 2026-10-30; mirrored in the app's `constants/Regex.ts`). The
@@ -114,20 +118,28 @@ public reference data the edit form prefills from).
 - **409s**, via `buildHoldingLinesWhere(holding)` in `orders.service.ts`:
   - `variantInUse`: the save drops a variant that open or future orders hold. `data.conflicts` =
     `[{ variantId, label, orderIds }]`.
-  - `stockModeInUse`: the save adds the first options, or removes them all, while holding lines use
-    the vanishing pool. Carries `data.orderIds`.
+  - `stockModeInUse`: the save adds the first options, removes them all, or flips `sharedStock`,
+    while holding lines use the vanishing pool. Carries `data.orderIds`. The update reads the old
+    mode under `SELECT shared_stock … FOR UPDATE`.
+- **Typed options + stock mode** (2026-10-30, EPIC-1-INVENTORY §3b): `options[].kind`
+  (`generic`|`color`, one color option max), `values[].color` (`#rrggbb`, color options only),
+  `sharedStock` (shared ⇒ the product `quantity` is the pool, variants carry none). With options the
+  product price is optional; every variant must resolve one (`variantPriceRequired`).
 - **Projection** (`projectProductForRole(product, role, { rentedNow, usage })`):
-  - `images` is the showcase only.
-  - `coverImageUrl` = the showcase primary, else the DEFAULT variant's value photo. The arrangement
-    tiles use it too.
-  - `options[]`, and `variants[]` with the ACTIVE variants in canonical order (`describeVariants`).
-    Each has `valueIds`, `label` "Rojo · Redondo", exactly one `isDefault`, EFFECTIVE prices,
-    deposit and description, and `imageUrl` (its first value in option order with photos, else the
-    showcase).
+  - `images` is the showcase only. `sharedStock` is always sent.
+  - `coverImageUrl` = the showcase primary → the DEFAULT variant's value photo → the first variant
+    (canonical order) with a photo → any value's photo. The arrangement tiles use it too.
+  - `options[]` (with `kind`, values with `color`), and `variants[]` with the ACTIVE variants in
+    canonical order (`describeVariants`). Each has `valueIds`, `label` "Rojo · Redondo", exactly one
+    `isDefault`, EFFECTIVE prices and deposit, its OWN `description` (never inherited — the page
+    stacks the product's above it), and `imageUrl` (its first value in option order with photos,
+    else the showcase).
   - Admin adds per variant: `quantity`, `available`, `inStock`, `total` (Alquiler), the effective
     `replacementPrice` and raw `overrides`. On `GET /products/:id` and the PUT response it also adds
     `usage: { lines, holding }` (`loadVariantUsage`).
-  - The product-level Admin stock is Σ over the variants.
+  - The product-level Admin stock is Σ over the variants — or, when SHARED, the pool itself (each
+    variant then reports the pool's figures).
+  - Sorting by price uses the cheapest active variant's effective price.
   - Rented-now is grouped by `["productId","variantId"]` and keyed by `stockKey`.
   - The PUT response adds `variantOutcome: { retired, deleted }` only when it removed a variant.
 - **Delete** (product): every photo set, details, options and values are hard-deleted; referenced
@@ -173,7 +185,17 @@ public reference data the edit form prefills from).
     marks one default (radio). An offered row has its own stock and optional overrides whose
     placeholders show what it inherits. Adding a value offers the combinations it creates (an
     option's first value completes every existing variation); "Ofrecer todas" fills up to the cap.
-    With options the product's single quantity steps aside (`quantityManaged`).
+  - **Option type** (2026-10-30): each option has a TYPE select (`Genérica` / `Color`; `Color` is
+    listed only where it can be chosen — one per product — and names an unnamed option "Color"). A
+    color option's values get a swatch (`ValueColorSlot`: an invisible native `<input type="color">`
+    over a circle; the form keeps `''` until a colour is picked) that eases open horizontally beside
+    the name.
+  - **Stock mode** (`StockModeToggle`, two radio cards at the top of the combinations): **Por
+    variación** — each offered row has its own stock and the product quantity steps aside
+    (`quantityManaged`, with the running total); **Compartido** — the product quantity comes back as
+    the pool and each row's stock cell swaps to a note (`SlotSwap`; a typed number survives, it is
+    just not sent). The general prices become optional defaults (`generalPriceHint`); a row with no
+    price of its own and none to inherit says `priceNeeded` and fails `variantPriceRequired`.
   - Form state carries `options` (values keyed `v<id>` saved / `n<k>` new) and `variants`
     (referencing values by key set); `productToFormValues` reads the RAW `overrides`, never the
     effective values, or the first save would freeze today's product price onto every variation.
@@ -196,12 +218,19 @@ public reference data the edit form prefills from).
     saved row is parked and comes back with its id/stock if re-offered. The 409s
     `variantInUse` / `stockModeInUse` name the variations and orders (`PED-…`) in the banner; a PUT's
     `variantOutcome.retired` toasts and never enters the cache.
-  - The card shows `coverImageUrl` (showcase primary, else the default variation's photo) and
-    "Desde Q…" when the offered variations' prices differ (`formatHeadlinePrice`); its stock is the
-    server's Σ. The detail page adds option chip pickers: a pick changes WHICH photos the 3:4 hero
-    shows (`photoSetFor`: first picked value with photos → showcase → with nothing picked and no
-    showcase, the default variation's photos), never the frame; a complete pick shows that
-    variation's price/deposit/replacement/stock/description, an unoffered combination says so.
+  - The card shows `coverImageUrl` (the API's chain, EPIC-1-INVENTORY §3b) and "Desde Q…" when the
+    offered variations' prices differ (`formatHeadlinePrice`, which reads rent-vs-sale off the
+    VARIATIONS since the product's own price may be absent); its stock is the server's figure. The
+    detail page adds option pickers — the COLOR option first, as round swatches (`aria-label`/`title`
+    = the name, arrow keys walk a row, the hovered/focused name echoes as "Color: Marfil"), the rest
+    as chips. A pick changes WHICH photos the 3:4 hero shows (`photoSetFor`: first picked value with
+    photos → showcase → with nothing picked and no showcase, the cover chain), never the frame; the
+    title names the picks (`pickedLabel`, its own height-eased region). Before a complete pick,
+    deposit/replacement read "Desde" the lowest (`variantRange`); a complete pick shows that
+    variation's price/deposit/replacement/stock, and its own description STACKS under the
+    product's; an unoffered combination says so; values whose every variation is at 0 are struck
+    through ("agotado"). "Limpiar selección" (always mounted, fades + inert when nothing is picked)
+    moves focus to the first picker, then resets.
 - Edit deliberately has **no sessionStorage draft** (server state is the source of truth; a stale
   draft would resurrect old values).
 - Delete is `ProductDeleteModal` (confirm dialog on the detail page; success drops the detail cache,
@@ -306,16 +335,22 @@ Frontend: `OrderForm mode="edit"` (one component; `orderToFormValues` mirrors `t
   price, deposit snapshot and replacement snapshot, and writes the `variantLabel` snapshot
   (`variantLabelOf`, option order, `" · "`) on every save. The settlement guard
   (`assertSettlementSurvivesEdit`) keys on the pair. §12's deposit rules are unchanged.
-- **Stock = per POOL** (EPIC-2-ORDERS §6b):
-  - Availability groups by `["productId","variantId"]`.
-  - `poolQuantity` returns the variant's own `quantity`, else the product's. `null` (deleted product
-    or retired variant) → a conflict with `available: 0` plus `variantId`/`variantLabel`.
+- **Stock = per POOL** (EPIC-2-ORDERS §6b). The pool is `(productId, shared ? null : variantId)`:
+  per variant, or the product's single pool for a SHARED-stock product (2026-10-30).
+  - Availability groups by `["productId","variantId"]`; lines on one pool are SUMMED before the check
+    (create, update, `advance` reopening, sale take-back).
+  - `poolQuantity` returns the variant's own `quantity`, else the product's (always the product's
+    when shared). `null` (deleted product or retired variant) → a conflict with `available: 0` plus
+    `variantId`/`variantLabel`. A shared pool's conflict names the PRODUCT only, with the combined
+    `requested`.
   - Sale units move ONLY through `moveSaleStock(tx, { productId, variantId }, delta)`. They sit on
-    the VARIANT row when the line has one (EPIC-2-ORDER-LIFECYCLE §6c).
+    the VARIANT row when the line has one and the stock is per variant, else on `products.quantity`
+    (two conditional `updateMany`s keyed on `shared_stock` — EPIC-2-ORDER-LIFECYCLE §6c).
   - `advance` stock lines carry `variantId`, so reopening onto a retired variant → `409` with
     `available: 0`.
-  - `POST /orders/availability` answers `variants: [{ variantId, available }]` for a variant product,
-    and its `available` = their sum (`null` when any is).
+  - `POST /orders/availability` answers `variants: [{ variantId, available }]` and `sharedStock` for a
+    variant product. Per variant its `available` = their sum (`null` when any is); shared, every
+    variant reports the pool figure and `available` is the pool.
 - **Read side.** Lines, damages and stock conflicts carry `variantId?`/`variantLabel?`. A line's
   `imageUrl` (`lineImageUrl`) is its variant's photo (values in option order), then the product
   SHOWCASE primary, and never `coverImageUrl`.
@@ -337,7 +372,9 @@ Frontend: `OrderForm mode="edit"` (one component; `orderToFormValues` mirrors `t
 - The stock cap is `takeableFor`: the window probe's per-pair figure (`variants[]`), else the
   variation's own `available`, else the product's for a line without variation. A variations line
   with no variation picked gets no hint, no cap and is never reconciled (the product-level window
-  figure is the SUM of its variations, so it never caps one).
+  figure is the SUM of its variations, so it never caps one). For a SHARED-stock product the lines
+  draw on one pool (`poolKeyOf`): the resolver (`appendLineAvailabilityErrors`' `poolOf`), the hint
+  and `reconcileAvailability` all subtract what the OTHER lines of that pool take.
 - The resolver blocks submit on `requiredLineVariant` / `invalidLineVariant` (shown on
   `lines.i.variantId` under the selects; a partial pick stays quiet until the first submit). The
   API's 400s (`variantRequired`, `variantForbidden`, `invalidLineVariant`, `duplicateLineProduct`)

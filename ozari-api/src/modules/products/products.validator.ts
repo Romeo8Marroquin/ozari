@@ -44,16 +44,17 @@ const rejectVariationWith =
   };
 
 /**
- * The stock rule both doors share once the variations are parsed: a product WITH options keeps its
- * stock on each variant (the parser already refused a `quantity` — `quantityWithVariants`) and
- * stores 0; one without options must carry its own valid `quantity`. `null` = rejected.
+ * The stock rule both doors share once the variations are parsed: a product whose variants own
+ * their stock keeps it on each variant (the parser already refused a `quantity` —
+ * `quantityWithVariants`) and stores 0; one without options, or with SHARED stock, must carry its
+ * own valid `quantity` (the one pool). `null` = rejected.
  */
 const resolveProductQuantity = (
   res: Response,
   variations: ParsedProductVariations,
   quantity: unknown,
 ): number | null => {
-  if (variations.options.length > 0) {
+  if (variations.options.length > 0 && !variations.sharedStock) {
     return 0;
   }
   if (
@@ -76,11 +77,20 @@ const resolveProductQuantity = (
 const parseVariationsAndStock = (
   res: Response,
   body: Record<string, unknown>,
-  scalars: Pick<ProductVariationsBody, "isRent" | "replacementPrice" | "securityDeposit" | "showcaseImages">,
+  scalars: Pick<
+    ProductVariationsBody,
+    "isRent" | "rentPrice" | "sellPrice" | "replacementPrice" | "securityDeposit" | "showcaseImages"
+  >,
   existing: ExistingProductVariations | null,
 ): { variations: ParsedProductVariations; quantity: number } | null => {
   const variations = parseProductVariations(
-    { options: body["options"], variants: body["variants"], quantity: body["quantity"], ...scalars },
+    {
+      options: body["options"],
+      variants: body["variants"],
+      quantity: body["quantity"],
+      sharedStock: body["sharedStock"],
+      ...scalars,
+    },
     existing,
     rejectVariationWith(res),
   );
@@ -116,6 +126,12 @@ const sanitizeProductMoney = (
   }
   return sanitized;
 };
+
+/** Whether the body declares variation options — the product's own price is then only a DEFAULT
+ *  (each variant must resolve one; the variations parser enforces that). A malformed `options` is
+ *  the parser's 400 to send, so it counts as none here. */
+const declaresOptions = (body: Record<string, unknown>): boolean =>
+  Array.isArray(body["options"]) && body["options"].length > 0;
 
 /** Log the create-validator warning for `key` and send its standard 400 (both share the key name). */
 const rejectCreate = (
@@ -277,17 +293,20 @@ export const validateCreateProduct = async (
     // The CONDITIONAL price rule — a product is exactly ONE business type:
     // Alquiler → rentPrice + a valid rent time unit, sellPrice forbidden; Venta → sellPrice only,
     // rent fields forbidden. `replacementPrice` is Alquiler-only too (what a client pays for a
-    // lost/damaged RENTAL — a sold item is simply consumed, there is nothing to replace).
+    // lost/damaged RENTAL — a sold item is simply consumed, there is nothing to replace). With
+    // variation options the price is only the DEFAULT the variants inherit (owner 2026-10-30): it
+    // may be absent, and the parser makes every variant resolve one (`variantPriceRequired`).
     const isRent = businessTypeId === BusinessTypeEnum.RENT;
     const hasRentTimeUnit =
       rentTimeUnitId !== undefined && rentTimeUnitId !== null;
     const pricingParams = { businessTypeId, rentPrice, sellPrice, rentTimeUnitId };
+    const priceIsDefault = declaresOptions(req.body as Record<string, unknown>);
     if (isRent) {
       if (sellMoney.value !== undefined) {
         rejectCreate(res, "pricingMismatch", pricingParams);
         return;
       }
-      if (rentMoney.value === undefined) {
+      if (rentMoney.value === undefined && !priceIsDefault) {
         rejectCreate(res, "rentPricingRequired", { rentPrice });
         return;
       }
@@ -305,7 +324,7 @@ export const validateCreateProduct = async (
         rejectCreate(res, "pricingMismatch", pricingParams);
         return;
       }
-      if (sellMoney.value === undefined) {
+      if (sellMoney.value === undefined && !priceIsDefault) {
         rejectCreate(res, "sellPricingRequired", { sellPrice });
         return;
       }
@@ -326,6 +345,8 @@ export const validateCreateProduct = async (
       req.body as Record<string, unknown>,
       {
         isRent,
+        rentPrice: isRent ? rentMoney.value : undefined,
+        sellPrice: isRent ? undefined : sellMoney.value,
         replacementPrice: isRent ? replacementMoney.value : undefined,
         securityDeposit: depositMoney.value,
         showcaseImages: sanitizedImages,
@@ -348,6 +369,7 @@ export const validateCreateProduct = async (
       quantity: resolvedQuantity,
       options: variations.options,
       variants: variations.variants,
+      sharedStock: variations.sharedStock,
       rentPrice: isRent ? rentMoney.value : undefined,
       rentTimeUnitId: isRent ? rentTimeUnitId : undefined,
       replacementPrice: isRent ? replacementMoney.value : undefined,
@@ -387,6 +409,31 @@ const rejectUpdate = (
 };
 
 /**
+ * The update's target product: a malformed id and an unknown/soft-deleted product are both `null`
+ * (→ 404) — a detail lookup either finds the row or it doesn't (the getProductById stance).
+ */
+const findUpdateTarget = async (
+  prismaClient: Awaited<ReturnType<typeof getPrismaClient>>,
+  rawId: unknown,
+) => {
+  const productId = Number(rawId);
+  if (!Number.isInteger(productId) || productId < 1) {
+    return null;
+  }
+  return prismaClient.product.findFirst({
+    where: { id: productId, isActive: true },
+    select: {
+      id: true,
+      // EVERY photo of the product (any set): a kept photo may move between sets.
+      productImages: { select: { id: true } },
+      productDetails: { select: { id: true } },
+      options: { select: { id: true, values: { select: { id: true } } } },
+      variants: { where: { isActive: true }, select: { id: true } },
+    },
+  });
+};
+
+/**
  * `PUT /products/:id` — the declarative full-state update (the RECONCILE design). Follows
  * `validateCreateProduct`'s shape exactly for the shared rules (same messages, same conditional
  * price rule), plus the update-only checks:
@@ -422,24 +469,8 @@ export const validateUpdateProduct = async (
       sellPrice,
     } = req.body as UpdateProductRequestModel;
 
-    // The target product: malformed id and unknown/soft-deleted product are both a 404 — a detail
-    // lookup either finds the row or it doesn't (the getProductById stance).
-    const productId = Number(req.params["id"]);
     const prismaClient = await getPrismaClient();
-    const product =
-      Number.isInteger(productId) && productId >= 1
-        ? await prismaClient.product.findFirst({
-            where: { id: productId, isActive: true },
-            select: {
-              id: true,
-              // EVERY photo of the product (any set): a kept photo may move between sets.
-              productImages: { select: { id: true } },
-              productDetails: { select: { id: true } },
-              options: { select: { id: true, values: { select: { id: true } } } },
-              variants: { where: { isActive: true }, select: { id: true } },
-            },
-          })
-        : null;
+    const product = await findUpdateTarget(prismaClient, req.params["id"]);
     if (!product) {
       logger.warn(
         i18next.t("products.updateProduct.validators.logs.productNotFound", {
@@ -618,12 +649,13 @@ export const validateUpdateProduct = async (
     const hasRentTimeUnit =
       rentTimeUnitId !== undefined && rentTimeUnitId !== null;
     const pricingParams = { businessTypeId, rentPrice, sellPrice, rentTimeUnitId };
+    const priceIsDefault = declaresOptions(req.body as Record<string, unknown>);
     if (isRent) {
       if (sellMoney.value !== undefined) {
         rejectCreate(res, "pricingMismatch", pricingParams);
         return;
       }
-      if (rentMoney.value === undefined) {
+      if (rentMoney.value === undefined && !priceIsDefault) {
         rejectCreate(res, "rentPricingRequired", { rentPrice });
         return;
       }
@@ -641,7 +673,7 @@ export const validateUpdateProduct = async (
         rejectCreate(res, "pricingMismatch", pricingParams);
         return;
       }
-      if (sellMoney.value === undefined) {
+      if (sellMoney.value === undefined && !priceIsDefault) {
         rejectCreate(res, "sellPricingRequired", { sellPrice });
         return;
       }
@@ -663,6 +695,8 @@ export const validateUpdateProduct = async (
       req.body as Record<string, unknown>,
       {
         isRent,
+        rentPrice: isRent ? rentMoney.value : undefined,
+        sellPrice: isRent ? undefined : sellMoney.value,
         replacementPrice: isRent ? replacementMoney.value : undefined,
         securityDeposit: depositMoney.value,
         showcaseImages: sanitizedImages,
@@ -689,6 +723,7 @@ export const validateUpdateProduct = async (
       quantity: resolvedQuantity,
       options: variations.options,
       variants: variations.variants,
+      sharedStock: variations.sharedStock,
       rentPrice: isRent ? rentMoney.value : undefined,
       rentTimeUnitId: isRent ? rentTimeUnitId : undefined,
       replacementPrice: isRent ? replacementMoney.value : undefined,

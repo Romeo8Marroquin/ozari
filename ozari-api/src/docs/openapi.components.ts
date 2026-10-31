@@ -381,8 +381,15 @@ export const schemas: Record<string, Schema> = {
           symbol: { type: "string", example: "Q" },
         },
       },
-      rentPrice: { type: "number", nullable: true, description: "Alquiler price per `rentTimeUnit`.", example: 75 },
-      sellPrice: { type: "number", nullable: true, description: "Venta price.", example: null },
+      rentPrice: {
+        type: "number",
+        nullable: true,
+        description:
+          "Alquiler price per `rentTimeUnit`. On a product WITH variations it is only the DEFAULT the " +
+          "variants inherit and may be absent — read `variants[]` for what a variation costs.",
+        example: 75,
+      },
+      sellPrice: { type: "number", nullable: true, description: "Venta price (a default with variations, like `rentPrice`).", example: null },
       rentTimeUnit: { type: "string", nullable: true, description: "Period the rent price is quoted against (Alquiler only).", example: "Día" },
       rentTimeUnitId: { type: "integer", nullable: true, description: "Its lookup id (Alquiler only).", example: 2 },
       securityDeposit: {
@@ -402,9 +409,10 @@ export const schemas: Record<string, Schema> = {
         type: "string",
         format: "uri",
         description:
-          "The photo a card / arrangement tile / picker shows: the showcase primary, else the DEFAULT " +
-          "variant's value photo, else absent. (An order line never uses it — the line shows its own " +
-          "variant's photo.)",
+          "The photo a card / arrangement tile / picker shows — the first that exists of: the showcase " +
+          "primary, the DEFAULT variant's value photo, the first variant's (canonical order) value " +
+          "photo, any value's photo (option order, value order); else absent. (An order line never " +
+          "uses it — the line shows its own variant's photo.)",
         example: "https://cdn.example.com/products/7/hero.webp",
       },
       options: {
@@ -419,10 +427,20 @@ export const schemas: Record<string, Schema> = {
           "empty for a product without variations. Exactly one has `isDefault: true`.",
         items: schemaRef("ProductVariant"),
       },
+      sharedStock: {
+        type: "boolean",
+        description:
+          "The STOCK MODE of a product with variations (always false without): true = the variants " +
+          "are configurations of the SAME units and draw from the product's one pool; false = each " +
+          "variant owns its stock.",
+        example: false,
+      },
       details: { type: "array", items: schemaRef("ProductDetailItem") },
       inStock: {
         type: "boolean",
-        description: "Availability signal (`available > 0`) — **Admin only**. For a product WITH variants, Σ over its active variants.",
+        description:
+          "Availability signal (`available > 0`) — **Admin only**. For a product WITH variants, Σ over " +
+          "its active variants (or the one pool when `sharedStock`).",
         example: true,
       },
       available: {
@@ -430,7 +448,8 @@ export const schemas: Record<string, Schema> = {
         description:
           "Units takeable right now — **Admin only**. Venta: the recorded stock. " +
           "Alquiler: fleet minus units out on active rentals. For a product WITH variants: the Σ of " +
-          "its active variants' `available` (`products.quantity` is 0 and never read).",
+          "its active variants' `available` (`products.quantity` is 0 and never read) — or, when " +
+          "`sharedStock`, the product's one pool minus every variant's holds.",
         example: 35,
       },
       total: {
@@ -438,7 +457,7 @@ export const schemas: Record<string, Schema> = {
         description:
           "The whole rental fleet in circulation (`available` + currently rented) — **Admin only, " +
           "Alquiler only** (absent for Venta, where it would duplicate `available`). Σ over the " +
-          "active variants for a product with variants.",
+          "active variants for a product with variants (the pool when `sharedStock`).",
         example: 40,
       },
       replacementPrice: { type: "number", description: "As-new replacement value — **Admin only**.", example: 900 },
@@ -450,7 +469,13 @@ export const schemas: Record<string, Schema> = {
     description: "One value of a variation option (\"Rojo\"), with its own photo set (display order, one flagged primary).",
     properties: {
       id: { type: "integer", example: 10 },
-      name: { type: "string", example: "Rojo" },
+      name: { type: "string", example: "Marfil" },
+      color: {
+        type: "string",
+        pattern: "^#[0-9a-f]{6}$",
+        description: "Its swatch (`#rrggbb`) — present exactly on the values of a `color` option.",
+        example: "#fffff0",
+      },
       sortOrder: { type: "integer", example: 0 },
       images: { type: "array", items: schemaRef("ProductImage") },
     },
@@ -461,6 +486,12 @@ export const schemas: Record<string, Schema> = {
     properties: {
       id: { type: "integer", example: 3 },
       name: { type: "string", example: "Color" },
+      kind: {
+        type: "string",
+        enum: ["generic", "color"],
+        description: "How it is picked: named values, or named values with a swatch (at most one `color` option per product).",
+        example: "color",
+      },
       sortOrder: { type: "integer", example: 0 },
       values: { type: "array", items: schemaRef("ProductOptionValue") },
     },
@@ -492,9 +523,10 @@ export const schemas: Record<string, Schema> = {
   ProductVariant: {
     type: "object",
     description:
-      "One ACTIVE offered combination with EFFECTIVE values (its override, else the product's). " +
-      "`quantity`, `available`, `inStock`, `total`, `replacementPrice`, `overrides` and `usage` are " +
-      "**Admin only** (role-projected like the product's stock fields).",
+      "One ACTIVE offered combination with EFFECTIVE prices and deposit (its override, else the " +
+      "product's). `quantity`, `available`, `inStock`, `total`, `replacementPrice`, `overrides` and " +
+      "`usage` are **Admin only** (role-projected like the product's stock fields); on a " +
+      "`sharedStock` product they report the product's one pool.",
     properties: {
       id: { type: "integer", example: 55 },
       valueIds: {
@@ -512,7 +544,13 @@ export const schemas: Record<string, Schema> = {
       rentPrice: { type: "number", example: 75 },
       sellPrice: { type: "number" },
       securityDeposit: { type: "number", example: 300 },
-      description: { type: "string", example: "Mesa para 8 personas" },
+      description: {
+        type: "string",
+        description:
+          "The variant's OWN text only — shown UNDER the product's `description`, never instead of " +
+          "it (absent when it has none).",
+        example: "Con flores naturales de temporada",
+      },
       imageUrl: {
         type: "string",
         format: "uri",
@@ -521,7 +559,11 @@ export const schemas: Record<string, Schema> = {
           "else first); else the showcase primary; else absent.",
         example: "https://cdn.example.com/products/7/rojo.webp",
       },
-      quantity: { type: "integer", description: "Its OWN stock (fleet for Alquiler, shelf for Venta) — **Admin only**.", example: 20 },
+      quantity: {
+        type: "integer",
+        description: "Its OWN stock (fleet for Alquiler, shelf for Venta), or the shared pool — **Admin only**.",
+        example: 20,
+      },
       available: { type: "integer", description: "Same rule as a product's `available` — **Admin only**.", example: 18 },
       inStock: { type: "boolean", description: "`available > 0` — **Admin only**.", example: true },
       total: { type: "integer", description: "**Admin only, Alquiler only**.", example: 20 },
@@ -1577,10 +1619,16 @@ export const schemas: Record<string, Schema> = {
       "One product's availability for the window. `available` is fleet-minus-held for rentals, " +
       "current stock for sales, and `null` for a rental with no pickup window yet. For a product " +
       "WITH variants, `available` is the Σ of its variants' (`null` when any is) and `variants` " +
-      "carries each pool.",
+      "carries each pool — unless `sharedStock`: then `available` is the product's ONE pool and " +
+      "every variant reports that same figure (the lines of the product compete for it together).",
     properties: {
       productId: { type: "integer", example: 3 },
       available: { type: "integer", nullable: true, example: 10 },
+      sharedStock: {
+        type: "boolean",
+        description: "Present only for a product with variants: whether they share one pool.",
+        example: false,
+      },
       variants: {
         type: "array",
         description: "Per ACTIVE variant (id order) — present only for a product with variants.",
@@ -2291,10 +2339,21 @@ export const schemas: Record<string, Schema> = {
     description:
       "One variation axis (array order = `sortOrder`: label order AND photo precedence). `id` is " +
       "update-only (a kept option of THIS product). Names: 1–40 chars (`variationNameRegex`), unique " +
-      "per product case/accent-insensitively. 1–20 values.",
+      "per product case/accent-insensitively. 1–20 values. A `color` option's values each REQUIRE " +
+      "a `color` (`400` `valueColorRequired` / `invalidValueColor`); a generic option's values may " +
+      "not carry one (`valueColorForbidden`).",
     properties: {
       id: { type: "integer", example: 3 },
       name: { type: "string", minLength: 1, maxLength: 40, example: "Color" },
+      kind: {
+        type: "string",
+        enum: ["generic", "color"],
+        default: "generic",
+        description:
+          "How the option is picked; absent = `generic`. At most ONE `color` option per product " +
+          "(`400` `multipleColorOptions`); any other value is `400` `invalidOptionKind`.",
+        example: "color",
+      },
       values: {
         type: "array",
         minItems: 1,
@@ -2319,7 +2378,13 @@ export const schemas: Record<string, Schema> = {
               minLength: 1,
               maxLength: 40,
               description: "Unique within its option (case/accent-insensitive).",
-              example: "Rojo",
+              example: "Marfil",
+            },
+            color: {
+              type: "string",
+              pattern: "^#[0-9a-fA-F]{6}$",
+              description: "The swatch — required on a `color` option's values, forbidden otherwise; stored lowercased.",
+              example: "#FFFFF0",
             },
             images: {
               type: "array",
@@ -2333,14 +2398,15 @@ export const schemas: Record<string, Schema> = {
   },
   ProductVariantRequest: {
     type: "object",
-    required: ["valueKeys", "quantity"],
+    required: ["valueKeys"],
     description:
       "One OFFERED combination. `id` is update-only (an ACTIVE variant of this product — its stock " +
       "and holds carry over, even when its combination changes). Overrides follow the product's " +
       "business type — Alquiler: `rentPrice`/`replacementPrice`/`securityDeposit`; Venta: " +
       "`sellPrice` only; anything else is `400` `variantPricingMismatch`. Absent = inherit the " +
-      "product's value. On EFFECTIVE values the deposit may not exceed the replacement (`400` " +
-      "`variantSecurityDepositAboveReplacement`).",
+      "product's value — and every variant must END UP with a price, its own or the product's " +
+      "default (`400` `variantPriceRequired`). On EFFECTIVE values the deposit may not exceed the " +
+      "replacement (`400` `variantSecurityDepositAboveReplacement`).",
     properties: {
       id: { type: "integer", example: 55 },
       valueKeys: {
@@ -2349,7 +2415,15 @@ export const schemas: Record<string, Schema> = {
         items: { type: "string" },
         example: ["v10", "t2"],
       },
-      quantity: { type: "integer", minimum: 0, maximum: 5000, description: "The variant's OWN stock.", example: 20 },
+      quantity: {
+        type: "integer",
+        minimum: 0,
+        maximum: 5000,
+        description:
+          "The variant's OWN stock — REQUIRED unless the product's `sharedStock` is true, where it is " +
+          "FORBIDDEN (`400` `variantQuantityWithSharedStock`; the pool is the product's `quantity`).",
+        example: 20,
+      },
       rentPrice: { type: "number", minimum: 0, example: 60 },
       sellPrice: { type: "number", minimum: 0 },
       replacementPrice: { type: "number", minimum: 0, description: "Cannot be cleared per variant — absent inherits.", example: 850 },
@@ -2365,7 +2439,9 @@ export const schemas: Record<string, Schema> = {
       "**Body limit 100kb** (this route and `PUT /products/{id}` only — every other route is 10kb). " +
       "Creates a product (+ nested details + gallery images). The CONDITIONAL price rule applies by " +
       "business type: **Alquiler** requires `rentPrice` + `rentTimeUnitId` and forbids `sellPrice`; " +
-      "**Venta** requires `sellPrice` and forbids the rent fields AND `replacementPrice` (the " +
+      "**Venta** requires `sellPrice` and forbids the rent fields AND `replacementPrice` — with " +
+      "variation `options` the price becomes an OPTIONAL default each variant inherits " +
+      "(`rentTimeUnitId` stays required for Alquiler) (the " +
       "as-new value billed for a lost/damaged RENTAL — a sold item is consumed, nothing to " +
       "replace; optional for Alquiler). `images` reference R2 keys previously " +
       "minted by `/products/images/upload-url` (the files must already be uploaded); the public URL " +
@@ -2384,9 +2460,19 @@ export const schemas: Record<string, Schema> = {
         minimum: 0,
         maximum: 5000,
         description:
-          "REQUIRED when `options` is empty; FORBIDDEN when options exist (`400` " +
+          "REQUIRED when `options` is empty or `sharedStock` is true (the ONE pool every variant " +
+          "draws from); FORBIDDEN when options exist with per-variant stock (`400` " +
           "`quantityWithVariants`) — each variant carries its own stock, and the product row stores 0.",
         example: 40,
+      },
+      sharedStock: {
+        type: "boolean",
+        default: false,
+        description:
+          "The STOCK MODE of a product with options: true = its variants are configurations of the " +
+          "SAME units (an arrangement with or without an add-on) and share the product's `quantity`. " +
+          "`true` without options is `400` `sharedStockWithoutVariants`; non-boolean `invalidSharedStock`.",
+        example: false,
       },
       options: {
         type: "array",
@@ -2400,7 +2486,13 @@ export const schemas: Record<string, Schema> = {
         description: "The offered combinations — at least one when options exist, none otherwise.",
         items: schemaRef("ProductVariantRequest"),
       },
-      rentPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Alquiler; forbidden for Venta.", example: 75 },
+      rentPrice: {
+        type: "number",
+        nullable: true,
+        minimum: 0,
+        description: "Alquiler only (forbidden for Venta). Required without options; with options an optional DEFAULT.",
+        example: 75,
+      },
       rentTimeUnitId: { type: "integer", nullable: true, description: "Required for Alquiler; forbidden for Venta.", example: 2 },
       replacementPrice: { type: "number", nullable: true, minimum: 0, example: 900 },
       securityDeposit: {
@@ -2412,7 +2504,13 @@ export const schemas: Record<string, Schema> = {
           "`replacementPrice` when both are set.",
         example: 300,
       },
-      sellPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Venta; forbidden for Alquiler.", example: null },
+      sellPrice: {
+        type: "number",
+        nullable: true,
+        minimum: 0,
+        description: "Venta only (forbidden for Alquiler). Required without options; with options an optional DEFAULT.",
+        example: null,
+      },
       productDetails: {
         type: "array",
         description:
@@ -2466,8 +2564,9 @@ export const schemas: Record<string, Schema> = {
       "absent ones are removed — a removed variant an order line references is RETIRED (tombstoned, " +
       "reported in `variantOutcome.retired`), else hard-deleted. A value id must stay under its " +
       "option; a variant id must be an ACTIVE variant of this product. Removing a variant that " +
-      "open/future orders HOLD is `409` `variantInUse`; adding the first options (or removing all " +
-      "of them) while open/future orders hold the current pool is `409` `stockModeInUse`.",
+      "open/future orders HOLD is `409` `variantInUse`; adding the first options, removing all of " +
+      "them, or flipping `sharedStock` while open/future orders hold the current pool is `409` " +
+      "`stockModeInUse`.",
     properties: {
       name: { type: "string", minLength: 5, maxLength: 255, example: "Mesa redonda" },
       description: { type: "string", nullable: true, minLength: 5, maxLength: 500, example: "Mesa para 8 personas" },
@@ -2478,8 +2577,16 @@ export const schemas: Record<string, Schema> = {
         type: "integer",
         minimum: 0,
         maximum: 5000,
-        description: "REQUIRED when `options` is empty; FORBIDDEN when options exist (`400` `quantityWithVariants`).",
+        description:
+          "REQUIRED when `options` is empty or `sharedStock` is true; FORBIDDEN when options exist " +
+          "with per-variant stock (`400` `quantityWithVariants`).",
         example: 40,
+      },
+      sharedStock: {
+        type: "boolean",
+        default: false,
+        description: "The stock mode — as in `CreateProductRequest`. Flipping it while orders hold the pool is `409` `stockModeInUse`.",
+        example: false,
       },
       options: {
         type: "array",
@@ -2493,7 +2600,13 @@ export const schemas: Record<string, Schema> = {
         description: "The FINAL offered combinations — at least one when options exist, none otherwise.",
         items: schemaRef("ProductVariantRequest"),
       },
-      rentPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Alquiler; forbidden for Venta.", example: 75 },
+      rentPrice: {
+        type: "number",
+        nullable: true,
+        minimum: 0,
+        description: "Alquiler only (forbidden for Venta). Required without options; with options an optional DEFAULT.",
+        example: 75,
+      },
       rentTimeUnitId: { type: "integer", nullable: true, description: "Required for Alquiler; forbidden for Venta.", example: 2 },
       replacementPrice: { type: "number", nullable: true, minimum: 0, example: 900 },
       securityDeposit: {
@@ -2505,7 +2618,13 @@ export const schemas: Record<string, Schema> = {
           "`replacementPrice` when both are set.",
         example: 300,
       },
-      sellPrice: { type: "number", nullable: true, minimum: 0, description: "Required for Venta; forbidden for Alquiler.", example: null },
+      sellPrice: {
+        type: "number",
+        nullable: true,
+        minimum: 0,
+        description: "Venta only (forbidden for Alquiler). Required without options; with options an optional DEFAULT.",
+        example: null,
+      },
       productDetails: {
         type: "array",
         description:

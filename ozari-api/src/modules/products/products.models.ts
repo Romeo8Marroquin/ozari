@@ -56,14 +56,21 @@ export interface ProductOptionValueRequestModel {
   id?: number;
   key: string;
   name: string;
+  /** `#rrggbb` (lowercased) — exactly on a COLOR option's values, absent otherwise. */
+  color: string | undefined;
   images: ProductVariationImageRequestModel[];
 }
+
+/** How an option is picked (owner 2026-10-30): named values, or named values with a swatch. */
+export type ProductOptionKindModel = "generic" | "color";
 
 /** One option ("Color"); array order = `sortOrder` (label order AND photo precedence). */
 export interface ProductOptionRequestModel {
   /** Update only: a kept option of THIS product. */
   id?: number;
   name: string;
+  /** Absent in the body = "generic"; at most one "color" option per product. */
+  kind: ProductOptionKindModel;
   values: ProductOptionValueRequestModel[];
 }
 
@@ -76,6 +83,7 @@ export interface ProductVariantRequestModel {
   /** Update only: an ACTIVE variant of this product (its stock and holds carry over). */
   id?: number;
   valueKeys: string[];
+  /** Its own stock — resolved to 0 on a SHARED-stock product (the request must omit it there). */
   quantity: number;
   rentPrice: number | undefined;
   sellPrice: number | undefined;
@@ -95,14 +103,19 @@ export interface CreateProductRequestModel {
   images: CreateProductImageRequestModel[];
   name: string;
   productDetails: CreateProductDetailRequestModel[];
-  /** The product's stock when it has NO variations; resolved to 0 by the validator when it has
-   *  (the request must then omit it — `quantityWithVariants`), whose stock lives on each variant. */
+  /** The product's stock when it has NO variations or SHARED stock; resolved to 0 by the validator
+   *  when each variant owns its stock (the request must then omit it — `quantityWithVariants`). */
   quantity: number;
   /** Variation axes, in order; empty = a product without variations. */
   options: ProductOptionRequestModel[];
   /** The offered combinations — empty exactly when `options` is. */
   variants: ProductVariantRequestModel[];
-  /** Required when `businessTypeId` = Alquiler; forbidden for Venta (see the conditional price rule). */
+  /** The STOCK MODE of a product with options (owner 2026-10-30): true = the variants are
+   *  configurations of the same units and draw from the product's one `quantity`. Always false
+   *  without options. */
+  sharedStock: boolean;
+  /** Alquiler only (forbidden for Venta). Required without options; with options it is the DEFAULT
+   *  every variant without its own price inherits (each variant must resolve one). */
   rentPrice: number | undefined;
   /** The period the rent price is quoted against — required with `rentPrice`, forbidden for Venta. */
   rentTimeUnitId: number | undefined;
@@ -113,7 +126,7 @@ export interface CreateProductRequestModel {
    *  never above `replacementPrice` when both are set (it covers partial damage; a total loss is
    *  billed at the replacement price). Not part of any price: orders snapshot it per line. */
   securityDeposit: number | undefined;
-  /** Required when `businessTypeId` = Venta; forbidden for Alquiler. */
+  /** Venta only (forbidden for Alquiler); required/default exactly like `rentPrice`. */
   sellPrice: number | undefined;
 }
 
@@ -168,6 +181,8 @@ export interface ProductImageResponseModel {
 export interface ProductOptionValueResponseModel {
   id: number;
   name: string;
+  /** `#rrggbb` — present exactly on a COLOR option's values. */
+  color?: string | undefined;
   sortOrder: number;
   images: ProductImageResponseModel[];
 }
@@ -176,6 +191,7 @@ export interface ProductOptionValueResponseModel {
 export interface ProductOptionResponseModel {
   id: number;
   name: string;
+  kind: ProductOptionKindModel;
   sortOrder: number;
   values: ProductOptionValueResponseModel[];
 }
@@ -196,7 +212,7 @@ export interface ProductVariantUsageModel {
 }
 
 /**
- * One ACTIVE variant as projected, with EFFECTIVE values (its override, else the product's).
+ * One ACTIVE variant as projected, with EFFECTIVE prices/deposit (its override, else the product's).
  * `label` is its values' names in option order ("Rojo · Redondo"). Exactly one variant of a product
  * has `isDefault: true` (the flagged one, else the first in canonical order).
  */
@@ -208,10 +224,13 @@ export interface ProductVariantResponseModel {
   rentPrice?: number | undefined;
   sellPrice?: number | undefined;
   securityDeposit?: number | undefined;
+  /** The variant's OWN text only (owner 2026-10-30) — shown UNDER the product's description, never
+   *  instead of it, so there is no fallback here. */
   description?: string | undefined;
   /** Its first value (in option order) with photos gives its primary; else the showcase primary. */
   imageUrl?: string | undefined;
-  /** Admin only — the variant's own stock and availability (same rules as a product's). */
+  /** Admin only — the variant's stock and availability (same rules as a product's). On a SHARED-stock
+   *  product every variant reports the product's one pool. */
   quantity?: number;
   available?: number;
   inStock?: boolean;
@@ -242,6 +261,8 @@ export interface ProductListItemResponseModel {
   /** The category's lookup id — same public-reference stance as `businessTypeId`. */
   categoryId: number;
   currency: CurrencyModel;
+  /** The product's own price. With variations it is only the DEFAULT the variants inherit, and may
+   *  be absent — read `variants[]` for what a variation costs. */
   rentPrice: number | undefined;
   sellPrice: number | undefined;
   /** The period `rentPrice` is quoted against (Alquiler only), e.g. "Día". */
@@ -253,15 +274,20 @@ export interface ProductListItemResponseModel {
   securityDeposit: number | undefined;
   /** The product's SHOWCASE photos only (value photos live under `options[].values[].images`). */
   images: ProductImageResponseModel[];
-  /** The photo a card/tile shows: the showcase primary, else the DEFAULT variant's image, else absent. */
+  /** The photo a card/tile shows (`coverImageUrl`): the showcase primary, else the DEFAULT
+   *  variant's value photo, else the first variant's / value's photo that exists, else absent. */
   coverImageUrl?: string | undefined;
   /** Variation axes in order — empty for a product without variations. */
   options: ProductOptionResponseModel[];
   /** ACTIVE variants in canonical order (option order, then value order) — empty without variations. */
   variants: ProductVariantResponseModel[];
+  /** The stock mode (always false without variations): true = every variant draws from the
+   *  product's one pool. */
+  sharedStock: boolean;
   details: BaseProductDetailsResponseModel[];
   /** Availability signal (Admin only) — derived: `available > 0`. For a product WITH variants every
-   *  stock figure (`inStock`/`available`/`total`) is the Σ over its active variants. */
+   *  stock figure (`inStock`/`available`/`total`) is the Σ over its active variants, or the one
+   *  pool when the stock is shared. */
   inStock?: boolean;
   /**
    * Units takeable RIGHT NOW (Admin only). Venta: the recorded stock (sales decrement it).

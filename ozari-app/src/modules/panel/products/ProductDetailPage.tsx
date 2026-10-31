@@ -11,6 +11,7 @@ import {
   HiOutlinePencilSquare,
   HiOutlineShoppingBag,
   HiOutlineTrash,
+  HiOutlineXMark,
 } from 'react-icons/hi2';
 import Button from '@components/Button';
 import LogoMark from '@components/LogoMark';
@@ -40,7 +41,16 @@ import { scrollPanelToTop } from './productsScroll';
 import ProductsStatus from './ProductsStatus';
 import SectionReveal from './SectionReveal';
 import { formatHeadlinePrice, formatMoney, primaryImageIndex } from './productPresentation';
-import { effectivePricing, matchVariant, photoSetFor, variantMatchesPicks } from './productVariations';
+import {
+  effectivePricing,
+  isLightColor,
+  lineDisplayName,
+  matchVariant,
+  photoSetFor,
+  pickedLabel,
+  variantMatchesPicks,
+  variantRange,
+} from './productVariations';
 import { useProduct } from './useProduct';
 import type { Product } from './product.types';
 
@@ -104,6 +114,19 @@ const StockLine: React.FC<{ product: Product }> = ({ product }) => {
  * `estimateDetailHeroRect` mirrors these numbers.
  */
 const PRODUCT_HERO_COLUMN = 'mx-auto w-full max-w-[max(14rem,calc((100svh_-_12rem)*0.75))]';
+
+/** Arrow keys walk a row of option controls (swatches or chips) like a toolbar; Tab still reaches
+ *  each one on its own, so neither path is the only way in. Wraps at both ends. */
+const moveFocusInRow = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+  const buttons = [...event.currentTarget.querySelectorAll('button')];
+  const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+  /* v8 ignore next -- keydown on the row comes from one of its buttons */
+  if (at === -1) return;
+  event.preventDefault();
+  const step = event.key === 'ArrowRight' ? 1 : -1;
+  buttons[(at + step + buttons.length) % buttons.length].focus();
+};
 
 /** The shimmering placeholder for a COLD load (a deep link — arriving from the grid is cache-warm).
  *  Its hero block is the real frame, so nothing moves when the data lands. */
@@ -171,8 +194,10 @@ const ProductDetailPage: React.FC = () => {
   const activeImage = images[activeIndex] ?? images[0];
   const allPicked = options.length > 0 && picks.every((pick) => pick !== null);
   const variant = product && allPicked ? matchVariant(product, picks) : undefined;
-  // The info a pick rewrites eases its height as one region (see the render).
+  // The info a pick rewrites eases its height as one region (see the render); the title above it is
+  // its own sibling region (never nested — two height tweens on nested boxes fight).
   const infoRegion = useMorphOnChange(picks.join(','));
+  const titleRegion = useMorphOnChange(picks.join(','));
 
   // The full-size viewer (opens on the hero / its expand affordance, at the current image).
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -195,14 +220,11 @@ const ProductDetailPage: React.FC = () => {
     setGhostImageUrl(activeImage?.url ?? null);
     setSelectedIndex(index);
   };
-  // A pick (or un-pick — pressing the chosen value again) that brings a different photo set
-  // crossfades to the new set's primary, through the same ghost layer as a thumbnail switch.
-  const pick = (optionIndex: number, valueId: number): void => {
+  // New picks that bring a different photo set crossfade to the new set's primary, through the same
+  // ghost layer as a thumbnail switch.
+  const applyPicks = (next: (number | null)[]): void => {
     /* v8 ignore next -- the pickers only render alongside the product */
     if (!product) return;
-    const next = picks.map((current, index) =>
-      index === optionIndex ? (current === valueId ? null : valueId) : current,
-    );
     setRawPicks(next);
     const nextImages = photoSetFor(product, next);
     if (nextImages === images) return;
@@ -211,6 +233,21 @@ const ProductDetailPage: React.FC = () => {
     // Only when a photo is both leaving AND arriving: the ghost needs an incoming hero to fade over.
     if (activeImage && incoming && incoming.url !== activeImage.url) setGhostImageUrl(activeImage.url);
   };
+  // A pick — or an un-pick: pressing the chosen value again.
+  const pick = (optionIndex: number, valueId: number): void =>
+    applyPicks(
+      picks.map((current, index) => (index === optionIndex ? (current === valueId ? null : valueId) : current)),
+    );
+  // "Limpiar selección" — back to exactly what opening the product from the grid shows. The button
+  // turns inert as it clears, so focus first moves to the first picker rather than falling to body.
+  const pickers = useRef<HTMLDivElement>(null);
+  const clearPicks = (): void => {
+    pickers.current?.querySelector('button')?.focus();
+    applyPicks(options.map(() => null));
+  };
+  // The value a pointer rests on (or keyboard focus sits on) speaks in its option's heading before
+  // it is chosen — "Color: Marfil" — the way a shop shows a swatch's name on hover.
+  const [preview, setPreview] = useState<{ optionIndex: number; name: string } | null>(null);
   // BOTH layers tween: the photo is CONTAINED (letterboxed), so wherever the incoming photo does not
   // reach — the sides, when a wide photo gives way to a tall one — the ghost shows through, and left
   // at full opacity it would vanish in one frame when it unmounts. Fading it out on the same clock
@@ -352,8 +389,8 @@ const ProductDetailPage: React.FC = () => {
 
   const isSell = product?.businessType === SELL_BUSINESS_TYPE;
   // What the info column speaks for: the picked VARIATION (its values arrive effective, stock
-  // included for the Admin) once every option is picked; the product — "Desde" its lowest price —
-  // until then.
+  // included for the Admin) once every option is picked; the product — "Desde" its lowest price,
+  // its total stock — until then.
   const shown: Product | null | undefined =
     product && variant
       ? {
@@ -368,8 +405,39 @@ const ProductDetailPage: React.FC = () => {
   const headline = shown ? formatHeadlinePrice(shown) : null;
   const headlineText =
     headline && (headline.from ? t(`${KEY}.card.priceFrom`, { price: headline.price }) : headline.price);
+  const anyPicked = picks.some((value) => value !== null);
   const pickNote = allPicked ? (variant ? variant.label : t(`${DKEY}.notOffered`)) : t(`${DKEY}.pickHint`);
-  const description = shown?.description ?? t(`${KEY}.card.noDescription`);
+  // The title follows the picks: "Mantel", then "Mantel — Negro", then "Mantel — Negro · Redondo".
+  const title = product
+    ? lineDisplayName({ productName: product.name, variantLabel: pickedLabel(product, picks) })
+    : '';
+  // A deposit / replacement BEFORE a complete pick: with variations the product's own value is only a
+  // default, so the line speaks for the offered variations — one figure when they agree, "Desde" the
+  // lowest when they differ (the headline price's rule).
+  const figure = (
+    read: (source: { securityDeposit?: number; replacementPrice?: number }) => number | undefined,
+  ): { amount: number; from: boolean } | undefined => {
+    if (!shown) return undefined;
+    const range = !variant && product ? variantRange(product, read) : null;
+    if (range) return { amount: range.min, from: range.min !== range.max };
+    const own = read(shown);
+    return own === undefined ? undefined : { amount: own, from: false };
+  };
+  const money = (value: { amount: number; from: boolean }, symbol: string): string => {
+    const amount = formatMoney(value.amount, symbol);
+    return value.from ? t(`${KEY}.card.priceFrom`, { price: amount }) : amount;
+  };
+  const replacement = figure((source) => source.replacementPrice);
+  const deposit = figure((source) => source.securityDeposit);
+  // The description STACKS (owner 2026-10-30): the product's general text always, the picked
+  // variation's own text under it — and "no description" only when neither has one.
+  const variantText = variant?.description;
+  const generalText = product?.description ?? (variantText ? undefined : t(`${KEY}.card.noDescription`));
+  // The option pickers in display order: the COLOR option leads (a shop's swatches come first);
+  // everything else keeps the admin's order. Labels, photos and titles keep the option order.
+  const pickerOrder = options
+    .map((option, index) => ({ option, index }))
+    .sort((a, b) => Number(b.option.kind === 'color') - Number(a.option.kind === 'color'));
 
   return (
     <div ref={root} className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6">
@@ -546,12 +614,20 @@ const ProductDetailPage: React.FC = () => {
                     {product.businessType}
                   </span>
                 </div>
-                <h2 className="reveal-item text-2xl font-bold text-charcoal sm:text-3xl">{product.name}</h2>
-                {headlineText && (
-                  <p className="reveal-item text-xl font-bold text-charcoal">
-                    <MorphSwap swapKey={headlineText}>{headlineText}</MorphSwap>
-                  </p>
-                )}
+                {/* The title names the picks as they are made; its own region eases the height a
+                    longer name may wrap to, so the price and everything below glide with it. */}
+                <div ref={titleRegion} className="flex flex-col gap-4">
+                  <h2 className="reveal-item text-2xl font-bold text-charcoal sm:text-3xl">
+                    <MorphSwap swapKey={title} block>
+                      {title}
+                    </MorphSwap>
+                  </h2>
+                  {headlineText && (
+                    <p className="reveal-item text-xl font-bold text-charcoal">
+                      <MorphSwap swapKey={headlineText}>{headlineText}</MorphSwap>
+                    </p>
+                  )}
+                </div>
                 {/* What a pick rewrites lives in ONE region: its height eases (the description
                     re-wrapping, a note's line count) while each text cross-fades in place, so the
                     details and the actions below glide instead of jumping. */}
@@ -561,84 +637,168 @@ const ProductDetailPage: React.FC = () => {
                     pairs with the other picks stays pressable (so the visitor can switch
                     straight across) but reads muted; the combination then says it is not offered. */}
                 {options.length > 0 && (
-                  <div className="reveal-item flex flex-col gap-3">
-                    {options.map((option, optionIndex) => (
-                      <div
-                        key={option.id}
-                        role="group"
-                        aria-label={t(`${DKEY}.options`, { name: option.name })}
-                        className="flex min-w-0 flex-col gap-1.5"
-                      >
-                        <span className="text-xs font-semibold uppercase tracking-wide text-charcoal/50">
-                          {option.name}
-                        </span>
-                        <div className="flex flex-wrap gap-2">
-                          {option.values.map((value) => {
-                            const pressed = picks[optionIndex] === value.id;
-                            const trial = picks.map((current, index) =>
-                              index === optionIndex ? value.id : current,
-                            );
-                            /* v8 ignore next -- `?? []`: a product with options always carries variants */
-                            const reachable = (product.variants ?? []).some((candidate) =>
-                              variantMatchesPicks(product, candidate, trial),
-                            );
-                            return (
-                              <button
-                                key={value.id}
-                                type="button"
-                                aria-pressed={pressed}
-                                onClick={() => pick(optionIndex, value.id)}
-                                className={`max-w-full cursor-pointer truncate rounded-chip px-3 py-1.5 text-sm font-medium transition-[background-color,color,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta motion-reduce:transition-none ${
-                                  pressed
-                                    ? 'bg-charcoal text-white'
-                                    : `bg-charcoal/[0.05] text-charcoal/80 hover:bg-charcoal/[0.09] ${reachable ? '' : 'opacity-45'}`
-                                }`}
-                              >
-                                {value.name}
-                              </button>
-                            );
-                          })}
+                  <div ref={pickers} className="reveal-item flex flex-col gap-3">
+                    {pickerOrder.map(({ option, index: optionIndex }) => {
+                      const isColor = option.kind === 'color';
+                      const pickedValue = option.values.find((value) => value.id === picks[optionIndex]);
+                      // "Color: Marfil" — the hovered/focused value first, else the chosen one.
+                      const headingValue =
+                        preview?.optionIndex === optionIndex ? preview.name : pickedValue?.name;
+                      return (
+                        <div
+                          key={option.id}
+                          role="group"
+                          aria-label={t(`${DKEY}.options`, { name: option.name })}
+                          className="flex min-w-0 flex-col gap-1.5"
+                        >
+                          <span className="flex min-w-0 items-baseline gap-1 text-xs font-semibold uppercase tracking-wide text-charcoal/50">
+                            <span className="shrink-0">{headingValue ? `${option.name}:` : option.name}</span>
+                            {/* Decorative echo of the hovered/chosen name (each control already
+                                carries its own); it fades rather than popping in. */}
+                            <span
+                              aria-hidden
+                              className={`min-w-0 truncate normal-case tracking-normal text-charcoal transition-opacity duration-150 motion-reduce:transition-none ${headingValue ? 'opacity-100' : 'opacity-0'}`}
+                            >
+                              {headingValue ?? ' '}
+                            </span>
+                          </span>
+                          <div
+                            className={`flex flex-wrap ${isColor ? 'gap-2.5 p-0.5' : 'gap-2'}`}
+                            // Arrow keys walk a row of swatches/chips like any toolbar; Tab still
+                            // reaches each one.
+                            onKeyDown={(event) => moveFocusInRow(event)}
+                            onPointerLeave={() => setPreview(null)}
+                          >
+                            {option.values.map((value) => {
+                              const pressed = picks[optionIndex] === value.id;
+                              const trial = picks.map((current, index) =>
+                                index === optionIndex ? value.id : current,
+                              );
+                              /* v8 ignore next -- `?? []`: a product with options always carries variants */
+                              const matching = (product.variants ?? []).filter((candidate) =>
+                                variantMatchesPicks(product, candidate, trial),
+                              );
+                              const reachable = matching.length > 0;
+                              // Sold out = every variation this value still leads to reports 0 takeable
+                              // (Admin only — a Client receives no stock figures).
+                              const soldOut =
+                                reachable && matching.every((candidate) => candidate.available === 0);
+                              const showPreview = (): void => setPreview({ optionIndex, name: value.name });
+                              const common = {
+                                type: 'button' as const,
+                                'aria-pressed': pressed,
+                                onClick: () => pick(optionIndex, value.id),
+                                onPointerEnter: showPreview,
+                                onFocus: showPreview,
+                                onBlur: () => setPreview(null),
+                              };
+                              if (isColor && value.color) {
+                                return (
+                                  <button
+                                    key={value.id}
+                                    {...common}
+                                    aria-label={
+                                      soldOut ? t(`${DKEY}.swatchSoldOut`, { name: value.name }) : value.name
+                                    }
+                                    title={soldOut ? t(`${DKEY}.swatchSoldOut`, { name: value.name }) : value.name}
+                                    className={`relative size-9 shrink-0 cursor-pointer overflow-hidden rounded-full ring-offset-2 ring-offset-white transition-[box-shadow,opacity,scale] duration-200 ease-[var(--ease-settle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta motion-reduce:transition-none ${
+                                      pressed
+                                        ? 'scale-105 ring-2 ring-charcoal'
+                                        : `ring-1 ring-charcoal/15 hover:scale-105 ${reachable ? '' : 'opacity-45'}`
+                                    }`}
+                                    style={{ backgroundColor: value.color }}
+                                  >
+                                    {soldOut && (
+                                      <span
+                                        aria-hidden
+                                        className={`absolute left-1/2 top-1/2 h-[140%] w-0.5 -translate-x-1/2 -translate-y-1/2 rotate-45 ${isLightColor(value.color) ? 'bg-charcoal/50' : 'bg-white/80'}`}
+                                      />
+                                    )}
+                                  </button>
+                                );
+                              }
+                              return (
+                                <button
+                                  key={value.id}
+                                  {...common}
+                                  aria-label={soldOut ? t(`${DKEY}.swatchSoldOut`, { name: value.name }) : undefined}
+                                  className={`max-w-full cursor-pointer truncate rounded-chip px-3 py-1.5 text-sm font-medium transition-[background-color,color,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta motion-reduce:transition-none ${
+                                    pressed
+                                      ? 'bg-charcoal text-white'
+                                      : `bg-charcoal/[0.05] text-charcoal/80 hover:bg-charcoal/[0.09] ${reachable ? '' : 'opacity-45'} ${soldOut ? 'line-through decoration-charcoal/40' : ''}`
+                                  }`}
+                                >
+                                  {value.name}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                    <p
-                      className={`text-xs transition-colors duration-200 motion-reduce:transition-none ${allPicked && !variant ? 'text-amber-700' : 'text-charcoal/50'}`}
-                    >
-                      <MorphSwap swapKey={pickNote} block>
-                        {pickNote}
-                      </MorphSwap>
-                    </p>
+                      );
+                    })}
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                      <p
+                        className={`min-w-0 grow basis-40 text-xs transition-colors duration-200 motion-reduce:transition-none ${allPicked && !variant ? 'text-amber-700' : 'text-charcoal/50'}`}
+                      >
+                        <MorphSwap swapKey={pickNote} block>
+                          {pickNote}
+                        </MorphSwap>
+                      </p>
+                      {/* Always mounted (its row never reflows); it fades in once something is
+                          picked and is inert while hidden — binary state, so CSS owns it. */}
+                      <button
+                        type="button"
+                        onClick={clearPicks}
+                        aria-hidden={!anyPicked}
+                        inert={!anyPicked}
+                        className={`flex cursor-pointer items-center gap-1 rounded-chip px-2 py-1 text-xs font-medium text-charcoal/60 transition-[opacity,color,background-color] duration-200 ease-[var(--ease-settle)] hover:bg-charcoal/[0.05] hover:text-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta motion-reduce:transition-none ${
+                          anyPicked ? 'opacity-100' : 'pointer-events-none opacity-0'
+                        }`}
+                      >
+                        <HiOutlineXMark aria-hidden className="size-3.5" />
+                        {t(`${DKEY}.clearPicks`)}
+                      </button>
+                    </div>
                   </div>
                 )}
                 <StockLine product={shown} />
                 {/* Field-presence gated (the projection only sends it to Admin): what the business
                     charges if the product is lost or damaged. Captured on the create form — this
                     is where the admin sees it again. */}
-                {shown.replacementPrice !== undefined && (
+                {replacement && (
                   <p className="reveal-item text-sm text-charcoal/70">
                     <span className="font-medium text-charcoal/60">{t(`${DKEY}.replacementPrice`)}: </span>
-                    <MorphSwap swapKey={shown.replacementPrice}>
-                      {formatMoney(shown.replacementPrice, product.currency.symbol)}
+                    <MorphSwap swapKey={money(replacement, product.currency.symbol)}>
+                      {money(replacement, product.currency.symbol)}
                     </MorphSwap>
                   </p>
                 )}
                 {/* The refundable deposit per unit — a public commercial condition (every role
                     receives it), shown beside the price because the client pays it up front. It is
                     NOT part of the price: it comes back when the goods do. */}
-                {shown.securityDeposit !== undefined && (
+                {deposit && (
                   <p className="reveal-item text-sm text-charcoal/70">
                     <span className="font-medium text-charcoal/60">{t(`${DKEY}.securityDeposit`)}: </span>
-                    <MorphSwap swapKey={shown.securityDeposit}>
-                      {formatMoney(shown.securityDeposit, product.currency.symbol)}
+                    <MorphSwap swapKey={money(deposit, product.currency.symbol)}>
+                      {money(deposit, product.currency.symbol)}
                     </MorphSwap>
                     <span className="text-charcoal/50"> · {t(`${DKEY}.securityDepositNote`)}</span>
                   </p>
                 )}
                 <div className="reveal-item flex flex-col gap-1.5">
                   <h3 className="text-sm font-semibold text-charcoal">{t(`${DKEY}.descriptionTitle`)}</h3>
-                  <MorphSwap swapKey={description} block className="text-sm leading-relaxed text-charcoal/70">
-                    {description}
-                  </MorphSwap>
+                  {generalText && (
+                    <MorphSwap swapKey={generalText} block className="text-sm leading-relaxed text-charcoal/70">
+                      {generalText}
+                    </MorphSwap>
+                  )}
+                  {/* The picked variation's own text, UNDER the general one — the region above
+                      eases the height it adds or takes away. */}
+                  {variantText && (
+                    <MorphSwap swapKey={variantText} block className="text-sm leading-relaxed text-charcoal/70">
+                      {variantText}
+                    </MorphSwap>
+                  )}
                 </div>
                 </div>
                 {product.details.length > 0 && (

@@ -65,6 +65,7 @@ const rawProduct = {
   sellPrice: null,
   replacementPrice: 900,
   quantity: 40,
+  sharedStock: false,
   isActive: true,
   createdAt: new Date("2026-07-01T00:00:00.000Z"),
   updatedAt: null,
@@ -214,8 +215,8 @@ describe("getProducts", () => {
     const findMany = vi
       .fn()
       .mockResolvedValueOnce([
-        { id: 7, name: "Mesa redonda", rentPrice: 75, sellPrice: null, createdAt: rawProduct.createdAt },
-        { id: 8, name: "Mesa chica", rentPrice: 30, sellPrice: null, createdAt: rawProduct.createdAt },
+        { id: 7, name: "Mesa redonda", rentPrice: 75, sellPrice: null, createdAt: rawProduct.createdAt, variants: [] },
+        { id: 8, name: "Mesa chica", rentPrice: 30, sellPrice: null, createdAt: rawProduct.createdAt, variants: [] },
       ])
       .mockResolvedValueOnce([rawProduct, second]); // DB returns them in ITS order — we must reorder
     const count = vi.fn();
@@ -467,6 +468,8 @@ interface TxSeed {
 function makeProductTx(seed: TxSeed = {}) {
   let nextId = 100;
   return {
+    // The update's row lock, reading the current stock mode.
+    $queryRaw: vi.fn().mockResolvedValue([{ shared_stock: false }]),
     product: {
       create: vi.fn().mockResolvedValue({ id: 7 }),
       update: vi.fn().mockResolvedValue({}),

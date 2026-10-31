@@ -15,6 +15,7 @@ const mantel: Pick<Product, 'options' | 'variants'> = {
       id: 10,
       name: 'Color',
       sortOrder: 0,
+      kind: 'generic' as const,
       values: [
         { id: 1, name: 'Rojo', sortOrder: 0, images: [] },
         { id: 2, name: 'Azul', sortOrder: 1, images: [] },
@@ -24,6 +25,7 @@ const mantel: Pick<Product, 'options' | 'variants'> = {
       id: 11,
       name: 'Tamaño',
       sortOrder: 1,
+      kind: 'generic' as const,
       values: [
         { id: 3, name: 'Redondo', sortOrder: 0, images: [] },
         { id: 4, name: 'Cuadrado', sortOrder: 1, images: [] },

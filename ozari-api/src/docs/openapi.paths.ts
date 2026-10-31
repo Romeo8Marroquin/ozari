@@ -742,6 +742,7 @@ export const paths: OpenAPIV3.PathsObject = {
             images: [],
             options: [],
             variants: [],
+            sharedStock: false,
             details: [{ id: 12, detail: "Blanco", detailType: "Color", detailTypeId: 1 }],
             inStock: true,
             available: 40,
@@ -755,8 +756,11 @@ export const paths: OpenAPIV3.PathsObject = {
         "400": errorResponse(
           "A field failed validation — bad lookup id, out-of-range value, a conditional-pricing " +
             "violation, an image key already owned by another product (unique `r2_key`), or a " +
-            "variation rule (`quantityWithVariants`, `idsForbiddenOnCreate`, a limit, a duplicate " +
-            "option/value name or combination, `variantPricingMismatch`, " +
+            "variation rule (`quantityWithVariants`, `variantQuantityWithSharedStock`, " +
+            "`sharedStockWithoutVariants`, `idsForbiddenOnCreate`, a limit, a duplicate " +
+            "option/value name or combination, `invalidOptionKind`, `multipleColorOptions`, " +
+            "`valueColorRequired`, `invalidValueColor`, `valueColorForbidden`, " +
+            "`variantPricingMismatch`, `variantPriceRequired`, " +
             "`variantSecurityDepositAboveReplacement`, …).",
           400,
           "Los precios enviados no corresponden al tipo de negocio del producto.",
@@ -813,18 +817,21 @@ export const paths: OpenAPIV3.PathsObject = {
               {
                 id: 3,
                 name: "Color",
+                kind: "color",
                 sortOrder: 0,
                 values: [
                   {
                     id: 10,
                     name: "Rojo",
+                    color: "#c62828",
                     sortOrder: 0,
                     images: [{ id: 7, url: "https://cdn.example.com/products/7/rojo.webp", isPrimary: true, sortOrder: 0 }],
                   },
-                  { id: 11, name: "Azul", sortOrder: 1, images: [] },
+                  { id: 11, name: "Azul", color: "#1e3a8a", sortOrder: 1, images: [] },
                 ],
               },
             ],
+            sharedStock: false,
             variants: [
               {
                 id: 55,
@@ -833,7 +840,7 @@ export const paths: OpenAPIV3.PathsObject = {
                 isDefault: true,
                 rentPrice: 75,
                 securityDeposit: 300,
-                description: EXAMPLE_PRODUCT_DESCRIPTION,
+                description: "Mantel rojo de 3 m",
                 imageUrl: "https://cdn.example.com/products/7/rojo.webp",
                 quantity: 20,
                 available: 15,
@@ -850,7 +857,6 @@ export const paths: OpenAPIV3.PathsObject = {
                 isDefault: false,
                 rentPrice: 60,
                 securityDeposit: 0,
-                description: EXAMPLE_PRODUCT_DESCRIPTION,
                 imageUrl: EXAMPLE_PRODUCT_IMAGE_URL,
                 quantity: 20,
                 available: 20,
@@ -923,6 +929,7 @@ export const paths: OpenAPIV3.PathsObject = {
         ],
         options: [],
         variants: [],
+        sharedStock: false,
       }),
       responses: {
         "200": dataResponse(
@@ -946,6 +953,7 @@ export const paths: OpenAPIV3.PathsObject = {
             coverImageUrl: EXAMPLE_PRODUCT_IMAGE_URL,
             options: [],
             variants: [],
+            sharedStock: false,
             details: [{ id: 12, detail: "Blanco", detailType: "Color", detailTypeId: 1 }],
             inStock: true,
             available: 35,
@@ -974,8 +982,8 @@ export const paths: OpenAPIV3.PathsObject = {
             "the editor (a concurrent save/delete); reload and retry. (2) `variantInUse` — the save " +
             "removes a variant that open or future orders HOLD; `data.conflicts` lists each one as " +
             "`ProductVariantConflict` (`{ variantId, label, orderIds }`). (3) `stockModeInUse` — the " +
-            "save switches between product-level and per-variant stock (adds the first options, or " +
-            "removes them all) while open or future orders hold the pool that would vanish; " +
+            "save switches how the product counts stock (adds the first options, removes them all, " +
+            "or flips `sharedStock`) while open or future orders hold the pool that would vanish; " +
             "`data.orderIds` lists them. Finished and cancelled orders never block.",
           409,
           "El producto cambió mientras lo editabas. Recarga la página e intenta de nuevo.",
@@ -1370,7 +1378,9 @@ export const paths: OpenAPIV3.PathsObject = {
         "keystroke. **Goods:** each product's takeable amount for the window — rentals = fleet " +
         "minus what's held (`null` until a pickup is set), sales = current stock; exact counts " +
         "(the admin runs the business). A product WITH variants answers per variant in " +
-        "`variants[]` (each its own pool) and its `available` is their sum. **Driver:** sent only when the body carries an " +
+        "`variants[]` (each its own pool) and its `available` is their sum — unless its " +
+        "`sharedStock` is true: then the product and every variant report the ONE pool, which " +
+        "the order's lines of that product share. **Driver:** sent only when the body carries an " +
         "`assignedUserId` — whether either event would overlap a block already on that driver's " +
         "day, plus whether the order's own two events are too close to each other. An `EDIT` " +
         "passes `excludeOrderId` so both halves drop the order from their own counts, and a " +
@@ -1392,6 +1402,7 @@ export const paths: OpenAPIV3.PathsObject = {
             {
               productId: 4,
               available: 120,
+              sharedStock: false,
               variants: [
                 { variantId: 55, available: 80 },
                 { variantId: 56, available: 40 },

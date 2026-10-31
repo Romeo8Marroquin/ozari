@@ -879,7 +879,8 @@ describe('ProductForm — variations', () => {
     expect(await screen.findByText(`${KEY}.errors.tooManyImagesTotal`)).toBeInTheDocument();
     expect(uploadImages).not.toHaveBeenCalled();
     expect(createProduct).not.toHaveBeenCalled();
-  }, 30_000);
+    // ~4s alone; the headroom is for the full parallel suite, where ~25 value rows render slowly.
+  }, 60_000);
 
   it("clears the variations' overrides of the side a type switch leaves behind", async () => {
     seedVariationDraft();
@@ -900,5 +901,57 @@ describe('ProductForm — variations', () => {
     );
     expect(await screen.findByRole('textbox', { name: `${VARIATIONS}.rentPriceLabel · Rojo` })).toHaveValue('');
     expect(screen.getByRole('textbox', { name: `${VARIATIONS}.securityDepositLabel · Rojo` })).toHaveValue('');
+  });
+
+  it('a SHARED stock brings the product quantity back as the one pool the variations draw on', async () => {
+    Storage.set(StorageKeys.PRODUCT_CREATE_DRAFT, {
+      ...createProductDefaultValues,
+      name: 'Arreglo floral',
+      description: 'Arreglo de rosas',
+      categoryId: 1,
+      quantity: '',
+      rentPrice: '',
+      options: [
+        {
+          name: 'Extra',
+          kind: 'generic',
+          values: [
+            { key: 'n1', name: 'Sin globo', color: '' },
+            { key: 'n2', name: 'Con globo', color: '' },
+          ],
+        },
+      ],
+      // One row's stock not typed yet: the running total counts it as nothing.
+      variants: [
+        { ...emptyVariantRow(['n1']), quantity: '6', rentPrice: '100' },
+        { ...emptyVariantRow(['n2']), quantity: '', rentPrice: '140' },
+      ],
+    });
+    renderForm();
+    // The general prices are optional defaults now — said where they are typed.
+    // AnimatedMessage settles its text after a tween — give a loaded suite room.
+    expect(
+      (await screen.findAllByText(`${VARIATIONS}.generalPriceHint`, {}, { timeout: 5000 })).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText(`${VARIATIONS}.quantityTotal`)).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('radio', { name: `${VARIATIONS}.stockMode.shared` }),
+    );
+    const quantity = await screen.findByRole('textbox', { name: `${KEY}.fields.quantityLabel` });
+    expect(
+      await screen.findByText(`${VARIATIONS}.quantitySharedHint`, {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    await userEvent.type(quantity, '4');
+
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createProduct).toHaveBeenCalled());
+    const body = createProduct.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body).toMatchObject({ quantity: 4, sharedStock: true });
+    expect(body.rentPrice).toBeUndefined();
+    expect(body.variants).toEqual([
+      { valueKeys: ['n1'], rentPrice: 100 },
+      { valueKeys: ['n2'], rentPrice: 140 },
+    ]);
   });
 });
