@@ -1,5 +1,11 @@
 import type { Product, ProductOptionValue, ProductVariant } from '../products/product.types';
-import { picksForVariant, variantFor, variantMatchesPicks } from '../products/productVariations';
+import { primaryImageIndex, productCoverUrl } from '../products/productPresentation';
+import {
+  photoSetFor,
+  picksForVariant,
+  variantFor,
+  variantMatchesPicks,
+} from '../products/productVariations';
 
 /**
  * The order form's per-line VARIATION picker, as pure decisions: a line of a product with
@@ -67,4 +73,21 @@ export function valueChoices(
   return option.values.filter(
     (value) => reachable.has(value.id) || value.id === picks[optionIndex],
   );
+}
+
+/**
+ * The photo a line shows beside its fields, following the admin's picks:
+ *
+ * - **nothing picked** — the product's COVER, the very photo its row wore in the picker (and its
+ *   tile in the grid), so choosing it continues what was just seen;
+ * - **a pick made** (a complete variation, or only the first option so far) — the detail page's
+ *   rule (`photoSetFor`): the first picked value that HAS photos gives its primary, else the
+ *   showcase's. It never falls back to the cover here: the cover may be the DEFAULT variation's
+ *   photo, and showing the blue one beside a line that says "Rojo" would be a lie (the comprobante
+ *   refuses it for the same reason). `null` = the brand placeholder.
+ */
+export function linePhotoUrl(product: Product, picks: readonly (number | null)[]): string | null {
+  if (!picks.some((pick) => pick != null)) return productCoverUrl(product);
+  const set = photoSetFor(product, picks);
+  return set[primaryImageIndex({ images: set })]?.url ?? null;
 }

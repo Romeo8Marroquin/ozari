@@ -66,3 +66,10 @@ export function primaryImageIndex(product: Pick<Product, 'images'>): number {
 export function primaryImageUrl(product: Product): string | null {
   return product.images[primaryImageIndex(product)]?.url ?? null;
 }
+
+/** The photo that REPRESENTS a product wherever it is listed — the grid tile, the order form's
+ *  product picker: the server's cover (showcase primary, else the DEFAULT variation's photo), else
+ *  the showcase primary when an older payload carries no cover. `null` = no photo at all. */
+export function productCoverUrl(product: Product): string | null {
+  return product.coverImageUrl ?? primaryImageUrl(product);
+}

@@ -214,6 +214,28 @@ const existingOrder = {
 
 const byId = (container: HTMLElement, id: string) => container.querySelector(`#${id}`) as HTMLElement;
 
+/** The product picker is a PHOTO listbox (`ImageSelect`, portaled to <body>), not a native select:
+ *  its rows live in the list its trigger `aria-controls`. */
+type Clicker = Pick<ReturnType<typeof userEvent.setup>, 'click' | 'keyboard'>;
+const productListbox = (container: HTMLElement, index: number): HTMLElement =>
+  document.getElementById(
+    byId(container, `order-line-product-${index}`).getAttribute('aria-controls') as string,
+  ) as HTMLElement;
+/** Open line `index`'s product picker and press the row for `value` (`''` = the "nothing" row). */
+const pickProduct = async (user: Clicker, container: HTMLElement, index: number, value: string) => {
+  await user.click(byId(container, `order-line-product-${index}`));
+  await user.click(productListbox(container, index).querySelector(`[data-value="${value}"]`) as HTMLElement);
+};
+/** The names line `index`'s product picker offers (opened, read, closed again). */
+const productOptions = async (user: Clicker, container: HTMLElement, index: number): Promise<string[]> => {
+  await user.click(byId(container, `order-line-product-${index}`));
+  const names = within(productListbox(container, index))
+    .getAllByRole('option')
+    .map((option) => option.textContent ?? '');
+  await user.keyboard('{Escape}');
+  return names;
+};
+
 /** Confirm a pin through the location field without loading Leaflet (see the mock at the top). */
 const pickLocation = async (): Promise<void> => {
   await userEvent.click(screen.getByTestId('order-delivery-coords-open'));
@@ -235,7 +257,7 @@ const fillValid = async (container: HTMLElement): Promise<void> => {
   await user.selectOptions(byId(container, 'order-event-type'), '1');
   setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
   await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-  await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+  await pickProduct(user, container, 0, '3');
   await user.type(byId(container, 'order-line-quantity-0'), '25');
   await waitFor(() => expect(byId(container, 'order-pickup-at')).toBeInTheDocument());
   setDateTime(byId(container, 'order-pickup-at'), '2026-08-02T15:00');
@@ -399,16 +421,44 @@ describe('OrderForm', () => {
     const user = userEvent.setup();
     const { container } = renderForm();
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    const productSelect = byId(container, 'order-line-product-0');
     // Both the rental (id 3) and the sale (id 4) are offered.
-    expect(within(productSelect).queryByRole('option', { name: 'Silla plegable' })).toBeInTheDocument();
-    expect(within(productSelect).queryByRole('option', { name: 'Vasos' })).toBeInTheDocument();
+    expect(await productOptions(user, container, 0)).toEqual(
+      expect.arrayContaining(['Silla plegable', 'Vasos']),
+    );
     // Already-picked products are hidden from a second line.
-    await user.selectOptions(productSelect, '3');
+    await pickProduct(user, container, 0, '3');
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    const second = byId(container, 'order-line-product-1');
-    expect(within(second).queryByRole('option', { name: 'Silla plegable' })).not.toBeInTheDocument();
-    expect(within(second).queryByRole('option', { name: 'Vasos' })).toBeInTheDocument();
+    const second = await productOptions(user, container, 1);
+    expect(second).not.toContain('Silla plegable');
+    expect(second).toContain('Vasos');
+  });
+
+  it("shows each product's COVER photo in the picker, and the line's photo follows the pick", async () => {
+    useOrderProducts.mockReturnValue(
+      q({
+        data: [
+          { ...rentalProduct, coverImageUrl: 'https://cdn/silla.webp' },
+          saleProduct, // no photo at all → the brand placeholder
+        ],
+      }),
+    );
+    const user = userEvent.setup();
+    const { container } = renderForm();
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    const row = byId(container, 'order-line-product-0').closest('[data-order-line]') as HTMLElement;
+    // Nothing picked yet: the line's photo slot holds the quiet empty tile.
+    expect(row.querySelector('[data-layer="empty"]')).toBeInTheDocument();
+
+    await user.click(byId(container, 'order-line-product-0'));
+    const list = productListbox(container, 0);
+    expect(list.querySelector('[data-value="3"] img')).toHaveAttribute('src', 'https://cdn/silla.webp');
+    expect(list.querySelector('[data-value="4"] [data-layer="brand"]')).toBeInTheDocument();
+    await user.click(list.querySelector('[data-value="3"]') as HTMLElement);
+
+    // The line now wears the same cover, laid OVER the empty tile until it has loaded.
+    const photo = row.querySelector('img') as HTMLImageElement;
+    expect(photo).toHaveAttribute('src', 'https://cdn/silla.webp');
+    expect(row.querySelector('[data-layer="empty"]')).toBeInTheDocument();
   });
 
   it('selecting a client prefills the delivery snapshots', async () => {
@@ -600,7 +650,7 @@ describe('OrderForm', () => {
     expect(byId(container, 'order-delivery-at')).toBeInTheDocument();
     expect(byId(container, 'order-pickup-at')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    await pickProduct(user, container, 0, '3');
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.removeLine` }));
     expect(byId(container, 'order-line-product-0')).toBeNull();
   });
@@ -609,7 +659,7 @@ describe('OrderForm', () => {
     const user = userEvent.setup();
     const { container } = renderForm();
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    await pickProduct(user, container, 0, '3');
     await waitFor(() => expect(screen.getByText(/lineUnitEach/)).toBeInTheDocument());
     // Typing a quantity reveals the subtotal segment; clearing it keeps the last amount painted while
     // it fades out (the segment stays in the DOM, just faded).
@@ -618,7 +668,7 @@ describe('OrderForm', () => {
     await user.clear(byId(container, 'order-line-quantity-0'));
     expect(screen.getByText(/lineSubtotal/)).toBeInTheDocument();
     // Deselecting the product collapses the note but keeps the last text painted through the animation.
-    await user.selectOptions(byId(container, 'order-line-product-0'), '');
+    await pickProduct(user, container, 0, '');
     expect(screen.getByText(/lineUnitEach/)).toBeInTheDocument();
   });
 
@@ -627,7 +677,7 @@ describe('OrderForm', () => {
     const { container } = renderForm();
     setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    await pickProduct(user, container, 0, '3');
     await user.type(byId(container, 'order-line-quantity-0'), '25');
     setDateTime(byId(container, 'order-pickup-at'), '2026-08-02T15:00'); // 25h → 2 days
     // 6 × 25 × 2 = 300 — shown as the line subtotal AND the products subtotal.
@@ -650,7 +700,7 @@ describe('OrderForm', () => {
     expect(depositLine).toHaveAttribute('aria-hidden', 'true');
 
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    await pickProduct(user, container, 0, '3');
     await user.type(byId(container, 'order-line-quantity-0'), '25');
     // 15 × 25 = 375 — its own line, and NOT folded into the estimated total (6 × 25 × 1 = 150).
     await waitFor(() => expect(depositLine).toHaveAttribute('aria-hidden', 'false'));
@@ -663,10 +713,10 @@ describe('OrderForm', () => {
     const user = userEvent.setup({ delay: null });
     const { container } = renderForm();
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    await pickProduct(user, container, 0, '3');
     await user.type(byId(container, 'order-line-quantity-0'), '10');
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    await user.selectOptions(byId(container, 'order-line-product-1'), '4');
+    await pickProduct(user, container, 1, '4');
     await user.type(byId(container, 'order-line-quantity-1'), '10');
     // Setting the FULL window fires the (debounced) probe with delivery + pickup + all product ids.
     setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
@@ -685,7 +735,9 @@ describe('OrderForm', () => {
     // A conflict: product 3 over the window (reduced to 4), product 4 none left (removed) → a toast.
     act(() => availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 4 }, { productId: 4, available: 0 }])));
     expect((byId(container, 'order-line-quantity-0') as HTMLInputElement).value).toBe('4');
-    expect(byId(container, 'order-line-product-1')).toBeNull(); // product 4 line removed
+    // Product 4's line is removed — through the same slide-out as the trash button, so it goes a
+    // beat later rather than in the same frame.
+    await waitFor(() => expect(byId(container, 'order-line-product-1')).toBeNull());
     expect(warning).toHaveBeenCalled();
     // The toast lists each change on its OWN line (adjusted heading + item, removed heading + item),
     // and lingers longer the more it carries (two changes here).
@@ -699,7 +751,7 @@ describe('OrderForm', () => {
     // The takeable amount now surfaces as a quiet hint UNDER each line's quantity (the dropdown shows
     // only the product name).
     expect(await screen.findByText(`${KEY}.availability.count`)).toBeInTheDocument();
-    expect(within(byId(container, 'order-line-product-0')).queryByRole('option', { name: /availability/ })).toBeNull();
+    expect(await productOptions(user, container, 0)).not.toContainEqual(expect.stringMatching(/availability/));
 
     // And a product with nothing takeable is no longer OFFERED at all. Listing it only to reject the
     // first quantity typed makes the admin discover what is unavailable one product at a time, in
@@ -716,16 +768,16 @@ describe('OrderForm', () => {
     const user = userEvent.setup({ delay: null });
     const { container } = renderForm();
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    const options = within(byId(container, 'order-line-product-0')).getAllByRole('option');
-    expect(options.map((option) => option.textContent)).toContain('Silla plegable');
-    expect(options.map((option) => option.textContent)).toContain('Vasos');
+    const options = await productOptions(user, container, 0);
+    expect(options).toContain('Silla plegable');
+    expect(options).toContain('Vasos');
   });
 
   it('handles adjust-only, remove-only, and empty availability payloads', async () => {
     const user = userEvent.setup({ delay: null });
     const { container } = renderForm();
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    await pickProduct(user, container, 0, '3');
     await user.type(byId(container, 'order-line-quantity-0'), '10');
     setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
     await waitForProbe();
@@ -740,9 +792,13 @@ describe('OrderForm', () => {
     expect((byId(container, 'order-line-quantity-0') as HTMLInputElement).value).toBe('6');
     expect(warning).toHaveBeenCalledTimes(1);
 
-    // Only a removal (nothing left) → the line is dropped.
-    act(() => availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 0 }])));
-    expect(byId(container, 'order-line-product-0')).toBeNull();
+    // Only a removal (nothing left) → the line slides out and is dropped. A second answer landing
+    // while it is still leaving neither counts it again nor announces it twice.
+    act(() => {
+      availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 0 }]));
+      availabilityHandlers().onSuccess(availabilityResponse([{ productId: 3, available: 0 }]));
+    });
+    await waitFor(() => expect(byId(container, 'order-line-product-0')).toBeNull());
     expect(warning).toHaveBeenCalledTimes(2);
   }, 20000);
 
@@ -750,7 +806,7 @@ describe('OrderForm', () => {
     const user = userEvent.setup({ delay: null });
     const { container } = renderForm();
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    await user.selectOptions(byId(container, 'order-line-product-0'), '3'); // product, but NO quantity
+    await pickProduct(user, container, 0, '3'); // product, but NO quantity
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` })); // an empty line (no product)
     setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
     await waitForProbe();
@@ -1034,7 +1090,7 @@ describe('OrderForm', () => {
     await user.selectOptions(byId(container, 'order-event-type'), '1');
     setDateTime(byId(container, 'order-delivery-at'), '2026-08-01T14:00');
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    await pickProduct(user, container, 0, '3');
     // The ceiling is STATED under the field (never a native `max`, which would block the submit
     // with the browser's own words and stop an admin correcting paperwork from typing a real number).
     expect(await screen.findByText(`${KEY}.availability.count`)).toBeInTheDocument();
@@ -1351,7 +1407,7 @@ describe('OrderForm — variations', () => {
       setDateTime(byId(container, 'order-pickup-at'), '2026-08-02T15:00');
     }
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    await user.selectOptions(byId(container, `order-line-product-${index}`), productId);
+    await pickProduct(user, container, index, productId);
   };
 
   it('asks for the variation per option, cascades, prices it, and sends it', async () => {
@@ -1458,7 +1514,7 @@ describe('OrderForm — variations', () => {
     await user.selectOptions(byId(container, 'order-line-2-option-10'), '1');
     await user.selectOptions(byId(container, 'order-line-2-option-11'), '3');
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
-    expect(optionValues(byId(container, 'order-line-product-3'))).not.toContain('Mantel');
+    expect(await productOptions(user, container, 3)).not.toContain('Mantel');
   });
 
   it('takes the ONLY variation by itself, and a product change resets the pick', async () => {
@@ -1471,7 +1527,7 @@ describe('OrderForm — variations', () => {
     await user.type(byId(container, 'order-line-quantity-0'), '1');
     // Its own stock is quoted once the variation is known.
     expect(await screen.findByText(`${KEY}.availability.count`)).toBeInTheDocument();
-    await user.selectOptions(byId(container, 'order-line-product-0'), '3');
+    await pickProduct(user, container, 0, '3');
     expect(byId(container, 'order-line-0-option-20')).toBeNull();
     await user.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
     await waitFor(() => expect(createOrder).toHaveBeenCalled());

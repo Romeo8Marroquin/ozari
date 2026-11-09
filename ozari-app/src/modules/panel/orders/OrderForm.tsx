@@ -17,6 +17,8 @@ import CustomInputForm from '@components/CustomInputForm';
 import CustomSelect from '@components/CustomSelect';
 import CustomSelectForm from '@components/CustomSelectForm';
 import CustomTextareaForm from '@components/CustomTextareaForm';
+import CrossfadeImage from '@components/CrossfadeImage';
+import ImageSelectForm from '@components/ImageSelectForm';
 import LocationField from '@components/LocationField';
 import FormError from '@components/FormError';
 import { notify } from '@components/notifications/notify';
@@ -47,11 +49,12 @@ import {
   stockKey,
   variantFor,
 } from '../products/productVariations';
+import { productCoverUrl } from '../products/productPresentation';
 import ProductsStatus from '../products/ProductsStatus';
 import AnimatedMessage from '@components/AnimatedMessage';
 import Collapse from '@components/Collapse';
 import useMorphOnChange from '../useMorphOnChange';
-import { currentPicks, nextPicks, valueChoices } from './orderLineVariants';
+import { currentPicks, linePhotoUrl, nextPicks, valueChoices } from './orderLineVariants';
 import SectionReveal from '../products/SectionReveal';
 import ClientRegistryModal from './ClientRegistryModal';
 import { clearOrderDraft, isMeaningfulOrderDraft, readOrderDraft, saveOrderDraft } from './orderDraft';
@@ -179,7 +182,9 @@ const LineRow: React.FC<{
       // `pb` groups a line's price note with its OWN row and widens the visual gap to the next row
       // (the flex `gap` between rows stays 20px for the `detailRowOut` collapse math). It's part of
       // the row height, so the enter/exit height animations still swallow it cleanly.
-      className="flex items-start gap-3 pb-2"
+      // `@container`: the line's photo sizes itself by the LINE, not the window (doctrine §10).
+      data-order-line
+      className="@container flex items-start gap-3 pb-2"
     >
       {children}
     </div>
@@ -497,14 +502,23 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   useEffect(() => {
     latestLineFields.current = lines.fields;
   }, [lines.fields]);
-  const removeLine = (id: string): void => {
-    /* v8 ignore next -- `?? null`: a rendered row always has its element registered */
-    void detailRowOut(lineRowRefs.current.get(id) ?? null).then(() => {
-      const index = latestLineFields.current.findIndex((row) => row.id === id);
-      /* v8 ignore next -- defensive: only reachable if the row already left (a raced double-remove) */
-      if (index !== -1) lines.remove(index);
-    });
-  };
+  // The rows already sliding out — the availability reconcile must not count (or announce) a line a
+  // previous probe already took away while its exit is still playing.
+  const leavingLines = useRef(new Set<string>());
+  const removeLine = useCallback(
+    (id: string): void => {
+      leavingLines.current.add(id);
+      /* v8 ignore next -- `?? null`: a rendered row always has its element registered */
+      void detailRowOut(lineRowRefs.current.get(id) ?? null).then(() => {
+        leavingLines.current.delete(id);
+        const index = latestLineFields.current.findIndex((row) => row.id === id);
+        /* v8 ignore next -- defensive: only reachable if the row already left (a raced double-remove) */
+        if (index !== -1) lines.remove(index);
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lines.remove is a stable RHF method
+    [],
+  );
 
   // Live line values drive the mode filter, the per-line isRental sync, the pickup rule, and the
   // estimate. `useWatch` (not `watch()`) keeps the React Compiler able to memoize this component.
@@ -666,14 +680,17 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     (map: Map<string, number | null>): void => {
       const current = getValues('lines');
       // Capture each change as structured data (name + old → new) so the toast can lay them out one
-      // per line. Iterate bottom-up so removals don't shift the indices still to process.
+      // per line. Iterate bottom-up so the toast reads top-down once reversed.
       const adjusted: { name: string; from: number; to: number }[] = [];
       const removed: string[] = [];
+      // A line already sliding out (an earlier probe emptied it) is gone as far as this one cares.
+      /* v8 ignore next -- `?.id ?? ''`: RHF keeps one field per value */
+      const leaving = (index: number): boolean => leavingLines.current.has(latestLineFields.current[index]?.id ?? '');
       // What each line may keep, top-down: a SHARED-stock product's lines draw on one pool, so the
       // first lines keep theirs and the later ones get what is left (each pool counted once).
       const left = new Map<string, number>();
-      const allowed = current.map((line) => {
-        if (line.productId == null) return null;
+      const allowed = current.map((line, index) => {
+        if (line.productId == null || leaving(index)) return null;
         const product = productsById.get(line.productId);
         // A line of a product WITH variations reconciles against ITS variation (or the shared pool)
         // — the product's own figure is their sum, which says nothing about this colour. No
@@ -702,7 +719,10 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
         });
         /* v8 ignore stop */
         if (available === 0) {
-          lines.remove(index);
+          // Slides out like a line removed by hand — nothing leaves the list abruptly. The live
+          // index is re-resolved when the exit ends, so the walk's indices stay valid meanwhile.
+          /* v8 ignore next -- `?.id ?? ''`: RHF keeps one field per value */
+          removeLine(latestLineFields.current[index]?.id ?? '');
           removed.push(name);
         } else {
           setValue(`lines.${index}.quantity`, String(available), { shouldValidate: true });
@@ -730,8 +750,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
         duration: reconcileToastDuration(adjusted.length + removed.length),
       });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- lines.remove is a stable RHF method
-    [getValues, productsById, setValue, t],
+    [getValues, productsById, setValue, t, removeLine],
   );
 
   // Fetch availability whenever the WINDOW changes (debounced): a valid delivery date is enough for
@@ -1024,7 +1043,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   );
   // The picker offers ALL products (rent + sale) — the order's kind is DERIVED from what's picked (any
   // rental line ⇒ a pickup is required); no upfront mode fork. Already-picked products are hidden. The
-  // dropdown shows ONLY the product name; the takeable amount lives as a quiet hint under its quantity.
+  // dropdown shows the product's name beside its COVER photo (the grid tile's, so the admin picks by
+  // sight what they browse by sight); the takeable amount lives as a quiet hint under its quantity.
   //
   // Nothing takeable ⇒ NOT OFFERED (owner decision 2026-08-26). Listing a sold-out product only to
   // reject it the moment a quantity is typed makes the admin do the work of discovering what is
@@ -1056,7 +1076,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   const optionsFor = (currentId: number | null | undefined) =>
     products
       .filter((product) => product.id === currentId || freePairs(product) > 0)
-      .map((product) => ({ value: product.id, label: product.name }));
+      .map((product) => ({ value: product.id, label: product.name, imageUrl: productCoverUrl(product) }));
   // "Agregar producto" is capped by what could actually be added, not by the raw catalog — otherwise
   // the button stays enabled and opens a select with nothing in it. The free pairs are counted
   // against the lines still WAITING for one (no product yet, or a product whose variation is not
@@ -1348,12 +1368,26 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                             else lineRowRefs.current.delete(row.id);
                           }}
                         >
+                          {/* WHICH one, at a glance — the comprobante's line photo, live. It follows
+                              the picks (the product's cover, then the colour as soon as one is
+                              chosen) and never cuts: every change is a cross-fade, and a cleared
+                              product fades back to the empty tile. The slot is there from the
+                              start, so a photo arriving moves nothing. `-mt-*` lifts its top to the
+                              floated label's, so the photo spans label + field. */}
+                          <CrossfadeImage
+                            src={lineProduct ? linePhotoUrl(lineProduct, picks) : null}
+                            empty={lineProduct === undefined}
+                            className="-mt-2 size-12 rounded-control ring-1 ring-black/[0.04] @min-[30rem]:-mt-3 @min-[30rem]:size-14"
+                          />
                           <div className="@container flex min-w-0 flex-1 flex-col">
                             {/* Below `sm` these stack, and the quantity field's label would land on
                                 the product select's availability hint — hence `gap-y-field`, while
                                 the columns keep their tighter gap. */}
                             <div className="grid gap-x-3 gap-y-field sm:grid-cols-[minmax(0,1fr)_minmax(0,130px)]">
-                              <CustomSelectForm<CreateOrderFormType>
+                              {/* Photo rows, not a native select: only Chromium's customizable picker
+                                  can put an image in an <option>, and the phones are exactly the
+                                  ones that could not. */}
+                              <ImageSelectForm<CreateOrderFormType>
                                 id={`order-line-product-${index}`}
                                 name={`lines.${index}.productId`}
                                 label={t(`${KEY}.fields.lineProductLabel`)}

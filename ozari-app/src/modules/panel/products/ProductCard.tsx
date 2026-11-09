@@ -7,7 +7,7 @@ import { useRole } from '@hooks/useRole';
 import { usePanelNavigate } from '../PanelNavContext';
 import { beginProductImageMorph, estimateDetailHeroRect } from './productImageMorph';
 import { saveProductsScroll } from './productsScroll';
-import { formatHeadlinePrice, primaryImageUrl } from './productPresentation';
+import { formatHeadlinePrice, productCoverUrl } from './productPresentation';
 import type { Product } from './product.types';
 
 const KEY = 'modules.panel.products';
@@ -138,7 +138,7 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const imageRef = useRef<HTMLImageElement>(null);
   // The server's cover (showcase primary, else the DEFAULT variation's photo); the showcase primary
   // when an older payload carries no cover.
-  const imageUrl = product.coverImageUrl ?? primaryImageUrl(product);
+  const imageUrl = productCoverUrl(product);
   // With variations, "Desde Q50 / Día" when they are priced differently. The stock badge needs no
   // such care — the product-level counts already sum the variations (server-side).
   const headline = formatHeadlinePrice(product);

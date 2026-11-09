@@ -309,6 +309,12 @@ interruption, reduced motion and leaves no inline style behind.
   snap). The gallery grid's height rides `GALLERY_REFLOW` (0.4s `power3.out`) — the tiles' own FLIP
   clock — and `releaseHeightOnResize(box)` drops an ease the moment the box's WIDTH changes, so a
   window resize re-wraps instantly instead of animating.
+- **`CrossfadeImage`** (`components/CrossfadeImage.tsx`) — a small photo box whose picture CHANGES
+  (the order line's product photo following the picks, the picker's row thumbnails). Each new
+  picture is a layer over the current one that fades in once it has LOADED (a placeholder at once,
+  via `starting:`), and the covered layers are dropped only after that fade — so photo ↔ photo,
+  empty → photo and photo → empty are all cross-fades, never a blink. A failed photo becomes the brand
+  placeholder. Decorative (`aria-hidden`, no alt): its subject's name is always printed beside it.
 - **A just-mounted label/note** may fade in with Tailwind's `starting:opacity-0` (CSS
   `@starting-style`) — binary, CSS-owned, nothing to clean up (the editor's default radio, the
   `FormError` message replacing another).
@@ -692,6 +698,17 @@ context cannot rise above the sidebar). The header `UserMenu`
 (`modules/panel/components/UserMenu.tsx`) is the reference implementation: a `createPortal` dropdown
 at `--z-float-header`, positioned under the pill and re-anchored on scroll/resize, with full menu a11y
 (roles, arrow/Home/End/Escape nav, click-outside, focus return, `inert` when closed).
+
+**`ImageSelect` / `ImageSelectForm`** (`components/`) are the body-float counterpart: a select whose
+rows carry a PHOTO (the order form's product picker). A native `<select>` cannot — only Chromium's
+customizable picker renders content inside an option, so Safari/iOS and Firefox would show bare
+names. It is the WAI-ARIA select-only combobox: a `<button role="combobox">` in the field family's
+look with focus that never leaves it (`aria-activedescendant`, the list swallows `mousedown`), the
+native keyboard (arrows, Home/End, PageUp/Down, Enter/Space, Escape/Tab, accent-insensitive
+type-ahead), and a listbox portaled at `--z-float-body` that opens upward when there is no room
+below, mounts only while open or fading out, and wears the user menu's surface and motion. The RHF
+wrapper keeps `CustomSelectForm`'s contract (`null` sentinel, touched-after-engagement). Use it only
+where a picture is how people recognise the choice; everything else stays a `CustomSelect`.
 
 ### The `Modal` primitive
 
