@@ -73,7 +73,6 @@ const data = (over: Partial<PreferencesResponse> = {}): PreferencesResponse => (
     { key: 'orders.evidenceMaxPhotos', type: 'int', value: 10, min: 1, max: 20, group: 'evidence' },
     { key: 'orders.evidenceRetentionMonths', type: 'int', value: 24, min: 1, max: 120, group: 'evidence' },
     { key: 'calendar.reminderMinutes', type: 'int', value: 1440, min: 0, max: 40320, group: 'calendar' },
-    { key: 'forms.saveDraftOrders', type: 'bool', value: true, group: 'forms' },
     { key: 'forms.saveDraftProducts', type: 'bool', value: true, group: 'forms' },
     {
       key: 'documents.businessName',
@@ -515,14 +514,13 @@ describe('PreferenceSettingsCard', () => {
     // rather than a setting the admin never chose. This is the client half of that contract.
     setState({ data: data() });
     renderPage();
-    await userEvent.click(screen.getByLabelText(`${KEY}.settings.saveDraftOrders.label`));
+    await userEvent.click(screen.getByLabelText(`${KEY}.settings.saveDraftProducts.label`));
     // The FOURTH card in Operación: logística, evidencia, calendario, formularios.
     await userEvent.click(screen.getAllByRole('button', { name: `${KEY}.settings.save` })[3]!);
 
-    // Per FORM, not one global — so flipping the order switch leaves the product one alone.
+    // Only the PRODUCT form has a switch: the order form's draft is the always-on cart.
     expect(updateSettings.mock.calls[0]?.[0]).toEqual([
-      { key: 'forms.saveDraftOrders', value: false },
-      { key: 'forms.saveDraftProducts', value: true },
+      { key: 'forms.saveDraftProducts', value: false },
     ]);
   });
 

@@ -261,9 +261,20 @@ botón **Registrar pago** (ver §8).
 o cancelado se puede corregir sin que el sistema reclame inventario —a esas alturas ya no reserva
 nada.
 
-**Borrador automático:** mientras llena un pedido nuevo, lo escrito se guarda en este navegador. Si se
-va y vuelve, aparece un aviso con la opción de descartarlo. Puede apagarlo en Preferencias →
-Operación → Formularios.
+**El pedido en curso (carrito):** el pedido nuevo que está armando se guarda en este dispositivo
+mientras lo llena, y se puede ir llenando desde cualquier parte del panel:
+
+- En **Productos**, el botón **+** de cada tarjeta agrega una unidad y abre un pequeño contador para
+  ajustar la cantidad. Un producto con variaciones se agrega sin elegirla: la variación se elige
+  después, en el pedido.
+- En el **detalle de un producto**, **Agregar al pedido** agrega la variación elegida (o el producto,
+  si todavía no la eligió).
+- El **carrito** de la barra superior muestra cuántos productos lleva y abre el pedido.
+
+Cuando el pedido ya tiene fechas, Productos y el detalle muestran lo disponible **para esas fechas**,
+y el contador no deja pasar de ahí. Al volver al formulario aparece "Retomamos tu pedido en curso."
+con la opción **Vaciar pedido**. El carrito no se puede apagar; se vacía al crear el pedido, al
+vaciarlo o al cerrar sesión, y no viaja a otro dispositivo.
 
 </details>
 
@@ -464,8 +475,8 @@ tarjeta con su propio botón.
 
 **Operación → Calendario** — con cuánta anticipación avisa el calendario. 1440 minutos = un día.
 
-**Operación → Formularios** — activar o desactivar el borrador automático, por separado para pedidos
-y para productos.
+**Operación → Formularios** — activar o desactivar el borrador automático del formulario de
+productos. (El pedido en curso no tiene interruptor: es el carrito, ver §6 "El pedido en curso".)
 
 **Los catálogos (Pedidos y Productos)** se administran igual: agregar, editar, eliminar.
 - Si nada usa el registro, se **elimina**. Si algún pedido ya lo usa, se **oculta**: desaparece de los

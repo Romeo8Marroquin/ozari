@@ -1,11 +1,13 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StorageKeys } from '@constants/StorageKeys';
 import { Storage } from '@utils/storage';
 import {
   clearOrderDraft,
   isMeaningfulOrderDraft,
+  orderDraftText,
   readOrderDraft,
   saveOrderDraft,
+  subscribeOrderDraft,
 } from './orderDraft';
 import { createOrderDefaultValues, type CreateOrderFormType } from './SchemaCreateOrder';
 
@@ -13,11 +15,12 @@ const values = (over: Partial<CreateOrderFormType> = {}): CreateOrderFormType =>
   ({ ...createOrderDefaultValues, ...over }) as CreateOrderFormType;
 
 beforeEach(() => {
+  localStorage.clear();
   sessionStorage.clear();
 });
 
 describe('orderDraft', () => {
-  it('round-trips a draft through sessionStorage', () => {
+  it('round-trips a draft through localStorage', () => {
     const draft = values({ deliveryName: 'María', deliveryAddress: 'Salón del club' });
     saveOrderDraft(draft);
     expect(readOrderDraft()).toMatchObject({
@@ -26,12 +29,39 @@ describe('orderDraft', () => {
     });
   });
 
-  it('lives in sessionStorage, so it dies with the TAB', () => {
-    // Not localStorage: a half-typed order should survive a refresh and a navigation, and should
-    // never resurrect itself a week later on a shared machine.
+  it('lives in localStorage — it is the CART, so it outlives the tab and is shared by every tab', () => {
+    // The header of one tab must never count lines the form in another cannot see. Logout still
+    // removes it (`clearAuthState`), so a shared machine never hands it to the next person.
     saveOrderDraft(values({ deliveryName: 'María' }));
-    expect(sessionStorage.getItem(StorageKeys.ORDER_CREATE_DRAFT)).not.toBeNull();
-    expect(localStorage.getItem(StorageKeys.ORDER_CREATE_DRAFT)).toBeNull();
+    expect(localStorage.getItem(StorageKeys.ORDER_CREATE_DRAFT)).not.toBeNull();
+    expect(sessionStorage.getItem(StorageKeys.ORDER_CREATE_DRAFT)).toBeNull();
+  });
+
+  it('tells its subscribers about a REAL change only — in this tab and from another one', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeOrderDraft(listener);
+    saveOrderDraft(values({ deliveryName: 'María' }));
+    expect(listener).toHaveBeenCalledTimes(1);
+    // The form autosaves on every render; writing the same values again is not news.
+    saveOrderDraft(values({ deliveryName: 'María' }));
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(orderDraftText()).toBe(JSON.stringify(values({ deliveryName: 'María' })));
+
+    clearOrderDraft();
+    expect(listener).toHaveBeenCalledTimes(2);
+    clearOrderDraft(); // nothing left to clear
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    // Another tab: its own key, or a whole-store clear (`key: null`). Anything else is not ours.
+    window.dispatchEvent(new StorageEvent('storage', { key: StorageKeys.ORDER_CREATE_DRAFT }));
+    window.dispatchEvent(new StorageEvent('storage', { key: null }));
+    window.dispatchEvent(new StorageEvent('storage', { key: StorageKeys.CSRF }));
+    expect(listener).toHaveBeenCalledTimes(4);
+
+    unsubscribe();
+    saveOrderDraft(values({ deliveryName: 'Ana' }));
+    window.dispatchEvent(new StorageEvent('storage', { key: StorageKeys.ORDER_CREATE_DRAFT }));
+    expect(listener).toHaveBeenCalledTimes(4);
   });
 
   it('has nothing to restore when the form was never touched', () => {
@@ -90,7 +120,7 @@ describe('orderDraft', () => {
 
   it('reads nothing from an empty or corrupt slot', () => {
     expect(readOrderDraft()).toBeNull();
-    sessionStorage.setItem(StorageKeys.ORDER_CREATE_DRAFT, 'no es json');
+    localStorage.setItem(StorageKeys.ORDER_CREATE_DRAFT, 'no es json');
     expect(readOrderDraft()).toBeNull();
   });
 

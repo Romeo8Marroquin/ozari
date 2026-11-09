@@ -41,7 +41,8 @@ inline route-error slot for route data).
   router so notifications, which are global, survive). The query cache is cleared AFTER navigating
   (no header placeholder flash).
 - **State taxonomy — clear vs keep.** Teardown clears everything **user-scoped** (token, CSRF,
-  refresh timer, React Query cache, form drafts, future Zustand stores). It deliberately **keeps
+  refresh timer, React Query cache, form drafts — the order sketch/cart included, though it lives in
+  localStorage — future Zustand stores). It deliberately **keeps
   globals**: notifications, i18n language, the per-device UUID, the maps-app preference. Any new
   client store must declare which side it is on.
 - **Refresh failure is split** (`tokenRefresh.ts`): an **auth** failure (401/403 from `/auth/refresh`
@@ -397,17 +398,19 @@ user watches themselves type would be truncated away later.
 
 ### Unsaved work = silent draft, never `beforeunload`
 
-Autosave to sessionStorage on change (`productDraft.ts` / `orderDraft.ts` + a `useWatch` effect),
-restore on return with a visible note + explicit discard, clear on success — and on logout
-(`clearAuthState` removes both; drafts are user-scoped). **CREATE only**: an edit's server state is
-authoritative, and a stale edit draft would silently resurrect values somebody else may have changed.
+Autosave on change (`productDraft.ts` / `orderDraft.ts` + a `useWatch` effect), restore on return
+with a visible note + explicit discard, clear on success — and on logout (`clearAuthState` removes
+both; drafts are user-scoped). **CREATE only**: an edit's server state is authoritative, and a stale
+edit draft would silently resurrect values somebody else may have changed. The product draft lives in
+sessionStorage (this tab only); the ORDER draft is the admin's cart and lives in localStorage — see
+"The order sketch" below.
 
-- **ONE SWITCH PER FORM**, not a global (owner decision 2026-08-26): `forms.saveDraftOrders` /
-  `forms.saveDraftProducts` (Preferencias → Operación → Formularios, both ON by default). The two
-  forms are used by different people at different moments — an order is filled with a client on the
-  phone, a product is set up once at a desk — so the answer for one is not the answer for the other.
-  A new form adds a key to the API registry and a member to `DraftForm`.
-- These are the first `bool` settings, which is why `SettingDefinition` / `PreferenceSettingModel` /
+- **ONE SWITCH PER FORM**, not a global (owner decision 2026-08-26) — today that is the PRODUCT form
+  only: `forms.saveDraftProducts` (Preferencias → Operación → Formularios, ON by default). The order
+  form had `forms.saveDraftOrders` until 2026-11-09, when its draft became the always-on cart (a cart
+  that can be switched off is a cart that silently forgets): the key left the API registry and the
+  seed sweeps its stored row. A new form adds a key to the API registry and a member to `DraftForm`.
+- These were the first `bool` settings, which is why `SettingDefinition` / `PreferenceSettingModel` /
   `PreferenceSetting` grew a third arm and `PreferenceSettingsCard` renders a `Switch`. The API
   accepts a REAL boolean only: `"true"` and `1` are rejected rather than coerced, because this
   endpoint is declarative and admin-only, so a wrong-shaped body is a stale client and coercion would
@@ -418,7 +421,9 @@ authoritative, and a stale edit draft would silently resurrect values somebody e
 - **The note is ONE component** (`panel/FormDraftNote.tsx`) with one i18n block
   (`modules.panel.formDraft.*`). Each form had grown its own wording, which is the same drift the
   shared document template exists to prevent: two screens describing the same mechanism in different
-  words teach the admin that they are different mechanisms.
+  words teach the admin that they are different mechanisms. The order form passes its cart wording
+  (`restoredLabel`/`discardLabel` = "Retomamos tu pedido en curso." / "Vaciar pedido") and
+  `canDisable={false}` — there is no switch to send the admin to.
 - ⚠️ **The draft is SEEDED into `defaultValues`, never `reset()` in after mount.** Seeding means no
   watcher observes a CHANGE, so none of the prefill effects fire. A `reset()` looks identical and then
   lets the order form's client-selection effect overwrite the restored contact, address, pin,
@@ -426,10 +431,65 @@ authoritative, and a stale edit draft would silently resurrect values somebody e
   own work. For the same reason `previousRegistryId` is seeded from the draft as well as the order.
 - The note is measured against **pristine** defaults, not the seeded ones: comparing a restored draft
   against itself reads as "untouched" and deletes it.
-- Any suite that mounts a create form must `sessionStorage.clear()` in `beforeEach`, or every test
-  after the first inherits the previous one's half-typed form.
+- Any suite that mounts a create form must clear its storage in `beforeEach` (`sessionStorage` for
+  products, `localStorage` for orders), or every test after the first inherits the previous one's
+  half-typed form.
 - The transient-appearance pattern for in-form notes is `Collapse` (§4 "Lists, slots and boxes") —
   never a bare conditional render (it pops and shoves).
+
+### The order sketch — the admin's cart (2026-11-09)
+
+The order-create draft IS the cart: ONE order in progress per device, built from the product grid,
+the product page or the form, and the API is called only when the order is created. Admin only
+(`RoleGate`), always on.
+
+- **One store, one key.** `orderSketch.ts` reads and writes `StorageKeys.ORDER_CREATE_DRAFT`
+  (localStorage) through `orderDraft.ts`; there is no second copy of the lines anywhere. A write
+  that leaves only a pristine order (`pristineOrderValues()`) CLEARS the key, so an emptied cart
+  leaves no residue. `useOrderSketch()` is a `useSyncExternalStore` whose snapshot is cached by the
+  stored TEXT (a fresh parse per read would loop the render).
+- **Live everywhere.** `saveOrderDraft`/`clearOrderDraft` notify subscribers only on a REAL change
+  (same tab), and `subscribeOrderDraft` also listens to `storage` events (other tabs; `key: null` =
+  a `clear()`). The open order form MERGES lines another tab changed (`mergeSketchLines`: matched by
+  product + variation; gone ⇒ slides out, quantity/picks ⇒ follow, new ⇒ appended) and keeps every
+  other field its own — overwriting would lose this tab's typing, ignoring would let the next
+  autosave erase the other tab's adds. The form never merges its OWN writes (no same-tab listener).
+- **The count is LINES, not units** (the header badge, `sketchCount`) — a blank row is not in the cart.
+- **A grid add is GENERIC** (`genericTarget`: the only variation when there is exactly one, else no
+  variation — "Se elige en el pedido"); the product page adds the picked variation, or the generic
+  line carrying the partial picks.
+- **The cap is the WINDOW once the sketch has dates.** `useSketchAvailability` asks the same
+  `POST /orders/availability` the form asks (`skipErrorNotification`, `retry: false` — advisory) and
+  `withWindowStock` rewrites the product's `available`/`inStock` with the window figures, so every
+  existing chip, swatch and cap reads the dates with no second code path. Undated ⇒ today's stock.
+  `sketchLineCap` subtracts the product's OTHER lines (a generic line may become any variation, so it
+  counts against each; shared stock is one pool). A line already ABOVE its cap says so (amber
+  `cap.over`) — the form's availability reconcile trims it, the cart never does silently.
+- **`QuantityStepper`** (`components/`) is the +/− primitive: a text input (`toIntegerText`, commits
+  on blur/Enter, clamped `1…max`), the minus becomes a trash can at 1 (→ `onChange(0)` = remove),
+  the plus disables at the cap. Never `type="number"`.
+- **The grid's quick card** (`SketchQuickAdd`) is portaled at `--z-float-body`, placed above the
+  button when there is room (whole pixels, re-placed on scroll/resize), closes on outside press,
+  Escape (focus back to the button), a focus that moves away, or its line disappearing; it stays
+  mounted for its exit. Its number is auto-focused on a fine pointer only.
+- **Nothing in the cart repaints** (owner, 2026-11-09: "no abrupt things appearing, moving, changing
+  or disappearing"). Every piece that changes under the admin's eyes has its motion:
+  - the cap/variation lines under a control are ONE `SketchNote` — a `MorphSwap` keyed on what it
+    says, inside a `useMorphOnChange` region that eases the height (one height owner; appearing and
+    vanishing are the same cross-fade from/to nothing; its spacing lives inside, so a silent note
+    takes no room — never a parent `gap` or a conditional `<p>`);
+  - the stock chips (grid AND detail) and the window chip's dates cross-fade via `MorphSwap`, tones
+    ease with `transition-colors`;
+  - `useSketchAvailability` keeps the previous answer while a new one is in flight
+    (`keepPreviousData`), so a date change never flashes every chip to today's figure and back;
+  - order-form lines enter per `LineEntrance`: rows present when the section reveals ride that
+    reveal (`none` — a second height tween would fight it), rows arriving later grow in (`grow`),
+    and ONLY "Agregar producto" also scrolls to its row (`follow`) — a line merged from another
+    tab never moves the page;
+  - "Vaciar pedido" slides every line out together, THEN resets the form; the empty-list note is a
+    `Collapse`;
+  - two rows leaving in the same tick: `removeLine` updates its field mirror at once, or the second
+    removal would target a stale index and stay on screen.
 
 ### The loading doctrine (per-card skeleton reveal)
 

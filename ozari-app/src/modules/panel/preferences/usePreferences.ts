@@ -244,12 +244,13 @@ export const readBoolSetting = (
   return found?.type === 'bool' ? found.value : fallback;
 };
 
-/** The create forms that keep a draft — one preference key each, because the answer for one is not
- *  the answer for the other. A new form adds a member here and a key in the API's registry. */
-export type DraftForm = 'orders' | 'products';
+/** The create forms whose draft can be switched off — one preference key each, because the answer
+ *  for one is not the answer for the other. A new form adds a member here and a key in the API's
+ *  registry. The ORDER form is deliberately absent: its draft is the order sketch — the admin's cart —
+ *  and a cart that can be switched off is a button that silently does nothing (owner, 2026-11-09). */
+export type DraftForm = 'products';
 
 const DRAFT_SETTING: Record<DraftForm, string> = {
-  orders: 'forms.saveDraftOrders',
   products: 'forms.saveDraftProducts',
 };
 

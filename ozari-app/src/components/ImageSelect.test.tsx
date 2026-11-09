@@ -232,11 +232,11 @@ describe('ImageSelect', () => {
     render(<Harness initial={2} />);
     const field = trigger();
     fireEvent.keyDown(field, { key: 'ArrowDown' });
-    expect(scrolls.at(-1)).toBe(2 * 50 - (100 - 50) / 2); // "Camino de mesa" centred
+    expect(scrolls[scrolls.length - 1]).toBe(2 * 50 - (100 - 50) / 2); // "Camino de mesa" centred
     fireEvent.keyDown(field, { key: 'End' }); // row 4 (200–250) is below the window
-    expect(scrolls.at(-1)).toBe(250 - 100);
+    expect(scrolls[scrolls.length - 1]).toBe(250 - 100);
     fireEvent.keyDown(field, { key: 'Home' }); // row 0 is above it
-    expect(scrolls.at(-1)).toBe(0);
+    expect(scrolls[scrolls.length - 1]).toBe(0);
     const count = scrolls.length;
     fireEvent.keyDown(field, { key: 'ArrowDown' }); // row 1 already fully visible → no scroll
     expect(scrolls).toHaveLength(count);

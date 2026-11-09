@@ -86,6 +86,12 @@
       "logo": "Logo Party Rentals",
       "loading": "Cargando"
     },
+    "quantityStepper": {
+      "decrease": "Quitar uno",
+      "increase": "Agregar uno",
+      "remove": "Quitar",
+      "atMax": "No hay más disponibles"
+    },
     "customInput": {
       "requiredField": "*",
       "optionalField": "(opcional)",
@@ -256,6 +262,34 @@
         "restored": "Recuperamos tu borrador.",
         "discard": "Descartar",
         "disable": "Desactivar borradores"
+      },
+      "orderSketch": {
+        "button": "Pedido en curso",
+        "buttonEmpty": "Pedido en curso: vacío",
+        "buttonCount_one": "Pedido en curso: {{count}} producto",
+        "buttonCount_other": "Pedido en curso: {{count}} productos",
+        "restored": "Retomamos tu pedido en curso.",
+        "discard": "Vaciar pedido",
+        "add": "Agregar al pedido",
+        "addNamed": "Agregar {{name}} al pedido",
+        "editNamed": "{{name}}: {{count}} en el pedido. Cambiar la cantidad",
+        "unavailableNamed": "{{name}}: sin disponibilidad",
+        "inSketch": "En el pedido",
+        "quantity": "Cantidad de {{name}}",
+        "variantLater": "Elegirás la variación en el pedido.",
+        "view": "Ver pedido",
+        "cap": {
+          "dated": "Máx. {{count}} para las fechas del pedido",
+          "today": "Máx. {{count}} disponibles hoy",
+          "noneDated": "Sin disponibilidad para las fechas del pedido",
+          "noneToday": "Sin disponibilidad por ahora",
+          "over": "Solo hay {{count}} para esas fechas; el pedido lo ajustará."
+        },
+        "window": {
+          "label": "Disponibilidad para las fechas del pedido en curso",
+          "range": "{{from}} → {{to}}",
+          "from": "Desde {{from}}"
+        }
       },
       "nav": {
         "dashboard": "Inicio",
@@ -575,13 +609,9 @@
             "label": "Minutos de anticipación del aviso",
             "help": "Cuánto antes de cada entrega o recolección avisa el calendario. 1440 = un día. Si el pedido se crea con menos tiempo que este, el aviso se ajusta para que igual llegue."
           },
-          "saveDraftOrders": {
-            "label": "Guardar borrador de nuevo pedido",
-            "help": "Conserva lo que llevas escrito si recargas o navegas a otra página. El borrador vive solo en esta pestaña y se borra al cerrarla, al crear el pedido o al cerrar sesión."
-          },
           "saveDraftProducts": {
             "label": "Guardar borrador de nuevo producto",
-            "help": "Igual que el de pedidos, para el formulario de productos. Las fotos nunca se guardan en el borrador."
+            "help": "Conserva lo que llevas escrito si recargas o navegas a otra página. El borrador vive solo en esta pestaña y se borra al cerrarla, al crear el producto o al cerrar sesión. Las fotos nunca se guardan en el borrador."
           },
           "businessName": {
             "label": "Nombre del negocio",

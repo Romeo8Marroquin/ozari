@@ -12,6 +12,8 @@ import RoleGate from '@components/RoleGate';
 import SkeletonFade from '@components/SkeletonFade';
 import { Role } from '@constants/Roles';
 import { useInfiniteScrollSentinel } from '@hooks/useInfiniteScrollSentinel';
+import { useSketchAvailability, withWindowStock } from '../orders/orderSketch';
+import SketchWindowNote from '../orders/SketchWindowNote';
 import { gridCellRevealDelay, staggerIn, staggerOut } from '../pageMotion';
 import { usePanelNavigate } from '../PanelNavContext';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
@@ -80,6 +82,10 @@ const ProductsPage: React.FC = () => {
 
   const filtered = hasActiveFilters(search);
   const products = useMemo(() => data?.products ?? [], [data]);
+  // Once the order sketch (the admin's cart) has dates, every tile's stock speaks for THAT window —
+  // the same probe the order form asks — and a chip under the filters says which dates.
+  const productIds = useMemo(() => products.map((product) => product.id), [products]);
+  const { availability, window: sketchSpan } = useSketchAvailability(productIds);
   const pagination = data?.pagination;
   // COLD = nothing cached to show at all (first visit / cold reload) — drives the skeleton grid
   // and the error panel.
@@ -315,6 +321,7 @@ const ProductsPage: React.FC = () => {
           </div>
           <div className={`reveal-item products-chrome${chromeSkeletonClass}`}>
             <ProductsFilterBar search={search} onChange={applyFilters} />
+            <SketchWindowNote window={sketchSpan} className="mt-3" />
           </div>
           <div ref={body} className="flex flex-1 flex-col gap-6">
             {filteredEmpty ? (
@@ -378,7 +385,7 @@ const ProductsPage: React.FC = () => {
                                 across slots by this id instead (see useGridListTransition). */}
                             {product && (
                               <div data-flip-id={product.id}>
-                                <ProductCard product={product} />
+                                <ProductCard product={withWindowStock(product, availability)} />
                               </div>
                             )}
                           </SkeletonFade>

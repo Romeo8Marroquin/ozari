@@ -36,16 +36,6 @@ vi.mock('./useOrderAvailability', () => ({ useOrderAvailability }));
 const { success, error, warning } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
 vi.mock('@components/notifications/notify', () => ({ notify: { success, error, warning } }));
 
-// Only the draft SWITCH is stubbed; `usePreferences` itself stays real, because the quote button in
-// the footer reads it and a wholesale module mock would take that down with it.
-const { formDrafts } = vi.hoisted(() => ({
-  formDrafts: vi.fn(() => ({ enabled: true, isLoading: false })),
-}));
-vi.mock('../preferences/usePreferences', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../preferences/usePreferences')>()),
-  useFormDraftsEnabled: formDrafts,
-}));
-
 // The form defaults the "Asignar a" select to the current admin's id (from the token).
 const { getStoredUserId } = vi.hoisted(() => ({ getStoredUserId: vi.fn(() => 1) }));
 vi.mock('@hooks/useRole', () => ({ getStoredUserId }));
@@ -101,8 +91,10 @@ import OrderForm from './OrderForm';
 import { createOrderDefaultValues, reconcileToastDuration } from './SchemaCreateOrder';
 
 const KEY = 'modules.panel.orders.create';
-/** The draft note is ONE component shared by both create forms, so its copy is not per-form. */
+/** The draft note is ONE component shared by both create forms — but the order form's draft is the
+ *  CART (the order sketch), so it speaks in the sketch's words and offers no switch. */
 const DRAFT_KEY = 'modules.panel.formDraft';
+const SKETCH_KEY = 'modules.panel.orderSketch';
 /** The logistics pad's own namespace — a driver conflict never borrows the stock keys. */
 const DKEY = 'modules.panel.orders.driverAvailability';
 
@@ -277,12 +269,11 @@ const FROZEN_NOW = new Date('2026-07-15T12:00:00').getTime();
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // The form autosaves a silent draft to sessionStorage as it is filled, so without this every test
-  // after the first one would mount already carrying the previous test's half-typed order — which is
-  // the feature working, and cross-test pollution all the same.
+  // The form autosaves the order sketch (its draft — the cart) to localStorage as it is filled, so
+  // without this every test after the first one would mount already carrying the previous test's
+  // half-typed order — which is the feature working, and cross-test pollution all the same.
   sessionStorage.clear();
   localStorage.clear();
-  formDrafts.mockReturnValue({ enabled: true, isLoading: false });
   vi.spyOn(Date, 'now').mockReturnValue(FROZEN_NOW);
   useCreateOrder.mockReturnValue({ createOrder, isPending: false });
   useUpdateOrder.mockReturnValue({ updateOrder, isPending: false });
@@ -1270,7 +1261,7 @@ describe('OrderForm — silent draft', () => {
   };
 
   const noteContainer = (): Element | null =>
-    screen.getByText(`${DRAFT_KEY}.restored`, { exact: false }).closest('[aria-hidden]');
+    screen.getByText(`${SKETCH_KEY}.restored`, { exact: false }).closest('[aria-hidden]');
 
   it('autosaves as the admin types, so a refresh loses nothing', async () => {
     const { container } = renderForm();
@@ -1290,8 +1281,9 @@ describe('OrderForm — silent draft', () => {
     );
     expect(noteContainer()).toHaveAttribute('aria-hidden', 'false');
 
-    await userEvent.click(screen.getByRole('button', { name: `${DRAFT_KEY}.discard` }));
-    expect((byId(container, 'order-delivery-name') as HTMLInputElement).value).toBe('');
+    await userEvent.click(screen.getByRole('button', { name: `${SKETCH_KEY}.discard` }));
+    // The lines slide out first; the form resets once they have left.
+    await waitFor(() => expect((byId(container, 'order-delivery-name') as HTMLInputElement).value).toBe(''));
     await waitFor(() => expect(Storage.get(StorageKeys.ORDER_CREATE_DRAFT)).toBeNull());
     expect(noteContainer()).toHaveAttribute('aria-hidden', 'true');
   });
@@ -1314,32 +1306,107 @@ describe('OrderForm — silent draft', () => {
     expect(noteContainer()).toHaveAttribute('inert');
   });
 
-  it('offers the way OUT of the feature, not just out of this draft', async () => {
-    // An admin who did not want their half-typed order kept needs to know where the switch is;
-    // "Preferencias", three screens away, is not a discoverable answer on its own.
+  it('offers to EMPTY the cart, never to switch it off — the sketch is always kept', () => {
+    // The order draft is the admin's cart (owner, 2026-11-09): a cart that can be switched off is a
+    // button that silently does nothing, so the product form's "Desactivar borradores" is not here.
     seedDraft();
-    const { navigateTo } = renderForm();
-    await userEvent.click(screen.getByRole('button', { name: `${DRAFT_KEY}.disable` }));
-    expect(navigateTo).toHaveBeenCalledWith('/panel/preferencias');
+    renderForm();
+    expect(screen.getByRole('button', { name: `${SKETCH_KEY}.discard` })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `${DRAFT_KEY}.disable` })).not.toBeInTheDocument();
   });
 
-  it('with the preference OFF, stores nothing and empties what was already stored', async () => {
-    // Switching the feature off has to mean "nothing of mine is being kept", not merely "nothing
-    // new will be" — a draft left behind would outlive the decision to stop making them.
-    seedDraft();
-    formDrafts.mockReturnValue({ enabled: false, isLoading: false });
+  it('restores LINES the cart put there — the grid builds the very same blank order', async () => {
+    // A cart started on the product grid is a pristine order (assignee = the signed-in admin) plus
+    // lines; the form opens on exactly that, with the line's product picked and its quantity.
+    Storage.set(StorageKeys.ORDER_CREATE_DRAFT, {
+      ...createOrderDefaultValues,
+      assignedUserId: 1,
+      lines: [{ productId: 3, variantId: null, pickedValues: [], quantity: '4', isRental: true }],
+    });
     const { container } = renderForm();
-    await waitFor(() => expect(Storage.get(StorageKeys.ORDER_CREATE_DRAFT)).toBeNull());
-    // Nothing was restored either — a form showing recovered values with no note explaining them is
-    // worse than a form that simply starts clean.
-    expect((byId(container, 'order-delivery-name') as HTMLInputElement).value).toBe('');
-    expect(noteContainer()).toHaveAttribute('aria-hidden', 'true');
+    expect(byId(container, 'order-line-product-0')).toHaveTextContent('Silla plegable');
+    expect((byId(container, 'order-line-quantity-0') as HTMLInputElement).value).toBe('4');
+    expect(noteContainer()).toHaveAttribute('aria-hidden', 'false');
 
-    await userEvent.type(byId(container, 'order-delivery-name'), 'María');
-    await waitFor(() =>
-      expect((byId(container, 'order-delivery-name') as HTMLInputElement).value).toBe('María'),
-    );
+    // "Vaciar pedido": the line slides out, THEN the form resets — and the empty-list note eases in.
+    await userEvent.click(screen.getByRole('button', { name: `${SKETCH_KEY}.discard` }));
+    await waitFor(() => expect(container.querySelectorAll('[data-order-line]')).toHaveLength(0));
+    expect(screen.getByText('modules.panel.orders.create.lines.empty')).toBeInTheDocument();
     expect(Storage.get(StorageKeys.ORDER_CREATE_DRAFT)).toBeNull();
+  });
+
+  it('merges the LINES another tab changed, instead of overwriting them on the next autosave', async () => {
+    // Tab B's grid added vasos and took the chairs to 6; tab A (this form) must follow — a line that
+    // went slides out, one that changed takes the new quantity, one that arrived is appended.
+    Storage.set(StorageKeys.ORDER_CREATE_DRAFT, {
+      ...createOrderDefaultValues,
+      assignedUserId: 1,
+      deliveryName: 'Pestaña A',
+      lines: [
+        { productId: 3, variantId: null, pickedValues: [], quantity: '4', isRental: true },
+        { productId: null, variantId: null, pickedValues: [], quantity: '', isRental: false },
+      ],
+    });
+    const { container } = renderForm();
+    const fromOtherTab = (lines: unknown[]): void => {
+      localStorage.setItem(
+        StorageKeys.ORDER_CREATE_DRAFT,
+        JSON.stringify({ ...createOrderDefaultValues, assignedUserId: 1, deliveryName: 'Pestaña B', lines }),
+      );
+      act(() => {
+        window.dispatchEvent(new StorageEvent('storage', { key: StorageKeys.ORDER_CREATE_DRAFT }));
+      });
+    };
+    fromOtherTab([
+      { productId: 3, variantId: null, pickedValues: [], quantity: '6', isRental: true },
+      { productId: 4, variantId: null, pickedValues: [], quantity: '2', isRental: false },
+    ]);
+    await waitFor(() => expect(byId(container, 'order-line-product-2')).toHaveTextContent('Vasos'));
+    expect((byId(container, 'order-line-quantity-0') as HTMLInputElement).value).toBe('6');
+    expect((byId(container, 'order-line-quantity-2') as HTMLInputElement).value).toBe('2');
+    // The blank row and every other field stay THIS form's own.
+    expect(byId(container, 'order-line-product-1')).toBeInTheDocument();
+    expect((byId(container, 'order-delivery-name') as HTMLInputElement).value).toBe('Pestaña A');
+
+    // An unrelated key moves nothing.
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: StorageKeys.CSRF }));
+    });
+    // Tab B emptied its cart (`clear()` → `key: null`): the product lines slide out.
+    localStorage.removeItem(StorageKeys.ORDER_CREATE_DRAFT);
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: null }));
+    });
+    await waitFor(() => expect(container.querySelectorAll('[data-order-line]')).toHaveLength(1));
+  });
+
+  it('follows picks another tab made on a GENERIC line', async () => {
+    Storage.set(StorageKeys.ORDER_CREATE_DRAFT, {
+      ...createOrderDefaultValues,
+      assignedUserId: 1,
+      lines: [{ productId: 3, variantId: null, pickedValues: [], quantity: '4', isRental: true }],
+    });
+    const { container } = renderForm();
+    localStorage.setItem(
+      StorageKeys.ORDER_CREATE_DRAFT,
+      JSON.stringify({
+        ...createOrderDefaultValues,
+        assignedUserId: 1,
+        lines: [{ productId: 3, variantId: null, pickedValues: [9], quantity: '4', isRental: true }],
+      }),
+    );
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: StorageKeys.ORDER_CREATE_DRAFT }));
+    });
+    // The form's NEXT autosave carries the merged picks (it would have written `[]` back otherwise).
+    await userEvent.type(byId(container, 'order-delivery-name'), 'X');
+    await waitFor(() => {
+      const stored = Storage.get<{ deliveryName: string; lines: { pickedValues: unknown[] }[] }>(
+        StorageKeys.ORDER_CREATE_DRAFT,
+      );
+      expect(stored?.deliveryName).toBe('X');
+      expect(stored?.lines[0]?.pickedValues).toEqual([9]);
+    });
   });
 
   it('EDIT never drafts — server state is what an existing order is', async () => {

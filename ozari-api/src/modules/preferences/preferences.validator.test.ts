@@ -59,6 +59,8 @@ describe("validateUpdatePreferenceSettings", () => {
     ["unknownSetting", { settings: [{ key: "nope", value: 1 }] }],
     // Seeded but honoured by nothing yet — deliberately NOT editable (owner rule 2026-07-29).
     ["unknownSetting", { settings: [{ key: "notifications.digestFrequency", value: 1 }] }],
+    // RETIRED 2026-11-09 — the order draft became the always-on cart; a stale client can't revive it.
+    ["unknownSetting", { settings: [{ key: "forms.saveDraftOrders", value: false }] }],
     ["unknownSetting", { settings: [{ key: 42, value: 1 }] }],
     [
       "duplicateSetting",
@@ -93,16 +95,16 @@ describe("validateUpdatePreferenceSettings", () => {
   });
 
   it("accepts a real BOOLEAN for a switch, and refuses to coerce anything else", () => {
-    expect(run({ settings: [{ key: "forms.saveDraftOrders", value: true }] }).next).toHaveBeenCalled();
+    expect(run({ settings: [{ key: "forms.saveDraftProducts", value: true }] }).next).toHaveBeenCalled();
     vi.clearAllMocks();
-    expect(run({ settings: [{ key: "forms.saveDraftOrders", value: false }] }).next).toHaveBeenCalled();
+    expect(run({ settings: [{ key: "forms.saveDraftProducts", value: false }] }).next).toHaveBeenCalled();
 
     // `"true"` and `1` are the shapes a stale or hand-rolled client sends. Coercing them would turn
     // a client bug into a setting the admin never chose, on an endpoint that is declarative and
     // admin-only — so they are rejected rather than interpreted.
     for (const value of ["true", 1, null]) {
       vi.clearAllMocks();
-      const { next } = run({ settings: [{ key: "forms.saveDraftOrders", value }] });
+      const { next } = run({ settings: [{ key: "forms.saveDraftProducts", value }] });
       expect(next).not.toHaveBeenCalled();
       expectRejected("invalidSettingValue");
     }

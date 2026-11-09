@@ -7,6 +7,11 @@ interface FormDraftNoteProps {
   /** Whether a draft was restored AND the feature is still on for this form. */
   visible: boolean;
   onDiscard: () => void;
+  /** The order form's draft is the CART (the order sketch): it says so in its own words… */
+  restoredLabel?: string;
+  discardLabel?: string;
+  /** …and it cannot be switched off, so it offers no "Desactivar borradores". */
+  canDisable?: boolean;
 }
 
 /**
@@ -28,7 +33,13 @@ interface FormDraftNoteProps {
  * the parent's column gap while collapsed and transitions back in step with the height. Conditional
  * rendering would pop and shove, and would skip the exit entirely.
  */
-const FormDraftNote: React.FC<FormDraftNoteProps> = ({ visible, onDiscard }) => {
+const FormDraftNote: React.FC<FormDraftNoteProps> = ({
+  visible,
+  onDiscard,
+  restoredLabel,
+  discardLabel,
+  canDisable = true,
+}) => {
   const { t } = useTranslation();
   const panelNavigate = usePanelNavigate();
 
@@ -42,7 +53,7 @@ const FormDraftNote: React.FC<FormDraftNoteProps> = ({ visible, onDiscard }) => 
     >
       <div className="overflow-hidden">
         <div className="reveal-block flex flex-wrap items-center gap-x-4 gap-y-1 rounded-control border border-charcoal/[0.08] bg-charcoal/[0.03] px-4 py-2.5 text-sm text-charcoal/70">
-          <span className="min-w-0">{t(`${KEY}.restored`)}</span>
+          <span className="min-w-0">{restoredLabel ?? t(`${KEY}.restored`)}</span>
           {/* The two things the admin might want, in the order they might want them: undo THIS
               draft, or stop making them at all. `ml-auto` keeps them right-aligned on a wide row
               and lets them wrap together on a narrow one. */}
@@ -51,15 +62,17 @@ const FormDraftNote: React.FC<FormDraftNoteProps> = ({ visible, onDiscard }) => 
             onClick={onDiscard}
             className="ml-auto cursor-pointer rounded-chip font-medium text-charcoal underline-offset-2 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
           >
-            {t(`${KEY}.discard`)}
+            {discardLabel ?? t(`${KEY}.discard`)}
           </button>
-          <button
-            type="button"
-            onClick={() => panelNavigate('/panel/preferencias')}
-            className="cursor-pointer rounded-chip text-charcoal/55 underline underline-offset-2 transition-colors hover:text-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
-          >
-            {t(`${KEY}.disable`)}
-          </button>
+          {canDisable && (
+            <button
+              type="button"
+              onClick={() => panelNavigate('/panel/preferencias')}
+              className="cursor-pointer rounded-chip text-charcoal/55 underline underline-offset-2 transition-colors hover:text-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
+            >
+              {t(`${KEY}.disable`)}
+            </button>
+          )}
         </div>
       </div>
     </div>

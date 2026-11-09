@@ -271,7 +271,7 @@ const ImageSelect = forwardRef<HTMLButtonElement, ImageSelectProps>(
         PageDown: Math.min(active + PAGE_STEP, last),
         PageUp: Math.max(active - PAGE_STEP, 0),
       };
-      if (Object.hasOwn(moves, key)) {
+      if (Object.prototype.hasOwnProperty.call(moves, key)) {
         event.preventDefault();
         setActive(moves[key]);
       } else if (key === 'Enter' || (key === ' ' && !searching)) {

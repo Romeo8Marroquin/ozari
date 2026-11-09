@@ -590,6 +590,25 @@ nothing: a method must be observed, not guessed.
   not a hidden card: the section's skeleton is always shown while loading, so hiding it on load
   would make a shimmer vanish.
 
+### The order sketch — the admin's cart (frontend only, 2026-11-09)
+
+The order-create draft doubles as a device-local CART: one order in progress, built from anywhere in
+the panel, sent to the API only by "Crear pedido". No endpoint, no table — it lives in localStorage
+(`ORDER_CREATE_DRAFT`, user-scoped, cleared on logout) and is lost on another device by design. The
+mechanics and their reasons are `FRONTEND-DOCTRINE.md` "The order sketch"; what exists:
+
+- **Store** `orders/orderSketch.ts` (`useOrderSketch`, `addToSketch`, `setSketchQuantity`,
+  `sketchLineCap`, `useSketchAvailability`, `withWindowStock`) over `orders/orderDraft.ts`.
+- **Header** `OrderSketchButton` (Admin): cart icon + line-count badge → `/panel/pedidos/nuevo`.
+- **Grid** `SketchQuickAdd` on each `ProductCard` (Admin): first press adds one generic unit and
+  opens a floating stepper card. **Detail page** `SketchDetailAdd` under the stock line: the picked
+  variation, or the generic line with the partial picks.
+- **Window**: once the sketch has a delivery date, `ProductsPage`/`ProductDetailPage` probe
+  `POST /orders/availability` for the visible products and show the window's figures
+  (`SketchWindowNote` names the dates); the order form's own picker already speaks for its dates.
+- **Form**: restores the sketch with "Retomamos tu pedido en curso." + "Vaciar pedido" (no switch to
+  turn it off), autosaves into it, and merges lines another tab changed.
+
 ---
 
 ## 3. The logistics pad — `EPIC-2-DRIVER-AVAILABILITY.md`
@@ -984,7 +1003,9 @@ catalogs.
 ### The two registries
 
 - **`preferences.service.ts` = the SETTINGS registry.** Only the settings the system actually HONOURS
-  are editable (spacing, turnaround, evidence min/max, retention, the two draft switches, the calendar
+  are editable (spacing, turnaround, evidence min/max, retention, the product-form draft switch —
+  `forms.saveDraftOrders` was retired 2026-11-09 when the order draft became the always-on cart, §2
+  "The order sketch" —, the calendar
   reminder lead, and the six `documents.*` keys the PDF and the register screen read) — owner rule
   2026-07-29: a control that saves a value nothing reads teaches the admin to distrust the whole
   screen. **Add a key here in the SAME commit as the feature that reads it.** Bounds travel to the

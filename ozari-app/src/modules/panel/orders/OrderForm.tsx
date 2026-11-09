@@ -23,7 +23,7 @@ import LocationField from '@components/LocationField';
 import FormError from '@components/FormError';
 import { notify } from '@components/notifications/notify';
 import { QueryKeys } from '@constants/QueryKeys';
-import { getStoredUserId } from '@hooks/useRole';
+import { StorageKeys } from '@constants/StorageKeys';
 import { RequiredPatternsContext } from '@contexts/RequiredFieldsContext';
 import { getStatus, toFormError } from '@utils/apiError';
 import { decimalInput, integerInput } from '@utils/numericInput';
@@ -37,7 +37,6 @@ import {
 } from '../pageMotion';
 import QuoteDocumentButton from '../documents/QuoteDocumentButton';
 import FormDraftNote from '../FormDraftNote';
-import { useFormDraftsEnabled } from '../preferences/usePreferences';
 import { usePanelNavigate } from '../PanelNavContext';
 import PreferencesCta from '../PreferencesCta';
 import type { Product, ProductVariant } from '../products/product.types';
@@ -58,6 +57,7 @@ import { currentPicks, linePhotoUrl, nextPicks, valueChoices } from './orderLine
 import SectionReveal from '../products/SectionReveal';
 import ClientRegistryModal from './ClientRegistryModal';
 import { clearOrderDraft, isMeaningfulOrderDraft, readOrderDraft, saveOrderDraft } from './orderDraft';
+import { pristineOrderValues, type SketchLine } from './orderSketch';
 import { CHANNEL_INPUT_MODE, contactChannelKind } from '@constants/Regex';
 import ContactChannelIcon from './ContactChannelIcon';
 import type {
@@ -83,7 +83,6 @@ import {
   appendLineVariantErrors,
   availabilityMapFrom,
   gapLabelKey,
-  createOrderDefaultValues,
   createOrderRequiredPatterns,
   createOrderSchema,
   nowDateTimeLocal,
@@ -157,21 +156,34 @@ const isReady = (
 ): boolean => Boolean(catalog && catalog.eventTypes.length > 0 && catalog.contactTypes.length > 0);
 
 /**
- * One product line: registers its element (so removal can tween it out) and grows in from the left
- * like a list entry on mount — the exact `detailRowIn`/`detailRowOut` language as the product form's
- * detail sub-editor. Every line is user-added post-reveal (this create form has no draft/initial
- * rows), so every mount animates in; `detailRowIn` no-ops under reduced motion.
+ * How a line ENTERS — decided once, as it mounts (`lineEntrance` in the form):
+ *  - `none`: it was there when the section's content appeared (a restored cart, an order being
+ *    edited) — it rides the section's own reveal; a second, per-row height tween would fight it;
+ *  - `grow`: it arrived later on its own (merged in from another tab's cart, the fresh blank row
+ *    after "Vaciar pedido") — it grows in, and the page stays exactly where the admin left it;
+ *  - `follow`: "Agregar producto" asked for it — it grows in AND the panel follows it into view.
+ */
+type LineEntrance = 'none' | 'grow' | 'follow';
+
+/**
+ * One product line: registers its element (so removal can tween it out) and enters as `entrance`
+ * says — the exact `detailRowIn`/`detailRowOut` language as the product form's detail sub-editor.
+ * `detailRowIn` no-ops under reduced motion.
  */
 const LineRow: React.FC<{
+  entrance: () => LineEntrance;
   onRegister: (el: HTMLDivElement | null) => void;
   children: React.ReactNode;
-}> = ({ onRegister, children }) => {
+}> = ({ entrance, onRegister, children }) => {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
+    const how = entrance();
+    if (how === 'none') return;
     detailRowIn(ref.current);
-    // The new line is what the click asked for, so it must not open below the fold — the panel
-    // follows it by the minimum needed, on the same curve as the row's own growth.
-    revealInScroller(ref.current);
+    // Adding is a request to see it — only when the admin ASKED (revealInScroller's rule): a line
+    // that arrived from another tab must not scroll the page under them.
+    if (how === 'follow') revealInScroller(ref.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only; the entrance is read once
   }, []);
   return (
     <div
@@ -343,9 +355,6 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   const catalogQuery = useOrdersCatalog();
   const productsQuery = useOrderProducts();
   const registriesQuery = useClientRegistries();
-  // Defaults to ON while the preference is in flight — see `useFormDraftsEnabled` for why that
-  // direction is the safe one.
-  const { enabled: draftsEnabled } = useFormDraftsEnabled('orders');
   const { createOrder, isPending: isCreating } = useCreateOrder();
   const { updateOrder, isPending: isUpdating } = useUpdateOrder();
   const { checkAvailability } = useOrderAvailability();
@@ -451,29 +460,23 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   // already stored. Computed once — RHF captures defaults at mount, and the edit page only mounts
   // this component once the order has loaded.
   // What a PRISTINE create form looks like — the yardstick the autosave measures against, and where
-  // "descartar" returns to. Kept separate from `defaultValues` because those may BE a restored
-  // draft, and comparing a draft against itself would read as "untouched" and delete it.
-  const pristineDefaults = useMemo<CreateOrderFormType>(
-    () => ({ ...createOrderDefaultValues, assignedUserId: getStoredUserId() as unknown as number }),
-    [],
-  );
-  // The draft is read ONCE per mount (never re-read mid-session — the form itself is the source of
-  // truth once mounted); its presence drives the "restored" note until discarded. Create-only, for
-  // the same reason the product form's is: server state is authoritative on an edit, and a stale
-  // edit draft would silently resurrect values somebody else may have already changed.
+  // "vaciar" returns to. Kept separate from `defaultValues` because those may BE a restored draft,
+  // and comparing a draft against itself would read as "untouched" and delete it. The SAME blank
+  // order a cart started on the product grid builds on (`pristineOrderValues`).
+  const pristineDefaults = useMemo<CreateOrderFormType>(() => pristineOrderValues(), []);
+  // The draft — the order SKETCH, the admin's cart (`orderSketch.ts`) — is read ONCE per mount (the
+  // form itself is the source of truth once mounted; another tab's changes to the LINES are merged
+  // in below); its presence drives the "restored" note until discarded. Create-only, for the same
+  // reason the product form's is: server state is authoritative on an edit, and a stale edit draft
+  // would silently resurrect values somebody else may have already changed. Always on: the cart
+  // cannot be switched off (owner, 2026-11-09).
   //
   // Seeded into `defaultValues` rather than `reset()` into the form after mount, and that is
   // load-bearing: seeding means no watcher ever observes a CHANGE, so none of the prefill effects
   // fire. A `reset()` would look identical and then let the client-selection effect below overwrite
   // the restored contact, address, pin, instructions and fee with the client's CURRENT defaults —
   // silently rewriting the admin's own work.
-  // Not read at all when the switch is already known to be OFF. (While the preference is still in
-  // flight it reads as ON — see `useFormDraftsEnabled` — but the storage is only ever written while
-  // enabled, so the only way to reach that window with a draft in hand is to have turned the feature
-  // off with one already saved. The effect below then empties it.)
-  const [storedDraft] = useState(() =>
-    mode === 'edit' || !draftsEnabled ? null : readOrderDraft(),
-  );
+  const [storedDraft] = useState(() => (mode === 'edit' ? null : readOrderDraft()));
   const [draftRestored, setDraftRestored] = useState(Boolean(storedDraft));
   const defaultValues = useMemo<CreateOrderFormType>(
     () => (order ? orderToFormValues(order) : (storedDraft ?? pristineDefaults)),
@@ -513,12 +516,27 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
         leavingLines.current.delete(id);
         const index = latestLineFields.current.findIndex((row) => row.id === id);
         /* v8 ignore next -- defensive: only reachable if the row already left (a raced double-remove) */
-        if (index !== -1) lines.remove(index);
+        if (index === -1) return;
+        lines.remove(index);
+        // Mirror the removal NOW: two rows leaving together finish in the same tick, before the
+        // re-render refreshes the mirror, and the second would otherwise remove a stale index.
+        latestLineFields.current = latestLineFields.current.filter((row) => row.id !== id);
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- lines.remove is a stable RHF method
     [],
   );
+  // Rows mounted with the section's content ride its reveal; the flag flips (in a PASSIVE effect,
+  // after those rows' layout effects have read it) once the content is up — see `LineEntrance`.
+  const linesSettled = useRef(false);
+  // Set by "Agregar producto", claimed by the ONE row that click mounts.
+  const followAddedLine = useRef(false);
+  const lineEntrance = useCallback((): LineEntrance => {
+    if (!linesSettled.current) return 'none';
+    const follow = followAddedLine.current;
+    followAddedLine.current = false;
+    return follow ? 'follow' : 'grow';
+  }, []);
 
   // Live line values drive the mode filter, the per-line isRental sync, the pickup rule, and the
   // estimate. `useWatch` (not `watch()`) keeps the React Compiler able to memoize this component.
@@ -639,26 +657,65 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     // is not a payment, and writing it here made every order claim a method nobody had used yet.
   }, [clientRegistryId, registriesById, setValue]);
 
-  // Silent autosave (create only). Every change persists the draft; a form back at its PRISTINE
-  // state clears it instead, so an untouched visit never leaves residue. With the preference off,
-  // the storage is actively emptied rather than merely left alone — switching the feature off has
-  // to mean "nothing of mine is being kept", not "nothing new will be". `useWatch` (not `watch()`)
-  // so the React Compiler can still memoize this component.
+  // Silent autosave (create only). Every change persists the sketch — and the header's cart count
+  // follows it keystroke by keystroke; a form back at its PRISTINE state clears it instead, so an
+  // untouched visit never leaves residue. `useWatch` (not `watch()`) so the React Compiler can still
+  // memoize this component.
   useEffect(() => {
     if (isEdit) return;
-    if (!draftsEnabled) {
-      clearOrderDraft();
-      return;
-    }
     const current = liveValues as CreateOrderFormType;
     if (isMeaningfulOrderDraft(current, pristineDefaults)) saveOrderDraft(current);
     else clearOrderDraft();
-  }, [liveValues, isEdit, draftsEnabled, pristineDefaults]);
+  }, [liveValues, isEdit, pristineDefaults]);
 
-  // The note describes something that is CURRENTLY happening, so it goes away the moment the
-  // preference does — even though the restored values stay on screen, because they are the admin's
-  // work and wiping them over a settings change would be the greater surprise.
-  const showDraftNote = draftRestored && draftsEnabled;
+  // ANOTHER TAB changed the sketch's lines (its grid, its detail page, or a second form): merge them
+  // into this form instead of letting this form's next autosave silently overwrite them. Only the
+  // product lines, matched by their (product, variation) pair: one that went is slid out like a
+  // removal by hand, one that changed takes the new quantity (and picks), one that arrived is
+  // appended. Blank rows and every other field are this form's own. Only the browser's `storage`
+  // event — this tab's own writes are the form's, never news to it.
+  const mergeSketchLines = useCallback(
+    (external: readonly SketchLine[]): void => {
+      const pending = external.filter((line) => line.productId != null);
+      const current = getValues('lines');
+      current.forEach((line, index) => {
+        /* v8 ignore next -- `?.id ?? ''`: RHF keeps one field per value */
+        const id = latestLineFields.current[index]?.id ?? '';
+        if (line.productId == null || leavingLines.current.has(id)) return;
+        const at = pending.findIndex(
+          (other) => other.productId === line.productId && (other.variantId ?? null) === (line.variantId ?? null),
+        );
+        if (at === -1) {
+          removeLine(id);
+          return;
+        }
+        const [incoming] = pending.splice(at, 1);
+        if (incoming.quantity !== line.quantity) {
+          setValue(`lines.${index}.quantity`, incoming.quantity, {
+            shouldValidate: getFieldState(`lines.${index}.quantity`).isTouched,
+          });
+        }
+        if (JSON.stringify(incoming.pickedValues) !== JSON.stringify(line.pickedValues)) {
+          setValue(`lines.${index}.pickedValues`, incoming.pickedValues);
+        }
+      });
+      pending.forEach((line) => lines.append(line, { shouldFocus: false }));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lines.append is a stable RHF method
+    [getValues, setValue, getFieldState, removeLine],
+  );
+  useEffect(() => {
+    if (isEdit) return undefined;
+    const fromOtherTab = (event: StorageEvent): void => {
+      if (event.key !== null && event.key !== StorageKeys.ORDER_CREATE_DRAFT) return;
+      mergeSketchLines(readOrderDraft()?.lines ?? []);
+    };
+    window.addEventListener('storage', fromOtherTab);
+    return () => window.removeEventListener('storage', fromOtherTab);
+  }, [isEdit, mergeSketchLines]);
+
+  // The note describes what was restored — the order in progress, which the cart may have filled.
+  const showDraftNote = draftRestored;
 
   const discardDraft = (): void => {
     // Move focus off the note's button BEFORE its container turns aria-hidden/inert — Chrome
@@ -666,8 +723,17 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     /* v8 ignore next -- activeElement is always the clicked button here; blur() is a no-op guard */
     (document.activeElement as HTMLElement | null)?.blur?.();
     clearOrderDraft();
-    reset(pristineDefaults);
     setDraftRestored(false);
+    // Emptying the cart takes its lines AWAY, so they leave the way a removed line does — all
+    // together, sliding out while their space closes — and only then does the form reset (which
+    // would otherwise make every row vanish in one frame). Marked as leaving meanwhile, so an
+    // availability answer landing mid-exit neither counts nor announces them.
+    const leaving = [...lineRowRefs.current];
+    leaving.forEach(([id]) => leavingLines.current.add(id));
+    void Promise.all(leaving.map(([, row]) => detailRowOut(row))).then(() => {
+      leaving.forEach(([id]) => leavingLines.current.delete(id));
+      reset(pristineDefaults);
+    });
   };
 
   // Reconcile the picked lines against fresh availability (the "adjust to available + notify" rule):
@@ -935,6 +1001,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   const catalogUsable = isReady(catalog);
   const configMissing = !isLoading && !requestError && !catalogUsable;
   const dataReady = !isLoading && !requestError && catalogUsable;
+  useEffect(() => {
+    if (dataReady) linesSettled.current = true;
+  }, [dataReady]);
   const emptyProducts = dataReady && products.length === 0;
   const refetchAll = (): void => {
     void catalogQuery.refetch();
@@ -1228,7 +1297,15 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
               aria-busy={isLoading}
               className="flex flex-col gap-6"
             >
-              <FormDraftNote visible={showDraftNote} onDiscard={discardDraft} />
+              {/* The order SKETCH — the cart — always kept, so the note offers to empty it but
+                  never to switch it off. */}
+              <FormDraftNote
+                visible={showDraftNote}
+                onDiscard={discardDraft}
+                restoredLabel={t('modules.panel.orderSketch.restored')}
+                discardLabel={t('modules.panel.orderSketch.discard')}
+                canDisable={false}
+              />
 
               {/* CLIENT — pick a walk-in registry or create one inline. */}
               <Section title={t(`${KEY}.sections.client.title`)} description={t(`${KEY}.sections.client.description`)}>
@@ -1328,9 +1405,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
               <Section title={t(`${KEY}.sections.lines.title`)} description={t(`${KEY}.sections.lines.description`)}>
                 <SectionReveal loading={revealing} delaySeconds={SECTION_REVEAL_STEP * 3} skeleton={<BodySkeleton rows={2} />}>
                   <div className="reveal-item flex flex-col gap-5">
-                    {lines.fields.length === 0 && (
-                      <p className="text-sm text-charcoal/45">{t(`${KEY}.lines.empty`)}</p>
-                    )}
+                    {/* Eases in once the last line has slid out (and away as the first arrives),
+                        instead of popping into the space the line just closed. `-mb-5` swallows
+                        the column gap it owns while folded. */}
+                    <Collapse open={lines.fields.length === 0} closedClassName="-mb-5">
+                      {lines.fields.length === 0 && (
+                        <p className="text-sm text-charcoal/45">{t(`${KEY}.lines.empty`)}</p>
+                      )}
+                    </Collapse>
                     {lines.fields.map((row, index) => {
                       // Live per-line price: unit (rent/sale) and subtotal (unit × qty × billed days
                       // for a Día rental; once otherwise) — shown once a product is picked.
@@ -1363,6 +1445,7 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                       return (
                         <LineRow
                           key={row.id}
+                          entrance={lineEntrance}
                           onRegister={(el) => {
                             if (el) lineRowRefs.current.set(row.id, el);
                             else lineRowRefs.current.delete(row.id);
@@ -1474,7 +1557,9 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                         size="sm"
                         disabled={!canAddLine}
                         startIcon={<HiOutlinePlus className="size-4" />}
-                        onClick={() =>
+                        onClick={() => {
+                          // The row this click mounts follows itself into view (`LineEntrance`).
+                          followAddedLine.current = true;
                           lines.append(
                             {
                               productId: null as unknown as number,
@@ -1484,8 +1569,8 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                               isRental: false,
                             },
                             { shouldFocus: false },
-                          )
-                        }
+                          );
+                        }}
                       >
                         {t(`${KEY}.actions.addLine`)}
                       </Button>

@@ -354,14 +354,6 @@ async function seedAppPreferences(prisma: SeedPrismaClient): Promise<void> {
         "Unidad de tiempo de alquiler por defecto en el formulario de productos (2 = Día)",
     },
     {
-      key: "forms.saveDraftOrders",
-      value: "true",
-      valueType: "bool",
-      group: "forms",
-      description:
-        "Guardar un borrador silencioso del formulario de nuevo pedido a medio llenar (se conserva al recargar o navegar, y se borra al cerrar la pestaña)",
-    },
-    {
       key: "forms.saveDraftProducts",
       value: "true",
       valueType: "bool",
@@ -438,8 +430,12 @@ async function seedAppPreferences(prisma: SeedPrismaClient): Promise<void> {
   // 2026-07-27), so the old row could only ever mislead. Safe + idempotent: no code reads it.
   // `forms.saveDrafts` was ONE switch for both create forms; it became one per form the same week
   // (owner decision 2026-08-26), so the old key can only ever mislead a reader of this table.
+  // `forms.saveDraftOrders` went on 2026-11-09: the order draft became the admin's cart (the order
+  // SKETCH), which is always on — a cart that can be switched off is a button that does nothing.
   await prisma.appPreference.deleteMany({
-    where: { key: { in: ["orders.evidencePhotosRequired", "forms.saveDrafts"] } },
+    where: {
+      key: { in: ["orders.evidencePhotosRequired", "forms.saveDrafts", "forms.saveDraftOrders"] },
+    },
   });
 }
 
