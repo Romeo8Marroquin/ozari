@@ -16,6 +16,10 @@ const { beginProductImageMorph, estimateDetailHeroRect } = vi.hoisted(() => ({
 vi.mock('./productImageMorph', () => ({ beginProductImageMorph, estimateDetailHeroRect }));
 const { saveProductsScroll } = vi.hoisted(() => ({ saveProductsScroll: vi.fn() }));
 vi.mock('./productsScroll', () => ({ saveProductsScroll }));
+// The order-sketch cart control has its own suite — a stub marks where the card puts it.
+vi.mock('../orders/SketchQuickAdd', () => ({
+  default: ({ product }: { product: { id: number } }) => <span data-testid={`sketch-add-${product.id}`} />,
+}));
 
 import { Role } from '@constants/Roles';
 import ProductCard from './ProductCard';
@@ -213,13 +217,27 @@ describe('ProductCard', () => {
     expect(screen.queryByText(STOCK.out)).not.toBeInTheDocument();
   });
 
-  it('offers NO actions to an Admin — "Ordenar" is gone (Epic-2A); management lives on the detail page', () => {
+  it('offers NO action row to an Admin — "Ordenar" is gone (Epic-2A); management lives on the detail page', () => {
     useRole.mockReturnValue(Role.Admin);
     render(<ProductCard product={base} />);
-    // The ONLY button is the card's own view-details control.
+    // The ONLY button is the card's own view-details control…
     expect(screen.getAllByRole('button')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.rent) })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: new RegExp(ACTIONS.buy) })).not.toBeInTheDocument();
+    // …beside the CART control in the price row (the order sketch), always visible.
+    expect(screen.getByTestId('sketch-add-1')).toBeInTheDocument();
+  });
+
+  it('keeps the cart control for an Admin even on a product with NO price, and never for a Client', () => {
+    useRole.mockReturnValue(Role.Admin);
+    const { unmount } = render(
+      <ProductCard product={{ ...base, rentPrice: undefined, rentTimeUnit: undefined }} />,
+    );
+    expect(screen.getByTestId('sketch-add-1')).toBeInTheDocument();
+    unmount();
+    useRole.mockReturnValue(Role.Client);
+    render(<ProductCard product={base} />);
+    expect(screen.queryByTestId('sketch-add-1')).not.toBeInTheDocument();
   });
 
   it('offers the business-type CTA to a Client: "Rentar" for Alquiler, "Comprar" for Venta', () => {

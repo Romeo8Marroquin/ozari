@@ -25,6 +25,16 @@ export const Storage = {
     }
   },
 
+  /** The stored TEXT, unparsed — a cheap identity for an external-store snapshot (two equal strings
+   *  are the same value, so a subscriber re-renders only when something really changed). */
+  raw: (key: StorageKeys): string | null => {
+    try {
+      return getStorage(key).getItem(key);
+    } catch {
+      return null;
+    }
+  },
+
   remove: (key: StorageKeys): void => {
     getStorage(key).removeItem(key);
   },
@@ -35,11 +45,11 @@ export const Storage = {
   },
 };
 
-// Per-tab, non-persistent values live in sessionStorage; durable preferences in localStorage.
+// Per-tab, non-persistent values live in sessionStorage; durable ones (preferences, the order
+// sketch) in localStorage.
 const SESSION_KEYS: readonly StorageKeys[] = [
   StorageKeyValues.TOKEN,
   StorageKeyValues.PRODUCT_CREATE_DRAFT,
-  StorageKeyValues.ORDER_CREATE_DRAFT,
 ];
 
 function getStorage(key: StorageKeys): globalThis.Storage {

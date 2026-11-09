@@ -51,6 +51,18 @@ vi.mock('./productsScroll', () => ({
   saveProductsScroll: vi.fn(),
 }));
 
+// The order sketch's window probe (the cart's dates) has its own suite — pin what it answers.
+const sketch = vi.hoisted(() => ({
+  value: {
+    availability: new Map<string, number | null>(),
+    window: null as { deliveryAt: Date; pickupAt: Date | null } | null,
+  },
+}));
+vi.mock('../orders/orderSketch', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../orders/orderSketch')>()),
+  useSketchAvailability: () => sketch.value,
+}));
+
 // The page reads filters from the URL and writes them back via navigate.
 const routerState = vi.hoisted(() => ({ search: {} as Record<string, unknown> }));
 const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }));

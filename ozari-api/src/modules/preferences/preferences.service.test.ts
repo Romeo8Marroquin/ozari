@@ -54,7 +54,6 @@ describe("PREFERENCE_SETTINGS", () => {
       // Honoured by BOTH calendar transports — the Google events and the ICS feed read the same
       // value, so a phone and a laptop can never disagree about the same job.
       "calendar.reminderMinutes",
-      "forms.saveDraftOrders",
       "forms.saveDraftProducts",
       "documents.businessName",
       "documents.businessPhone",
@@ -96,20 +95,17 @@ describe("PREFERENCE_SETTINGS", () => {
     expect(multiline).toEqual(["documents.terms", "documents.conditions"]);
   });
 
-  it("gives each create form its OWN draft switch", () => {
-    // One global switch was the first shape (2026-08-26) and lasted a day. The two forms are used
-    // by different people at different moments — an order is filled with a client on the phone, a
-    // product is set up once at a desk — so the answer for one is not the answer for the other.
+  it("keeps a draft switch for the PRODUCT form only — the order draft is the always-on cart", () => {
+    // One global switch was the first shape (2026-08-26) and lasted a day; then one per form. The
+    // order form's went on 2026-11-09, when its draft became the admin's cart (the order sketch):
+    // a cart that can be switched off is a button that silently does nothing.
     const drafts = PREFERENCE_SETTINGS.filter((setting) => setting.group === "forms");
-    expect(drafts.map((setting) => setting.key)).toEqual([
-      "forms.saveDraftOrders",
-      "forms.saveDraftProducts",
-    ]);
+    expect(drafts.map((setting) => setting.key)).toEqual(["forms.saveDraftProducts"]);
     expect(drafts.every((setting) => setting.type === "bool")).toBe(true);
   });
 
   it("reads a switch as its DEFAULT unless the row says one of the two words we write", () => {
-    const drafts = definitionOf("forms.saveDraftOrders");
+    const drafts = definitionOf("forms.saveDraftProducts");
     expect(readSettingValue(drafts, "true")).toBe(true);
     expect(readSettingValue(drafts, "false")).toBe(false);
     // A missing row, a hand-edited "1", a leftover "yes" — none of these is a value we can honestly

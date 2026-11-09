@@ -2,12 +2,14 @@ import { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineCalendarDays, HiOutlineShoppingBag } from 'react-icons/hi2';
 import LogoMark from '@components/LogoMark';
+import MorphSwap from '@components/MorphSwap';
 import { Role } from '@constants/Roles';
 import { useRole } from '@hooks/useRole';
+import SketchQuickAdd from '../orders/SketchQuickAdd';
 import { usePanelNavigate } from '../PanelNavContext';
 import { beginProductImageMorph, estimateDetailHeroRect } from './productImageMorph';
 import { saveProductsScroll } from './productsScroll';
-import { formatHeadlinePrice, primaryImageUrl } from './productPresentation';
+import { formatHeadlinePrice, productCoverUrl } from './productPresentation';
 import type { Product } from './product.types';
 
 const KEY = 'modules.panel.products';
@@ -61,13 +63,15 @@ const StockBadge: React.FC<{ product: Product }> = ({ product }) => {
 
   return (
     // `shrink-0` holds the numbers whole while the type chip yields; `max-w-full truncate` is the
-    // last-resort cap so even a pathologically narrow tile clips with an ellipsis, never overlaps.
+    // last-resort cap so even a pathologically narrow tile clips, never overlaps. The figure can
+    // CHANGE under the admin's eyes (the cart's dates answer: today's "8 de 10" becomes the window's
+    // "2 de 10"), so the label cross-fades with a width morph and the tone eases — never a repaint.
     <span
-      className={`shrink-0 max-w-full truncate rounded-chip px-2 py-0.5 text-[11px] font-semibold shadow-sm backdrop-blur ${
-        available ? 'bg-white/85 text-emerald-600' : 'bg-white/85 text-amber-600'
+      className={`shrink-0 max-w-full truncate rounded-chip bg-white/85 px-2 py-0.5 text-[11px] font-semibold shadow-sm backdrop-blur transition-colors duration-200 motion-reduce:transition-none ${
+        available ? 'text-emerald-600' : 'text-amber-600'
       }`}
     >
-      {label}
+      <MorphSwap swapKey={label}>{label}</MorphSwap>
     </span>
   );
 };
@@ -138,7 +142,7 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const imageRef = useRef<HTMLImageElement>(null);
   // The server's cover (showcase primary, else the DEFAULT variation's photo); the showcase primary
   // when an older payload carries no cover.
-  const imageUrl = product.coverImageUrl ?? primaryImageUrl(product);
+  const imageUrl = productCoverUrl(product);
   // With variations, "Desde Q50 / Día" when they are priced differently. The stock badge needs no
   // such care — the product-level counts already sum the variations (server-side).
   const headline = formatHeadlinePrice(product);
@@ -156,9 +160,10 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
     panelNavigate(`/panel/productos/${product.id}`);
   };
 
-  // Only the Client has a card action (see the docstring's role mapping) — an Admin browses and
-  // manages from the detail page.
+  // Only the Client has a card ACTION row (see the docstring's role mapping) — an Admin manages from
+  // the detail page, and gets the order-sketch cart control in the price row instead.
   const hasActions = role === Role.Client;
+  const isAdmin = role === Role.Admin;
   const isSell = product.businessType === SELL_BUSINESS_TYPE;
   // The padding hand-off: at rest the block owns the bottom spacing; engaged, it eases to zero (in
   // step with the expansion) while the actions row carries the same spacing INSIDE the clip.
@@ -269,12 +274,22 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
           </div>
         </div>
 
-        {price && (
-          <span
-            className={`font-bold transition-[color,font-size] duration-200 ease-[var(--ease-settle)] motion-reduce:transition-none ${INK_FLIP} text-base pointer-fine:group-hover:text-lg group-focus-within:text-lg`}
-          >
-            {price}
-          </span>
+        {/* The price, and — for an Admin — the CART control at its right (the order sketch):
+            always visible, never hover-only, so a phone has it too (a tap anywhere else on the
+            tile still navigates). The row only exists when it has something to hold. */}
+        {(price || isAdmin) && (
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            {price ? (
+              <span
+                className={`min-w-0 truncate font-bold transition-[color,font-size] duration-200 ease-[var(--ease-settle)] motion-reduce:transition-none ${INK_FLIP} text-base pointer-fine:group-hover:text-lg group-focus-within:text-lg`}
+              >
+                {price}
+              </span>
+            ) : (
+              <span />
+            )}
+            {isAdmin && <SketchQuickAdd product={product} />}
+          </div>
         )}
 
         {/* The role's actions grow open under the price, emerging from the card's bottom edge. */}
