@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Product, ProductVariant } from '../products/product.types';
-import { currentPicks, nextPicks, valueChoices } from './orderLineVariants';
+import { currentPicks, linePhotoUrl, nextPicks, valueChoices } from './orderLineVariants';
 
 // Color (Rojo 1, Azul 2) × Tamaño (Redondo 3, Cuadrado 4); Azul · Cuadrado is NOT offered.
 const variant = (id: number, valueIds: number[], label: string): ProductVariant => ({
@@ -88,5 +88,43 @@ describe('valueChoices', () => {
   it('is empty for an option the product does not have, or without variations', () => {
     expect(valueChoices(mantel, [], 5, all)).toEqual([]);
     expect(valueChoices({ options: mantel.options }, [null, null], 0, all)).toEqual([]);
+  });
+});
+
+describe('linePhotoUrl', () => {
+  const photo = (id: number, url: string, isPrimary = false) => ({ id, url, isPrimary, sortOrder: id });
+  // Rojo has its own photos (the second one starred); Azul has none; the showcase has one.
+  const product = {
+    id: 5,
+    name: 'Mantel',
+    images: [photo(1, 'https://cdn/showcase.webp')],
+    coverImageUrl: 'https://cdn/cover-default.webp',
+    options: [
+      {
+        ...mantel.options![0],
+        values: [
+          { id: 1, name: 'Rojo', sortOrder: 0, images: [photo(2, 'https://cdn/rojo-a.webp'), photo(3, 'https://cdn/rojo-b.webp', true)] },
+          { id: 2, name: 'Azul', sortOrder: 1, images: [] },
+        ],
+      },
+      mantel.options![1],
+    ],
+    variants: mantel.variants,
+  } as unknown as Product;
+
+  it("shows the product's COVER until something is picked — the photo its picker row wore", () => {
+    expect(linePhotoUrl(product, [])).toBe('https://cdn/cover-default.webp');
+    expect(linePhotoUrl(product, [null, null])).toBe('https://cdn/cover-default.webp');
+  });
+
+  it("follows the picks: the first picked value's starred photo, even before the variation is complete", () => {
+    expect(linePhotoUrl(product, [1, null])).toBe('https://cdn/rojo-b.webp');
+    expect(linePhotoUrl(product, [1, 3])).toBe('https://cdn/rojo-b.webp');
+  });
+
+  it('a pick without photos shows the showcase — never the cover, which may be another colour', () => {
+    expect(linePhotoUrl(product, [2, 3])).toBe('https://cdn/showcase.webp');
+    // …and with no showcase either, nothing (the brand placeholder), not the default's photo.
+    expect(linePhotoUrl({ ...product, images: [] }, [2, 3])).toBeNull();
   });
 });

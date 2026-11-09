@@ -4,6 +4,7 @@ import {
   formatProductPrice,
   primaryImageIndex,
   primaryImageUrl,
+  productCoverUrl,
 } from './productPresentation';
 import type { Product } from './product.types';
 
@@ -70,5 +71,19 @@ describe('primaryImageIndex / primaryImageUrl', () => {
   it('returns null when the product has no images', () => {
     expect(primaryImageIndex(base)).toBe(0);
     expect(primaryImageUrl(base)).toBeNull();
+  });
+});
+
+describe('productCoverUrl', () => {
+  const showcase = [{ id: 3, url: 'https://cdn/showcase.webp', isPrimary: true, sortOrder: 0 }];
+
+  it("prefers the server's cover (it may be the DEFAULT variation's photo)", () => {
+    const product = { ...base, images: showcase, coverImageUrl: 'https://cdn/default-blue.webp' };
+    expect(productCoverUrl(product)).toBe('https://cdn/default-blue.webp');
+  });
+
+  it('falls back to the showcase primary, then to null', () => {
+    expect(productCoverUrl({ ...base, images: showcase })).toBe('https://cdn/showcase.webp');
+    expect(productCoverUrl(base)).toBeNull();
   });
 });

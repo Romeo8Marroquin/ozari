@@ -94,15 +94,6 @@ export const PREFERENCE_SETTINGS: readonly SettingDefinition[] = [
     max: 120,
     fallback: appConfig.defaultEvidenceRetentionMonths,
   },
-  // Whether each create FORM keeps a silent draft of half-finished work (sessionStorage: survives a
-  // refresh and a navigation, dies with the tab). ON by default, because losing twenty fields to a
-  // mis-tapped back button is the failure worth preventing — but it IS a choice: on a shared machine
-  // an admin may prefer that a half-typed order leaves nothing behind for the next shift.
-  //
-  // ONE SWITCH PER FORM (owner decision 2026-08-26), not a single global. The two forms are used by
-  // different people at different moments — an order is filled with a client on the phone, a product
-  // is set up once at a desk — so the answer for one is not the answer for the other. A form added
-  // later gets its own key here; nothing about this shape has to change.
   // How long before a delivery or collection a connected calendar reminds. ONE value for both
   // transports (the Google events and the ICS feed), because "how much warning do we want" is a
   // single question — two controls would let a phone and a laptop disagree about the same job.
@@ -122,12 +113,16 @@ export const PREFERENCE_SETTINGS: readonly SettingDefinition[] = [
     max: 40320,
     fallback: appConfig.calendar.defaultReminderMinutes,
   },
-  {
-    key: "forms.saveDraftOrders",
-    group: "forms",
-    type: "bool",
-    fallback: appConfig.defaultSaveFormDrafts,
-  },
+  // Whether the product create FORM keeps a silent draft of half-finished work (sessionStorage:
+  // survives a refresh and a navigation, dies with the tab). ON by default, because losing twenty
+  // fields to a mis-tapped back button is the failure worth preventing — but it IS a choice: on a
+  // shared machine an admin may prefer that a half-typed product leaves nothing behind.
+  //
+  // ONE SWITCH PER FORM (owner decision 2026-08-26), not a single global — a form added later gets
+  // its own key here. The ORDER form had one (`forms.saveDraftOrders`) until 2026-11-09: its draft
+  // became the order SKETCH, the admin's cart, which the product grid and detail page add to. A
+  // cart that can be switched off is a button that silently does nothing, so the order draft is
+  // always on and the key was retired (swept by the seed).
   {
     key: "forms.saveDraftProducts",
     group: "forms",

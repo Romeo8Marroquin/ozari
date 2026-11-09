@@ -11,9 +11,18 @@ vi.mock('@tanstack/react-router', () => ({
 
 // Isolate the header from the UserMenu (its own data/query concerns are tested separately).
 vi.mock('./UserMenu', () => ({ default: () => <div data-testid="user-menu" /> }));
+vi.mock('../orders/OrderSketchButton', () => ({ default: () => <div data-testid="order-sketch" /> }));
 
+import { Role } from '@constants/Roles';
+import { StorageKeys } from '@constants/StorageKeys';
+import { Storage } from '@utils/storage';
 import { PanelChromeProvider } from '../hooks/usePanelChrome';
 import Header from './Header';
+
+const base64url = (obj: object): string =>
+  btoa(JSON.stringify(obj)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+const tokenFor = (userRole: Role): string =>
+  `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ userId: 1, userRole })}.sig`;
 
 const originalMatchMedia = window.matchMedia;
 
@@ -44,6 +53,7 @@ beforeEach(() => {
 
 afterEach(() => {
   window.matchMedia = originalMatchMedia;
+  sessionStorage.clear();
 });
 
 describe('Header', () => {
@@ -65,6 +75,17 @@ describe('Header', () => {
     expect(
       screen.queryByRole('button', { name: 'modules.panel.actions.notifications' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('carries the order-sketch cart for an ADMIN only — the cart is theirs', () => {
+    setViewport('desktop');
+    Storage.set(StorageKeys.TOKEN, tokenFor(Role.Client));
+    const { unmount } = render(<Header />, { wrapper });
+    expect(screen.queryByTestId('order-sketch')).not.toBeInTheDocument();
+    unmount();
+    Storage.set(StorageKeys.TOKEN, tokenFor(Role.Admin));
+    render(<Header />, { wrapper });
+    expect(screen.getByTestId('order-sketch')).toBeInTheDocument();
   });
 
   it('falls back to the products title when the path matches no nav item', () => {

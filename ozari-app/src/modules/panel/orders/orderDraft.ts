@@ -3,21 +3,48 @@ import { Storage } from '@utils/storage';
 import { createOrderDefaultValues, type CreateOrderFormType } from './SchemaCreateOrder';
 
 /**
- * Silent draft persistence for the order create form — the same contract `productDraft` established,
- * and for the same reason: the friendly alternative to a blocking "are you sure you want to leave?"
- * dialog. The form autosaves as the admin types (sessionStorage: survives a refresh and a navigation
- * away and back, dies with the tab, and is user-scoped — `clearAuthState` removes it on logout).
- * Restored on return with a visible note + an explicit discard; cleared on a successful create.
- * Never nags, never loses work.
+ * The order create form's draft — which is also the admin's CART, the order SKETCH (`orderSketch.ts`):
+ * the product grid and the product detail page add lines to it, the header button counts them, and the
+ * form restores it. It started as the same silent-draft contract `productDraft` established (the
+ * friendly alternative to a blocking "are you sure you want to leave?" dialog) and grew into the cart
+ * on 2026-11-09, which changed two things:
  *
- * An order form is where this matters most: it is the longest form in the panel, it is often filled
- * while the client is on the phone, and it is the one an admin most often steps away from to go and
- * check a product or a client.
+ * - **localStorage, not sessionStorage.** A cart has to survive closing the tab and be the SAME cart in
+ *   every tab — the header of one tab must never count lines the form in another cannot see. It still
+ *   never leaves the device (the API is only called when the order is created), and it is still
+ *   user-scoped: `clearAuthState` removes it on logout.
+ * - **Always on.** The `forms.saveDraftOrders` switch was retired: a cart that can be switched off is a
+ *   button that silently does nothing.
  *
- * **Honours `forms.saveDrafts`** — the caller checks the preference; this module only knows how to
- * read, write and forget. Keeping the switch out of here is what lets the same three functions be
- * tested without a query client.
+ * Restored on return with a visible note + an explicit discard; cleared on a successful create. Never
+ * nags, never loses work. Every write and clear here NOTIFIES the subscribers (`subscribeOrderDraft`),
+ * so the header count follows the form keystroke by keystroke in the same tab; other tabs hear the
+ * browser's own `storage` event.
  */
+
+type Listener = () => void;
+const listeners = new Set<Listener>();
+
+const emit = (): void => {
+  listeners.forEach((listener) => listener());
+};
+
+/** Fires on every write/clear in THIS tab, and on a change made by ANOTHER tab (`storage` event). */
+export function subscribeOrderDraft(listener: Listener): () => void {
+  listeners.add(listener);
+  const fromOtherTab = (event: StorageEvent): void => {
+    // `key === null` is another tab's `localStorage.clear()` — the sketch went with it.
+    if (event.key === null || event.key === StorageKeys.ORDER_CREATE_DRAFT) listener();
+  };
+  window.addEventListener('storage', fromOtherTab);
+  return () => {
+    listeners.delete(listener);
+    window.removeEventListener('storage', fromOtherTab);
+  };
+}
+
+/** The stored text — the snapshot IDENTITY for `useSyncExternalStore` (equal text, same draft). */
+export const orderDraftText = (): string | null => Storage.raw(StorageKeys.ORDER_CREATE_DRAFT);
 
 /**
  * The stored draft merged over the current defaults, or `null` when there is no usable draft.
@@ -63,11 +90,16 @@ export function readOrderDraft(): CreateOrderFormType | null {
 }
 
 export function saveOrderDraft(values: CreateOrderFormType): void {
+  const before = orderDraftText();
   Storage.set(StorageKeys.ORDER_CREATE_DRAFT, values);
+  // The form autosaves on every render of its values; only a REAL change is news.
+  if (orderDraftText() !== before) emit();
 }
 
 export function clearOrderDraft(): void {
+  if (orderDraftText() === null) return;
   Storage.remove(StorageKeys.ORDER_CREATE_DRAFT);
+  emit();
 }
 
 /**

@@ -11,6 +11,18 @@ vi.mock('./useProduct', () => ({ useProduct }));
 const { useRole, useHasRole } = vi.hoisted(() => ({ useRole: vi.fn(), useHasRole: vi.fn() }));
 vi.mock('@hooks/useRole', () => ({ useRole, useHasRole }));
 
+// The order sketch's window probe (the cart's dates) has its own suite — pin what it answers.
+const sketch = vi.hoisted(() => ({
+  value: {
+    availability: new Map<string, number | null>(),
+    window: null as { deliveryAt: Date; pickupAt: Date | null } | null,
+  },
+}));
+vi.mock('../orders/orderSketch', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../orders/orderSketch')>()),
+  useSketchAvailability: () => sketch.value,
+}));
+
 // The page reads its id from the route params.
 const routeParams = vi.hoisted(() => ({ productId: '7' }));
 vi.mock('@tanstack/react-router', () => ({ useParams: () => routeParams }));

@@ -63,21 +63,21 @@ beforeEach(() => {
 });
 
 describe('readBoolSetting', () => {
-  const settings = [{ key: 'forms.saveDraftOrders', type: 'bool' as const, value: false, group: 'forms' }];
+  const settings = [{ key: 'forms.saveDraftProducts', type: 'bool' as const, value: false, group: 'forms' }];
 
   it('reads the stored value', () => {
-    expect(readBoolSetting(settings, 'forms.saveDraftOrders', true)).toBe(false);
+    expect(readBoolSetting(settings, 'forms.saveDraftProducts', true)).toBe(false);
   });
 
   it('falls back when the key is absent, the list is, or the arm is wrong', () => {
     // The same forgiving read `readLetterhead` does: a screen must not break because a key it wants
     // has not been published yet, or because a stale row still calls itself an int.
     expect(readBoolSetting(settings, 'forms.nope', true)).toBe(true);
-    expect(readBoolSetting(undefined, 'forms.saveDraftOrders', true)).toBe(true);
+    expect(readBoolSetting(undefined, 'forms.saveDraftProducts', true)).toBe(true);
     const wrongArm = [
-      { key: 'forms.saveDraftOrders', type: 'int' as const, value: 0, min: 0, max: 1, group: 'forms' },
+      { key: 'forms.saveDraftProducts', type: 'int' as const, value: 0, min: 0, max: 1, group: 'forms' },
     ];
-    expect(readBoolSetting(wrongArm, 'forms.saveDraftOrders', true)).toBe(true);
+    expect(readBoolSetting(wrongArm, 'forms.saveDraftProducts', true)).toBe(true);
   });
 });
 
@@ -88,7 +88,7 @@ describe('useFormDraftsEnabled', () => {
     // loss the feature exists to prevent. Over-saving for a few hundred ms costs a write nobody reads.
     client.clear();
     apiGet.mockReturnValue(new Promise(() => {}));
-    const { result } = renderHook(() => useFormDraftsEnabled('orders'), { wrapper });
+    const { result } = renderHook(() => useFormDraftsEnabled('products'), { wrapper });
     expect(result.current).toEqual({ enabled: true, isLoading: true });
   });
 
@@ -98,11 +98,11 @@ describe('useFormDraftsEnabled', () => {
       data: {
         data: {
           ...payload(),
-          settings: [{ key: 'forms.saveDraftOrders', type: 'bool', value: false, group: 'forms' }],
+          settings: [{ key: 'forms.saveDraftProducts', type: 'bool', value: false, group: 'forms' }],
         },
       },
     });
-    const { result } = renderHook(() => useFormDraftsEnabled('orders'), { wrapper });
+    const { result } = renderHook(() => useFormDraftsEnabled('products'), { wrapper });
     await waitFor(() => expect(result.current.enabled).toBe(false));
   });
 });

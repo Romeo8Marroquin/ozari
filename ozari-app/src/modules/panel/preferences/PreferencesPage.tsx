@@ -77,8 +77,9 @@ const TAB_SECTIONS: Record<PreferenceTab, readonly PreferenceSection[]> = {
     // One field: how much warning a connected calendar gives. The CONNECTION itself is in Ajustes
     // (it is somebody's own Google account); the rule is here, where rules live.
     { kind: 'settings', group: 'calendar', skeletonRows: 1 },
-    // One switch per create form — two rows, so the placeholder is the shape of what arrives.
-    { kind: 'settings', group: 'forms', skeletonRows: 2 },
+    // One switch per create form that has one — today only the product form's (the order form's
+    // draft is the always-on cart), so one row: the placeholder is the shape of what arrives.
+    { kind: 'settings', group: 'forms', skeletonRows: 1 },
   ],
   orders: [
     { kind: 'catalog', catalog: 'event-types', field: 'eventTypes', minimumActive: 1, skeletonRows: 3 },

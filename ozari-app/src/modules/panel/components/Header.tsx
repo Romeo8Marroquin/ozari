@@ -1,8 +1,11 @@
 ﻿import { useLocation } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineBars3 } from 'react-icons/hi2';
+import RoleGate from '@components/RoleGate';
+import { Role } from '@constants/Roles';
 import { PANEL_NAV } from '../navConfig';
 import { usePanelChrome } from '../hooks/usePanelChrome';
+import OrderSketchButton from '../orders/OrderSketchButton';
 import UserMenu from './UserMenu';
 
 // The same keyboard focus indicator used across the panel chrome, so every control in the header is
@@ -46,6 +49,10 @@ const Header: React.FC = () => {
           An in-app centre earns its place when there is a SECOND person to notify (assignments,
           hand-offs) or a client portal — bring the bell back with that, not before. */}
       <div className="flex items-center gap-1.5 sm:gap-2">
+        {/* The order sketch — the admin's cart (orders/orderSketch.ts). */}
+        <RoleGate roles={[Role.Admin]}>
+          <OrderSketchButton />
+        </RoleGate>
         <UserMenu />
       </div>
     </header>

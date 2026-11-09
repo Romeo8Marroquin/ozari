@@ -23,6 +23,9 @@ import { getStatus } from '@utils/apiError';
 import { clearHistoryDepartureHold, setHistoryDepartureHold } from '@utils/historyDeparture';
 import { prefersReducedMotion } from '@utils/motion';
 import MorphSwap from '@components/MorphSwap';
+import { useSketchAvailability, withWindowStock } from '../orders/orderSketch';
+import SketchDetailAdd from '../orders/SketchDetailAdd';
+import SketchWindowNote from '../orders/SketchWindowNote';
 import { headerTitleOut, staggerIn, staggerOut } from '../pageMotion';
 import { usePanelNavigate } from '../PanelNavContext';
 import { usePanelPageMotion } from '../PanelPageTransitionContext';
@@ -168,7 +171,15 @@ const ProductDetailPage: React.FC = () => {
   const role = useRole();
   const { productId } = useParams({ from: '/panel/productos_/$productId' });
   const id = Number(productId);
-  const { data: product, isLoading, isError, isFetching, refetch, error } = useProduct(id);
+  const { data: fetched, isLoading, isError, isFetching, refetch, error } = useProduct(id);
+  // Once the order sketch (the admin's cart) has dates, every stock figure here — the chip, the
+  // sold-out swatches, the cart's cap — speaks for THAT window, per variation (`withWindowStock`).
+  // Undated, or for anybody but an Admin, it is the product as fetched.
+  const { availability, window: sketchSpan } = useSketchAvailability(fetched ? [fetched.id] : []);
+  const product = useMemo(
+    () => (fetched ? withWindowStock(fetched, availability) : fetched),
+    [fetched, availability],
+  );
   const root = useRef<HTMLDivElement>(null);
   const heroWrap = useRef<HTMLDivElement>(null);
   const heroImage = useRef<HTMLImageElement>(null);
@@ -761,7 +772,12 @@ const ProductDetailPage: React.FC = () => {
                     </div>
                   </div>
                 )}
-                <StockLine product={shown} />
+                {/* The stock chip, and — once the cart has dates — which dates it speaks for.
+                    `empty:hidden` so a Client (no chip, no cart) gets no stray gap. */}
+                <div className="flex flex-col empty:hidden">
+                  <StockLine product={shown} />
+                  {role === Role.Admin && <SketchWindowNote window={sketchSpan} className="mt-2" />}
+                </div>
                 {/* Field-presence gated (the projection only sends it to Admin): what the business
                     charges if the product is lost or damaged. Captured on the create form — this
                     is where the admin sees it again. */}
@@ -814,6 +830,14 @@ const ProductDetailPage: React.FC = () => {
                     </dl>
                   </div>
                 )}
+
+                {/* The admin's CART: add what the page shows (the picked variation, or the product
+                    to choose its variation in the form), then adjust it in place. */}
+                <RoleGate roles={[Role.Admin]}>
+                  <div className="reveal-item mt-2">
+                    <SketchDetailAdd product={product} picks={picks} variant={variant} />
+                  </div>
+                </RoleGate>
 
                 {/* Role actions — the card's mapping, full-size. Renting/buying land with the
                     orders epic; Editar opens the edit form; Eliminar opens the delete dialog. */}

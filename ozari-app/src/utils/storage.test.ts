@@ -34,6 +34,26 @@ describe('Storage', () => {
     expect(localStorage.getItem(StorageKeys.CSRF)).toBe(JSON.stringify('csrf'));
   });
 
+  it('keeps the order SKETCH in localStorage — a cart outlives the tab and is shared by every tab', () => {
+    Storage.set(StorageKeys.ORDER_CREATE_DRAFT, { deliveryName: 'María' });
+    expect(localStorage.getItem(StorageKeys.ORDER_CREATE_DRAFT)).not.toBeNull();
+    expect(sessionStorage.getItem(StorageKeys.ORDER_CREATE_DRAFT)).toBeNull();
+    // The product draft stays per-tab.
+    Storage.set(StorageKeys.PRODUCT_CREATE_DRAFT, { name: 'Mesa' });
+    expect(sessionStorage.getItem(StorageKeys.PRODUCT_CREATE_DRAFT)).not.toBeNull();
+  });
+
+  it('raw hands back the stored text unparsed, and null when the store refuses', () => {
+    expect(Storage.raw(StorageKeys.CSRF)).toBeNull();
+    Storage.set(StorageKeys.CSRF, 'abc');
+    expect(Storage.raw(StorageKeys.CSRF)).toBe(JSON.stringify('abc'));
+    vi.spyOn(Object.getPrototypeOf(localStorage) as globalThis.Storage, 'getItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    expect(Storage.raw(StorageKeys.CSRF)).toBeNull();
+    vi.restoreAllMocks();
+  });
+
   it('remove deletes a single key from its backing store', () => {
     Storage.set(StorageKeys.TOKEN, 'jwt');
     Storage.remove(StorageKeys.TOKEN);
