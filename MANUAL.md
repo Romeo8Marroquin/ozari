@@ -230,7 +230,7 @@ editable** — son un punto de partida, no una obligación.
 
 **Productos**
 Agregue líneas con **Agregar producto**. Bajo cada línea aparece el subtotal y, en alquileres, los
-días facturados.
+días contratados.
 
 ⚠️ **Los días se cobran por día empezado.** De sábado 8:00 a domingo 10:00 son **dos días**, no uno y
 medio. El documento lo dice explícitamente para que el cliente lo vea igual que usted.
