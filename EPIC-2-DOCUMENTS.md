@@ -59,7 +59,7 @@ is settled; the reasoning matters more than the individual strings, because it g
 | # | Decision |
 |---|---|
 | 9 | **A bare value is not a fact.** The phone under the letterhead was an unlabelled number; `Contacto` sat in a card that never said whose it was. Every fact card now carries a TITLE and every row a label that survives being read alone. |
-| 10 | **No abbreviations the reader has to decode.** `Cant.` → `Cantidad`, a bare `Precio` → `Precio por día` (which is also what makes `cantidad × días × precio` verifiable by hand), the per-line `Total` → `Subtotal` — it is not the document's total, and the number the client acts on is the saldo. `Días de alquiler` → `Días facturados`, with the per-started-day rule stated once, beside the number. |
+| 10 | **No abbreviations the reader has to decode.** `Cant.` → `Cantidad`, a bare `Precio` → `Precio por día` (which is also what makes `cantidad × días × precio` verifiable by hand), the per-line `Total` → `Subtotal` — it is not the document's total, and the number the client acts on is the saldo. `Días de alquiler` → `Días contratados`, with the per-started-day rule stated once, beside the number. ⚠️ **Never `factura` / `facturados` / anything that reads as invoicing, anywhere a client or admin can see it** (owner, 2026-11-11: *"bajo ningún motivo en ningún lado puede ir la palabra factura o que dé a entender facturación"*) — the business issues no invoices (scope note above), so the word promises a fiscal document that does not exist. It was `Días facturados` until that date; `es.json` is guarded by `src/test/noInvoiceWording.test.ts`. |
 | 11 | **The important conditions are PRINTED, not merely referenced.** This does not reverse decision §5: the reason a wall of conditions does not belong on a quote is that it buries the totals, not that a client should have to ask what happens if a table comes back broken. Two to four short lines in the business's own words, from a new `documents.conditions` preference; the acceptance line still covers everything else. |
 | 12 | **Free delivery is a DERIVED condition with the admin's wording.** An order stores no zone (`deliveryZoneId` lives in the order form as a fee suggester and is never sent to the API), so the document cannot name where free delivery applies — but it knows exactly whether THIS order was charged for one. The note prints only when the fee is `0`; the text comes from `documents.freeDeliveryNote`. Typing the promise into `conditions` instead would print it on billed orders too, which is the failure this exists to prevent. |
 | 13 | **The delivery fee says what it BUYS.** `Envío a domicilio` → `Servicio a domicilio` with `Incluye entrega y recolección` beneath — the one thing the hand-made template was explicit about and this one was not. A purchase-only order gets `Incluye entrega`, which is also the seam a future "the client collects it themselves" mode widens. |
@@ -277,7 +277,7 @@ client. The card TITLE is load-bearing (decision #9): `Teléfono` under `CLIENTE
 client's, which the old free-floating `Contacto` could not promise.
 
 **Event block** — titled `EVENTO Y LOGÍSTICA`: event type; delivery date + time; pickup date + time;
-**días facturados** with the per-started-day rule stated beneath it. A 3-day and a 1-day rental
+**días contratados** with the per-started-day rule stated beneath it. A 3-day and a 1-day rental
 otherwise render identically at different totals, which reads as an error.
 
 **Lines, grouped, each group with its own columns and subtotal:**

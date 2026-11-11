@@ -445,7 +445,7 @@
           "eventType": "Tipo de evento",
           "delivery": "Entrega",
           "pickup": "Recolección",
-          "billedDays": "Días facturados",
+          "billedDays": "Días contratados",
           "billedDaysValue_one": "{{count}} día",
           "billedDaysValue_other": "{{count}} días",
           "billedDaysHint": "El alquiler se cobra por día iniciado.",
@@ -1396,7 +1396,7 @@
             "preferredPaymentLabel": "Método de pago preferido",
             "preferredPaymentPlaceholder": "Sin preferencia",
             "notesLabel": "Notas del cliente",
-            "notesPlaceholder": "Ej. cliente frecuente, pide factura"
+            "notesPlaceholder": "Ej. cliente frecuente, prefiere entregas por la mañana"
           },
           "actions": {
             "addContact": "Agregar contacto",

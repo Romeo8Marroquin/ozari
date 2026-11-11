@@ -485,7 +485,7 @@ const copy: DocumentCopy = {
   quoteNotice: 'Cotización sujeta a cambios y a la disponibilidad de los artículos en las fechas indicadas.',
   termsNotice:
     'La aceptación de este documento implica la conformidad con los términos y condiciones del servicio.',
-  billedDays: 'Días facturados',
+  billedDays: 'Días contratados',
   billedDaysValue: (days) => `${days} ${days === 1 ? 'día' : 'días'}`,
   billedDaysHint: 'El alquiler se cobra por día iniciado.',
   groupRental: 'Alquiler',
