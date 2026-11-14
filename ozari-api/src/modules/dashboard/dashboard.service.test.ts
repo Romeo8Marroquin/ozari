@@ -89,40 +89,62 @@ const schedule = (overrides: Partial<Parameters<typeof nextPendingEvent>[0]> = {
 });
 
 describe("period ranges", () => {
-  // Local Y/M/D construction, so the assertions use local components too — the business is
-  // single-timezone and the boundaries are deliberately local (see `monthRange`).
-  const now = new Date(2026, 7, 15, 9, 30); // 15 Aug 2026, local
+  // Every instant here is written in UTC on purpose: the boundaries are the BUSINESS's midnights
+  // (Guatemala, UTC−6 → 06:00Z), whatever zone the test machine or the server runs in. The old local
+  // construction passed on a developer's machine in Guatemala and was wrong on Cloud Run (UTC).
+  const now = new Date("2026-08-15T15:30:00Z"); // 15 Aug 2026, 09:30 in Guatemala
 
-  it("monthRange is the half-open calendar month containing `now`", () => {
+  it("monthRange is the half-open business month containing `now`", () => {
     expect(monthRange(now)).toEqual({
-      from: new Date(2026, 7, 1),
-      to: new Date(2026, 8, 1),
+      from: new Date("2026-08-01T06:00:00Z"),
+      to: new Date("2026-09-01T06:00:00Z"),
     });
   });
 
   it("monthRange walks backwards across a year boundary", () => {
-    // -8 months from August 2026 is December 2025 — the rollover the Date constructor handles for us.
+    // -8 months from August 2026 is December 2025.
     expect(monthRange(now, -8)).toEqual({
-      from: new Date(2025, 11, 1),
-      to: new Date(2026, 0, 1),
+      from: new Date("2025-12-01T06:00:00Z"),
+      to: new Date("2026-01-01T06:00:00Z"),
     });
   });
 
-  it("dayRange is the half-open local day", () => {
+  it("dayRange is the half-open business day", () => {
     expect(dayRange(now)).toEqual({
-      from: new Date(2026, 7, 15),
-      to: new Date(2026, 7, 16),
+      from: new Date("2026-08-15T06:00:00Z"),
+      to: new Date("2026-08-16T06:00:00Z"),
     });
   });
 
-  it("monthKey zero-pads the month so keys sort lexicographically", () => {
-    expect(monthKey(new Date(2026, 0, 31))).toBe("2026-01");
-    expect(monthKey(new Date(2026, 11, 1))).toBe("2026-12");
+  it("an 8:30 p. m. event belongs to TODAY in Guatemala, though it is already tomorrow in UTC", () => {
+    // The production bug (2026-11-13): looked at in the afternoon, an evening delivery the same day
+    // fell outside a UTC "today" and the card read "Entregas de hoy 0".
+    const afternoon = new Date("2026-11-13T21:00:00Z"); // 15:00 in Guatemala
+    const eveningDelivery = new Date("2026-11-14T02:30:00Z"); // 20:30 in Guatemala, same day
+    const { from, to } = dayRange(afternoon);
+    expect(eveningDelivery >= from && eveningDelivery < to).toBe(true);
+    // …and last night's 20:30 is NOT today (it used to be, which is how a past collection showed up
+    // as "Recolecciones de hoy 1").
+    const lastNight = new Date("2026-11-13T02:30:00Z"); // 12 Nov, 20:30 in Guatemala
+    expect(lastNight >= from).toBe(false);
+  });
+
+  it("the late evening still reads as the same business day (the UTC date already rolled over)", () => {
+    expect(dayRange(new Date("2026-11-14T05:59:00Z"))).toEqual({
+      from: new Date("2026-11-13T06:00:00Z"),
+      to: new Date("2026-11-14T06:00:00Z"),
+    });
+  });
+
+  it("monthKey is the business month — the 31st at 8:30 p. m. is still that month", () => {
+    expect(monthKey(new Date("2026-01-31T12:00:00Z"))).toBe("2026-01");
+    expect(monthKey(new Date("2026-12-01T12:00:00Z"))).toBe("2026-12");
+    expect(monthKey(new Date("2026-11-01T02:30:00Z"))).toBe("2026-10"); // 31 Oct, 20:30 local
   });
 
   it("trailingMonthKeys ends on the current month, oldest first, crossing the year", () => {
     expect(trailingMonthKeys(now, 3)).toEqual(["2026-06", "2026-07", "2026-08"]);
-    expect(trailingMonthKeys(new Date(2026, 1, 5), 4)).toEqual([
+    expect(trailingMonthKeys(new Date("2026-02-05T12:00:00Z"), 4)).toEqual([
       "2025-11",
       "2025-12",
       "2026-01",
@@ -287,10 +309,25 @@ describe("projectUpNextItem", () => {
 });
 
 describe("bucketRevenueByMonth", () => {
-  const now = new Date(2026, 7, 15);
+  const now = new Date("2026-08-15T18:00:00Z");
+  // Mid-month noon UTC — unambiguous in any zone; the boundary case has its own test below.
   const row = (year: number, month: number, amount: string) => ({
-    deliveryAt: new Date(year, month, 10),
+    deliveryAt: new Date(Date.UTC(year, month, 10, 12)),
     totalAmount: new Prisma.Decimal(amount),
+  });
+
+  it("buckets an evening order on the last day into ITS month, not the next (business zone)", () => {
+    const series = bucketRevenueByMonth(
+      [{ deliveryAt: new Date("2026-08-01T02:30:00Z"), totalAmount: new Prisma.Decimal("50") }],
+      now,
+      TREND_MONTHS,
+    );
+    // 31 July, 20:30 in Guatemala — July's revenue, though it is already August in UTC.
+    expect(series.find((point) => point.month === "2026-07")).toEqual({
+      month: "2026-07",
+      revenue: 50,
+      orders: 1,
+    });
   });
 
   it("returns one bucket per month, oldest first, with empty months as explicit zeros", () => {

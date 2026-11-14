@@ -358,13 +358,25 @@ interface DepositOrderStateModel {
 export const canRecordSettlement = (order: DepositOrderStateModel): boolean =>
   order.deliveredAt !== null && order.cancelledAt === null;
 
-/** The list flag: settleable, recordable, and not recorded yet. */
+/**
+ * The "Depósito pendiente" flag (agenda chip, detail header, dashboard count): a DEPOSIT is waiting
+ * for its decision — the order carries a nominal deposit (`D > 0`), it was delivered, it is not
+ * cancelled, nobody recorded it as not received (WAIVED: no money to give back), and it is not
+ * settled yet. A replacement value ALONE never raises it (owner, 2026-11-13: an order of chairs with
+ * a replacement price but no deposit read "Depósito pendiente" — there is no deposit to be pending):
+ * such an order can still record a damage report from its detail (`canSettle`), it just isn't nagged.
+ * The dashboard's open-deposit query is this predicate in SQL — change both together.
+ */
 export const isDepositSettlementPending = (
-  order: DepositOrderStateModel & { serviceDetails: readonly DepositLineModel[] },
+  order: DepositOrderStateModel & {
+    depositWaivedAt: Date | null;
+    serviceDetails: readonly DepositLineModel[];
+  },
 ): boolean =>
   order.depositSettledAt === null &&
+  order.depositWaivedAt === null &&
   canRecordSettlement(order) &&
-  order.serviceDetails.some(isSettleableLine);
+  computeDepositTotal(order.serviceDetails) > 0;
 
 // ── Deposit COLLECTION (was it actually received?) ───────────────────────────────────────────────
 

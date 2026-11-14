@@ -1,4 +1,5 @@
 import { appConfig } from "@/config/app.js";
+import { formatBusinessTime } from "@helpers/businessTime.js";
 import { i18next } from "@/config/i18n.js";
 import {
   logisticsEvents,
@@ -205,12 +206,11 @@ export function entryDescription(order: CalendarOrderModel, at: Date): string {
     .join("\n");
 }
 
-/** `2:00 p. m.` in the business's own locale — the description is read by a person, not parsed. */
+/** `2:00 p. m.` in the business's own locale AND zone — the description is read by a person, not
+ *  parsed. Without the zone it read the server's clock: on Cloud Run (UTC) an 8:30 p. m. delivery
+ *  was described as "2:30 a. m.". */
 function formatLocalTime(date: Date): string {
-  return new Intl.DateTimeFormat("es-GT", {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
+  return formatBusinessTime(date);
 }
 
 // ── ICS (RFC 5545) ────────────────────────────────────────────────────────────────────────────

@@ -9,9 +9,11 @@ import { sendOzariSuccess } from "@models/http/ozariSuccessModel.js";
 import { sendOzariError } from "@models/http/ozariErrorModel.js";
 import { statusById } from "../orders/lifecycle/lifecycle.service.js";
 import { loadOrderProjectionContext } from "../orders/orders.service.js";
+import type { Prisma } from "@prisma/client";
 import type {
   DashboardCurrencyModel,
   DashboardEnvelopeModel,
+  DashboardResponseModel,
   StatusSliceModel,
   TopProductModel,
 } from "./dashboard.models.js";
@@ -35,6 +37,71 @@ import {
 
 /** A cancelled order is not business — it never counts toward revenue, volume or workload. */
 const LIVE = { cancelledAt: null, isActive: true } as const;
+
+/** A half-open `[from, to)` Prisma range. */
+const inRange = (from: Date, to: Date) => ({ gte: from, lt: to });
+
+type DashboardPrismaClient = Awaited<ReturnType<typeof getPrismaClient>>;
+
+/**
+ * The "Hoy" block. Called INSIDE `getDashboard`'s one `Promise.all` (its queries start as soon as it
+ * is invoked, concurrently with everything else) — split out only so it can be read on its own.
+ *
+ * - **Today is the BUSINESS day** (`dayRange`, zoned to Guatemala — the server runs in UTC; the
+ *   production bug of 2026-11-13 counted an 8:30 p. m. delivery on tomorrow). Each count is what is
+ *   SCHEDULED today beside how many are already DONE (the actual stamp), so the card says what is
+ *   left instead of a total that reads the same before and after the work.
+ * - **Overdue** is measured against the ACTUALS, never a status id — the logistics pad's rule, so a
+ *   corrected rewind puts an order back on the count by itself.
+ * - **Open** = neither finished (`readyAt`) nor cancelled, broken down by what it still waits for:
+ *   to deliver, delivered with a pickup to collect, and the rest — the work is done, only marking it
+ *   finished is missing. An order collected but not finished IS open, and the breakdown says so in
+ *   words (owner, 2026-11-13: "3 abiertos, pero solo tengo 2").
+ */
+async function loadToday(
+  prismaClient: DashboardPrismaClient,
+  now: Date,
+): Promise<DashboardResponseModel["today"]> {
+  const day = dayRange(now);
+  const count = (where: Prisma.ServiceWhereInput) =>
+    prismaClient.service.count({ where: { ...LIVE, ...where } });
+  const [
+    deliveries,
+    deliveriesDone,
+    collections,
+    collectionsDone,
+    overdueDeliveries,
+    overdueCollections,
+    active,
+    activeToDeliver,
+    activeToCollect,
+  ] = await Promise.all([
+    count({ deliveryAt: inRange(day.from, day.to) }),
+    count({ deliveryAt: inRange(day.from, day.to), deliveredAt: { not: null } }),
+    count({ pickupAt: inRange(day.from, day.to) }),
+    count({ pickupAt: inRange(day.from, day.to), collectedAt: { not: null } }),
+    count({ deliveredAt: null, deliveryAt: { lt: now } }),
+    count({ deliveredAt: { not: null }, collectedAt: null, pickupAt: { lt: now } }),
+    count({ readyAt: null }),
+    count({ readyAt: null, deliveredAt: null }),
+    count({ readyAt: null, deliveredAt: { not: null }, collectedAt: null, pickupAt: { not: null } }),
+  ]);
+  return {
+    deliveries,
+    deliveriesDone,
+    collections,
+    collectionsDone,
+    overdue: overdueDeliveries + overdueCollections,
+    overdueDeliveries,
+    overdueCollections,
+    active,
+    activeToDeliver,
+    activeToCollect,
+    // Disjoint subsets of `active`, so the remainder is exact: delivered, nothing left to collect
+    // (collected, or a purchase with no pickup), and not marked finished yet.
+    activeToClose: active - activeToDeliver - activeToCollect,
+  };
+}
 
 /**
  * `GET /dashboard` — the admin's home screen, computed in ONE round trip.
@@ -60,12 +127,10 @@ export const getDashboard = async (
     // ONE instant for the entire payload: every countdown, every "overdue", every period boundary is
     // derived from this, so the screen can never show figures from two different moments.
     const now = new Date();
-    const today = dayRange(now);
     const thisMonth = monthRange(now);
     const lastMonth = monthRange(now, -1);
     const trendFrom = monthRange(now, -(TREND_MONTHS - 1)).from;
 
-    const inRange = (from: Date, to: Date) => ({ gte: from, lt: to });
     const monthAggregate = (from: Date, to: Date) =>
       prismaClient.service.aggregate({
         where: { ...LIVE, deliveryAt: inRange(from, to) },
@@ -86,11 +151,7 @@ export const getDashboard = async (
       context,
       pendingDeliveries,
       pendingCollections,
-      deliveriesToday,
-      collectionsToday,
-      overdueDeliveries,
-      overdueCollections,
-      activeOrders,
+      today,
       currentMonth,
       previousMonth,
       collectedThisMonth,
@@ -130,26 +191,9 @@ export const getDashboard = async (
         take: UP_NEXT_LIMIT,
         include: dashboardOrderInclude,
       }),
-      prismaClient.service.count({
-        where: { ...LIVE, deliveryAt: inRange(today.from, today.to) },
-      }),
-      prismaClient.service.count({
-        where: { ...LIVE, pickupAt: inRange(today.from, today.to) },
-      }),
-      // "Overdue" is measured against the ACTUALS, never a status id — the same rule the logistics
-      // pad uses, so a corrected rewind puts an order back on this count by itself.
-      prismaClient.service.count({
-        where: { ...LIVE, deliveredAt: null, deliveryAt: { lt: now } },
-      }),
-      prismaClient.service.count({
-        where: {
-          ...LIVE,
-          deliveredAt: { not: null },
-          collectedAt: null,
-          pickupAt: { lt: now },
-        },
-      }),
-      prismaClient.service.count({ where: { ...LIVE, readyAt: null } }),
+      // "Hoy" — the business day's counts, in their own function but started HERE, inside this
+      // same Promise.all, so they still run concurrently with everything else.
+      loadToday(prismaClient, now),
       monthAggregate(thisMonth.from, thisMonth.to),
       monthAggregate(lastMonth.from, lastMonth.to),
       collectedAggregate(thisMonth.from, thisMonth.to),
@@ -197,8 +241,9 @@ export const getDashboard = async (
         where: { ...LIVE, readyAt: null },
         _count: { _all: true },
       }),
-      // Open deposits — the list's `depositSettlementPending` predicate, pushed into SQL: delivered,
-      // live, unsettled, with a rental line carrying a deposit or a replacement value. Occasional by
+      // Open deposits — the list's `depositSettlementPending` predicate (`isDepositSettlementPending`),
+      // pushed into SQL: delivered, live, unsettled, not recorded as "no recibido", with a rental line
+      // carrying a deposit (a replacement value alone is no deposit — owner 2026-11-13). Occasional by
       // nature, so ALL of them come back (the count and the amount must be exact) and the card lists
       // the oldest few.
       prismaClient.service.findMany({
@@ -206,11 +251,13 @@ export const getDashboard = async (
           ...LIVE,
           deliveredAt: { not: null },
           depositSettledAt: null,
+          depositWaivedAt: null,
           serviceDetails: {
             some: {
               isActive: true,
               isRental: true,
-              OR: [{ securityDeposit: { gt: 0 } }, { replacementPrice: { not: null } }],
+              quantity: { gt: 0 },
+              securityDeposit: { gt: 0 },
             },
           },
         },
@@ -300,12 +347,7 @@ export const getDashboard = async (
       dashboard: {
         generatedAt: now,
         upNext,
-        today: {
-          deliveries: deliveriesToday,
-          collections: collectionsToday,
-          overdue: overdueDeliveries + overdueCollections,
-          active: activeOrders,
-        },
+        today,
         month: {
           period: thisMonth,
           revenue: compare(revenueNow, revenuePrev),

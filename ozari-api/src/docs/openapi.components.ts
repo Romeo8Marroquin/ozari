@@ -1060,8 +1060,10 @@ export const schemas: Record<string, Schema> = {
       depositSettlementPending: {
         type: "boolean",
         description:
-          "True when the order carries a deposit or a replaceable rental line, was delivered, is not " +
-          "cancelled, and has no deposit settlement yet — the agenda's \"garantía por liquidar\" flag.",
+          "True when the order carries a security deposit (> 0), was delivered, is not cancelled, the " +
+          "deposit was not recorded as not received (waived), and it has no settlement yet — the " +
+          "agenda's \"Depósito pendiente\" flag. A replacement value alone never sets it (the damage " +
+          "report stays available on the detail's `securityDeposit.canSettle`).",
         example: false,
       },
     },
@@ -1956,18 +1958,62 @@ export const schemas: Record<string, Schema> = {
           },
           today: {
             type: "object",
+            description:
+              "\"Today\" is the BUSINESS day (America/Guatemala, 00:00–24:00), never the server's " +
+              "UTC day.",
             properties: {
-              deliveries: { type: "integer", example: 4 },
-              collections: { type: "integer", example: 2 },
-              overdue: {
+              deliveries: {
                 type: "integer",
-                description: "Pending events whose time has already passed.",
+                description: "Deliveries scheduled today, done or not.",
+                example: 4,
+              },
+              deliveriesDone: {
+                type: "integer",
+                description: "Of `deliveries`, those already delivered.",
                 example: 1,
               },
+              collections: {
+                type: "integer",
+                description: "Collections scheduled today, done or not.",
+                example: 2,
+              },
+              collectionsDone: {
+                type: "integer",
+                description: "Of `collections`, those already collected.",
+                example: 0,
+              },
+              overdue: {
+                type: "integer",
+                description:
+                  "Pending events whose time has already passed (`overdueDeliveries + " +
+                  "overdueCollections`).",
+                example: 1,
+              },
+              overdueDeliveries: { type: "integer", example: 1 },
+              overdueCollections: { type: "integer", example: 0 },
               active: {
                 type: "integer",
-                description: "Orders neither finished nor cancelled.",
+                description:
+                  "Orders neither finished nor cancelled = `activeToDeliver + activeToCollect + " +
+                  "activeToClose`.",
                 example: 9,
+              },
+              activeToDeliver: {
+                type: "integer",
+                description: "Open and not delivered yet.",
+                example: 5,
+              },
+              activeToCollect: {
+                type: "integer",
+                description: "Open, delivered, with a pickup not collected yet.",
+                example: 3,
+              },
+              activeToClose: {
+                type: "integer",
+                description:
+                  "Open with the work done (collected, or a delivered purchase) — only marking it " +
+                  "finished is missing.",
+                example: 1,
               },
             },
           },

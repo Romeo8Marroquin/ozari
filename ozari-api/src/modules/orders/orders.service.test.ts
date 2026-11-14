@@ -1277,6 +1277,37 @@ describe("security deposit & damage settlement", () => {
     expect(canRecordSettlement({ deliveredAt: DELIVERED, cancelledAt: null, depositSettledAt: null })).toBe(true);
   });
 
+  it("never flags a deposit pending when the order carries no deposit, or it was recorded as not received", () => {
+    const context = makeProjectionContext();
+    // The production case (2026-11-13): chairs + tables with a replacement value and NO deposit. The
+    // damage report stays available on the detail, but there is no deposit to be pending.
+    const replacementOnly = [
+      { quantity: 26, isRental: true, securityDeposit: null, replacementPrice: dec("40") },
+      { quantity: 2, isRental: true, securityDeposit: dec("0"), replacementPrice: dec("300") },
+    ];
+    expect(
+      projectOrderListItem(makeListRow({ serviceDetails: replacementOnly, deliveredAt: DELIVERED }), context)
+        .depositSettlementPending,
+    ).toBe(false);
+    // A deposit recorded as "no recibido" holds nothing to give back — handled, not pending.
+    const guarded = [
+      { quantity: 2, isRental: true, securityDeposit: dec("50"), replacementPrice: dec("80") },
+    ];
+    expect(
+      projectOrderListItem(
+        makeListRow({ serviceDetails: guarded, deliveredAt: DELIVERED, depositWaivedAt: DELIVERED }),
+        context,
+      ).depositSettlementPending,
+    ).toBe(false);
+    // …while one still PENDING collection or RECEIVED stays flagged until it is settled.
+    expect(
+      projectOrderListItem(
+        makeListRow({ serviceDetails: guarded, deliveredAt: DELIVERED, depositReceivedAt: DELIVERED }),
+        context,
+      ).depositSettlementPending,
+    ).toBe(true);
+  });
+
   it("projects no deposit block when no line can carry one, and the snapshots on every line", () => {
     const detail = projectOrderDetail(makeRichOrder(), makeProjectionContext());
     expect(detail.securityDeposit).toBeUndefined();

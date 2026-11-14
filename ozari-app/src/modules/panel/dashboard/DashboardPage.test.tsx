@@ -78,7 +78,19 @@ const dashboard = (overrides: Partial<Dashboard> = {}): Dashboard =>
   ({
     generatedAt: new Date().toISOString(),
     upNext: [upNextItem()],
-    today: { deliveries: 4, collections: 2, overdue: 1, active: 9 },
+    today: {
+      deliveries: 4,
+      deliveriesDone: 1,
+      collections: 2,
+      collectionsDone: 2,
+      overdue: 1,
+      overdueDeliveries: 1,
+      overdueCollections: 0,
+      active: 9,
+      activeToDeliver: 5,
+      activeToCollect: 3,
+      activeToClose: 1,
+    },
     month: {
       period: { from: '2026-08-01T06:00:00.000Z', to: '2026-09-01T06:00:00.000Z' },
       revenue: { current: 12400, previous: 9800, deltaPercent: 26.5 },
@@ -135,7 +147,17 @@ describe('DashboardPage', () => {
     expect(useDashboard).toHaveBeenCalled();
     expect(screen.getByText(`${KEY}.upNext.title`)).toBeInTheDocument();
     expect(screen.getByText(`${KEY}.today.title`)).toBeInTheDocument();
+    // Each "Hoy" figure says what it is made of — the API's breakdown, in words.
+    expect(screen.getByText(`${KEY}.today.deliveriesLeft`)).toBeInTheDocument();
+    expect(screen.getByText(`${KEY}.today.collectionsAllDone`)).toBeInTheDocument();
+    expect(screen.getByText(`${KEY}.today.overdueDeliveries`)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        `${KEY}.today.activeToDeliver · ${KEY}.today.activeToCollect · ${KEY}.today.activeToClose`,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText(`${KEY}.month.title`)).toBeInTheDocument();
+    expect(screen.getByText(`${KEY}.month.description`)).toBeInTheDocument();
     expect(screen.getByText('María López')).toBeInTheDocument();
   });
 
