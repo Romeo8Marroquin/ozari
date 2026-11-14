@@ -81,12 +81,12 @@ export interface StatusSliceModel {
  * open) and what the month's settlements came to.
  */
 export interface DashboardDepositsModel {
-  /** Delivered, not cancelled, carrying a deposit or replacement value, and not settled yet — the
-   *  same predicate as the list's `depositSettlementPending`. `items` are the oldest deliveries first,
+  /** Delivered, not cancelled, carrying a deposit (> 0) not recorded as "no recibido", and not
+   *  settled yet — the same predicate as the list's `depositSettlementPending`. `items` are the oldest deliveries first,
    *  capped at `PENDING_DEPOSITS_LIMIT`; `orders`/`amount` count them all. */
   pending: {
     orders: number;
-    /** Σ of their HELD deposits (`heldDeposit` — only a RECEIVED one counts; pending/waived count 0)
+    /** Σ of their HELD deposits (`heldDeposit` — only a RECEIVED one counts; a pending one counts 0)
      *  — money in hand that is not the business's yet. */
     amount: number;
     items: OrderListItemResponseModel[];
@@ -124,13 +124,28 @@ export interface DashboardResponseModel {
    *  the server about what is overdue. */
   generatedAt: Date;
   upNext: UpNextItemResponseModel[];
+  /** "Hoy" is the BUSINESS day (Guatemala, `@helpers/businessTime`), never the server's UTC day. */
   today: {
+    /** Deliveries SCHEDULED today, done or not. */
     deliveries: number;
+    /** …of which already delivered (`deliveredAt`). */
+    deliveriesDone: number;
+    /** Collections SCHEDULED today, done or not. */
     collections: number;
-    /** Pending events whose time has already passed. */
+    /** …of which already collected (`collectedAt`). */
+    collectionsDone: number;
+    /** Pending events whose time has already passed (= `overdueDeliveries + overdueCollections`). */
     overdue: number;
+    overdueDeliveries: number;
+    overdueCollections: number;
     /** Orders neither finished nor cancelled — the real "open work" number. */
     active: number;
+    /** Open and not delivered yet. */
+    activeToDeliver: number;
+    /** Open, delivered, with a pickup not collected yet. */
+    activeToCollect: number;
+    /** Open with the work done (collected, or a delivered purchase) — only "finished" is missing. */
+    activeToClose: number;
   };
   month: {
     period: DateRangeModel;

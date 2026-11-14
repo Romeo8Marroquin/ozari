@@ -91,9 +91,10 @@ interface DashboardMocks {
 
 /** Wires the prisma client so the controller's ONE `Promise.all` resolves deterministically. */
 const mockPrisma = (mocks: DashboardMocks = {}) => {
-  // In `Promise.all` order: deliveries today, collections today, overdue deliveries, overdue
-  // collections, active, cancelled this month, cancelled last month.
-  const counts = mocks.counts ?? [4, 2, 1, 0, 9, 3, 5];
+  // In `Promise.all` order: deliveries today, of which done; collections today, of which done;
+  // overdue deliveries, overdue collections; active, of which to deliver, of which to collect;
+  // cancelled this month, cancelled last month.
+  const counts = mocks.counts ?? [4, 1, 2, 0, 1, 0, 9, 5, 3, 3, 5];
   const count = vi.fn();
   counts.forEach((value) => count.mockResolvedValueOnce(value));
   const findMany = vi
@@ -154,7 +155,7 @@ beforeEach(() => vi.clearAllMocks());
 
 describe("getDashboard", () => {
   it("answers the whole screen in one payload, from a single instant", async () => {
-    mockPrisma();
+    const client = mockPrisma();
     await getDashboard(req, res);
 
     expect(sendOzariSuccess).toHaveBeenCalledWith(
@@ -165,7 +166,31 @@ describe("getDashboard", () => {
     );
     const dashboard = sentDashboard();
     expect(dashboard.generatedAt).toBeInstanceOf(Date);
-    expect(dashboard.today).toEqual({ deliveries: 4, collections: 2, overdue: 1, active: 9 });
+    expect(dashboard.today).toEqual({
+      deliveries: 4,
+      deliveriesDone: 1,
+      collections: 2,
+      collectionsDone: 0,
+      overdue: 1,
+      overdueDeliveries: 1,
+      overdueCollections: 0,
+      active: 9,
+      activeToDeliver: 5,
+      activeToCollect: 3,
+      // The remainder: collected (or a delivered purchase) but not marked finished — still open.
+      activeToClose: 1,
+    });
+    // "Hoy" is the BUSINESS day: the today-counts are scoped to Guatemala's midnights (06:00Z), never
+    // the server's UTC day — the production bug (2026-11-13) where an 8:30 p. m. delivery was
+    // counted on tomorrow.
+    const firstCount = (client.service.count as Mock).mock.calls[0]?.[0] as {
+      where: { deliveryAt: { gte: Date; lt: Date } };
+    };
+    const { gte, lt } = firstCount.where.deliveryAt;
+    expect(gte.getUTCHours()).toBe(6);
+    expect(lt.getTime() - gte.getTime()).toBe(24 * 60 * 60 * 1000);
+    expect(gte.getTime()).toBeLessThanOrEqual(dashboard.generatedAt.getTime());
+    expect(lt.getTime()).toBeGreaterThan(dashboard.generatedAt.getTime());
     expect(dashboard.currency).toEqual(CURRENCY);
     // Nothing open, nothing settled: the deposit corner is all zeros, never absent.
     expect(dashboard.deposits).toEqual({
@@ -191,19 +216,10 @@ describe("getDashboard", () => {
         ],
       }),
     );
-    // An eighth WAIVED at the door and a ninth still PENDING: both still await their damage report
-    // (they have replacement values), but neither holds money — each counts as an order and adds
-    // nothing to the amount in hand (owner 2026-10-28: only a RECEIVED deposit is in hand).
+    // An eighth still PENDING collection: it awaits its decision but holds no money — it counts as an
+    // order and adds nothing to the amount in hand (owner 2026-10-28: only a RECEIVED deposit is in
+    // hand). A WAIVED one or a replacement-only order never reaches this list (the query below).
     pendingDeposits.push(
-      rawOrder({
-        id: 200,
-        deliveredAt: delivered,
-        depositWaivedAt: delivered,
-        depositWaivedReason: "Un familiar",
-        serviceDetails: [
-          { quantity: 3, isRental: true, securityDeposit: dec("10.45"), replacementPrice: dec("80") },
-        ],
-      }),
       rawOrder({
         id: 201,
         deliveredAt: delivered,
@@ -233,8 +249,8 @@ describe("getDashboard", () => {
     await getDashboard(req, res);
 
     const { deposits } = sentDashboard();
-    expect(deposits.pending.orders).toBe(9);
-    // 7 × 31.35 HELD (the waived and the pending one count 0), rounded to cents (float addition would otherwise
+    expect(deposits.pending.orders).toBe(8);
+    // 7 × 31.35 HELD (the pending one counts 0), rounded to cents (float addition would otherwise
     // leak `219.45000000000002`).
     expect(deposits.pending.amount).toBe(219.45);
     expect(deposits.pending.items.map((item) => item.id)).toEqual([100, 101, 102, 103, 104]);
@@ -258,7 +274,17 @@ describe("getDashboard", () => {
         where: expect.objectContaining({
           deliveredAt: { not: null },
           depositSettledAt: null,
+          depositWaivedAt: null,
           cancelledAt: null,
+          // A deposit, never a replacement value alone (owner 2026-11-13).
+          serviceDetails: {
+            some: {
+              isActive: true,
+              isRental: true,
+              quantity: { gt: 0 },
+              securityDeposit: { gt: 0 },
+            },
+          },
         }),
         orderBy: [{ deliveredAt: "asc" }, { id: "asc" }],
       }),

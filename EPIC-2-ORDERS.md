@@ -861,8 +861,8 @@ deposit actually received? Three `services` columns: `depositReceivedAt`, `depos
 - **A damage report never writes the collection** (2026-10-28; it used to stamp a PENDING one RECEIVED).
 - **Projection:** `securityDeposit.held` (= `H`) and `securityDeposit.collection { status, at?, reason?,
   canRecord }` — absent when `D = 0`; `at` = the stamp; `reason` only when WAIVED; `canRecord` = not
-  cancelled. `depositSettlementPending` is unchanged (a waived or pending order with replacement values
-  still awaits its report).
+  cancelled. A WAIVED deposit clears `depositSettlementPending` (owner 2026-11-13 — see Projections); a
+  PENDING one keeps it.
 - **Decision:** the deposit RECEIPT is now tracked; the balance payment of damages is still a documented
   door.
 
@@ -892,16 +892,23 @@ what was retained (the same ceiling the report enforces; the collection plays no
 first. The edit never writes the damage columns. Order delete
 removes the lines (and with them the damage) in its transaction.
 
-**Projections:** list items carry `depositSettlementPending` (delivered + settleable + not cancelled + not
-settled — the agenda's pending-deposit chip); the detail carries per-line snapshots + damage, a
+**Projections:** list items carry `depositSettlementPending` (`isDepositSettlementPending`: delivered + a
+NOMINAL deposit `D > 0` + not WAIVED + not cancelled + not settled — the agenda's "Depósito pendiente"
+chip, the detail's header shortcut and card chip, and the dashboard count). **Owner decision
+2026-11-13:** a replacement value ALONE never raises it, and neither does a deposit recorded as "no
+recibido" — in production an order of chairs + tables (replacement prices, no deposit) read "Entregado ·
+Depósito pendiente" on the agenda, which is false: there is no deposit to be pending. Such an order is
+still SETTLEABLE (`canSettle`; "Registrar sin daños" / "Reportar daños" on the detail), its card titled
+"Revisión de daños" with no Q0.00 deposit row — it is reviewable, not nagged. The detail carries per-line snapshots + damage, a
 `securityDeposit { total, held, collection?, canSettle, settlement? }` block with every derived figure, and
 `depositHistory`; the forward DELIVERY action carries `depositToCollect`.
 The UI and the PDF render those numbers; they never re-derive them.
 
 **Dashboard** (`GET /dashboard` → `deposits`): `pending { orders, amount, items }` — the
-`depositSettlementPending` predicate pushed into SQL (live, delivered, unsettled, an active rental line with
-a deposit > 0 or a replacement value); ALL of them are fetched so `orders`/`amount` (Σ HELD deposit — only
-a RECEIVED one adds; pending/waived add 0 — money in hand) are exact,
+`depositSettlementPending` predicate pushed into SQL (live, delivered, unsettled, not waived, an active
+rental line with quantity > 0 and a deposit > 0 — change it WITH `isDepositSettlementPending`); ALL of
+them are fetched so `orders`/`amount` (Σ HELD deposit — only a RECEIVED one adds; a pending one adds 0 —
+money in hand) are exact,
 and `items` lists the oldest deliveries first, capped at `PENDING_DEPOSITS_LIMIT` (5), as ordinary list
 items (`projectOrderListItem`). `month { settled, refunded, retained, replacements, balanceDue }` totals
 the settlements FIRST recorded this month (scoped by `depositSettledAt`, as they stand now) through

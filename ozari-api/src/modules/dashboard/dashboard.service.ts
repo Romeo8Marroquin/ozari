@@ -1,4 +1,10 @@
 import { Prisma } from "@prisma/client";
+import {
+  businessDayRange,
+  businessMonthKey,
+  businessMonthRange,
+  trailingBusinessMonthKeys,
+} from "@helpers/businessTime.js";
 import { decryptKms } from "@helpers/encryption.js";
 import { pendingLogisticsEvents } from "../orders/logistics/logistics.service.js";
 import type { LogisticsEventModel } from "../orders/logistics/logistics.models.js";
@@ -49,27 +55,24 @@ export type DashboardOrderRow = Prisma.ServiceGetPayload<{
  * The calendar month containing `now`, shifted by `offsetMonths` (0 = this month, -1 = last month).
  *
  * Half-open `[from, to)` so an order timestamped exactly at midnight on the 1st belongs to the new
- * month and to nothing else. Built from local Y/M parts, which is correct here because the business
- * is single-timezone (Guatemala, no DST — EPIC-2 §1); a multi-timezone business would need the
- * month boundaries computed in the BUSINESS's zone, not the server's, and this is the one function
- * that would change.
+ * month and to nothing else. The boundaries are the BUSINESS's midnights (Guatemala), never the
+ * server's — Cloud Run is UTC, and building them from the process clock shifted every month by six
+ * hours (an 8:30 p. m. order on the 30th counted toward the next month).
  */
 export function monthRange(now: Date, offsetMonths = 0): DateRangeModel {
-  const from = new Date(now.getFullYear(), now.getMonth() + offsetMonths, 1);
-  const to = new Date(now.getFullYear(), now.getMonth() + offsetMonths + 1, 1);
-  return { from, to };
+  return businessMonthRange(now, offsetMonths);
 }
 
-/** The local day containing `now`, half-open like every other range here. */
+/** The business day containing `now`, half-open like every other range here. "Hoy" on the dashboard
+ *  is the owner's day — 00:00 to 24:00 in Guatemala — whatever zone the server runs in. */
 export function dayRange(now: Date): DateRangeModel {
-  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  return { from, to };
+  return businessDayRange(now);
 }
 
-/** `YYYY-MM` for a date — the trend series' stable machine key (the client formats the label). */
+/** `YYYY-MM` for a date — the trend series' stable machine key (the client formats the label), in
+ *  the business's month. */
 export function monthKey(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  return businessMonthKey(date);
 }
 
 /**
@@ -77,9 +80,7 @@ export function monthKey(date: Date): string {
  * rather than ranges because the bucketing below is a lookup, not a series of comparisons.
  */
 export function trailingMonthKeys(now: Date, count: number): string[] {
-  return Array.from({ length: count }, (_, index) =>
-    monthKey(new Date(now.getFullYear(), now.getMonth() - (count - 1 - index), 1)),
-  );
+  return trailingBusinessMonthKeys(now, count);
 }
 
 /**

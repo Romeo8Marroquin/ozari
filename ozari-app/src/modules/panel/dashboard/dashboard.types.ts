@@ -59,11 +59,23 @@ export interface Dashboard {
    *  countdown on the screen. */
   generatedAt: string;
   upNext: UpNextItem[];
+  /** The BUSINESS day (Guatemala) — the API zones it; the client never re-derives a figure. */
   today: {
+    /** Scheduled today, done or not — and how many of those are already done. */
     deliveries: number;
+    deliveriesDone: number;
     collections: number;
+    collectionsDone: number;
+    /** `overdueDeliveries + overdueCollections`. */
     overdue: number;
+    overdueDeliveries: number;
+    overdueCollections: number;
+    /** Neither finished nor cancelled = toDeliver + toCollect + toClose. */
     active: number;
+    activeToDeliver: number;
+    activeToCollect: number;
+    /** The work is done (collected, or a delivered purchase); only "finished" is missing. */
+    activeToClose: number;
   };
   month: {
     period: { from: string; to: string };

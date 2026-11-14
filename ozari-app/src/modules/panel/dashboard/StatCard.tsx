@@ -72,7 +72,9 @@ const StatCard: React.FC<{
             {badgeLabel}
           </span>
         )}
-        {hint && <span className="min-w-0 truncate text-[11px] text-charcoal/45">{hint}</span>}
+        {/* WRAPS rather than truncates: a breakdown ("2 por entregar · 1 por recolectar · 1 por
+            finalizar") cut at "…" hides the very part that explains the number. */}
+        {hint && <span className="min-w-0 break-words text-[11px] text-charcoal/45">{hint}</span>}
       </div>
     </div>
   );
