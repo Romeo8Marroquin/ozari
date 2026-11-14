@@ -500,8 +500,9 @@ nothing: a method must be observed, not guessed.
   `total`, for what comes back or is credited; the nominal `total` is only the agreed amount and the
   retention's ceiling. "Not received" = PENDING or WAIVED (a legacy deposit without a collection
   reads PENDING — `isDepositNotReceived`, `documents/documentModel.ts`).
-- **Order detail:** `OrderDepositCard` ("Depósito", only when `order.securityDeposit`) renders ONLY
-  the API's numbers. Chip: "Pendiente" (recordable, not recorded) / "Devuelto" (recorded,
+- **Order detail:** `OrderDepositCard` ("Depósito", or "Revisión de daños" with no deposit row when
+  `total` is 0; only when `order.securityDeposit`) renders ONLY the API's numbers. Chip: "Pendiente"
+  (`order.depositSettlementPending` — a real deposit awaiting its decision) / "Devuelto" (recorded,
   `claimsTotal` 0, a deposit in hand) / "Sin daños" (recorded clean, nothing in hand) / "Con daños"
   (claims > 0) — branched on the API's `claimsTotal`/`held`, never recomputed. The amount shown is
   the AGREED `total`; whether it arrived is the row below. Pending + `canSettle` (Admin): the HAPPY
@@ -581,7 +582,10 @@ nothing: a method must be observed, not guessed.
   `grid-rows` collapse, `inert` while closed) only when claims > 0 AND the values pass the resolver's
   own schema — a typo never prints.
 - **Agenda/history tickets** carry an amber "Depósito pendiente" chip on
-  `depositSettlementPending`.
+  `depositSettlementPending` — raised ONLY by a real deposit (D > 0, not waived, delivered, unsettled;
+  never by a replacement value alone — owner 2026-11-13, EPIC-2-ORDERS §12 Projections). The detail
+  card's own "Pendiente" chip is the same flag. An order with replacement values but no deposit keeps
+  the card as **"Revisión de daños"** (no Q0.00 deposit row): reviewable, never "pending".
 - **Dashboard:** a small "Depósitos" card (`dashboard/DepositsCard.tsx`) LAST on `/panel/inicio`,
   after the top products — rare edge cases never compete with the headline figures. Pending: "N
   pendientes · Q en depósitos" + up to 5 compact links (client · short delivery date · the ticket's
@@ -799,6 +803,30 @@ destination, platform)` decides, and `openMapsLink` follows it:
   **`month.collected`** — money actually RECEIVED, scoped by `paidAt` and therefore the one monthly
   figure NOT scoped by delivery date. `revenue` is what the month's work is worth; this is what came
   in; the gap between them is what `outstanding` totals.
+- ⚠️ **Every day/month boundary is the BUSINESS's (Guatemala), never the server's** — owner bug
+  2026-11-13. Cloud Run runs in UTC, and `dayRange`/`monthRange`/`monthKey` used to build boundaries
+  from the process clock (`new Date(y, m, d)`), so "Hoy" ran 18:00 → 18:00 Guatemala time: an 8:30
+  p. m. delivery counted on TOMORROW ("Entregas de hoy 0") and last night's collection on today
+  ("Recolecciones de hoy 1"); months shifted six hours the same way. The old tests used local dates
+  and passed on a machine already in Guatemala. Every calendar question now goes through
+  **`@helpers/businessTime`** (`businessDayRange`, `businessMonthRange`, `businessMonthKey`,
+  `trailingBusinessMonthKeys`, `formatBusinessTime`; zone = `appConfig.businessTimeZone`, also the
+  calendar's), and its tests are written in UTC instants. **Never `getDate()`/`getMonth()`/`new
+  Date(y, m, d)` or a zone-less `Intl.DateTimeFormat` on the API** — the calendar description had
+  the same bug ("2:30 a. m." for an 8:30 p. m. event). Deliberately NOT a `TZ` env var on Cloud Run:
+  the code must be right wherever it runs, and the tests prove it under `TZ=UTC`.
+- **Every "Hoy" figure says what it is MADE of** (owner 2026-11-13: "Pedidos abiertos 3, pero solo
+  tengo 2" — the third was collected but not marked finished, so it IS open). The value stays the
+  count; the hint (`todayHints.ts`, from API fields, never re-derived) says what is left:
+  deliveries/collections = SCHEDULED today + `deliveriesDone`/`collectionsDone` → "Falta 1 por
+  entregar" / "Todas entregadas" / "Ninguna programada para hoy"; `overdue` = `overdueDeliveries` +
+  `overdueCollections` → "1 entrega · 2 recolecciones"; `active` = `activeToDeliver` +
+  `activeToCollect` + `activeToClose` (disjoint, from the ACTUALS — the last is the remainder:
+  collected or a delivered purchase, not finished) → "2 por entregar · 1 por finalizar".
+  `StatCard`'s hint WRAPS (never `truncate`): a cut breakdown hides the part that explains the
+  number. "Este mes" carries ONE line naming which date each figure is scoped by (delivery /
+  payment / none for "Por cobrar"), since Ingresos ≠ Cobrado + Por cobrar is correct and otherwise
+  reads as an error.
 - **`event.isOverdue`/`minutesUntil` are computed SERVER-side** against `generatedAt` — a device with a
   skewed clock must not be able to contradict the server about what is late.
 - **Freshness is 60s + refetch-on-focus, deliberately NOT the 10–30s that "live" suggests**
@@ -814,12 +842,13 @@ destination, platform)` decides, and `openMapsLink` follows it:
   lazy chunk — a non-admin never downloads this screen's code. The backend guard likewise does NOT
   widen by adding row scoping, unlike `/orders`.
 - `bucketRevenueByMonth` buckets the 12-month trend in memory on purpose (a year is a few hundred rows
-  here, and the month boundaries then obey the same rule as the rest of the screen rather than
-  Postgres's timezone handling); **the trigger to move it into a `date_trunc` group-by** is the year's
+  here, and the month boundaries then obey the same BUSINESS-zone rule as the rest of the screen
+  (`businessMonthKey`) rather than Postgres's timezone handling — a `date_trunc` port must truncate
+  `AT TIME ZONE 'America/Guatemala'`, never the session's UTC); **the trigger to move it into a `date_trunc` group-by** is the year's
   order count reaching a few thousand.
 - **`deposits`** (EPIC-2-ORDERS §12): `pending` = EVERY open deposit (the list's
   `depositSettlementPending` predicate in SQL) counted and its HELD deposits summed (`heldDeposit` —
-  only a RECEIVED one adds; pending/waived add 0), the oldest `PENDING_DEPOSITS_LIMIT` (5) listed as
+  only a RECEIVED one adds; a pending one adds 0; a waived one is not open), the oldest `PENDING_DEPOSITS_LIMIT` (5) listed as
   order list items; `month` = settlements first recorded this month, totalled by `summarizeSettlements`
   through the shared `heldDeposit` + `computeSettlementMoney` (the select carries `depositReceivedAt`). Both queries
   sit in the same `Promise.all`; the shaping is `projectDeposits`.

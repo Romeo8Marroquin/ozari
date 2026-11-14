@@ -42,7 +42,10 @@ const MoneyLine: React.FC<{
  * The order detail's "Depósito" card — the refundable security deposit and, once the goods are back,
  * what was recorded about it. ("Depósito" is the owner's word with clients; the app never says
  * "garantía" or "liquidar".) Rendered only when the API sent the block (an order that can carry a
- * deposit or a damage). The states, all decided by the API's flags:
+ * deposit or a damage). An order with only REPLACEMENT values (no deposit) gets the same card as a
+ * plain "Revisión de daños": no deposit row, and never "Pendiente" — that chip is the API's
+ * `depositSettlementPending`, which only a real deposit raises (owner, 2026-11-13). The states, all
+ * decided by the API's flags:
  *
  * - not recorded, not recordable yet → the total and "después de la entrega…";
  * - not recorded, recordable (Admin) → the HAPPY PATH first: "Devolver depósito" when a deposit is
@@ -96,6 +99,9 @@ const OrderDepositCard: React.FC<{
   // The order carries a deposit nobody has recorded as received (PENDING or WAIVED; a legacy order
   // without a collection reads PENDING): the damages are then billed whole, nothing comes back.
   const notReceived = deposit.total > 0 && collection?.status !== 'RECEIVED';
+  // An order whose rental lines carry only a REPLACEMENT value (no deposit — e.g. chairs and tables):
+  // the card is then the damage review alone, so it neither says "Depósito" nor shows a Q0.00 deposit.
+  const hasDeposit = deposit.total > 0;
   const claimed = settlement !== undefined && settlement.claimsTotal > 0;
   const body = useMorphOnChange<HTMLDivElement>(
     `${settlement?.settledAt ?? ''}|${settlement?.claimsTotal ?? ''}|${canSettle}|${collection?.status ?? ''}|${deposit.held}`,
@@ -107,7 +113,10 @@ const OrderDepositCard: React.FC<{
       : inHand
         ? { label: t(`${KEY}.chipRefunded`), tone: 'bg-emerald-50 text-emerald-600' }
         : { label: t(`${KEY}.chipNoDamage`), tone: 'bg-emerald-50 text-emerald-600' }
-    : canSettle
+    : // "Pendiente" is the API's `depositSettlementPending` — the SAME fact as the agenda's chip and
+      // the header button, never re-derived here: a deposit is waiting for its decision. An order
+      // with no deposit (or one recorded as not received) is reviewable, but nothing is pending.
+      order.depositSettlementPending
       ? { label: t(`${KEY}.chipPending`), tone: 'bg-amber-50 text-amber-600' }
       : undefined;
 
@@ -200,7 +209,7 @@ const OrderDepositCard: React.FC<{
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="order-deposit-title" className="text-sm font-semibold text-charcoal">
-          {t(`${KEY}.title`)}
+          {t(`${KEY}.${hasDeposit ? 'title' : 'titleNoDeposit'}`)}
         </h2>
         {chip && (
           <span
@@ -212,17 +221,21 @@ const OrderDepositCard: React.FC<{
       </div>
 
       <div ref={body} className="flex flex-col gap-3 text-sm">
-        {/* The deposit itself — collected ON TOP of the order, never part of its total. */}
-        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
-          <div className="min-w-0 grow basis-56">
-            <p className="font-medium text-charcoal">{t(`${KEY}.total`)}</p>
-            <p className="text-xs text-charcoal/50">{t(`${KEY}.totalNote`)}</p>
+        {/* The deposit itself — collected ON TOP of the order, never part of its total. Absent
+            when the order carries none: a "Depósito Q0.00 · se devuelve al recoger" row describes
+            money that does not exist. */}
+        {hasDeposit && (
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+            <div className="min-w-0 grow basis-56">
+              <p className="font-medium text-charcoal">{t(`${KEY}.total`)}</p>
+              <p className="text-xs text-charcoal/50">{t(`${KEY}.totalNote`)}</p>
+            </div>
+            {/* The AGREED deposit — what the order asks for. Whether it arrived is the next row. */}
+            <span className="shrink-0 font-semibold tabular-nums text-charcoal">
+              {money(deposit.total)}
+            </span>
           </div>
-          {/* The AGREED deposit — what the order asks for. Whether it arrived is the next row. */}
-          <span className="shrink-0 font-semibold tabular-nums text-charcoal">
-            {money(deposit.total)}
-          </span>
-        </div>
+        )}
 
         {/* Was it actually received? The label/control row rule: the description carries the
             `basis-56` floor and the row wraps, so the actions fold under it on a narrow card.
@@ -294,7 +307,11 @@ const OrderDepositCard: React.FC<{
         )}
 
         {settlement ? (
-          <div className="flex flex-col gap-2 border-t border-black/[0.06] pt-3">
+          // The divider separates the outcome from the deposit row above it — with no deposit row,
+          // it would underline nothing.
+          <div
+            className={`flex flex-col gap-2 ${hasDeposit ? 'border-t border-black/[0.06] pt-3' : ''}`}
+          >
             {!claimed && (
               <p className="text-charcoal/60">
                 {t(

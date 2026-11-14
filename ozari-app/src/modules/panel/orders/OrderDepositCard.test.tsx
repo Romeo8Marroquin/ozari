@@ -55,14 +55,15 @@ const clean = (): OrderDepositSettlement =>
     balanceDue: 0,
   });
 
-const renderCard = (deposit: OrderSecurityDeposit, isAdmin = true) => {
+/** `pending` is the API's `depositSettlementPending` — the card renders it, never derives it. */
+const renderCard = (deposit: OrderSecurityDeposit, isAdmin = true, pending = false) => {
   const onRefund = vi.fn();
   const onReport = vi.fn();
   const onUndo = vi.fn();
   const onCollection = vi.fn();
   render(
     <OrderDepositCard
-      order={order}
+      order={{ ...order, depositSettlementPending: pending }}
       deposit={deposit}
       isAdmin={isAdmin}
       onRefund={onRefund}
@@ -89,7 +90,11 @@ describe('OrderDepositCard', () => {
   });
 
   it('delivered, pending: the HAPPY path leads ("Devolver depósito"), the damage path follows', async () => {
-    const { onRefund, onReport } = renderCard({ total: 200, held: 200, canSettle: true });
+    const { onRefund, onReport } = renderCard(
+      { total: 200, held: 200, canSettle: true },
+      true,
+      true,
+    );
     expect(screen.getByText(`${K}.chipPending`)).toBeInTheDocument();
     expect(screen.getByText(`${K}.due`)).toBeInTheDocument();
     const buttons = screen.getAllByRole('button');
@@ -103,8 +108,15 @@ describe('OrderDepositCard', () => {
     expect(screen.queryByTestId('damage-report')).not.toBeInTheDocument();
   });
 
-  it('replacement values only (no deposit): the quick action reads "Sin daños"', () => {
+  it('replacement values only (no deposit): a damage review — no deposit row, nothing "pending"', () => {
+    // The production case (2026-11-13): chairs + tables with a replacement price, no deposit. The
+    // API never flags it pending, and the card must not call it a deposit nor show a Q0.00 one.
     renderCard({ total: 0, held: 0, canSettle: true });
+    expect(screen.getByRole('heading', { name: `${K}.titleNoDeposit` })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: `${K}.title` })).not.toBeInTheDocument();
+    expect(screen.queryByText(`${K}.totalNote`)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Q\s*0\.00/)).not.toBeInTheDocument();
+    expect(screen.queryByText(`${K}.chipPending`)).not.toBeInTheDocument();
     expect(screen.getByText(`${K}.dueNoDeposit`)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: `${K}.noDamageAction` })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: `${K}.refundAction` })).not.toBeInTheDocument();

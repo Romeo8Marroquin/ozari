@@ -29,6 +29,7 @@ import { formatMonthLabel, formatMoney, freshnessLabel, secondsSince } from './d
 import { ChartSkeleton, ListSkeleton, StatsSkeleton, UpNextSkeleton } from './DashboardSkeleton';
 import DepositsCard from './DepositsCard';
 import StatCard from './StatCard';
+import { activeHint, overdueHint, scheduledTodayHint } from './todayHints';
 import UpNextCard from './UpNextCard';
 import { useDashboard } from './useDashboard';
 
@@ -204,27 +205,48 @@ const DashboardPage: React.FC = () => {
         <SectionReveal loading={loading} skeleton={<StatsSkeleton />} delaySeconds={SECTION_REVEAL_STEP}>
           {data && (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {/* Every figure says what it is MADE of underneath — a bare "1" read the same before
+                  and after the work, and "Pedidos abiertos 3" left the owner counting (2026-11-13:
+                  the third was collected but not finished). The value stays the day's SCHEDULE
+                  (the API's business day, Guatemala); the hint says what is still left. */}
               <StatCard
                 label={t(`${KEY}.today.deliveries`)}
                 value={String(data.today.deliveries)}
                 icon={HiOutlineTruck}
+                hint={scheduledTodayHint(
+                  t,
+                  'deliveries',
+                  data.today.deliveries,
+                  data.today.deliveriesDone,
+                )}
               />
               <StatCard
                 label={t(`${KEY}.today.collections`)}
                 value={String(data.today.collections)}
                 icon={HiOutlineClipboardDocumentList}
+                hint={scheduledTodayHint(
+                  t,
+                  'collections',
+                  data.today.collections,
+                  data.today.collectionsDone,
+                )}
               />
               <StatCard
                 label={t(`${KEY}.today.overdue`)}
                 value={String(data.today.overdue)}
                 icon={HiOutlineExclamationTriangle}
-                hint={t(`${KEY}.today.overdueHint`)}
+                hint={overdueHint(t, data.today.overdueDeliveries, data.today.overdueCollections)}
               />
               <StatCard
                 label={t(`${KEY}.today.active`)}
                 value={String(data.today.active)}
                 icon={HiOutlineReceiptPercent}
-                hint={t(`${KEY}.today.activeHint`)}
+                hint={activeHint(
+                  t,
+                  data.today.activeToDeliver,
+                  data.today.activeToCollect,
+                  data.today.activeToClose,
+                )}
               />
             </div>
           )}
@@ -233,7 +255,13 @@ const DashboardPage: React.FC = () => {
 
       {/* ── 3. The business ──────────────────────────────────────────────────────────────── */}
       <section className="reveal-block flex flex-col gap-3">
-        <h2 className="text-base font-bold text-charcoal">{t(`${KEY}.month.title`)}</h2>
+        {/* The six figures are scoped by DIFFERENT dates (delivery, payment, none), which is right
+            and also exactly what makes "Ingresos ≠ Cobrado + Por cobrar" look like an error. One
+            line says which is which, once, instead of six footnotes. */}
+        <div>
+          <h2 className="text-base font-bold text-charcoal">{t(`${KEY}.month.title`)}</h2>
+          <p className="text-xs text-charcoal/55">{t(`${KEY}.month.description`)}</p>
+        </div>
         <SectionReveal
           loading={loading}
           skeleton={<StatsSkeleton />}

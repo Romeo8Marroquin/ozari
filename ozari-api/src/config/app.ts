@@ -1,6 +1,16 @@
 import { getAppHost, isDeployedEnvironment } from "./environment.js";
 
+/**
+ * The zone the BUSINESS lives in — what "today", "this month" and "8:30 p. m." mean. Never the
+ * server's: Cloud Run runs in UTC, so a day built from the process clock spans 18:00 → 18:00 in
+ * Guatemala and every evening event lands on the wrong day (production, 2026-11-13). Every calendar
+ * question goes through `@helpers/businessTime`. Guatemala has no DST (EPIC-2 §1).
+ */
+export const BUSINESS_TIME_ZONE = "America/Guatemala";
+
 export const appConfig = {
+  businessTimeZone: BUSINESS_TIME_ZONE,
+
   accessToken: {
     algorithm: "HS256" as const,
     audience: "platform-users",
@@ -156,7 +166,7 @@ export const appConfig = {
     // the zone the business thinks in. Every instant is still emitted in UTC, which is the only
     // form that needs no VTIMEZONE block and stays unambiguous on a phone that travels. Guatemala
     // has no DST, which is what makes a single fixed zone honest here (EPIC-2 §1).
-    timeZone: "America/Guatemala",
+    timeZone: BUSINESS_TIME_ZONE,
 
     // How long before an event the calendar should remind, when the `calendar.reminderMinutes`
     // preference is missing or corrupt. A day's notice is the point of the feature.
