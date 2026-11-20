@@ -82,8 +82,12 @@ En el celular, el menú se abre con el botón ☰ de la esquina superior izquier
 
 Tres bloques, de arriba abajo:
 
-- **Lo que sigue** — los próximos tres pedidos que requieren acción, con su hora y un botón para
-  avanzarlos sin entrar al detalle.
+- **Lo que sigue** — todos los pedidos con algo por hacer **hoy** (también los atrasados), con su
+  hora y un botón para avanzarlos sin entrar al detalle. Se ve una fila; si hay más, **Ver más** los
+  despliega ahí mismo y **Ver menos** los vuelve a recoger. Debajo, **Entregas de mañana** dice
+  cuántos pedidos hay que entregar mañana — solo el número, sin tarjetas. Las recolecciones no
+  cuentan ahí: un pedido que solo se recoge mañana no aparece, y uno que se entrega mañana sí,
+  aunque se recoja días después.
 - **Hoy** — el trabajo del día.
 - **Este mes** — seis indicadores del mes en curso.
 
@@ -235,6 +239,13 @@ días contratados.
 ⚠️ **Los días se cobran por día empezado.** De sábado 8:00 a domingo 10:00 son **dos días**, no uno y
 medio. El documento lo dice explícitamente para que el cliente lo vea igual que usted.
 
+**Días a cobrar** — aparece bajo las fechas cuando el pedido lleva alquiler. Se llena solo con los
+días que dan las fechas, y **se vuelve a llenar cada vez que cambia una fecha**. Puede escribir otro
+número cuando lo acordado con el cliente es distinto (por ejemplo, "50 sillas por 3 días" aunque las
+horas den 4): el pedido se cobra con ese número. **Usar las fechas** regresa al cálculo automático.
+Si prefiere que cada pedido nuevo empiece siempre con un número fijo, cámbielo en **Ajustes →
+Pedidos** (§12).
+
 Si no hay unidades suficientes para esas fechas, el sistema lo dice **en la línea del producto**, con
 el número disponible. No es un error del formulario: es que otro pedido ya las tiene tomadas.
 
@@ -252,6 +263,10 @@ el número disponible. No es un error del formulario: es que otro pedido ya las 
 **Cobro**
 - **Costo de envío** — puede ser 0. En cero, el documento imprime la nota de envío gratis.
 - **Anticipo** — lo que el cliente deja adelantado. Resta del saldo.
+- **Descuento** — un monto en quetzales que se resta del total del pedido. Si piensa en porcentaje,
+  escríbalo en la casilla **%** y el monto se calcula solo. No puede ser mayor que el pedido.
+- **Motivo del descuento** — opcional, una línea corta (hasta 60 caracteres). ⚠️ **El cliente lo
+  ve**: se imprime bajo el descuento en la cotización y el comprobante.
 - **Comentario** — notas del pedido (viene precargado con las notas del cliente).
 
 ⚠️ **Aquí no se registra el pago.** El pago se registra cuando el dinero llega de verdad, con el
@@ -393,7 +408,9 @@ Dos documentos PDF, mismo diseño, momentos distintos:
 <details>
 <summary><b>▸ Ver detalle</b></summary>
 
-- La cotización exige que el formulario esté completo: al pedirla, se marcan los campos que falten.
+- **Para cotizar basta un producto.** Cliente, dirección y fechas son opcionales: lo que no se haya
+  llenado simplemente no aparece en el documento (sin recuadros vacíos). Lo que sí esté llenado debe
+  ser válido; si algo no lo es, se marca en el formulario.
 - Un pedido **cancelado no genera comprobante**.
 - El encabezado, las condiciones impresas, los términos, la validez de la cotización y las cuentas
   bancarias salen de **Preferencias → Documentos**. El documento nunca inventa esos textos.
@@ -499,6 +516,7 @@ empiezan vacías**: si en el documento solo aparece un banco, es que el segundo 
 |---|---|
 | **Cuenta** | Su nombre, correo y rol. |
 | **Seguridad** | Cambiar contraseña y verificación en dos pasos. |
+| **Pedidos** | Cómo empiezan sus pedidos nuevos: los días a cobrar **según las fechas** (lo normal) o un **número fijo**. Es suyo: lo sigue en cualquier dispositivo y no cambia el de otros administradores. |
 | **Este dispositivo** | Con qué app de mapas se abren las direcciones. |
 | **Calendarios** | Conectar Google o generar el enlace de suscripción (§10). |
 

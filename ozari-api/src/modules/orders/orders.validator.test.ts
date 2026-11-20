@@ -162,10 +162,69 @@ describe("validateCreateOrder", () => {
     ["invalidComment", { comment: 42 }],
     ["invalidDeliveryAmount", { deliveryAmount: -1 }],
     ["invalidDepositAmount", { depositAmount: "x" }],
+    ["invalidBilledDays", { billedDays: 0 }],
+    ["invalidBilledDays", { billedDays: appConfig.maxBilledDays + 1 }],
+    ["invalidBilledDays", { billedDays: 1.5 }],
+    ["invalidBilledDays", { billedDays: "2" }],
+    ["invalidDiscountAmount", { discountAmount: -5 }],
+    ["invalidDiscountAmount", { discountAmount: "10" }],
+    ["invalidDiscountReason", { discountAmount: 10, discountReason: 42 }],
+    ["invalidDiscountReason", { discountAmount: 10, discountReason: "x".repeat(61) }],
+    // Printed under the discount row — one line, never a paragraph.
+    ["invalidDiscountReason", { discountAmount: 10, discountReason: "Amigo\nde la casa" }],
+    ["discountReasonWithoutDiscount", { discountReason: "Cliente frecuente" }],
+    ["discountReasonWithoutDiscount", { discountAmount: 0, discountReason: "Cliente frecuente" }],
   ])("rejects %s", async (key, patch) => {
     const { next } = await run({ ...validBody(), ...patch });
     expect(next).not.toHaveBeenCalled();
     expectRejected(key);
+  });
+
+  it("passes an AGREED billed-days figure on a rental order (owner 2026-11-19)", async () => {
+    const { req, next } = await run({ ...validBody(), billedDays: 1 });
+    expect(next).toHaveBeenCalled();
+    expect((req.body as Record<string, unknown>)["billedDays"]).toBe(1);
+  });
+
+  it("leaves billed days absent when none is agreed (null counts as none)", async () => {
+    const { req } = await run({ ...validBody(), billedDays: null });
+    expect((req.body as Record<string, unknown>)["billedDays"]).toBeUndefined();
+  });
+
+  it("refuses billed days on a purchase-only order — nothing is rented", async () => {
+    await run({
+      ...validBody(),
+      pickupAt: undefined,
+      lines: [{ productId: 4, quantity: 1 }],
+      billedDays: 2,
+    });
+    expectRejected("billedDaysForbiddenForPurchase");
+  });
+
+  it("passes a whole-order discount with its trimmed reason, money truncated to cents", async () => {
+    const { req, next } = await run({
+      ...validBody(),
+      discountAmount: 25.999,
+      discountReason: "  Cliente frecuente  ",
+    });
+    expect(next).toHaveBeenCalled();
+    const body = req.body as Record<string, unknown>;
+    expect(body["discountAmount"]).toBe(25.99);
+    expect(body["discountReason"]).toBe("Cliente frecuente");
+  });
+
+  it("reads a zero discount (and a blank reason) as no discount at all", async () => {
+    const { req, next } = await run({ ...validBody(), discountAmount: 0, discountReason: "" });
+    expect(next).toHaveBeenCalled();
+    const body = req.body as Record<string, unknown>;
+    expect(body["discountAmount"]).toBeUndefined();
+    expect(body["discountReason"]).toBeUndefined();
+  });
+
+  it("accepts a discount without a reason — the reason is optional", async () => {
+    const { req, next } = await run({ ...validBody(), discountAmount: 10 });
+    expect(next).toHaveBeenCalled();
+    expect((req.body as Record<string, unknown>)["discountReason"]).toBeUndefined();
   });
 
   it("IGNORES a payment method — it is not part of an order's body (owner 2026-08-05)", async () => {

@@ -870,6 +870,7 @@ export function projectOrderDetail(
     cancelReason: order.cancelReason ?? undefined,
     serviceStart: order.serviceStart,
     serviceEnd: order.serviceEnd,
+    ...projectBilledDays(order),
     lines: order.serviceDetails.map((line) => ({
       id: line.id,
       productId: line.productId,
@@ -957,6 +958,68 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  */
 export function computeBilledDays(deliveryAt: Date, pickupAt: Date): number {
   return Math.max(1, Math.ceil((pickupAt.getTime() - deliveryAt.getTime()) / DAY_MS));
+}
+
+/**
+ * The days an order's rental lines are billed for: the admin's AGREED figure when the body carries
+ * one (owner, 2026-11-19 — a pickup the business delays for its own convenience is not more rental),
+ * else the window's own count. A purchase-only order has no window and bills once. ONE function for
+ * create and update, so the two doors can never price the same body differently.
+ */
+export function resolveBilledDays(body: {
+  deliveryAt: Date;
+  pickupAt: Date | undefined;
+  billedDays: number | undefined;
+}): number {
+  if (!body.pickupAt) {
+    return 1;
+  }
+  return body.billedDays ?? computeBilledDays(body.deliveryAt, body.pickupAt);
+}
+
+/** A whole-order discount larger than what it discounts — thrown inside the write transaction (rolls
+ *  it back) and answered as a `400`: only the priced lines can tell, so the validator cannot. */
+export class OrderDiscountExceedsTotalError extends Error {
+  constructor(
+    readonly discountAmount: number,
+    readonly grossAmount: number,
+  ) {
+    super("order discount exceeds total");
+    this.name = "OrderDiscountExceedsTotalError";
+  }
+}
+
+/**
+ * The order's TOTAL: lines + delivery − discount, to the cent. The discount may bring it to zero (a
+ * gift is a legitimate order) but never below — a negative total would be the business paying the
+ * client to rent its tables. Throws {@link OrderDiscountExceedsTotalError} past that.
+ */
+export function orderTotalAmount(
+  linesTotal: number,
+  deliveryAmount: number | undefined,
+  discountAmount: number | undefined,
+): number {
+  const gross = Math.round((linesTotal + (deliveryAmount ?? 0)) * 100) / 100;
+  const discount = discountAmount ?? 0;
+  if (discount > gross) {
+    throw new OrderDiscountExceedsTotalError(discount, gross);
+  }
+  return Math.round((gross - discount) * 100) / 100;
+}
+
+/** The detail's `billedDays`/`windowDays` pair — both absent on a purchase-only order. A row saved
+ *  before the agreed figure existed (NULL) billed the window, so the window is its answer. */
+export function projectBilledDays(order: {
+  pickupAt: Date | null;
+  serviceStart: Date;
+  serviceEnd: Date;
+  billedDays: number | null;
+}): { billedDays: number | undefined; windowDays: number | undefined } {
+  if (order.pickupAt === null) {
+    return { billedDays: undefined, windowDays: undefined };
+  }
+  const windowDays = computeBilledDays(order.serviceStart, order.serviceEnd);
+  return { billedDays: order.billedDays ?? windowDays, windowDays };
 }
 
 /**

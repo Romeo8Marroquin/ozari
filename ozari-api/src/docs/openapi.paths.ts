@@ -1294,6 +1294,9 @@ export const paths: OpenAPIV3.PathsObject = {
         deliveryContact: EXAMPLE_ORDER_CONTACT,
         deliveryAddress: EXAMPLE_ORDER_ADDRESS,
         deliveryAmount: 50,
+        billedDays: 1,
+        discountAmount: 25,
+        discountReason: "Cliente frecuente",
         assignedUserId: 2,
         lines: [{ productId: 3, quantity: 25 }],
       }),
@@ -1309,13 +1312,17 @@ export const paths: OpenAPIV3.PathsObject = {
             deliveryAt: EXAMPLE_DELIVERY_AT,
             pickupAt: EXAMPLE_PICKUP_AT,
             itemCount: 25,
-            totalAmount: 200,
+            totalAmount: 175,
             currency: { id: 1, name: EXAMPLE_CURRENCY_NAME, iso4217Code: "GTQ", symbol: "Q" },
             deliveryContact: EXAMPLE_ORDER_CONTACT,
             deliveryAddress: EXAMPLE_ORDER_ADDRESS,
             serviceStart: EXAMPLE_DELIVERY_AT,
             serviceEnd: EXAMPLE_PICKUP_AT,
+            billedDays: 1,
+            windowDays: 1,
             deliveryAmount: 50,
+            discountAmount: 25,
+            discountReason: "Cliente frecuente",
             lines: [
               {
                 id: 31,
@@ -1345,7 +1352,10 @@ export const paths: OpenAPIV3.PathsObject = {
           "Validation failed (unknown registry/event type/product, a delivery scheduled in the " +
             "past, incoherent pickup for the order's mode, bad snapshot fields, unsupported rent " +
             "unit, mixed currencies, the same (product, variant) pair twice, a line's variant: " +
-            "`variantRequired` / `variantForbidden` / `invalidLineVariant`…).",
+            "`variantRequired` / `variantForbidden` / `invalidLineVariant`…; `billedDays` outside " +
+            "1..365 or on a purchase-only order; a malformed discount, or a reason without one). " +
+            "Also a discount LARGER than lines + delivery — knowable only after pricing, so it " +
+            "carries `data.discountExceedsTotal.maxDiscount` for the form to quote.",
           400,
           "An order with rentals requires a pickup time",
         ),
@@ -1655,8 +1665,10 @@ export const paths: OpenAPIV3.PathsObject = {
         ),
         "400": errorResponse(
           "The body failed the order contract (same rules as create — incl. the line variant rules " +
-            "`variantRequired` / `variantForbidden` / `invalidLineVariant`; plus the delivery may " +
-            "not be moved into the past).",
+            "`variantRequired` / `variantForbidden` / `invalidLineVariant`, `billedDays` and the " +
+            "discount; plus the delivery may not be moved into the past). A discount the NEW lines " +
+            "no longer cover is a `400` with `data.discountExceedsTotal.maxDiscount`, like create. " +
+            "Full-state: omitting `discountAmount`/`billedDays` CLEARS them.",
           400,
           "The pickup must be after the delivery.",
         ),
@@ -2085,6 +2097,52 @@ export const paths: OpenAPIV3.PathsObject = {
         "200": dataResponse("The terms, as written. May be empty.", "TermsResponse", {
           terms: "Cualquier daño ocasionado al mobiliario será cobrado según el precio de reposición.",
         }),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+  },
+  "/account/preferences": {
+    get: {
+      tags: ["Account"],
+      summary: "My own working preferences",
+      operationId: "getAccountPreferences",
+      description:
+        "The signed-in person's OWN preferences — how *I* work (today: how the order form fills " +
+        "its billed days), as opposed to the business rules under `/preferences`. Every " +
+        "authenticated role; always the CALLER's row — there is no user id in the path, so nobody " +
+        "can read another person's. An account that never saved anything answers the defaults " +
+        "(`null` everywhere). Authenticated limiter (100/min).",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      responses: {
+        "200": dataResponse("The caller's preferences, defaults included.", "AccountPreferencesResponse", {
+          preferences: { orderBilledDays: null },
+        }),
+        "401": unauthorized(STALE_TOKEN_401),
+        "429": rateLimited,
+        "500": serverError,
+      },
+    },
+    put: {
+      tags: ["Account"],
+      summary: "Replace my own working preferences",
+      operationId: "updateAccountPreferences",
+      description:
+        "Declarative: the body is the FULL set and every key is required (`null` = back to the " +
+        "default), so a client that forgets one is refused rather than silently resetting it. " +
+        "Values are never coerced. The response is what was stored. Always the caller's own row.",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      requestBody: bodyRef("AccountPreferences", { orderBilledDays: 1 }),
+      responses: {
+        "200": dataResponse("The preferences as they now stand.", "AccountPreferencesResponse", {
+          preferences: { orderBilledDays: 1 },
+        }, "Preferences saved"),
+        "400": errorResponse(
+          "`orderBilledDays` missing, or neither `null` nor an integer in 1..365.",
+          400,
+          "Default billed days must be a whole number between 1 and 365, or automatic.",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
         "429": rateLimited,
         "500": serverError,
       },
@@ -2692,14 +2750,17 @@ export const paths: OpenAPIV3.PathsObject = {
       summary: "The admin home screen, in one call (admin)",
       operationId: "getDashboard",
       description:
-        "**STRICTLY Admin.** The whole home screen in a single round trip: the three orders the " +
-        "admin has to act on next, today's workload, this month against last month, what is still " +
+        "**STRICTLY Admin.** The whole home screen in a single round trip: the orders the admin has " +
+        "to act on TODAY, today's workload, how many orders go out TOMORROW, this month against last month, what is still " +
         "owed, a twelve-month revenue trend, the most-rented products and the live status split.\n\n" +
         "**One call, one instant.** Every figure is computed against the same `generatedAt`, so the " +
         "screen can never show a revenue total from one moment beside a counter from another — and " +
         "on a scale-to-zero backend six separate aggregates would cost six round trips on top of a " +
         "cold start.\n\n" +
-        "**`upNext` is three ORDERS, not three events.** Each order is represented by the single " +
+        "**`upNext` is ORDERS, not events** — every one whose next event is due before the end of " +
+        "today's business day (overdue included) and nothing after it — a quiet day is an empty " +
+        "array; tomorrow is the `tomorrow` COUNT, never cards — capped at 50. Each order " +
+        "is represented by the single " +
         "event it still has to perform: an order delivering at 14:00 and collecting at 14:30 " +
         "occupies ONE slot showing the delivery, and the moment that delivery is confirmed the same " +
         "order re-enters the queue carrying its collection and re-sorts against everyone else. Each " +
@@ -2760,6 +2821,10 @@ export const paths: OpenAPIV3.PathsObject = {
                 },
               ],
               today: { deliveries: 4, collections: 2, overdue: 1, active: 9 },
+              tomorrow: {
+                period: { from: "2026-08-02T06:00:00.000Z", to: "2026-08-03T06:00:00.000Z" },
+                deliveries: 3,
+              },
               month: {
                 period: { from: "2026-08-01T06:00:00.000Z", to: "2026-09-01T06:00:00.000Z" },
                 revenue: { current: 12400, previous: 9800, deltaPercent: 26.5 },

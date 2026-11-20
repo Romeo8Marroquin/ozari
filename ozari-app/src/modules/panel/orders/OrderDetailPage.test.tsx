@@ -222,6 +222,9 @@ const order = (over: Partial<OrderDetail> = {}): OrderDetail =>
     deliveryAddress: 'Zona 10',
     serviceStart: new Date('2026-08-01T14:00:00').toISOString(),
     serviceEnd: new Date('2026-08-02T10:00:00').toISOString(),
+    // Billed by the dates' own rule: the row states the days, nothing more.
+    billedDays: 1,
+    windowDays: 1,
     lines: [
       {
         id: 31,
@@ -885,6 +888,10 @@ describe('OrderDetailPage', () => {
         deliveryAmount: 50,
         depositAmount: 100,
         discountAmount: 25,
+        discountReason: 'Cliente frecuente',
+        // The admin agreed 1 day over a 3-day window.
+        billedDays: 1,
+        windowDays: 3,
         paymentMethod: { id: 1, name: 'Efectivo' },
         paidAt: new Date('2026-08-03T10:00:00').toISOString(),
         lines: [
@@ -913,6 +920,12 @@ describe('OrderDetailPage', () => {
     expect(screen.getByText('Vasos — Azul')).toBeInTheDocument();
     expect(screen.getByText(`${KEY}.money.delivery`)).toBeInTheDocument();
     expect(screen.getByText(`${KEY}.money.discount`)).toBeInTheDocument();
+    // The reason sits under the discount, exactly as the client's documents print it.
+    expect(screen.getByText('Cliente frecuente')).toBeInTheDocument();
+    // The billed days are the API's — and an AGREED figure says what the dates alone would bill.
+    expect(
+      screen.getByText(`${KEY}.logistics.billedDaysValue · ${KEY}.logistics.billedDaysAgreed`),
+    ).toBeInTheDocument();
     // A sale line reads as a sale, and the tracked actuals are all spelled out.
     expect(screen.getByText(new RegExp(`${KEY}.lines.sale`))).toBeInTheDocument();
     expect(screen.getByText(`${KEY}.logistics.delivered`)).toBeInTheDocument();
@@ -924,6 +937,9 @@ describe('OrderDetailPage', () => {
     setOrder({
       data: order({
         pickupAt: undefined,
+        // A purchase-only order bills once: the API sends no billed days at all.
+        billedDays: undefined,
+        windowDays: undefined,
         assignee: undefined,
         deliveryAmount: undefined,
         discountAmount: undefined,
@@ -939,6 +955,7 @@ describe('OrderDetailPage', () => {
     expect(screen.getByText(`${KEY}.logistics.unassigned`)).toBeInTheDocument();
     // …while money it doesn't have simply isn't shown (never an empty label).
     expect(screen.queryByText(`${KEY}.money.delivery`)).not.toBeInTheDocument();
+    expect(screen.queryByText(`${KEY}.logistics.billedDays`)).not.toBeInTheDocument();
     expect(screen.queryByText(`${KEY}.money.discount`)).not.toBeInTheDocument();
     expect(screen.queryByText(`${KEY}.money.deposit`)).not.toBeInTheDocument();
     expect(screen.queryByText(`${KEY}.money.paidAt`)).not.toBeInTheDocument();

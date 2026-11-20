@@ -5,7 +5,7 @@ import { encodeCoords } from "@helpers/geo.js";
 import { makeProjectionContext } from "@/tests/fixtures/lifecycleCatalog.js";
 import {
   TREND_MONTHS,
-  UP_NEXT_LIMIT,
+  UP_NEXT_MAX,
   bucketRevenueByMonth,
   compare,
   dayRange,
@@ -213,15 +213,38 @@ describe("nextPendingEvent", () => {
 describe("selectUpNext", () => {
   const at = (iso: string) => ({ at: new Date(iso), kind: "DELIVERY" as const });
 
-  it("orders by the next event and caps the queue", () => {
+  // The end of the business day the queue is cut at — everything before it is today's work.
+  const window = {
+    max: UP_NEXT_MAX,
+    until: new Date("2026-08-02T06:00:00Z"),
+  };
+
+  it("is EMPTY on a day with nothing due — tomorrow is a count, never padding (owner, 2026-11-19)", () => {
+    const rows = [
+      { id: 1, when: "2026-08-02T16:00:00Z" },
+      { id: 2, when: "2026-08-02T09:00:00Z" },
+    ];
+    expect(selectUpNext(rows, (row) => at(row.when), window)).toEqual([]);
+  });
+
+  it("keeps EVERY event due today, overdue ones included, and nothing after", () => {
+    // A heavy day: five due before the cut (one overdue from yesterday), one tomorrow.
     const rows = [
       { id: 1, when: "2026-08-01T16:00:00Z" },
-      { id: 2, when: "2026-08-01T09:00:00Z" },
+      { id: 2, when: "2026-07-31T09:00:00Z" },
       { id: 3, when: "2026-08-01T12:00:00Z" },
       { id: 4, when: "2026-08-01T08:00:00Z" },
+      { id: 5, when: "2026-08-02T05:59:00Z" },
+      { id: 6, when: "2026-08-02T06:00:00Z" },
     ];
-    const picked = selectUpNext(rows, (row) => at(row.when), UP_NEXT_LIMIT);
-    expect(picked.map((p) => p.row.id)).toEqual([4, 2, 3]);
+    const picked = selectUpNext(rows, (row) => at(row.when), window);
+    expect(picked.map((p) => p.row.id)).toEqual([2, 4, 3, 1, 5]);
+  });
+
+  it("caps the queue at the safety ceiling", () => {
+    const rows = Array.from({ length: 8 }, (_, index) => ({ id: index + 1 }));
+    const picked = selectUpNext(rows, () => at("2026-08-01T09:00:00Z"), { ...window, max: 5 });
+    expect(picked.map((p) => p.row.id)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it("drops rows with nothing pending instead of showing an empty slot", () => {
@@ -229,14 +252,14 @@ describe("selectUpNext", () => {
     const picked = selectUpNext(
       rows,
       (row) => (row.id === 2 ? null : at("2026-08-01T09:00:00Z")),
-      UP_NEXT_LIMIT,
+      window,
     );
     expect(picked.map((p) => p.row.id)).toEqual([1, 3]);
   });
 
   it("breaks ties on id so the queue does not reshuffle on every refetch", () => {
     const rows = [{ id: 9 }, { id: 4 }];
-    const picked = selectUpNext(rows, () => at("2026-08-01T09:00:00Z"), UP_NEXT_LIMIT);
+    const picked = selectUpNext(rows, () => at("2026-08-01T09:00:00Z"), window);
     expect(picked.map((p) => p.row.id)).toEqual([4, 9]);
   });
 });

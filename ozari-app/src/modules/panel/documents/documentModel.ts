@@ -1,8 +1,11 @@
 import {
+  applyDiscount,
   computeBilledDays,
+  effectiveBilledDays,
   estimateLineSubtotal,
   isRentalProduct,
   lineUnitPrice,
+  windowDaysFromStrings,
 } from '../orders/orderEstimate';
 import { parseDateTime, parseLineQuantity, parseMoney } from '../orders/SchemaCreateOrder';
 import type { CreateOrderFormType } from '../orders/SchemaCreateOrder';
@@ -108,7 +111,11 @@ export interface DocumentTotals {
   groups: { kind: DocumentGroup['kind']; subtotal: number }[];
   /** Absent when there is no delivery charge at all; 0 renders as "Gratis", which is a real answer. */
   delivery?: number;
+  /** A whole-order discount, already out of `total`. */
   discount?: number;
+  /** Why it was granted — printed under the discount row (owner, 2026-11-19: it is client-facing).
+   *  Only ever beside a `discount`. */
+  discountReason?: string;
   /** The service COST — never includes the deposit, and never zeroed: a receipt claiming a total of
    *  Q0.00 would be evidence that nothing was ever charged. */
   total: number;
@@ -187,23 +194,54 @@ export interface DocumentModel {
   /** Only a quote states one; a comprobante records what was agreed, which does not expire. */
   validUntil?: Date;
   isPaid: boolean;
-  client: {
-    name: string;
-    contact: string;
-    address: string;
-  };
+  /**
+   * Who and where. Every field is OPTIONAL because a cotización may be produced from as little as one
+   * product (owner, 2026-11-19): a fact nobody has given yet is simply not printed — never a blank
+   * row, and a card with nothing in it is not drawn at all. A comprobante always carries all three.
+   */
+  client: DocumentParty;
   event: {
-    type: string;
-    deliveryAt: Date;
-    /** Absent = a purchase-only order: no collection, and no billed days to show. */
+    type?: string;
+    deliveryAt?: Date;
+    /** Absent = no collection (a purchase-only order) or, on a quote, not decided yet. */
     pickupAt?: Date;
+    /** The days the rental lines are billed for — present whenever something is rented. */
     billedDays?: number;
+    /**
+     * The window's own day count, when there is a window. The "why N days" rule is printed under the
+     * billed days ONLY when the two agree: a figure the admin AGREED with the client is not the
+     * 24-hour rule's, and explaining it with that rule would be stating something untrue.
+     */
+    windowDays?: number;
   };
   groups: DocumentGroup[];
   totals: DocumentTotals;
   /** Absent unless a recorded damage report charged something. */
   damages?: DocumentDamages;
   currencySymbol: string;
+}
+
+/** The client card's facts — each absent when unknown (see {@link DocumentModel.client}). */
+export interface DocumentParty {
+  name?: string;
+  contact?: string;
+  address?: string;
+}
+
+/** A text worth printing, or nothing: blank and whitespace-only read as "not given". */
+const given = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed === '' ? undefined : trimmed;
+};
+
+/** A party from three texts, carrying only the ones actually given. */
+export function partyOf(name?: string, contact?: string, address?: string): DocumentParty {
+  const [n, c, a] = [given(name), given(contact), given(address)];
+  return {
+    ...(n !== undefined && { name: n }),
+    ...(c !== undefined && { contact: c }),
+    ...(a !== undefined && { address: a }),
+  };
 }
 
 /** A `documents.*` settings array → the typed letterhead. Reads DEFENSIVELY: a key the API has not
@@ -415,14 +453,27 @@ export function advanceRows(
   return advance > total ? { advance: total, advanceReceived: advance } : { advance };
 }
 
+/** The `Descuento` row and its caption: present only for a real (positive) discount, and the reason
+ *  only beside one — exactly the API's own pairing, so both adapters print the same thing. */
+export function discountRows(
+  amount: number | undefined,
+  reason: string | undefined,
+): Pick<DocumentTotals, 'discount' | 'discountReason'> {
+  if (amount === undefined || amount <= 0) return {};
+  const why = given(reason);
+  return { discount: amount, ...(why !== undefined && { discountReason: why }) };
+}
+
 /**
  * A SAVED order → its comprobante. Every figure is the order's own stored price; nothing here
  * re-derives money, because the server already priced it and a document that recomputed could
  * disagree with the record it claims to be.
  *
- * `billedDays` is the one derived value, and it is DISPLAYED rather than applied: without it a
- * one-day and a three-day rental print identically at different totals, which reads as an error.
- * It mirrors the backend's own rule through the shared `computeBilledDays`.
+ * `billedDays` is DISPLAYED rather than applied: without it a one-day and a three-day rental print
+ * identically at different totals, which reads as an error. It is the API's own figure — the days
+ * the order was actually BILLED for, which is the admin's agreed number when one was set — never
+ * re-derived from the window (2026-11-19: the two differ exactly when a figure was agreed). Only an
+ * answer from before the API reported it falls back to the window's count, the rule it then billed by.
  */
 export function fromOrderDetail(
   order: OrderDetail,
@@ -431,8 +482,9 @@ export function fromOrderDetail(
 ): DocumentModel {
   const deliveryAt = new Date(order.serviceStart);
   const pickupAt = order.pickupAt === undefined ? undefined : new Date(order.serviceEnd);
-  const billedDays =
-    pickupAt === undefined ? undefined : computeBilledDays(deliveryAt, pickupAt);
+  const windowDays =
+    pickupAt === undefined ? undefined : (order.windowDays ?? computeBilledDays(deliveryAt, pickupAt));
+  const billedDays = pickupAt === undefined ? undefined : (order.billedDays ?? windowDays);
 
   const groups: DocumentGroup[] = (['rental', 'sale'] as const)
     .map((kind) => {
@@ -477,22 +529,19 @@ export function fromOrderDetail(
     reference: order.id,
     issuedAt,
     isPaid: order.isPaid,
-    client: {
-      name: order.clientName,
-      contact: order.deliveryContact,
-      address: order.deliveryAddress,
-    },
+    client: partyOf(order.clientName, order.deliveryContact, order.deliveryAddress),
     event: {
       type: order.eventType.name,
       deliveryAt,
       ...(pickupAt !== undefined && { pickupAt }),
       ...(billedDays !== undefined && { billedDays }),
+      ...(windowDays !== undefined && { windowDays }),
     },
     groups,
     totals: {
       groups: groups.map((group) => ({ kind: group.kind, subtotal: group.subtotal })),
       ...(order.deliveryAmount !== undefined && { delivery: order.deliveryAmount }),
-      ...(order.discountAmount !== undefined && { discount: order.discountAmount }),
+      ...discountRows(order.discountAmount, order.discountReason),
       total: order.totalAmount,
       ...advanceRows(advance, order.totalAmount),
       ...(paid > 0 && { paid }),
@@ -515,10 +564,10 @@ export function fromOrderDetail(
 export interface QuoteSource {
   values: CreateOrderFormType;
   productsById: ReadonlyMap<number, Product>;
-  /** The registry client when one is picked, else the delivery contact's name — a quote is always
-   *  addressed to somebody, and the form guarantees at least the latter. */
-  clientName: string;
-  eventTypeName: string;
+  /** The registry client when one is picked, else the delivery contact's name — or nothing yet: a
+   *  quote may be produced before anybody is named (owner, 2026-11-19). */
+  clientName?: string;
+  eventTypeName?: string;
 }
 
 /**
@@ -529,10 +578,15 @@ export interface QuoteSource {
  * (`orderEstimate.ts`, itself a mirror of the backend's pricing) rather than any saved figure. The
  * arithmetic is therefore identical to the total the admin is looking at while they talk.
  *
- * Returns `undefined` when the values cannot make a document — an unparseable delivery date, or not
- * one line pointing at a product we hold. The caller runs the form's own resolver first, so this is
- * defence in depth rather than the expected path; it is `undefined` and not a throw because failing
- * to produce a PDF is a "nothing happened, tell them" moment, never a crashed screen.
+ * **As little as one product is enough** (owner, 2026-11-19). A quote is often the FIRST thing a
+ * client asks for — "¿cuánto por 50 sillas?" — before there is a name, a venue or a date. Whatever
+ * has not been given is left out of the model, and the template leaves it off the page: no blank
+ * rows, no empty cards. Whatever HAS been given is printed exactly as the form holds it.
+ *
+ * Returns `undefined` only when there is nothing to quote — not one line pointing at a product we
+ * hold. The caller validates the lines first, so this is defence in depth rather than the expected
+ * path; it is `undefined` and not a throw because failing to produce a PDF is a "nothing happened,
+ * tell them" moment, never a crashed screen.
  *
  * **No `reference`, and a `validUntil`.** A quote has no order to name, and unlike a comprobante —
  * which records what was agreed and does not expire — it is a proposal with a shelf life. `kind`
@@ -545,7 +599,6 @@ export function fromOrderForm(
 ): DocumentModel | undefined {
   const { values, productsById } = source;
   const deliveryAt = parseDateTime(values.deliveryAt);
-  if (deliveryAt === null) return undefined;
 
   const priced = values.lines.flatMap((line) => {
     const product = productsById.get(line.productId);
@@ -574,7 +627,13 @@ export function fromOrderForm(
   // leftover value there is stale. Same rule as the schema's own pickup coherence check.
   const anyRental = priced.some((line) => line.isRental);
   const pickupAt = anyRental ? parseDateTime(values.pickupAt) : null;
-  const billedDays = pickupAt === null ? undefined : computeBilledDays(deliveryAt, pickupAt);
+  // The days the rentals are priced for — the SAME figure as the form's estimate beside the button
+  // (`effectiveBilledDays`): the agreed number when the admin typed one, else the window's count,
+  // else one. It needs no dates: "50 sillas por 3 días" is a complete question.
+  const windowDays = windowDaysFromStrings(values.deliveryAt, anyRental ? values.pickupAt : '');
+  const billedDays = anyRental
+    ? effectiveBilledDays({ ...values, anyRental })
+    : undefined;
 
   const groups: DocumentGroup[] = (['rental', 'sale'] as const)
     .map((kind) => {
@@ -614,7 +673,11 @@ export function fromOrderForm(
   // The ANTICIPO (the form's `depositAmount`), not the security deposit below.
   const advance = parseMoney(values.depositAmount) ?? undefined;
   const linesTotal = groups.reduce((sum, group) => sum + group.subtotal, 0);
-  const total = cents(linesTotal + (delivery ?? 0));
+  // The discount as the form holds it (an AMOUNT — the % helper only converts), with its reason;
+  // the form's ceiling already refused one above the gross, the floor only guards a race.
+  const discount = discountRows(parseMoney(values.discountAmount) ?? undefined, values.discountReason);
+  const total = applyDiscount(cents(linesTotal + (delivery ?? 0)), discount.discount ?? 0);
+  const eventType = given(source.eventTypeName);
   // The security deposit the order WOULD carry — the server's own rule (Σ rental line's per-unit
   // deposit × quantity), estimated from the catalog exactly as the prices are. Kept OUT of `total`:
   // it is collected on top and refunded at pickup, and a quote that folded it in would overstate
@@ -635,21 +698,19 @@ export function fromOrderForm(
     issuedAt,
     validUntil: new Date(issuedAt.getTime() + letterhead.quoteValidityDays * DAY_MS),
     isPaid: false,
-    client: {
-      name: source.clientName,
-      contact: values.deliveryContact,
-      address: values.deliveryAddress,
-    },
+    client: partyOf(source.clientName, values.deliveryContact, values.deliveryAddress),
     event: {
-      type: source.eventTypeName,
-      deliveryAt,
+      ...(eventType !== undefined && { type: eventType }),
+      ...(deliveryAt !== null && { deliveryAt }),
       ...(pickupAt !== null && { pickupAt }),
       ...(billedDays !== undefined && { billedDays }),
+      ...(windowDays !== undefined && { windowDays }),
     },
     groups,
     totals: {
       groups: groups.map((group) => ({ kind: group.kind, subtotal: group.subtotal })),
       ...(delivery !== undefined && { delivery }),
+      ...discount,
       total,
       ...advanceRows(advance, total),
       // Squared by the same rule as a saved order. A quote's deposit is always still to be handed
@@ -772,11 +833,7 @@ export function fromDamageReport(
     letterhead,
     reference: order.id,
     issuedAt,
-    client: {
-      name: order.clientName,
-      contact: order.deliveryContact,
-      address: order.deliveryAddress,
-    },
+    client: partyOf(order.clientName, order.deliveryContact, order.deliveryAddress),
     event: {
       type: order.eventType.name,
       deliveryAt,

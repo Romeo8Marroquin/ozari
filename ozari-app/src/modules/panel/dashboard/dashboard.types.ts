@@ -77,6 +77,12 @@ export interface Dashboard {
     /** The work is done (collected, or a delivered purchase); only "finished" is missing. */
     activeToClose: number;
   };
+  /** TOMORROW (the next business day) as ONE count: the live orders still to DELIVER that day. */
+  tomorrow: {
+    period: { from: string; to: string };
+    /** Orders delivering tomorrow — collections never count here. One order, one delivery. */
+    deliveries: number;
+  };
   month: {
     period: { from: string; to: string };
     revenue: StatComparison;

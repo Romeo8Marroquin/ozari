@@ -2,6 +2,7 @@ import type { ResolverResult } from 'react-hook-form';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Product, ProductVariant } from '../products/product.types';
 import {
+  appendDiscountCeilingError,
   appendDriverConflictErrors,
   appendLineAvailabilityErrors,
   appendLineVariantErrors,
@@ -62,6 +63,9 @@ const validForm = (overrides: Partial<CreateOrderFormType> = {}): CreateOrderFor
   comment: '',
   deliveryAmount: '',
   depositAmount: '',
+  billedDays: '',
+  discountAmount: '',
+  discountReason: '',
   assignedUserId: 2,
   lines: [ln(3, '25', true)],
   ...overrides,
@@ -192,6 +196,22 @@ describe('createOrderSchema', () => {
     expect(parse(validForm({ lines: [ln(3, '0', true)] })).success).toBe(false);
     expect(parse(validForm({ deliveryAmount: '-5' })).success).toBe(false);
     expect(parse(validForm({ depositAmount: 'abc' })).success).toBe(false);
+    expect(parse(validForm({ discountAmount: 'abc' })).success).toBe(false);
+  });
+
+  it('bounds the billed days like the API (blank = the window)', () => {
+    expect(parse(validForm({ billedDays: '' })).success).toBe(true);
+    expect(parse(validForm({ billedDays: '1' })).success).toBe(true);
+    expect(parse(validForm({ billedDays: '365' })).success).toBe(true);
+    expect(parse(validForm({ billedDays: '0' })).success).toBe(false);
+    expect(parse(validForm({ billedDays: '366' })).success).toBe(false);
+    expect(parse(validForm({ billedDays: '1.5' })).success).toBe(false);
+  });
+
+  it('keeps the discount reason to one line of up to 60 characters', () => {
+    expect(parse(validForm({ discountAmount: '10', discountReason: 'x'.repeat(60) })).success).toBe(true);
+    expect(parse(validForm({ discountAmount: '10', discountReason: 'x'.repeat(61) })).success).toBe(false);
+    expect(parse(validForm({ discountAmount: '10', discountReason: 'una\ndos' })).success).toBe(false);
   });
 
   it('exposes required-field patterns for the marker', () => {
@@ -267,6 +287,30 @@ describe('toCreateOrderBody', () => {
     expect(body.depositAmount).toBeUndefined();
   });
 
+  it('sends the agreed billed days only beside a pickup', () => {
+    expect(toCreateOrderBody(validForm({ billedDays: '1' })).billedDays).toBe(1);
+    // Blank = the window's own count: nothing to send.
+    expect(toCreateOrderBody(validForm({ billedDays: '' }))).not.toHaveProperty('billedDays');
+    // A purchase-only order bills once — the API refuses a figure there.
+    expect(
+      toCreateOrderBody(validForm({ pickupAt: '', billedDays: '3', lines: [ln(4, '10', false)] })),
+    ).not.toHaveProperty('billedDays');
+  });
+
+  it('sends a discount with its trimmed reason, and never a reason without a discount', () => {
+    expect(
+      toCreateOrderBody(validForm({ discountAmount: '85.555', discountReason: '  Cliente frecuente  ' })),
+    ).toMatchObject({ discountAmount: 85.55, discountReason: 'Cliente frecuente' });
+    expect(toCreateOrderBody(validForm({ discountAmount: '20', discountReason: '   ' }))).not.toHaveProperty(
+      'discountReason',
+    );
+    // Zero is "no discount" — and the reason it explained is dropped with it.
+    const none = toCreateOrderBody(validForm({ discountAmount: '0', discountReason: 'Promo' }));
+    expect(none).not.toHaveProperty('discountAmount');
+    expect(none).not.toHaveProperty('discountReason');
+    expect(toCreateOrderBody(validForm({ discountReason: 'Promo' }))).not.toHaveProperty('discountReason');
+  });
+
   it('has sane defaults', () => {
     expect(createOrderDefaultValues.lines).toEqual([]);
     expect(createOrderDefaultValues.deliveryAt).toBe('');
@@ -312,6 +356,31 @@ describe('takeableFor', () => {
     expect(takeableFor(7, 72, new Map(), products)).toBeUndefined(); // no baseline on it
     expect(takeableFor(7, 99, new Map(), products)).toBeUndefined(); // not offered
     expect(takeableFor(8, 81, new Map(), products)).toBeUndefined(); // unknown product
+  });
+});
+
+describe('appendDiscountCeilingError', () => {
+  const ok = (form: CreateOrderFormType): ResolverResult<CreateOrderFormType> => ({ values: form, errors: {} });
+  const message = (max: number): string => `max ${max}`;
+  const discountError = (result: ResolverResult<CreateOrderFormType>) =>
+    (result.errors as Record<string, { message?: string } | undefined>)['discountAmount'];
+
+  it('lets a discount bring the order to zero, never below', () => {
+    const exact = validForm({ discountAmount: '385' });
+    expect(appendDiscountCeilingError(exact, ok(exact), 385, message)).toEqual(ok(exact));
+    const over = validForm({ discountAmount: '385.01' });
+    expect(discountError(appendDiscountCeilingError(over, ok(over), 385, message))?.message).toBe('max 385');
+  });
+
+  it('has nothing to say without a discount, and keeps a schema error already there', () => {
+    const none = validForm();
+    expect(appendDiscountCeilingError(none, ok(none), 0, message)).toEqual(ok(none));
+    const bad = validForm({ discountAmount: 'x' });
+    const schema = {
+      values: {},
+      errors: { discountAmount: { type: 'custom', message: 'invalid' } },
+    } as unknown as ResolverResult<CreateOrderFormType>;
+    expect(appendDiscountCeilingError(bad, schema, 0, message)).toBe(schema);
   });
 });
 
@@ -598,6 +667,20 @@ describe('orderToFormValues', () => {
     expect(values).not.toHaveProperty('paymentMethodId');
     // A purchase-only order sends no pickup at all (the mode rule, mirrored).
     expect(toCreateOrderBody(values).pickupAt).toBeUndefined();
+  });
+
+  it('restores the billed days and the discount, and re-sends them untouched', () => {
+    const values = orderToFormValues(
+      order({ billedDays: 1, discountAmount: 25, discountReason: 'Cliente frecuente' }),
+    );
+    expect(values).toMatchObject({ billedDays: '1', discountAmount: '25', discountReason: 'Cliente frecuente' });
+    expect(toCreateOrderBody(values)).toMatchObject({
+      billedDays: 1,
+      discountAmount: 25,
+      discountReason: 'Cliente frecuente',
+    });
+    // An order with neither reopens blank on both.
+    expect(orderToFormValues(order())).toMatchObject({ billedDays: '', discountAmount: '', discountReason: '' });
   });
 
   it('restores the optional TEXTS an order does carry', () => {

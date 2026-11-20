@@ -73,6 +73,12 @@ export const ORDER_TEXT_MAX_LENGTH = 255;
 // A delivery/registry ADDRESS: 5–500 chars. Free-text notes/description/comment: up to 500.
 export const ORDER_ADDRESS_MIN_LENGTH = 5;
 export const ORDER_LONGTEXT_MAX_LENGTH = 500;
+// The AGREED billed days of a rental: a whole number 1–365 (appConfig.maxBilledDays) — also the
+// bounds of the per-user default (`/account/preferences`).
+export const ORDER_MAX_BILLED_DAYS = 365;
+// The whole-order discount's reason: ONE line, up to 60 chars (appConfig.maxDiscountReasonLength) —
+// it prints under the discount row of the client's documents, and 60 keeps it one printed line.
+export const ORDER_DISCOUNT_REASON_MAX_LENGTH = 60;
 // A deposit settlement's retention reason / damage note — `SETTLEMENT_TEXT_MAX_LENGTH`
 // (`ozari-api/src/modules/orders/settlement/settlement.validator.ts`), counted after trimming.
 export const SETTLEMENT_TEXT_MAX_LENGTH = 500;

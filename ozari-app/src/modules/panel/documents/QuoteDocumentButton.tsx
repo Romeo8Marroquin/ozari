@@ -6,6 +6,7 @@ import Button from '@components/Button';
 import { notify } from '@components/notifications/notify';
 import { downloadDocument } from './downloadDocument';
 import { fromOrderForm } from './documentModel';
+import { quoteFields } from './quoteGate';
 import { DOCUMENT_DATE, DOCUMENT_DATE_TIME, documentMoney } from './documentFormats';
 import { useDocumentCopy, useDocumentLetterhead } from './useDocumentVocabulary';
 import type { CatalogOption, ClientRegistry } from '../orders/order.types';
@@ -34,12 +35,17 @@ interface QuoteDocumentButtonProps {
  * "sujeta a cambios" notice — because a proposal that looks like a receipt is a document a client
  * can hold you to.
  *
- * **The valid-form gate is a CHECK ON CLICK, not a disabled button** (owner decision #2, implemented
- * the way this form already behaves). "No document from an incomplete form" is honoured either way,
- * but a greyed control on a twenty-field form is a puzzle: it cannot say WHICH field is missing, and
- * the admin is left hunting. Clicking runs the same resolver that guards submit, so an incomplete
- * form lights up its own field errors — the answer, rather than the absence of one. It also matches
- * the submit button beside it, which is enabled and validates on press.
+ * **One product is enough** (owner, 2026-11-19 — superseding "no document from an incomplete form").
+ * A quote is usually the FIRST question ("¿cuánto por 50 sillas?"), asked before there is a client,
+ * a venue or a date, so nothing the ORDER requires is required here: what has not been given is left
+ * off the page (`fromOrderForm` + the template's known-facts rule).
+ *
+ * What the gate still guards is what gets PRINTED: the lines (at least one, each a real product with
+ * a valid quantity, its variation and the live availability caps — a quote promising goods we cannot
+ * supply is worse than no quote), every money field, the billed days and the discount (with its
+ * ceiling), and any optional text or date the admin DID fill in. It is still a check on click, never
+ * a disabled button, and it runs the same resolver as submit — on exactly those fields, so a missing
+ * client or date stays quiet instead of lighting up as an error the quote does not have.
  */
 const QuoteDocumentButton: React.FC<QuoteDocumentButtonProps> = ({
   productsById,
@@ -54,10 +60,10 @@ const QuoteDocumentButton: React.FC<QuoteDocumentButtonProps> = ({
   const [busy, setBusy] = useState(false);
 
   const download = async (): Promise<void> => {
-    // The SAME resolver that guards submit — including the live availability caps layered onto it,
-    // since a quote promising goods we cannot supply is worse than no quote.
-    if (!(await trigger())) {
-      notify.warning(t(`${KEY}.errors.incompleteForm`));
+    // The SAME resolver that guards submit — including the live availability caps layered onto it —
+    // on the fields the quote PRINTS (see `quoteFields`).
+    if (!(await trigger(quoteFields(getValues())))) {
+      notify.warning(t(`${KEY}.errors.incompleteQuote`));
       return;
     }
     const values = getValues();
@@ -66,12 +72,12 @@ const QuoteDocumentButton: React.FC<QuoteDocumentButtonProps> = ({
         values,
         productsById,
         // The registry client is who the quote is ADDRESSED to; the delivery name is who receives
-        // it. Prefer the former and fall back to the latter, which the schema guarantees is present
-        // — a walk-in quoted before they exist as a client still gets a document with a name on it.
+        // it. Prefer the former and fall back to the latter — and to nobody yet: a quote asked for
+        // before a name was given simply has no client card.
         clientName:
           registries.find((registry) => registry.id === values.clientRegistryId)?.name ??
           values.deliveryName,
-        eventTypeName: eventTypes.find((type) => type.id === values.eventTypeId)?.name ?? '',
+        eventTypeName: eventTypes.find((type) => type.id === values.eventTypeId)?.name,
       },
       letterhead,
       new Date(),

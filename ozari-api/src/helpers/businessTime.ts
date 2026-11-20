@@ -86,12 +86,16 @@ export interface BusinessRange {
   to: Date;
 }
 
-/** The business day containing `now`, half-open. */
-export function businessDayRange(now: Date, timeZone: string = appConfig.businessTimeZone): BusinessRange {
+/** The business day containing `now`, shifted by `offsetDays` (0 = today, 1 = tomorrow), half-open. */
+export function businessDayRange(
+  now: Date,
+  offsetDays = 0,
+  timeZone: string = appConfig.businessTimeZone,
+): BusinessRange {
   const { year, month, day } = zonedParts(now, timeZone);
   return {
-    from: zonedMidnight(year, month - 1, day, timeZone),
-    to: zonedMidnight(year, month - 1, day + 1, timeZone),
+    from: zonedMidnight(year, month - 1, day + offsetDays, timeZone),
+    to: zonedMidnight(year, month - 1, day + offsetDays + 1, timeZone),
   };
 }
 

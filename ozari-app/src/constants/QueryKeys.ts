@@ -12,6 +12,9 @@ export enum QueryKeys {
   SKETCH_AVAILABILITY = 'sketch-availability',
   CLIENT_REGISTRIES = 'client-registries',
   PREFERENCES = 'preferences',
+  // The signed-in person's OWN working preferences (`/account/preferences`) — user-scoped, like the
+  // whole query cache, so `clearAuthState` drops it with everything else.
+  ACCOUNT_PREFERENCES = 'account-preferences',
   DASHBOARD = 'dashboard',
   CALENDAR = 'calendar',
   TERMS = 'terms',

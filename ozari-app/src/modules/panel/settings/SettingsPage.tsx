@@ -17,6 +17,7 @@ import CalendarSection from './CalendarSection';
 import ChangePasswordModal from './ChangePasswordModal';
 import MfaDisableModal from './MfaDisableModal';
 import MfaEnableModal from './MfaEnableModal';
+import OrderDefaultsSection from './OrderDefaultsSection';
 import SettingRow from './SettingRow';
 import SettingsSection from './SettingsSection';
 import { revealPendingSettingsSection } from './settingsSections';
@@ -277,6 +278,12 @@ const SettingsPage: React.FC = () => {
           </SettingRow>
         </div>
       </SettingsSection>
+
+      {/* ── Orders ──────────────────────────────────────────────────────────────────────
+          How *I* fill a new order — stored on the account, so it follows the person to every
+          device. Shown to whoever can CREATE orders (Admin-only today, like the order form itself);
+          the endpoint serves every role, so opening creation to another role is this one gate. */}
+      {isAdmin && <OrderDefaultsSection />}
 
       {/* ── This device ─────────────────────────────────────────────────────────────────
           Deliberately in Ajustes (every role has it) rather than in the admin Preferencias screen:

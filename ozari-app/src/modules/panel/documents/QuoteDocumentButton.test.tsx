@@ -116,14 +116,39 @@ describe('QuoteDocumentButton', () => {
     expect(model.reference).toBeUndefined();
   });
 
-  it('runs the SAME resolver that guards submit, and produces nothing when it fails', async () => {
-    // "No document from an incomplete form" (owner decision #2). The gate is a check on click
-    // rather than a disabled button, so the form lights up which field is missing.
+  it('runs the SAME resolver that guards submit — on the PRINTED fields — and produces nothing when it fails', async () => {
+    // The gate is a check on click rather than a disabled button, so the form lights up what is
+    // wrong. It asks only about what the quote prints (`quoteFields`), never the order's own
+    // requirements: a missing client or date is not an error a quote has (owner, 2026-11-19).
     trigger.mockResolvedValue(false);
     setup();
     await click();
-    await waitFor(() => expect(notify.warning).toHaveBeenCalledWith(`${KEY}.errors.incompleteForm`));
+    await waitFor(() => expect(notify.warning).toHaveBeenCalledWith(`${KEY}.errors.incompleteQuote`));
+    expect(trigger).toHaveBeenCalledWith(expect.arrayContaining(['lines', 'discountAmount', 'deliveryAt']));
     expect(downloadDocument).not.toHaveBeenCalled();
+  });
+
+  it('quotes from as little as ONE product — no client, no venue, no dates', async () => {
+    getValues.mockReturnValue({
+      ...createOrderDefaultValues,
+      lines: [{ productId: 1, variantId: null, pickedValues: [], quantity: '5', isRental: true }],
+    });
+    setup();
+    await click();
+    await waitFor(() => expect(downloadDocument).toHaveBeenCalled());
+    // Only the always-printed fields were asked about: nothing optional was filled.
+    expect(trigger).toHaveBeenCalledWith([
+      'lines',
+      'deliveryAmount',
+      'depositAmount',
+      'billedDays',
+      'discountAmount',
+      'discountReason',
+    ]);
+    const { model } = lastInput();
+    expect(model.client).toEqual({});
+    expect(model.event).toEqual({ billedDays: 1 });
+    expect(model.totals.total).toBe(50);
   });
 
   it('refuses to build a document from values it cannot read', async () => {
@@ -160,13 +185,13 @@ describe('QuoteDocumentButton', () => {
     expect(lastInput().model.event.type).toBe('Boda');
   });
 
-  it('leaves the event type BLANK rather than failing when the catalog cannot name it', async () => {
+  it('leaves the event type OUT rather than failing when the catalog cannot name it', async () => {
     // Only reachable with a catalog that loaded empty — the button is disabled until the reference
     // data is ready. A missing label is a thinner document; it is never a reason not to quote.
     setup([product], REGISTRIES, []);
     await click();
     await waitFor(() => expect(downloadDocument).toHaveBeenCalled());
-    expect(lastInput().model.event.type).toBe('');
+    expect(lastInput().model.event.type).toBeUndefined();
   });
 
   it('falls back to whoever RECEIVES it when the client is not saved yet', async () => {

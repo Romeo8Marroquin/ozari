@@ -17,6 +17,7 @@ import { appConfig } from "./config/app.js";
 import { HttpEnum } from "./models/enums/httpEnum.js";
 import type { AppError } from "./models/common/error.js";
 
+import accountRouter from "./modules/account/account.route.js";
 import authRouter from "./modules/auth/auth.route.js";
 import calendarRouter, {
   mountCalendarPublicRoutes,
@@ -285,6 +286,10 @@ function configureRoutes(app: Express): void {
   // System preferences (scalar settings + the manageable seeded catalogs) - authenticated limiter;
   // STRICTLY Admin inside the router, every route
   apiRouter.use("/preferences", rateLimiters["authenticated"], preferencesRouter);
+
+  // The signed-in person's OWN working preferences (how I fill an order) — authenticated limiter;
+  // every role, and only ever the caller's row (no user id in any path). Business rules stay above.
+  apiRouter.use("/account", rateLimiters["authenticated"], accountRouter);
 
   // External calendar connections (Google) + the ICS subscription token - authenticated limiter;
   // STRICTLY Admin inside the router. The two UNAUTHENTICATED calendar routes are mounted earlier,

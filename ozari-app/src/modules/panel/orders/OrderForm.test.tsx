@@ -32,6 +32,10 @@ vi.mock('./useClientRegistries', () => ({ useClientRegistries }));
 vi.mock('./useCreateOrder', () => ({ useCreateOrder }));
 vi.mock('./useUpdateOrder', () => ({ useUpdateOrder }));
 vi.mock('./useOrderAvailability', () => ({ useOrderAvailability }));
+// The admin's OWN billed-days default (`/account/preferences`): settled on "by the dates" unless a
+// test says otherwise.
+const { useAccountPreferences } = vi.hoisted(() => ({ useAccountPreferences: vi.fn() }));
+vi.mock('../settings/useAccountPreferences', () => ({ useAccountPreferences }));
 
 const { success, error, warning } = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
 vi.mock('@components/notifications/notify', () => ({ notify: { success, error, warning } }));
@@ -278,6 +282,7 @@ beforeEach(() => {
   useCreateOrder.mockReturnValue({ createOrder, isPending: false });
   useUpdateOrder.mockReturnValue({ updateOrder, isPending: false });
   useOrderAvailability.mockReturnValue({ checkAvailability });
+  useAccountPreferences.mockReturnValue({ data: { orderBilledDays: null }, isPending: false });
   setReady();
 });
 
@@ -1699,5 +1704,145 @@ describe('OrderForm (edit mode) — variations', () => {
     await userEvent.click(screen.getByRole('button', { name: 'modules.panel.orders.edit.actions.submit' }));
     expect(await screen.findByText(`${KEY}.errors.invalidLineVariant`)).toBeInTheDocument();
     expect(updateOrder).not.toHaveBeenCalled();
+  });
+});
+describe('OrderForm — billed days (filled for the admin, never locked)', () => {
+  const billedDays = (container: HTMLElement): HTMLInputElement =>
+    byId(container, 'order-billed-days') as HTMLInputElement;
+
+  it('fills them from the dates, and re-derives them on EVERY date change — even after a hand edit', async () => {
+    const { container } = renderForm();
+    // 01/08 14:00 → 02/08 15:00 is 25 hours: two started days.
+    await fillValid(container);
+    await waitFor(() => expect(billedDays(container).value).toBe('2'));
+    expect(screen.getByText(`${KEY}.fields.billedDaysHintAuto`)).toBeInTheDocument();
+
+    await userEvent.clear(billedDays(container));
+    await userEvent.type(billedDays(container), '1');
+    // A new window is a new question: the dates win again.
+    setDateTime(byId(container, 'order-pickup-at'), '2026-08-04T15:00');
+    await waitFor(() => expect(billedDays(container).value).toBe('4'));
+  });
+
+  it('sends the AGREED figure, and offers the dates’ own count back in one tap', async () => {
+    const { container } = renderForm();
+    await fillValid(container);
+    await waitFor(() => expect(billedDays(container).value).toBe('2'));
+    await userEvent.clear(billedDays(container));
+    await userEvent.type(billedDays(container), '1');
+
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createOrder).toHaveBeenCalled());
+    expect(createOrder.mock.calls[0][0].billedDays).toBe(1);
+
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.fields.billedDaysUseWindow` }));
+    expect(billedDays(container).value).toBe('2');
+  });
+
+  it('a FIXED default starts every new order at N, and the dates never touch it', async () => {
+    useAccountPreferences.mockReturnValue({ data: { orderBilledDays: 3 }, isPending: false });
+    const { container } = renderForm();
+    await fillValid(container);
+    expect(billedDays(container).value).toBe('3');
+    expect(screen.getByText(`${KEY}.fields.billedDaysHintFixed`)).toBeInTheDocument();
+    setDateTime(byId(container, 'order-pickup-at'), '2026-08-05T15:00');
+    await waitFor(() => expect(lastProbeBody()?.['pickupAt']).toBeTruthy(), PROBE_WAIT);
+    expect(billedDays(container).value).toBe('3');
+  });
+
+  it('fills nothing until the preference is known, so a fixed default is never pre-empted', async () => {
+    useAccountPreferences.mockReturnValue({ data: undefined, isPending: true });
+    const { container } = renderForm();
+    await fillValid(container);
+    expect(billedDays(container).value).toBe('');
+    // Blank still prices by the window — the placeholder says how many days that is.
+    expect(billedDays(container)).toHaveAttribute('placeholder', '2');
+  });
+
+  it('a fixed default comes back with the next order after "Vaciar pedido"', async () => {
+    useAccountPreferences.mockReturnValue({ data: { orderBilledDays: 2 }, isPending: false });
+    Storage.set(StorageKeys.ORDER_CREATE_DRAFT, {
+      ...createOrderDefaultValues,
+      assignedUserId: 1,
+      lines: [{ productId: 3, variantId: null, pickedValues: [], quantity: '4', isRental: true }],
+    });
+    const { container } = renderForm();
+    await userEvent.click(screen.getByRole('button', { name: `${SKETCH_KEY}.discard` }));
+    await waitFor(() => expect(container.querySelectorAll('[data-order-line]')).toHaveLength(0));
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: `${KEY}.actions.addLine` }));
+    await pickProduct(user, container, 0, '3');
+    await waitFor(() => expect(billedDays(container).value).toBe('2'));
+  });
+
+  it('an EDIT reopens on the order’s own billed days, untouched until a date moves', async () => {
+    const order = { ...existingOrder, billedDays: 1, windowDays: 2 } as unknown as OrderDetail;
+    const { container } = renderForm({ mode: 'edit', order });
+    expect(billedDays(container).value).toBe('1');
+    setDateTime(byId(container, 'order-pickup-at'), '2026-08-03T15:00');
+    await waitFor(() => expect(billedDays(container).value).toBe('3'));
+  });
+});
+
+describe('OrderForm — the whole-order discount', () => {
+  const input = (container: HTMLElement, id: string): HTMLInputElement =>
+    byId(container, id) as HTMLInputElement;
+
+  it('subtracts it, says what share it is, opens the reason, and sends both', async () => {
+    const { container } = renderForm();
+    // 25 chairs × Q6 × 2 days = Q300, + the client's zone fee Q50 = Q350.
+    await fillValid(container);
+    await userEvent.type(input(container, 'order-discount-amount'), '35');
+    expect(await screen.findByText('Q 315.00')).toBeInTheDocument();
+    expect(screen.getByText(`${KEY}.estimate.discount`)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`${KEY}.estimate.discountShare`))).toBeInTheDocument();
+
+    await userEvent.type(input(container, 'order-discount-reason'), 'Cliente frecuente');
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    await waitFor(() => expect(createOrder).toHaveBeenCalled());
+    expect(createOrder.mock.calls[0][0]).toMatchObject({ discountAmount: 35, discountReason: 'Cliente frecuente' });
+  });
+
+  it('the % helper writes the AMOUNT, and steps aside once the amount is typed by hand', async () => {
+    const { container } = renderForm();
+    await fillValid(container);
+    await userEvent.type(input(container, 'order-discount-percent'), '10');
+    expect(input(container, 'order-discount-amount').value).toBe('35');
+    expect(input(container, 'order-discount-percent').value).toBe('10');
+
+    await userEvent.type(input(container, 'order-discount-amount'), '0');
+    expect(input(container, 'order-discount-percent').value).toBe('');
+    // Clearing the percentage clears the amount it wrote.
+    await userEvent.type(input(container, 'order-discount-percent'), '5');
+    await userEvent.clear(input(container, 'order-discount-percent'));
+    expect(input(container, 'order-discount-amount').value).toBe('');
+  });
+
+  it('refuses a discount larger than the order, quoting the ceiling, before anything is sent', async () => {
+    const { container } = renderForm();
+    await fillValid(container);
+    await userEvent.type(input(container, 'order-discount-amount'), '400');
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.submit` }));
+    expect(await screen.findByText(`${KEY}.errors.discountExceedsTotal`)).toBeInTheDocument();
+    expect(createOrder).not.toHaveBeenCalled();
+  });
+
+  it('lands the SERVER’s ceiling on the discount field (its prices may have moved)', async () => {
+    const { container } = renderForm();
+    const handlers = await fillAndSubmit(container);
+    act(() =>
+      handlers.onError(axiosError(400, 'El descuento es mayor', { discountExceedsTotal: { maxDiscount: 120 } })),
+    );
+    expect(await screen.findByText(`${KEY}.errors.discountExceedsTotal`)).toBeInTheDocument();
+    expect(input(container, 'order-discount-amount')).toBeInTheDocument();
+  });
+
+  it('offers no % of nothing, and a discount on an empty order names no share', async () => {
+    const { container } = renderForm();
+    expect(input(container, 'order-discount-percent')).toBeDisabled();
+    await userEvent.type(input(container, 'order-discount-amount'), '10');
+    expect(await screen.findByText(`${KEY}.estimate.discount`)).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(`${KEY}.estimate.discountShare`))).not.toBeInTheDocument();
   });
 });

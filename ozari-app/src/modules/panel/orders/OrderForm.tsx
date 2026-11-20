@@ -13,6 +13,7 @@ import {
 } from 'react-icons/hi2';
 import axios from 'axios';
 import Button from '@components/Button';
+import CustomInput from '@components/CustomInput';
 import CustomInputForm from '@components/CustomInputForm';
 import CustomSelect from '@components/CustomSelect';
 import CustomSelectForm from '@components/CustomSelectForm';
@@ -69,15 +70,19 @@ import type {
 } from './order.types';
 import { formatDateTime } from './orderDayGroups';
 import {
-  billedDaysFromStrings,
+  applyDiscount,
+  discountFromPercent,
+  effectiveBilledDays,
   estimateDepositTotal,
   estimateLineSubtotal,
   estimateOrderTotal,
   formatMoney,
   isRentalProduct,
   lineUnitPrice,
+  windowDaysFromStrings,
 } from './orderEstimate';
 import {
+  appendDiscountCeilingError,
   appendDriverConflictErrors,
   appendLineAvailabilityErrors,
   appendLineVariantErrors,
@@ -87,6 +92,7 @@ import {
   createOrderSchema,
   nowDateTimeLocal,
   orderToFormValues,
+  parseBilledDays,
   parseDateTime,
   parseLineQuantity,
   parseMoney,
@@ -96,6 +102,7 @@ import {
   updateOrderSchema,
   type CreateOrderFormType,
 } from './SchemaCreateOrder';
+import { useAccountPreferences } from '../settings/useAccountPreferences';
 import { useClientRegistries } from './useClientRegistries';
 import { useCreateOrder } from './useCreateOrder';
 import { useOrderAvailability } from './useOrderAvailability';
@@ -283,6 +290,16 @@ const LineSubtotalNote: React.FC<{
   );
 };
 
+/** The currency of the first PICKED product's row — never a hardcoded symbol (owner rule 2026-08-04:
+ *  every amount wears the symbol of the row it came from). `''` while nothing is picked. */
+const currencyOf = (
+  lines: readonly { productId: number | null }[],
+  productsById: Map<number, Product>,
+): string =>
+  lines
+    .map((line) => (line.productId != null ? productsById.get(line.productId) : undefined))
+    .find((product): product is Product => product !== undefined)?.currency.symbol ?? '';
+
 const SKELETON = 'animate-pulse rounded bg-charcoal/10 motion-reduce:animate-none';
 
 /** A section's shimmer body while the form data loads — the card chrome (title/description) stays
@@ -369,6 +386,11 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
 
   const [registryModalOpen, setRegistryModalOpen] = useState(false);
   const [formError, setFormError] = useState<string | undefined>(undefined);
+  // The discount's % helper (form-only, never stored): what was typed, and the gross + amount it
+  // produced — so it shows only while it still describes the order on screen.
+  const [discountPercent, setDiscountPercent] = useState<
+    { text: string; gross: number; amount: string } | undefined
+  >(undefined);
   // Per-product takeable amounts for the current window (null = a rental with no pickup yet). Drives
   // the picker annotations + the line reconciliation; empty until a valid delivery date is set.
   // Keyed by `stockKey(productId, variantId)`: each product's own amount AND each variation's.
@@ -447,7 +469,25 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
         required: t(`${KEY}.errors.requiredLineVariant`),
         invalid: t(`${KEY}.errors.invalidLineVariant`),
       });
-      return appendDriverConflictErrors(driverRef.current, withVariants, driverMessages);
+      const withDriver = appendDriverConflictErrors(driverRef.current, withVariants, driverMessages);
+      // The discount ceiling needs the PRICES (the API's own check runs after pricing): a discount
+      // may bring the order to zero, never below — the gross is the same estimate the card shows.
+      const anyRentalLine = values.lines.some((line) => line.isRental);
+      const gross = estimateOrderTotal(
+        values.lines.flatMap((line) =>
+          line.productId != null
+            ? [{ productId: line.productId, variantId: line.variantId, quantity: line.quantity }]
+            : [],
+        ),
+        productsByIdRef.current,
+        effectiveBilledDays({ ...values, anyRental: anyRentalLine }),
+        parseMoney(values.deliveryAmount) ?? 0,
+      );
+      return appendDiscountCeilingError(values, withDriver, gross, (maxDiscount) =>
+        t(`${KEY}.errors.discountExceedsTotal`, {
+          max: formatMoney(currencyOf(values.lines, productsByIdRef.current), maxDiscount),
+        }),
+      );
     },
     [zodResolve, t, driverMessages, enforcesStock],
   );
@@ -552,6 +592,37 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   // WHOSE day the events would occupy — re-probed on every change, because the logistics pad is a
   // question about that person, not about the business.
   const assignedUserId = useWatch({ control, name: 'assignedUserId' });
+  const billedDaysRaw = useWatch({ control, name: 'billedDays' });
+  const discountAmountRaw = useWatch({ control, name: 'discountAmount' });
+
+  // ── Billed days: filled for the admin, never locked ─────────────────────────────────────────────
+  // The admin's OWN default (`/account/preferences`, follows them to every device): `null` = "by the
+  // dates" — the field is re-derived from the window EVERY time a date changes, even after a manual
+  // edit (a new window is a new question); N = a new order starts at N days and the dates never touch
+  // it. Either way the field stays editable. Until the answer arrives nothing is filled, so a fixed
+  // default is never pre-empted by a window count it would then have to fight.
+  const accountPreferences = useAccountPreferences();
+  const preferencesSettled = !accountPreferences.isPending;
+  const fixedBilledDays = accountPreferences.data?.orderBilledDays ?? null;
+  // The window the field was last filled for. `null` = never filled yet: a fresh create (or a cart
+  // that carries no figure) gets its first fill once the preference is known. An edit — or a draft
+  // that already holds a figure — starts "filled" for its own window, so opening it changes nothing.
+  const lastFilledWindow = useRef<string | null>(
+    isEdit || (storedDraft?.billedDays ?? '') !== '' ? `${defaultValues.deliveryAt}|${defaultValues.pickupAt}` : null,
+  );
+  useEffect(() => {
+    if (!preferencesSettled) return;
+    const windowKey = `${deliveryAt}|${pickupAt}`;
+    if (windowKey === lastFilledWindow.current) return;
+    const firstFill = lastFilledWindow.current === null;
+    lastFilledWindow.current = windowKey;
+    if (fixedBilledDays !== null) {
+      if (firstFill) setValue('billedDays', String(fixedBilledDays));
+      return;
+    }
+    const windowDays = windowDaysFromStrings(deliveryAt, pickupAt);
+    if (windowDays !== undefined) setValue('billedDays', String(windowDays), { shouldValidate: true });
+  }, [preferencesSettled, fixedBilledDays, deliveryAt, pickupAt, setValue]);
 
   // The exact question the driver answer belongs to. Deriving `driver` from it means a stale answer
   // simply stops applying — nothing to clear, and no window where the form blocks a slot the admin
@@ -732,7 +803,12 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
     leaving.forEach(([id]) => leavingLines.current.add(id));
     void Promise.all(leaving.map(([, row]) => detailRowOut(row))).then(() => {
       leaving.forEach(([id]) => leavingLines.current.delete(id));
-      reset(pristineDefaults);
+      // A fresh order starts where every fresh order does: the admin's own default days, if any.
+      reset({
+        ...pristineDefaults,
+        billedDays: fixedBilledDays !== null ? String(fixedBilledDays) : '',
+      });
+      lastFilledWindow.current = `${pristineDefaults.deliveryAt}|${pristineDefaults.pickupAt}`;
     });
   };
 
@@ -943,6 +1019,20 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
           return;
         }
       }
+      // The discount ceiling is only knowable after the SERVER priced the lines (its catalog may have
+      // moved since this form loaded): it lands on the discount itself, quoting the server's ceiling.
+      const ceiling = axios.isAxiosError(error) && getStatus(error) === 400
+        ? (error.response?.data as { data?: { discountExceedsTotal?: { maxDiscount: number } } })?.data
+            ?.discountExceedsTotal
+        : undefined;
+      if (ceiling) {
+        setError('discountAmount', {
+          message: t(`${KEY}.errors.discountExceedsTotal`, {
+            max: formatMoney(currencySymbol, ceiling.maxDiscount),
+          }),
+        });
+        return;
+      }
       const { inline, toast } = toFormError(error, t(`${KEY}.errors.submitFallback`));
       if (inline) setFormError(inline);
       if (toast) notify.error(toast);
@@ -1025,13 +1115,14 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
   // anything is picked there is no currency to name and the estimate is zero, so it renders bare
   // rather than asserting a currency the order has not chosen yet (owner rule 2026-08-04: no view
   // hardcodes "Q"; every amount wears the symbol of the row it came from).
-  const firstPicked = lineValues
-    .map((line) => (line.productId != null ? productsById.get(line.productId) : undefined))
-    .find((product): product is Product => product !== undefined);
-  const currencySymbol = firstPicked?.currency.symbol ?? '';
-  // Billed days for the current window (for the per-line rental math) + the money breakdown: the
-  // products subtotal on its own, the delivery fee, and the total.
-  const billedDays = billedDaysFromStrings(deliveryAt, anyRental ? pickupAt : '');
+  const currencySymbol = currencyOf(lineValues, productsById);
+  // The days the rental lines are priced for — the AGREED figure when the field holds a valid one,
+  // else the window's own count (exactly the API's `resolveBilledDays`) — and the window's count on
+  // its own, which the field's hint offers back when the two differ.
+  const billedDays = effectiveBilledDays({ deliveryAt, pickupAt, billedDays: billedDaysRaw, anyRental });
+  const windowDays = windowDaysFromStrings(deliveryAt, pickupAt);
+  // The money breakdown: the products subtotal on its own, the delivery fee, the discount, and the
+  // total the client pays.
   const linesSubtotal = estimateOrderTotal(
     lineValues.flatMap((line) =>
       line.productId != null
@@ -1039,12 +1130,26 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
         : [],
     ),
     productsById,
-    parseDateTime(deliveryAt),
-    anyRental ? parseDateTime(pickupAt) : null,
+    billedDays,
     0,
   );
   const deliveryFee = parseMoney(deliveryAmountRaw) ?? 0;
-  const estimate = Math.round((linesSubtotal + deliveryFee) * 100) / 100;
+  const gross = Math.round((linesSubtotal + deliveryFee) * 100) / 100;
+  const discount = parseMoney(discountAmountRaw) ?? 0;
+  const estimate = applyDiscount(gross, discount);
+  // The % helper's text is FORM-ONLY and remembers the gross it was typed against: once the lines or
+  // the fee move, the percentage it shows would describe a different order, so it simply stops
+  // showing (derived — nothing to clear). The stored value is always the AMOUNT.
+  // Likewise once the amount is typed by hand: the percentage it no longer matches disappears.
+  const percentShown =
+    discountPercent && discountPercent.gross === gross && discountPercent.amount === discountAmountRaw
+      ? discountPercent.text
+      : '';
+  const onDiscountPercent = (text: string): void => {
+    const amount = discountFromPercent(text, gross) ?? '';
+    setDiscountPercent({ text, gross, amount });
+    setValue('discountAmount', amount, { shouldValidate: true, shouldDirty: true, shouldTouch: true });
+  };
   // The refundable guarantee the picked rentals carry — collected APART from the order and given
   // back at pickup, so it is shown beside the total and never added into it.
   const depositTotal = estimateDepositTotal(
@@ -1384,6 +1489,56 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                         aria-label={t(`${KEY}.fields.pickupAtLabel`)}
                         instructions={t(`${KEY}.fields.pickupAtHint`)}
                       />
+                    </div>
+                    {/* The BILLED days — only where something is rented (a purchase bills once).
+                        Filled for the admin (by the dates, or by their own default) and always
+                        editable; when it no longer matches the dates, the way back is one tap. */}
+                    {/* The fold clips, and a floating label paints ABOVE its box — so the content
+                        carries `pt-field` for it, and the wrapper's `-mt-field` hands that space
+                        back to the column's gap. Folded, `-mt-1` swallows the remaining 4px. */}
+                    <div className="reveal-item -mt-field">
+                    <Collapse open={anyRental} closedClassName="-mt-1">
+                      {anyRental && (
+                        <div className="flex flex-col gap-1 pt-field">
+                          <div className="sm:max-w-[calc(50%-0.625rem)]">
+                            <CustomInputForm<CreateOrderFormType>
+                              id="order-billed-days"
+                              name="billedDays"
+                              {...integerInput}
+                              label={t(`${KEY}.fields.billedDaysLabel`)}
+                              aria-label={t(`${KEY}.fields.billedDaysLabel`)}
+                              placeholder={windowDays !== undefined ? String(windowDays) : undefined}
+                              instructions={
+                                fixedBilledDays !== null
+                                  ? t(`${KEY}.fields.billedDaysHintFixed`, { count: fixedBilledDays })
+                                  : t(`${KEY}.fields.billedDaysHintAuto`)
+                              }
+                            />
+                          </div>
+                          <Collapse
+                            open={windowDays !== undefined && parseBilledDays(billedDaysRaw) !== windowDays}
+                          >
+                            {windowDays !== undefined && (
+                              // `p-0.5`: the fold clips, and the focus ring paints outside the button.
+                              <div className="p-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setValue('billedDays', String(windowDays), {
+                                      shouldValidate: true,
+                                      shouldDirty: true,
+                                    })
+                                  }
+                                  className="rounded-chip px-2 py-1 text-sm font-medium text-charcoal/70 underline decoration-charcoal/30 underline-offset-4 transition-[color,background-color] duration-150 hover:bg-charcoal/[0.04] hover:text-charcoal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-magenta"
+                                >
+                                  {t(`${KEY}.fields.billedDaysUseWindow`, { count: windowDays })}
+                                </button>
+                              </div>
+                            )}
+                          </Collapse>
+                        </div>
+                      )}
+                    </Collapse>
                     </div>
                     {/* The date fields already carry the message; this only offers the way OUT of
                         it — the admin can look at the order that is in the way. Rendered only for
@@ -1748,6 +1903,53 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                         aria-label={t(`${KEY}.fields.depositAmountLabel`)}
                       />
                     </div>
+                    {/* The whole-order DISCOUNT: an amount (what the order stores) with a % helper
+                        that only converts — typing 10 there writes 10 % of the current gross into
+                        the amount. Per-product offers are a documented door (EPIC-2-ORDERS §13). */}
+                    <div className="reveal-item grid gap-5 sm:grid-cols-[minmax(0,1fr)_minmax(0,8rem)]">
+                      <CustomInputForm<CreateOrderFormType>
+                        id="order-discount-amount"
+                        name="discountAmount"
+                        {...decimalInput}
+                        optionalLabel
+                        label={t(`${KEY}.fields.discountAmountLabel`)}
+                        placeholder={t(`${KEY}.fields.moneyPlaceholder`)}
+                        aria-label={t(`${KEY}.fields.discountAmountLabel`)}
+                        instructions={t(`${KEY}.fields.discountAmountHint`)}
+                      />
+                      <CustomInput
+                        id="order-discount-percent"
+                        {...decimalInput}
+                        optionalLabel
+                        label={t(`${KEY}.fields.discountPercentLabel`)}
+                        aria-label={t(`${KEY}.fields.discountPercentLabel`)}
+                        placeholder="0"
+                        value={percentShown}
+                        disabled={gross <= 0}
+                        onChange={(event) => onDiscountPercent(event.target.value)}
+                      />
+                    </div>
+                    {/* Why — printed under the discount row of the client's documents, so it only
+                        exists beside a discount (a reason left behind is dropped on save). The fold
+                        clips, hence `pt-field` for the floating label inside it. */}
+                    <div className="reveal-item -mt-field">
+                      <Collapse open={discount > 0} closedClassName="-mt-1">
+                        {discount > 0 && (
+                          <div className="pt-field">
+                            <CustomInputForm<CreateOrderFormType>
+                              id="order-discount-reason"
+                              name="discountReason"
+                              type="text"
+                              optionalLabel
+                              label={t(`${KEY}.fields.discountReasonLabel`)}
+                              placeholder={t(`${KEY}.fields.discountReasonPlaceholder`)}
+                              aria-label={t(`${KEY}.fields.discountReasonLabel`)}
+                              instructions={t(`${KEY}.fields.discountReasonHint`)}
+                            />
+                          </div>
+                        )}
+                      </Collapse>
+                    </div>
                     {/* The payment METHOD is deliberately absent here (owner decision 2026-08-05):
                         it records how the order was actually PAID, and at this point nobody has paid
                         anything. Asking now collected a guess and stored it as a fact — and, since
@@ -1764,6 +1966,28 @@ const OrderForm: React.FC<OrderFormProps> = ({ mode = 'create', order }) => {
                         <span>{t(`${KEY}.estimate.deliveryFee`)}</span>
                         <span className="tabular-nums">{formatMoney(currencySymbol, deliveryFee)}</span>
                       </div>
+                      {/* The discount line eases in with the first discount (`-mt-2` swallows the
+                          column gap while folded), and says what share of the order it is. */}
+                      <Collapse open={discount > 0} closedClassName="-mt-2">
+                        {discount > 0 && (
+                          <div className="flex items-center justify-between gap-3 text-sm text-charcoal/60">
+                            <span className="min-w-0">
+                              {t(`${KEY}.estimate.discount`)}
+                              {gross > 0 && (
+                                <span className="text-charcoal/40">
+                                  {' · '}
+                                  {t(`${KEY}.estimate.discountShare`, {
+                                    percent: Math.round((Math.min(discount, gross) / gross) * 1000) / 10,
+                                  })}
+                                </span>
+                              )}
+                            </span>
+                            <span className="shrink-0 tabular-nums">
+                              {`− ${formatMoney(currencySymbol, discount)}`}
+                            </span>
+                          </div>
+                        )}
+                      </Collapse>
                       <div className="mt-1 flex items-center justify-between border-t border-charcoal/10 pt-2">
                         <span className="text-sm font-medium text-charcoal/70">{t(`${KEY}.estimate.label`)}</span>
                         <span aria-live="polite" className="text-lg font-bold tabular-nums text-charcoal">

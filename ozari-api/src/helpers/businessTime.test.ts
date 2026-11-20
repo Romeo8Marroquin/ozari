@@ -57,6 +57,14 @@ describe("businessDayRange / businessMonthRange", () => {
     });
   });
 
+  it("tomorrow is the NEXT business day — across a month end, from an evening already 'tomorrow' in UTC", () => {
+    // 20:30 on 30 Nov in Guatemala (1 Dec in UTC): tomorrow is 1 Dec, not 2 Dec.
+    expect(businessDayRange(new Date("2026-12-01T02:30:00Z"), 1)).toEqual({
+      from: new Date("2026-12-01T06:00:00Z"),
+      to: new Date("2026-12-02T06:00:00Z"),
+    });
+  });
+
   it("the month is the business month, shifted by an offset", () => {
     const evening = new Date("2026-12-01T02:30:00Z"); // 30 Nov, 20:30 in Guatemala
     expect(businessMonthRange(evening)).toEqual({

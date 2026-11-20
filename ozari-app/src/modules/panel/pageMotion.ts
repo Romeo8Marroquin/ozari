@@ -1363,3 +1363,122 @@ export function headerTitleIn(options?: EnterOptions): void {
   }
   gsap.fromTo(element, { autoAlpha: 0, x: 14 }, to);
 }
+
+// ── A grid's folded rows — the dashboard's "Ver más" (2026-11-19) ─────────────────────────────────
+
+/** How long a folded grid takes to open: the in-flow height clock, a touch longer than a row's
+ *  growth because it can move several rows of cards at once. */
+const UNFOLD_DURATION = 0.42;
+/** How long it takes to shut — a little quicker, the out-is-faster asymmetry of every exit here. */
+const FOLD_DURATION = 0.36;
+/** The revealed cards' fade + rise. They start a beat behind the box, so they appear INTO space that
+ *  is already opening rather than being uncovered by it (no clip-wipe, and no overflow clip that
+ *  would shave the cards' rings and shadows). */
+const UNFOLD_ITEM_DELAY = 0.14;
+const UNFOLD_ITEM_DURATION = 0.32;
+const FOLD_ITEM_DURATION = 0.18;
+/** Exactly what the unfold/fold leave inline on a card, cleared at rest. */
+const FOLD_ITEM_PROPS = 'opacity,visibility,transform';
+
+/**
+ * UNFOLD a grid whose later rows were hidden (`display: none`) and have just been rendered: the box
+ * eases from `fromHeight` (measured BEFORE the commit — possibly mid-fold) to its natural height, so
+ * everything below glides down instead of jumping, while the revealed cards fade and rise in as a
+ * small row/column wave a beat behind it.
+ *
+ * `fresh` — the cards were hidden until this commit, so they start from the canonical off state.
+ * Otherwise an unfinished FOLD is being reversed, and they continue from their current frame.
+ *
+ * No overflow clip on purpose: the cards are invisible while their space opens, and clipping the box
+ * would shave the first row's rings and shadows for the length of the tween.
+ */
+export function unfoldGrid(
+  box: HTMLElement | null,
+  fromHeight: number,
+  revealed: HTMLElement[],
+  { fresh }: { fresh: boolean },
+): void {
+  if (!box) return;
+  gsap.killTweensOf(box, 'height');
+  gsap.set(box, { clearProps: 'height' });
+  if (prefersReducedMotion()) {
+    gsap.set(revealed, { clearProps: FOLD_ITEM_PROPS });
+    return;
+  }
+  const toHeight = box.offsetHeight;
+  gsap.fromTo(
+    box,
+    { height: fromHeight },
+    {
+      height: toHeight,
+      duration: UNFOLD_DURATION,
+      ease: 'power3.out',
+      overwrite: true,
+      clearProps: 'height',
+    },
+  );
+  if (revealed.length === 0) return;
+  if (fresh) gsap.set(revealed, { autoAlpha: 0, y: 10 });
+  const delays = waveDelays(revealed, PAGE_EXIT_STAGGER);
+  revealed.forEach((el, index) => {
+    gsap.to(el, {
+      autoAlpha: 1,
+      y: 0,
+      duration: UNFOLD_ITEM_DURATION,
+      ease: 'power3.out',
+      delay: UNFOLD_ITEM_DELAY + (delays[index] ?? 0),
+      overwrite: true,
+      clearProps: FOLD_ITEM_PROPS,
+    });
+  });
+}
+
+/**
+ * FOLD a grid back to its first row: the cards leaving fade and tuck up (last first — the wave runs
+ * back toward the row that stays), THEN the box eases to `toHeight` underneath them, so the eye sees
+ * them leave and the content below rise into the freed space — never cards shrinking in place.
+ * Resolves when the box settles OR is interrupted (an unfold reversing it); the caller hides the
+ * cards and calls {@link settleFoldedGrid} — never before, or the box would snap open for a frame.
+ */
+export function foldGrid(
+  box: HTMLElement | null,
+  toHeight: number,
+  leaving: HTMLElement[],
+): Promise<void> {
+  if (!box || prefersReducedMotion()) return Promise.resolve();
+  const delays = waveDelays(leaving, PAGE_EXIT_STAGGER * 0.5);
+  const last = Math.max(0, ...delays);
+  leaving.forEach((el, index) => {
+    gsap.to(el, {
+      autoAlpha: 0,
+      y: -6,
+      duration: FOLD_ITEM_DURATION,
+      ease: 'power2.in',
+      delay: last - (delays[index] ?? 0),
+      overwrite: true,
+    });
+  });
+  const fromHeight = box.offsetHeight;
+  return new Promise((resolve) => {
+    gsap.fromTo(
+      box,
+      { height: fromHeight },
+      {
+        height: toHeight,
+        duration: FOLD_DURATION,
+        ease: 'power3.inOut',
+        delay: last + FOLD_ITEM_DURATION * 0.7,
+        overwrite: true,
+        onComplete: resolve,
+        onInterrupt: resolve,
+      },
+    );
+  });
+}
+
+/** The folded grid at rest: its pinned height and the hidden cards' inline state dropped, so the
+ *  next unfold starts clean and the layout belongs to CSS again. */
+export function settleFoldedGrid(box: HTMLElement | null, hidden: HTMLElement[]): void {
+  if (box) gsap.set(box, { clearProps: 'height' });
+  if (hidden.length > 0) gsap.set(hidden, { clearProps: FOLD_ITEM_PROPS });
+}

@@ -428,6 +428,9 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     paddingVertical: 3,
   },
+  // The label column gives way to the figure: a caption (a discount's reason runs to 60 characters)
+  // wraps under its label instead of pushing the amount out of the panel.
+  totalLineText: { flexShrink: 1, paddingRight: 10 },
   totalLabel: { fontSize: 9, lineHeight: 1.35, color: MUTED },
   totalNote: { fontSize: 7, lineHeight: 1.4, color: MUTED },
   totalValue: { fontSize: 9, lineHeight: 1.35, color: INK },
@@ -896,7 +899,14 @@ interface FactItem {
   hint?: string;
 }
 
-/** A titled card of labelled facts. */
+/** A fact worth a row: one whose value is KNOWN. A cotización may be produced before the client,
+ *  the venue or the dates exist (owner, 2026-11-19), and an unknown fact is left off the page
+ *  rather than printed as an empty label. */
+const knownFacts = (facts: (Omit<FactItem, 'value'> & { value: string | undefined })[]): FactItem[] =>
+  facts.flatMap((fact) => (fact.value === undefined ? [] : [{ ...fact, value: fact.value }]));
+
+/** A titled card of labelled facts. Callers pass only KNOWN facts (`knownFacts`) and never draw a
+ *  card with none — an empty tinted box under a heading is exactly the blank the quote must not have. */
 const FactCard: React.FC<{ title: string; facts: FactItem[] }> = ({ title, facts }) => (
   <View style={styles.factCard}>
     <Text style={styles.factTitle}>{title.toUpperCase()}</Text>
@@ -909,6 +919,24 @@ const FactCard: React.FC<{ title: string; facts: FactItem[] }> = ({ title, facts
     ))}
   </View>
 );
+
+/**
+ * The facts block: the client card and the event card, side by side — each only when it has
+ * something to say, and the whole block only when either does. A lone card takes the full width
+ * rather than leaving half the row empty. Returns `null` for a quote of nothing but products, which
+ * then opens straight on its first table.
+ */
+const FactCards: React.FC<{ cards: { title: string; facts: FactItem[] }[] }> = ({ cards }) => {
+  const shown = cards.filter((card) => card.facts.length > 0);
+  if (shown.length === 0) return null;
+  return (
+    <View style={styles.facts}>
+      {shown.map((card) => (
+        <FactCard key={card.title} title={card.title} facts={card.facts} />
+      ))}
+    </View>
+  );
+};
 
 interface TableColumn {
   label: string;
@@ -1150,7 +1178,7 @@ const TotalLine: React.FC<{ label: string; value: string; note?: string; strong?
   strong = false,
 }) => (
   <View style={styles.totalLine}>
-    <View>
+    <View style={styles.totalLineText}>
       <Text style={styles.totalLabel}>{label}</Text>
       {note !== undefined && <Text style={styles.totalNote}>{note}</Text>}
     </View>
@@ -1406,8 +1434,39 @@ const OrderDocument: React.FC<OrderDocumentProps> = ({ model, copy, money, date,
   // A purchase-only order is delivered and never collected, so the fee buys a one-way trip. Stating
   // the return leg there would promise a visit nobody is making — and this is also the seam a
   // future "the client collects it themselves" mode widens, rather than a new branch elsewhere.
-  const deliveryNote =
-    model.event.pickupAt === undefined ? copy.deliveryIncludesOneWay : copy.deliveryIncludesReturn;
+  // Read off the RENTAL group, not the pickup date: a quote may rent things before a collection
+  // time is set, and the trip back is still part of what the fee buys.
+  const deliveryNote = model.groups.some((group) => group.kind === 'rental')
+    ? copy.deliveryIncludesReturn
+    : copy.deliveryIncludesOneWay;
+  const { event } = model;
+  const factCards = [
+    {
+      title: copy.clientCard,
+      facts: knownFacts([
+        { label: copy.clientName, value: model.client.name },
+        { label: copy.contact, value: model.client.contact },
+        { label: copy.address, value: model.client.address },
+      ]),
+    },
+    {
+      title: copy.eventCard,
+      facts: knownFacts([
+        { label: copy.eventType, value: event.type },
+        { label: copy.delivery, value: event.deliveryAt && dateTime(event.deliveryAt) },
+        { label: copy.pickup, value: event.pickupAt && dateTime(event.pickupAt) },
+        {
+          label: copy.billedDays,
+          value: event.billedDays === undefined ? undefined : copy.billedDaysValue(event.billedDays),
+          // The 24-hour rule explains the number only when the number IS the rule's: an agreed
+          // figure ("1 día" for a weekend) printed above that sentence would contradict it.
+          ...(event.billedDays !== undefined &&
+            event.billedDays === event.windowDays && { hint: copy.billedDaysHint }),
+        },
+      ]),
+    },
+  ];
+  const hasFacts = factCards.some((card) => card.facts.length > 0);
   /**
    * The standing notes, resolved ONCE — because the page's bottom padding is what reserves room for
    * them, and a padding computed from a different rule than the block it reserves is a gap waiting
@@ -1437,35 +1496,7 @@ const OrderDocument: React.FC<OrderDocumentProps> = ({ model, copy, money, date,
       {...(model.isPaid && { mark: copy.paid })}
       notes={notes}
     >
-      <View style={styles.facts}>
-        <FactCard
-          title={copy.clientCard}
-          facts={[
-            { label: copy.clientName, value: model.client.name },
-            { label: copy.contact, value: model.client.contact },
-            { label: copy.address, value: model.client.address },
-          ]}
-        />
-        <FactCard
-          title={copy.eventCard}
-          facts={[
-            { label: copy.eventType, value: model.event.type },
-            { label: copy.delivery, value: dateTime(model.event.deliveryAt) },
-            ...(model.event.pickupAt === undefined
-              ? []
-              : [{ label: copy.pickup, value: dateTime(model.event.pickupAt) }]),
-            ...(model.event.billedDays === undefined
-              ? []
-              : [
-                  {
-                    label: copy.billedDays,
-                    value: copy.billedDaysValue(model.event.billedDays),
-                    hint: copy.billedDaysHint,
-                  },
-                ]),
-          ]}
-        />
-      </View>
+      <FactCards cards={factCards} />
       {model.groups.map((group, groupIndex) => {
         // Days are a rental-only column, and only when there is a window to bill: a purchase-only
         // order has none, so the table drops the column rather than printing a placeholder.
@@ -1474,7 +1505,9 @@ const OrderDocument: React.FC<OrderDocumentProps> = ({ model, copy, money, date,
           <LineTable
             key={group.kind}
             title={group.kind === 'rental' ? copy.groupRental : copy.groupSale}
-            first={groupIndex === 0}
+            // The first table's top margin is its distance from the FACTS — with no facts above
+            // it (a quote of products only) it sits right under the letterhead's own gap.
+            first={groupIndex === 0 && hasFacts}
             // The divider under this group carries the WHOLE gap to whatever comes next — another
             // table for every group but the last, and the summary (a change of section) for that.
             dividerGap={
@@ -1542,7 +1575,12 @@ const OrderDocument: React.FC<OrderDocumentProps> = ({ model, copy, money, date,
             />
           )}
           {model.totals.discount !== undefined && (
-            <TotalLine label={copy.discount} value={`${MINUS}${money(model.totals.discount)}`} />
+            // The reason is the client's to read (owner, 2026-11-19) — the caption under the row.
+            <TotalLine
+              label={copy.discount}
+              {...(model.totals.discountReason !== undefined && { note: model.totals.discountReason })}
+              value={`${MINUS}${money(model.totals.discount)}`}
+            />
           )}
           <View style={styles.grandLine}>
             <Text style={styles.grandLabel}>{copy.total}</Text>
@@ -1699,26 +1737,28 @@ export const DamageReportDocument: React.FC<DamageReportDocumentProps> = ({
       meta={[`${copy.reference} ${reference}`, `${copy.issuedAt} ${date(model.issuedAt)}`]}
       notes={[]}
     >
-      <View style={styles.facts}>
-        <FactCard
-          title={copy.clientCard}
-          facts={[
-            { label: copy.clientName, value: model.client.name },
-            { label: copy.contact, value: model.client.contact },
-            { label: copy.address, value: model.client.address },
-          ]}
-        />
-        <FactCard
-          title={copy.eventCard}
-          facts={[
-            { label: copy.eventType, value: model.event.type },
-            { label: copy.delivery, value: dateTime(model.event.deliveryAt) },
-            ...(model.event.pickupAt === undefined
-              ? []
-              : [{ label: copy.pickup, value: dateTime(model.event.pickupAt) }]),
-          ]}
-        />
-      </View>
+      {/* Always both cards here — the report is about a SAVED order — through the same
+          known-facts rule as the comprobante, so the two can never word a fact differently. */}
+      <FactCards
+        cards={[
+          {
+            title: copy.clientCard,
+            facts: knownFacts([
+              { label: copy.clientName, value: model.client.name },
+              { label: copy.contact, value: model.client.contact },
+              { label: copy.address, value: model.client.address },
+            ]),
+          },
+          {
+            title: copy.eventCard,
+            facts: knownFacts([
+              { label: copy.eventType, value: model.event.type },
+              { label: copy.delivery, value: dateTime(model.event.deliveryAt) },
+              { label: copy.pickup, value: model.event.pickupAt && dateTime(model.event.pickupAt) },
+            ]),
+          },
+        ]}
+      />
       {tables.map((table, index) => (
         <LineTable
           key={table.title}

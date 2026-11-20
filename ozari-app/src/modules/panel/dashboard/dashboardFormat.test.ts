@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   deltaTone,
+  formatBusinessDay,
   formatMonthLabel,
   formatMoney,
   freshnessLabel,
@@ -28,6 +29,17 @@ describe('formatMonthLabel', () => {
   it('falls back to the raw key rather than rendering "Invalid Date"', () => {
     expect(formatMonthLabel('nonsense')).toBe('nonsense');
     expect(formatMonthLabel('2026-')).toBe('2026-');
+  });
+});
+
+describe('formatBusinessDay', () => {
+  it('names the day in GUATEMALA, whatever zone the browser is in', () => {
+    // 06:00Z is midnight in Guatemala on Friday the 20th — still Thursday evening further west, and
+    // already the 20th's morning in UTC: only the business zone gives the day the API counted.
+    const label = formatBusinessDay('2026-11-20T06:00:00.000Z');
+    expect(label).toMatch(/viernes/);
+    expect(label).toMatch(/20/);
+    expect(label).toMatch(/noviembre/);
   });
 });
 

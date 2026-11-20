@@ -48,8 +48,28 @@ model User {
   passwordResetTokens  PasswordResetToken[]
   calendarConnections  CalendarConnection[]
   calendarFeed         CalendarFeed?
+  preferences          UserPreference?
 
   @@map("users")
+}
+
+// One person's OWN working preferences — how *I* work, as opposed to `app_preferences` (how the
+// business runs). Owner, 2026-11-19: the billed-days default differs by whoever creates the orders
+// (one admin's clients routinely keep the goods longer), so it cannot be business-wide — and it must
+// follow the person to every device, so it cannot be local storage either. One row per user with
+// TYPED columns (not a key-value table): a new personal preference is a new nullable column, NULL
+// means "the default behaviour", and an absent row is all-defaults — so nothing is seeded.
+model UserPreference {
+  userId          Int       @id @map("user_id")
+  // The order form's billed days. NULL = derive them from the delivery→pickup dates (the default);
+  // N = start every new order at N days, whatever the dates say. Either way the field stays editable.
+  orderBilledDays Int?      @map("order_billed_days")
+  updatedAt       DateTime? @updatedAt @map("updated_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
 }
 
 // A pending password-reset request. Only the SHA-256 hash of the token is stored. Rows are
@@ -869,9 +889,14 @@ model Service {
   collectedAt DateTime? @map("collected_at")
   readyAt     DateTime? @map("ready_at")
 
-  // The BILLED period (whole days derived from the delivery→pickup window; pickup time decides).
+  // The delivery→pickup WINDOW the rental occupies (pickup time decides its day count).
   serviceStart DateTime @map("service_start")
   serviceEnd   DateTime @map("service_end")
+  // The days the rental lines were BILLED for, when the admin agreed a figure (owner 2026-11-19: a
+  // pickup delayed for the business's convenience is not more rental). NULL = the window's own count
+  // — which is also what every row saved before this column billed, so no backfill is needed. Always
+  // NULL on a purchase-only order.
+  billedDays   Int?     @map("billed_days")
 
   // The driver this order is assigned to (MVP: admin assigns manually; the admin is also a driver).
   assignedUserId Int? @map("assigned_user_id")
@@ -879,8 +904,9 @@ model Service {
   // Money. `totalAmount` stays authoritative but RECOMPUTABLE from lines + extras + delivery −
   // discount (the FEL/adjustments door). `deliveryAmount` = the fee actually charged (admin-set,
   // distance-based; free inside Hacienda Real — owner 2026-07-16). `depositAmount` = anticipo;
-  // `paidAt` records when payment completed (paymentStatus stays the state lookup). Discounts are
-  // admin-only and occasional (§2) — nullable, no dedicated flow yet.
+  // `paidAt` records when payment completed (paymentStatus stays the state lookup). The discount is
+  // ONE whole-order amount (owner 2026-11-19), already subtracted from `totalAmount`, with an
+  // optional client-facing reason; per-product offers are a documented door (EPIC-2-ORDERS §13).
   totalAmount    Decimal   @map("total_amount") @db.Decimal(15, 2)
   deliveryAmount Decimal?  @map("delivery_amount") @db.Decimal(15, 2)
   depositAmount  Decimal?  @map("deposit_amount") @db.Decimal(15, 2)
