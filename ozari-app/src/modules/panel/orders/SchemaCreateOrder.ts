@@ -1,6 +1,8 @@
 import {
   ORDER_ADDRESS_MIN_LENGTH,
+  ORDER_DISCOUNT_REASON_MAX_LENGTH,
   ORDER_LONGTEXT_MAX_LENGTH,
+  ORDER_MAX_BILLED_DAYS,
   ORDER_MAX_LINES,
   ORDER_TEXT_MAX_LENGTH,
   ORDER_TEXT_MIN_LENGTH,
@@ -33,6 +35,16 @@ export const parseLineQuantity = (value: string): number | null => {
   if (trimmed === '') return null;
   const parsed = Number(trimmed);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > PRODUCT_MAX_QUANTITY) return null;
+  return parsed;
+};
+
+/** Parses the AGREED billed days: `''` = absent (the window's own count applies); else a whole number
+ *  within `[1, ORDER_MAX_BILLED_DAYS]`; `null` when present-but-invalid. Mirrors the API validator. */
+export const parseBilledDays = (value: string): number | undefined | null => {
+  const trimmed = value.trim();
+  if (trimmed === '') return undefined;
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > ORDER_MAX_BILLED_DAYS) return null;
   return parsed;
 };
 
@@ -137,6 +149,21 @@ const baseCreateOrderSchema = z.object({
     .refine((v) => v.trim().length <= ORDER_LONGTEXT_MAX_LENGTH, t(`${KEY}.invalidComment`)),
   deliveryAmount: moneyField(t(`${KEY}.invalidDeliveryAmount`)),
   depositAmount: moneyField(t(`${KEY}.invalidDepositAmount`)),
+  // The days the rental lines are BILLED for. Filled from the dates (or from the admin's own default
+  // — `/account/preferences`) and freely editable: a pickup delayed for the business's convenience is
+  // not more rental. `''` = the window's own count. Only sent when something is rented.
+  billedDays: z.string().refine((value) => parseBilledDays(value) !== null, t(`${KEY}.invalidBilledDays`)),
+  // A whole-order DISCOUNT (an amount — the % helper beside it only converts) and why. Whether it
+  // fits under the order's total needs the catalog's prices, so that ceiling lives in the resolver
+  // (`appendDiscountCeilingError`), like the API's own post-pricing check. The reason is client-facing
+  // (it prints under the discount row) and is only sent beside a discount.
+  discountAmount: moneyField(t(`${KEY}.invalidDiscountAmount`)),
+  discountReason: z
+    .string()
+    .refine(
+      (value) => value.trim().length <= ORDER_DISCOUNT_REASON_MAX_LENGTH && !/[\r\n]/.test(value),
+      t(`${KEY}.invalidDiscountReason`),
+    ),
   // NOTE — no `paymentMethodId` (owner decision 2026-08-05). It records how the order was actually
   // PAID, which has not happened while this form is open; it is collected once, by "Registrar pago".
   // Who the order is assigned to — REQUIRED, exactly like the backend validator (Q-D2, owner
@@ -240,6 +267,9 @@ export const createOrderDefaultValues: CreateOrderFormType = {
   comment: '',
   deliveryAmount: '',
   depositAmount: '',
+  billedDays: '',
+  discountAmount: '',
+  discountReason: '',
   // null = unset; the form overrides it with the current admin's id (from the token) on mount.
   assignedUserId: null as unknown as number,
   lines: [],
@@ -260,6 +290,11 @@ export interface CreateOrderBody {
   comment?: string;
   deliveryAmount?: number;
   depositAmount?: number;
+  /** The agreed billed days — only with a `pickupAt` (absent = the window's own count). */
+  billedDays?: number;
+  discountAmount?: number;
+  /** Only beside a discount. */
+  discountReason?: string;
   assignedUserId: number;
   /** `variantId` only on a line of a product with variations (omitted otherwise). */
   lines: { productId: number; variantId?: number; quantity: number }[];
@@ -277,6 +312,12 @@ export function toCreateOrderBody(data: CreateOrderFormType): CreateOrderBody {
   /* v8 ignore next -- parseDateTime is guaranteed non-null by the schema; the `?? new Date()` documents that */
   const deliveryAt = (parseDateTime(data.deliveryAt) ?? new Date()).toISOString();
   const pickup = anyRental ? parseDateTime(data.pickupAt) : null;
+  // A figure only means something beside a pickup (the API refuses one on a purchase-only order).
+  const billedDays = pickup ? parseBilledDays(data.billedDays) : undefined;
+  // Zero is "no discount" — and a reason without one is simply dropped, never sent: the field it
+  // explains is gone, and the API would refuse the pair.
+  const discount = money(data.discountAmount);
+  const discountReason = data.discountReason.trim();
   return {
     clientRegistryId: data.clientRegistryId,
     eventTypeId: data.eventTypeId,
@@ -295,6 +336,12 @@ export function toCreateOrderBody(data: CreateOrderFormType): CreateOrderBody {
     ...(comment && { comment }),
     ...(money(data.deliveryAmount) !== undefined && { deliveryAmount: money(data.deliveryAmount) }),
     ...(money(data.depositAmount) !== undefined && { depositAmount: money(data.depositAmount) }),
+    ...(billedDays != null && { billedDays }),
+    ...(discount !== undefined &&
+      discount > 0 && {
+        discountAmount: discount,
+        ...(discountReason !== '' && { discountReason }),
+      }),
     assignedUserId: data.assignedUserId,
     lines: data.lines.map((line) => ({
       productId: line.productId,
@@ -338,6 +385,9 @@ export function orderToFormValues(order: {
   comment?: string;
   deliveryAmount?: number;
   depositAmount?: number;
+  billedDays?: number;
+  discountAmount?: number;
+  discountReason?: string;
   paymentMethod?: { id: number };
   assignee?: { id: number };
   lines: { productId: number; variantId?: number; quantity: number; isRental: boolean }[];
@@ -359,6 +409,11 @@ export function orderToFormValues(order: {
     comment: order.comment ?? '',
     deliveryAmount: order.deliveryAmount != null ? String(order.deliveryAmount) : '',
     depositAmount: order.depositAmount != null ? String(order.depositAmount) : '',
+    // The days the order was BILLED for (the API resolves an un-agreed one to the window's count),
+    // so an untouched save re-sends the figure the client was quoted.
+    billedDays: order.billedDays != null ? String(order.billedDays) : '',
+    discountAmount: order.discountAmount != null ? String(order.discountAmount) : '',
+    discountReason: order.discountReason ?? '',
     assignedUserId: order.assignee?.id as unknown as number,
     lines: order.lines.map((line) => ({
       productId: line.productId,
@@ -455,6 +510,30 @@ export function appendLineVariantErrors(
   return {
     values: {},
     errors: { ...result.errors, lines },
+  } as ResolverResult<CreateOrderFormType>;
+}
+
+/**
+ * Layers the discount CEILING the schema cannot see: a discount may bring the order to zero, never
+ * below — mirroring the API's post-pricing `400 discountExceedsTotal`. `gross` is the live estimate of
+ * lines + delivery (the caller prices it from the catalog). A schema error already on the field is
+ * kept. Pure, like its siblings; `message` receives the ceiling so the copy can quote it.
+ */
+export function appendDiscountCeilingError(
+  values: CreateOrderFormType,
+  result: ResolverResult<CreateOrderFormType>,
+  gross: number,
+  message: (maxDiscount: number) => string,
+): ResolverResult<CreateOrderFormType> {
+  if ((result.errors as Record<string, unknown>)['discountAmount']) return result;
+  const discount = parseMoney(values.discountAmount);
+  if (discount == null || discount <= gross) return result;
+  return {
+    values: {},
+    errors: {
+      ...result.errors,
+      discountAmount: { type: 'discountCeiling', message: message(gross) },
+    },
   } as ResolverResult<CreateOrderFormType>;
 }
 

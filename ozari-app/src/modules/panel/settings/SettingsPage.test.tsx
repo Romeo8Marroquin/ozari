@@ -52,6 +52,10 @@ vi.mock('@hooks/useRole', () => ({ useHasRole }));
 vi.mock('./CalendarSection', () => ({
   default: () => <div data-testid="calendar-section" />,
 }));
+// Same for the per-person order defaults (its own suite: OrderDefaultsSection.test).
+vi.mock('./OrderDefaultsSection', () => ({
+  default: () => <div data-testid="order-defaults-section" />,
+}));
 
 import { PanelPageTransitionContext, type PanelPageMotion } from '../PanelPageTransitionContext';
 import SettingsPage from './SettingsPage';
@@ -263,6 +267,18 @@ describe('SettingsPage', () => {
     useHasRole.mockReturnValue(false);
     renderPage();
     expect(screen.queryByTestId('calendar-section')).not.toBeInTheDocument();
+  });
+
+  it('offers the ORDER defaults to whoever creates orders (the admin), and to nobody else', () => {
+    setMe({ data: { id: 1, fullName: 'Ana', role: 'Admin', mfaEnabled: false, createdAt: '2026-01-01' } });
+    useHasRole.mockReturnValue(true);
+    renderPage();
+    expect(screen.getByTestId('order-defaults-section')).toBeInTheDocument();
+    cleanup();
+
+    useHasRole.mockReturnValue(false);
+    renderPage();
+    expect(screen.queryByTestId('order-defaults-section')).not.toBeInTheDocument();
   });
 
   describe('registered page motion', () => {

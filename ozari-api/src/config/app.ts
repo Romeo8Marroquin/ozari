@@ -263,6 +263,14 @@ export const appConfig = {
   maxOrderPageSize: 100,
   // Most distinct products one order can carry (a hard input bound, far above any real party).
   maxOrderLines: 50,
+  // The most days a rental can be BILLED for — an agreed figure (`billedDays`) and the per-user
+  // default alike. A year: past it the per-day price stops being how anyone would quote. Mirrored in
+  // the frontend (`ORDER_MAX_BILLED_DAYS`).
+  maxBilledDays: 365,
+  // A discount's reason is printed under the discount row on the client's documents, and 60
+  // characters is what keeps it ONE printed line there (~65 fit): a second line is what pushes an
+  // ordinary one-page order onto a second sheet. Mirrored (`ORDER_DISCOUNT_REASON_MAX_LENGTH`).
+  maxDiscountReasonLength: 60,
   // Fallback when the `orders.logisticsSpacingMinutes` app preference is missing/corrupt — the
   // seeded default. It is the LOGISTICS PAD's gap: each event occupies ±half of it on its DRIVER's
   // day, so two events of the same driver end up ≥1h apart (EPIC-2-DRIVER-AVAILABILITY §1).

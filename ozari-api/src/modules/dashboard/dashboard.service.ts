@@ -27,10 +27,17 @@ import type {
 const MINUTE_MS = 60 * 1000;
 
 /**
- * How many orders the "up next" queue shows. Three is the owner's number and it is a UX decision,
- * not a technical one: a queue you can hold in your head while driving.
+ * The "up next" queue is TODAY's work and nothing else (owner, 2026-11-19): every order whose next
+ * event falls before the end of the business day — overdue ones included, since a late delivery is
+ * still today's job — however many there are. The screen shows one row and folds the rest behind
+ * "Ver más". What comes AFTER today is not a card: tomorrow is a COUNT (`tomorrow`), and the agenda
+ * holds the rest.
+ *
+ * This is a safety ceiling, per candidate query and on the merged queue — not a business rule. A real
+ * day is a handful of events; fifty bounds the payload if orders are left un-advanced for weeks (each
+ * one would count as overdue, i.e. "today's work").
  */
-export const UP_NEXT_LIMIT = 3;
+export const UP_NEXT_MAX = 50;
 
 /** How many months of history the revenue trend covers, including the current (partial) one. */
 export const TREND_MONTHS = 12;
@@ -63,10 +70,11 @@ export function monthRange(now: Date, offsetMonths = 0): DateRangeModel {
   return businessMonthRange(now, offsetMonths);
 }
 
-/** The business day containing `now`, half-open like every other range here. "Hoy" on the dashboard
- *  is the owner's day — 00:00 to 24:00 in Guatemala — whatever zone the server runs in. */
-export function dayRange(now: Date): DateRangeModel {
-  return businessDayRange(now);
+/** The business day containing `now` (shifted by `offsetDays`: 1 = tomorrow), half-open like every
+ *  other range here. "Hoy" on the dashboard is the owner's day — 00:00 to 24:00 in Guatemala —
+ *  whatever zone the server runs in. */
+export function dayRange(now: Date, offsetDays = 0): DateRangeModel {
+  return businessDayRange(now, offsetDays);
 }
 
 /** `YYYY-MM` for a date — the trend series' stable machine key (the client formats the label), in
@@ -129,7 +137,9 @@ export function nextPendingEvent(order: {
 }
 
 /**
- * Picks the `limit` orders whose next pending event is soonest, earliest first.
+ * The up-next queue, earliest next event first: EVERY order whose next pending event falls before
+ * `until` (the end of the business day — so today's work and everything overdue), capped at `max`.
+ * A quiet day is an EMPTY queue, never padded with tomorrow (owner, 2026-11-19).
  *
  * Orders with nothing pending drop out entirely. Ties break by order id so the list is stable across
  * refetches — two deliveries scheduled for the same minute must not swap places every 60 seconds.
@@ -137,17 +147,17 @@ export function nextPendingEvent(order: {
 export function selectUpNext<T extends { id: number }>(
   rows: readonly T[],
   eventOf: (row: T) => LogisticsEventModel | null,
-  limit: number,
+  { max, until }: { max: number; until: Date },
 ): { row: T; event: LogisticsEventModel }[] {
   return rows
     .flatMap((row) => {
       const event = eventOf(row);
-      return event ? [{ row, event }] : [];
+      return event && event.at.getTime() < until.getTime() ? [{ row, event }] : [];
     })
     .sort(
       (a, b) => a.event.at.getTime() - b.event.at.getTime() || a.row.id - b.row.id,
     )
-    .slice(0, limit);
+    .slice(0, max);
 }
 
 /**

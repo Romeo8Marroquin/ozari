@@ -222,6 +222,32 @@ describe('fromOrderDetail', () => {
     // is a different answer from "no hay envío".
     expect(charged.totals.delivery).toBe(0);
     expect(charged.totals.discount).toBe(25);
+    expect(charged.totals).not.toHaveProperty('discountReason');
+  });
+
+  it('prints the discount’s REASON under it — the client reads it (owner, 2026-11-19)', () => {
+    const model = fromOrderDetail(
+      order({ discountAmount: 25, discountReason: 'Cliente frecuente' }),
+      letterhead,
+      ISSUED_AT,
+    );
+    expect(model.totals).toMatchObject({ discount: 25, discountReason: 'Cliente frecuente' });
+  });
+
+  it('prints the days the order was BILLED for — the API’s agreed figure, never the window re-derived', () => {
+    // The window is 3 started days; the admin agreed 1 (and the API priced it so).
+    const model = fromOrderDetail(
+      order({ billedDays: 1, windowDays: 3, lines: [line({ parcialPrice: 50 })], totalAmount: 50 }),
+      letterhead,
+      ISSUED_AT,
+    );
+    expect(model.event).toMatchObject({ billedDays: 1, windowDays: 3 });
+    expect(model.groups[0]?.lines[0]?.days).toBe(1);
+  });
+
+  it('leaves an empty snapshot text off the client card rather than printing a blank row', () => {
+    const model = fromOrderDetail(order({ deliveryContact: '' }), letterhead, ISSUED_AT);
+    expect(model.client).toEqual({ name: 'Test cliente', address: 'Test dirección' });
   });
 
   it('subtracts the ANTICIPO from what is owed but never from the TOTAL', () => {
@@ -807,12 +833,74 @@ describe('fromOrderForm', () => {
     expect(quote({}, [dollars])?.currencySymbol).toBe('$');
   });
 
-  it('produces NOTHING rather than a document built on values it cannot read', () => {
-    // Both are defence in depth — the caller runs the form's resolver first — but a PDF with an
-    // invented date or no priced line is worse than no PDF.
-    expect(quote({ deliveryAt: 'no es una fecha' })).toBeUndefined();
-    // Every line points at a product the cache no longer holds.
+  it('produces NOTHING when there is nothing to quote', () => {
+    // Defence in depth — the caller validates the lines first — but a PDF with no priced line is
+    // worse than no PDF. Every line points at a product the cache no longer holds.
     expect(quote({}, [])).toBeUndefined();
+  });
+
+  describe('as little as ONE product (owner, 2026-11-19)', () => {
+    const bare = (over: Partial<CreateOrderFormType> = {}, names: { client?: string; event?: string } = {}) =>
+      fromOrderForm(
+        {
+          values: {
+            ...createOrderDefaultValues,
+            lines: [{ productId: 1, variantId: null, pickedValues: [], quantity: '5', isRental: true }],
+            ...over,
+          },
+          productsById: new Map([[1, product()]]),
+          clientName: names.client,
+          eventTypeName: names.event,
+        },
+        letterhead,
+        ISSUED_AT,
+      );
+
+    it('quotes a product with no client, venue or dates — every unknown fact simply absent', () => {
+      const model = bare();
+      expect(model?.client).toEqual({});
+      // A rental always states its billed days: one, with nothing agreed and no window to count.
+      expect(model?.event).toEqual({ billedDays: 1 });
+      expect(model?.groups[0]?.lines[0]).toMatchObject({ quantity: 5, days: 1, total: 50 });
+      expect(model?.totals.total).toBe(50);
+    });
+
+    it('treats whitespace-only names as not given, never as a blank row', () => {
+      const model = bare({ deliveryContact: '   ' }, { client: '  ', event: '' });
+      expect(model?.client).toEqual({});
+      expect(model?.event.type).toBeUndefined();
+    });
+
+    it('prints whatever IS given — a name and a delivery, no pickup yet', () => {
+      const model = bare({ deliveryAt: '2026-07-29T11:50' }, { client: 'María' });
+      expect(model?.client).toEqual({ name: 'María' });
+      expect(model?.event.deliveryAt).toBeInstanceOf(Date);
+      expect(model?.event.pickupAt).toBeUndefined();
+      // No window yet, so no window count — and no "por día iniciado" hint under the days.
+      expect(model?.event.windowDays).toBeUndefined();
+    });
+
+    it('prices an AGREED figure even before there are dates ("50 sillas por 3 días")', () => {
+      const model = bare({ billedDays: '3' });
+      expect(model?.event.billedDays).toBe(3);
+      expect(model?.totals.total).toBe(150);
+    });
+  });
+
+  it('bills the AGREED days when they differ from the window, and keeps the window beside them', () => {
+    // Wed → Fri is 3 started days, but the admin agreed 1.
+    const model = quote({ billedDays: '1' });
+    expect(model?.event).toMatchObject({ billedDays: 1, windowDays: 3 });
+    expect(model?.groups[0]?.lines[0]).toMatchObject({ days: 1, total: 50 });
+  });
+
+  it('subtracts the discount and carries its reason; zero is no discount at all', () => {
+    const model = quote({ discountAmount: '30', discountReason: '  Cliente frecuente ' });
+    expect(model?.totals).toMatchObject({ discount: 30, discountReason: 'Cliente frecuente', total: 120 });
+    const none = quote({ discountAmount: '0', discountReason: 'Promo' });
+    expect(none?.totals).not.toHaveProperty('discount');
+    expect(none?.totals).not.toHaveProperty('discountReason');
+    expect(quote({ discountAmount: '20' })?.totals).not.toHaveProperty('discountReason');
   });
 });
 

@@ -44,7 +44,9 @@ inline route-error slot for route data).
   refresh timer, React Query cache, form drafts — the order sketch/cart included, though it lives in
   localStorage — future Zustand stores). It deliberately **keeps
   globals**: notifications, i18n language, the per-device UUID, the maps-app preference. Any new
-  client store must declare which side it is on.
+  client store must declare which side it is on. A per-USER preference that must follow the user
+  across devices (the billed-days default, `useAccountPreferences`) is SERVER state — the user's own
+  `/account/preferences` row in the user-scoped query cache — never device storage.
 - **Refresh failure is split** (`tokenRefresh.ts`): an **auth** failure (401/403 from `/auth/refresh`
   → refresh token rejected) is the ONLY thing that triggers forced logout; a **transient** failure
   (network / 429 / 5xx) keeps the session and just warns. `refreshAccessToken({ silent: true })` is
@@ -310,6 +312,16 @@ interruption, reduced motion and leaves no inline style behind.
   snap). The gallery grid's height rides `GALLERY_REFLOW` (0.4s `power3.out`) — the tiles' own FLIP
   clock — and `releaseHeightOnResize(box)` drops an ease the moment the box's WIDTH changes, so a
   window resize re-wraps instantly instead of animating.
+- **`unfoldGrid` / `foldGrid` / `settleFoldedGrid`** (2026-11-19, the dashboard's "Ver más",
+  `UpNextQueue`) — a GRID whose later rows are folded away (`display: none`) and opened IN PLACE.
+  Unfold: the box eases from the height measured before the commit (0.42s `power3.out`) and the
+  revealed cards fade + rise in a beat behind it, as a row/column wave. Fold: the cards fade and tuck
+  up first (last first), THEN the box eases shut underneath (0.36s `power3.inOut`) and the caller hides
+  them only once it resolves — hiding first would snap the box. **No overflow clip** in either
+  direction: the moving cards are invisible while their space changes, and a clip would shave the
+  first row's rings and shadows for the whole tween. Either motion reverses the other from the current
+  frame; the caller guards the fold's commit with a run token. How many cards make "one row" is READ
+  from the rendered grid (`useGridColumns`), never a breakpoint.
 - **`CrossfadeImage`** (`components/CrossfadeImage.tsx`) — a small photo box whose picture CHANGES
   (the order line's product photo following the picks, the picker's row thumbnails). Each new
   picture is a layer over the current one that fades in once it has LOADED (a placeholder at once,

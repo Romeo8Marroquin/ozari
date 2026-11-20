@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PanelPageTransitionContext } from '../PanelPageTransitionContext';
@@ -90,6 +90,10 @@ const dashboard = (overrides: Partial<Dashboard> = {}): Dashboard =>
       activeToDeliver: 5,
       activeToCollect: 3,
       activeToClose: 1,
+    },
+    tomorrow: {
+      period: { from: '2026-08-02T06:00:00.000Z', to: '2026-08-03T06:00:00.000Z' },
+      deliveries: 2,
     },
     month: {
       period: { from: '2026-08-01T06:00:00.000Z', to: '2026-09-01T06:00:00.000Z' },
@@ -190,10 +194,20 @@ describe('DashboardPage', () => {
     expect(refetch).toHaveBeenCalled();
   });
 
+  it('puts tomorrow under today’s queue as a COUNT, never as more cards', () => {
+    render(<DashboardPage />);
+    const tomorrow = screen.getByRole('region', { name: `${KEY}.tomorrow.title` });
+    expect(within(tomorrow).getByText(`${KEY}.tomorrow.orders`)).toBeInTheDocument();
+    // Only today's order is a card.
+    expect(screen.getAllByRole('link', { name: `${KEY}.upNext.openAria` })).toHaveLength(1);
+  });
+
   it('nudges toward creating an order when there is nothing queued', async () => {
     useDashboard.mockReturnValue(q({ data: dashboard({ upNext: [] }) }));
     render(<DashboardPage />);
     expect(screen.getByText(`${KEY}.upNext.emptyTitle`)).toBeInTheDocument();
+    // A quiet TODAY still says what tomorrow holds.
+    expect(screen.getByRole('region', { name: `${KEY}.tomorrow.title` })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: `${KEY}.upNext.emptyAction` }));
     expect(navigateTo).toHaveBeenCalledWith('/panel/pedidos/nuevo');
   });

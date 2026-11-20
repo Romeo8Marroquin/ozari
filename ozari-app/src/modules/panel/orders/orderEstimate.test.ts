@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Product } from '../products/product.types';
 import {
+  applyDiscount,
   billedDaysFromStrings,
   computeBilledDays,
+  discountFromPercent,
+  effectiveBilledDays,
+  windowDaysFromStrings,
   estimateDepositTotal,
   estimateLineSubtotal,
   estimateOrderTotal,
@@ -92,8 +96,7 @@ describe('estimateOrderTotal', () => {
         { productId: 4, quantity: '10' },
       ],
       productsById,
-      new Date('2026-08-01T14:00:00'),
-      new Date('2026-08-02T15:00:00'),
+      2,
       50,
     );
     // rental 6×25×2 = 300, sale 3.5×10 = 35, +50 = 385
@@ -107,8 +110,7 @@ describe('estimateOrderTotal', () => {
         { productId: 999, quantity: '5' },
       ],
       productsById,
-      null,
-      null,
+      1,
       0,
     );
     expect(total).toBe(0);
@@ -159,8 +161,7 @@ describe('VARIATIONS — effective prices and deposits', () => {
           { productId: 7, variantId: 72, quantity: '1' },
         ],
         productsById,
-        null,
-        null,
+        1,
         0,
       ),
     ).toBe(24);
@@ -176,6 +177,57 @@ describe('VARIATIONS — effective prices and deposits', () => {
         productsById,
       ),
     ).toBe(40);
+  });
+});
+
+describe('windowDaysFromStrings', () => {
+  it('counts a real window and has nothing to say otherwise', () => {
+    expect(windowDaysFromStrings('2026-08-01T14:00', '2026-08-04T10:00')).toBe(3);
+    expect(windowDaysFromStrings('2026-08-01T14:00', '')).toBeUndefined();
+    expect(windowDaysFromStrings('', '2026-08-04T10:00')).toBeUndefined();
+    // A pickup not after the delivery is a mistake in progress, not a 1-day rental.
+    expect(windowDaysFromStrings('2026-08-01T14:00', '2026-08-01T14:00')).toBeUndefined();
+  });
+});
+
+describe('effectiveBilledDays — the API resolveBilledDays mirror', () => {
+  const window = { deliveryAt: '2026-08-01T14:00', pickupAt: '2026-08-04T10:00', anyRental: true };
+
+  it('takes the agreed figure when the field holds a valid one', () => {
+    expect(effectiveBilledDays({ ...window, billedDays: '1' })).toBe(1);
+  });
+
+  it('falls back to the window for a blank or invalid figure', () => {
+    expect(effectiveBilledDays({ ...window, billedDays: '' })).toBe(3);
+    expect(effectiveBilledDays({ ...window, billedDays: '0' })).toBe(3);
+  });
+
+  it('bills once when nothing is rented, or with neither a figure nor a window', () => {
+    expect(effectiveBilledDays({ ...window, billedDays: '5', anyRental: false })).toBe(1);
+    expect(effectiveBilledDays({ ...window, pickupAt: '', billedDays: '' })).toBe(1);
+  });
+
+  it('honours an agreed figure before there are dates (a quote for "3 días")', () => {
+    expect(effectiveBilledDays({ deliveryAt: '', pickupAt: '', billedDays: '3', anyRental: true })).toBe(3);
+  });
+});
+
+describe('discount helpers', () => {
+  it('subtracts the discount, never below zero', () => {
+    expect(applyDiscount(385, 85)).toBe(300);
+    expect(applyDiscount(385, 385)).toBe(0);
+    expect(applyDiscount(100, 150)).toBe(0);
+  });
+
+  it('turns a percentage of the gross into an amount truncated to cents, capped at 100 %', () => {
+    expect(discountFromPercent('10', 385)).toBe('38.5');
+    expect(discountFromPercent('33.333', 100)).toBe('33.33');
+    expect(discountFromPercent('150', 200)).toBe('200');
+    expect(discountFromPercent('', 200)).toBeUndefined();
+    // The middle of typing ".5" — nothing to convert yet.
+    expect(discountFromPercent('.', 200)).toBeUndefined();
+    expect(discountFromPercent('-5', 200)).toBeUndefined();
+    expect(discountFromPercent('abc', 200)).toBeUndefined();
   });
 });
 

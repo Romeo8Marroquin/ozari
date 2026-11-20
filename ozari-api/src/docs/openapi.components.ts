@@ -1354,16 +1354,43 @@ export const schemas: Record<string, Schema> = {
             nullable: true,
             description: "How the order is paid (Efectivo / Transferencia); absent until chosen.",
           },
-          discountAmount: { type: "number", nullable: true },
-          discountReason: { type: "string", nullable: true },
+          discountAmount: {
+            type: "number",
+            nullable: true,
+            description: "The whole-order discount, ALREADY subtracted from `totalAmount`.",
+            example: 100,
+          },
+          discountReason: {
+            type: "string",
+            nullable: true,
+            description: "Why — client-facing: the documents print it under the discount row.",
+            example: "Cliente frecuente",
+          },
           paidAt: { type: "string", format: "date-time", nullable: true },
           cancelReason: { type: "string", nullable: true },
           serviceStart: {
             type: "string",
             format: "date-time",
-            description: "Start of the BILLED period (whole days over the delivery→pickup window).",
+            description: "Start of the delivery→pickup WINDOW (equals `deliveryAt`).",
           },
           serviceEnd: { type: "string", format: "date-time" },
+          billedDays: {
+            type: "integer",
+            nullable: true,
+            description:
+              "The days the rental lines were BILLED for: the admin's agreed figure when one was " +
+              "set, else the window's own count (per started 24h). Absent on a purchase-only order. " +
+              "Never re-derive it from the window — they differ exactly when a figure was agreed.",
+            example: 1,
+          },
+          windowDays: {
+            type: "integer",
+            nullable: true,
+            description:
+              "The delivery→pickup window's own day count — present with `billedDays`, so a screen " +
+              "can say when the two differ.",
+            example: 3,
+          },
           lines: { type: "array", items: schemaRef("OrderLine") },
           extras: { type: "array", items: schemaRef("OrderExtra") },
           securityDeposit: { allOf: [schemaRef("OrderSecurityDeposit")], nullable: true },
@@ -1481,6 +1508,37 @@ export const schemas: Record<string, Schema> = {
       comment: { type: "string", nullable: true, maxLength: 500 },
       deliveryAmount: { type: "number", nullable: true, example: 50 },
       depositAmount: { type: "number", nullable: true, example: 100 },
+      billedDays: {
+        type: "integer",
+        nullable: true,
+        minimum: 1,
+        maximum: 365,
+        description:
+          "The days the rental lines are billed for, when the admin AGREED a figure other than " +
+          "the window's (a pickup delayed for the business's convenience is not more rental). Only " +
+          "with a `pickupAt` — on a purchase-only order it is a `400` " +
+          "`billedDaysForbiddenForPurchase`. Omit (or null) = the window's own count. Applies to " +
+          "per-day (Día) products only; 'Evento' lines stay flat.",
+        example: 1,
+      },
+      discountAmount: {
+        type: "number",
+        nullable: true,
+        description:
+          "A whole-order discount, subtracted from lines + delivery. Zero/omitted = none. It may " +
+          "bring the total to 0 but never below: past that the answer is a `400` with " +
+          "`data.discountExceedsTotal.maxDiscount` (only the server's pricing knows the ceiling).",
+        example: 100,
+      },
+      discountReason: {
+        type: "string",
+        nullable: true,
+        maxLength: 60,
+        description:
+          "Why the discount was granted — ONE line, printed under the discount row on the " +
+          "client's documents. Only alongside a discount (`400` `discountReasonWithoutDiscount`).",
+        example: "Cliente frecuente",
+      },
       assignedUserId: {
         type: "integer",
         description:
@@ -1950,7 +2008,9 @@ export const schemas: Record<string, Schema> = {
           upNext: {
             type: "array",
             description:
-              "The next THREE ORDERS — not three events. An order delivering at 14:00 and " +
+              "ORDERS, not events, earliest next event first: every order whose next event falls " +
+              "before the end of today's business day (overdue ones included) and nothing after it " +
+              "(a quiet day is an empty array), capped at 50. An order delivering at 14:00 and " +
               "collecting at 14:30 occupies one slot showing the delivery; confirming that delivery " +
               "puts the same order back in the queue carrying its collection, re-sorted against " +
               "everyone else. Ties break on id so the queue never reshuffles on a refetch.",
@@ -2014,6 +2074,31 @@ export const schemas: Record<string, Schema> = {
                   "Open with the work done (collected, or a delivered purchase) — only marking it " +
                   "finished is missing.",
                 example: 1,
+              },
+            },
+          },
+          tomorrow: {
+            type: "object",
+            description:
+              "TOMORROW as ONE count: the live orders to DELIVER on the next business day, not " +
+              "delivered yet (a delivery made early drops out). Collections are deliberately not " +
+              "counted — an order only collected tomorrow is absent; one delivering tomorrow counts " +
+              "whenever it comes back.",
+            properties: {
+              period: {
+                type: "object",
+                description: "The business day counted, half-open `[from, to)`.",
+                properties: {
+                  from: { type: "string", format: "date-time" },
+                  to: { type: "string", format: "date-time" },
+                },
+              },
+              deliveries: {
+                type: "integer",
+                description:
+                  "Orders whose delivery falls tomorrow and is still pending — one order has one " +
+                  "delivery, so this is orders and deliveries at once.",
+                example: 3,
               },
             },
           },
@@ -2148,6 +2233,33 @@ export const schemas: Record<string, Schema> = {
     },
   },
 
+  AccountPreferences: {
+    type: "object",
+    required: ["orderBilledDays"],
+    description:
+      "The signed-in person's OWN working preferences — how *I* work, as opposed to the business " +
+      "rules under `/preferences`. They follow the person to every device. `null` always means the " +
+      "default behaviour, so an account that never saved anything reads as all-`null`.",
+    properties: {
+      orderBilledDays: {
+        type: "integer",
+        nullable: true,
+        minimum: 1,
+        maximum: 365,
+        description:
+          "How the order form fills its billed days. `null` (default) = from the delivery→pickup " +
+          "dates, re-derived whenever they change; N = every new order starts at N days whatever " +
+          "the dates say. The field stays editable per order either way.",
+        example: 1,
+      },
+    },
+  },
+  AccountPreferencesResponse: {
+    type: "object",
+    properties: {
+      preferences: schemaRef("AccountPreferences"),
+    },
+  },
   TermsResponse: {
     type: "object",
     required: ["terms"],

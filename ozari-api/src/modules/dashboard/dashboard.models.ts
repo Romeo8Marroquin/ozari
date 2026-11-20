@@ -147,6 +147,17 @@ export interface DashboardResponseModel {
     /** Open with the work done (collected, or a delivered purchase) — only "finished" is missing. */
     activeToClose: number;
   };
+  /**
+   * TOMORROW as ONE count (owner, 2026-11-19/20): the orders to DELIVER on the next business day —
+   * live, not delivered yet. Collections are deliberately left out: the day ahead is planned around
+   * what goes OUT. An order has one delivery, so this is orders and deliveries at once.
+   */
+  tomorrow: {
+    /** The business day counted (Guatemala midnights), so the client can name it. */
+    period: DateRangeModel;
+    /** Live orders whose delivery falls tomorrow and has not happened yet. */
+    deliveries: number;
+  };
   month: {
     period: DateRangeModel;
     revenue: StatComparisonModel;

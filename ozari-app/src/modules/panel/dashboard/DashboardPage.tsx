@@ -30,7 +30,8 @@ import { ChartSkeleton, ListSkeleton, StatsSkeleton, UpNextSkeleton } from './Da
 import DepositsCard from './DepositsCard';
 import StatCard from './StatCard';
 import { activeHint, overdueHint, scheduledTodayHint } from './todayHints';
-import UpNextCard from './UpNextCard';
+import TomorrowSummary from './TomorrowSummary';
+import UpNextQueue from './UpNextQueue';
 import { useDashboard } from './useDashboard';
 
 const KEY = 'modules.panel.dashboard';
@@ -58,9 +59,11 @@ const sliceColor = (colorKey: string | undefined): string => {
  *
  * Three questions, in the order an owner actually asks them:
  *
- * 1. **What do I do next?** The three orders whose next event is soonest, each with the one action
- *    that moves it forward and a button that hands the address to the driver's maps app. This is the
- *    only part of the screen you can act on, so it leads and it is the widest.
+ * 1. **What do I do next?** Every order with something to do TODAY (overdue included — and nothing
+ *    after), each with the one action that moves it forward and a button that hands the address to
+ *    the driver's maps app — one row at rest, the rest folded behind "Ver más" (`UpNextQueue`). Under
+ *    it, how many orders go out TOMORROW (`TomorrowSummary`) — one count, never more cards. This is the only part of the
+ *    screen you can act on, so it leads and it is the widest.
  * 2. **How is today?** Deliveries, collections, what is late, what is open.
  * 3. **How is the business?** This month against last, what is still owed, a year of revenue, what
  *    is actually going out of the warehouse, and where the live orders are sitting.
@@ -147,7 +150,9 @@ const DashboardPage: React.FC = () => {
   return (
     <div ref={root} className="flex flex-col gap-6">
       {/* ── 1. What do I do next ─────────────────────────────────────────────────────────── */}
-      <section className="reveal-block flex flex-col gap-3">
+      {/* `@container`: the queue's columns (how many cards make "one row") answer to this section's
+          width, not the window's — the sidebar and the page padding sit in between. */}
+      <section className="reveal-block @container flex min-w-0 flex-col gap-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div className="min-w-0">
             <h2 className="text-base font-bold text-charcoal">{t(`${KEY}.upNext.title`)}</h2>
@@ -164,38 +169,36 @@ const DashboardPage: React.FC = () => {
         </div>
 
         <SectionReveal loading={loading} skeleton={<UpNextSkeleton />}>
-          {data && data.upNext.length > 0 ? (
-            <div className="grid gap-3 lg:grid-cols-3">
-              {data.upNext.map((item, index) => (
-                <div key={`${item.id}-${item.event.kind}`} className="card-item">
-                  <UpNextCard
-                    item={item}
-                    rank={index}
-                    onOpen={(order) => panelNavigate(`/panel/pedidos/${order.id}`)}
-                    onAdvance={(order, action) => setPending({ item: order, action })}
-                    onPay={setPayingOrder}
-                  />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="card-item">
-              <ProductsStatus
-                tone="empty"
-                title={t(`${KEY}.upNext.emptyTitle`)}
-                description={t(`${KEY}.upNext.emptyDescription`)}
-                action={
-                  <Button
-                    color={SECONDARY_COLOR}
-                    startIcon={<HiOutlinePlus className="size-4" />}
-                    onClick={() => panelNavigate('/panel/pedidos/nuevo')}
-                  >
-                    {t(`${KEY}.upNext.emptyAction`)}
-                  </Button>
-                }
+          <div className="flex flex-col gap-3">
+            {data && data.upNext.length > 0 ? (
+              // TODAY only, ONE row at rest, the rest folded behind "Ver más" (`UpNextQueue`).
+              <UpNextQueue
+                items={data.upNext}
+                onOpen={(order) => panelNavigate(`/panel/pedidos/${order.id}`)}
+                onAdvance={(order, action) => setPending({ item: order, action })}
+                onPay={setPayingOrder}
               />
-            </div>
-          )}
+            ) : (
+              <div className="card-item">
+                <ProductsStatus
+                  tone="empty"
+                  title={t(`${KEY}.upNext.emptyTitle`)}
+                  description={t(`${KEY}.upNext.emptyDescription`)}
+                  action={
+                    <Button
+                      color={SECONDARY_COLOR}
+                      startIcon={<HiOutlinePlus className="size-4" />}
+                      onClick={() => panelNavigate('/panel/pedidos/nuevo')}
+                    >
+                      {t(`${KEY}.upNext.emptyAction`)}
+                    </Button>
+                  }
+                />
+              </div>
+            )}
+            {/* Tomorrow is a COUNT under today's cards, never more cards (owner, 2026-11-19). */}
+            {data && <TomorrowSummary tomorrow={data.tomorrow} />}
+          </div>
         </SectionReveal>
       </section>
 

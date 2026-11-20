@@ -386,12 +386,19 @@ export interface OrderDetail extends OrderListItem {
   deliveryAmount?: number;
   depositAmount?: number;
   paymentMethod?: OrderLookup;
+  /** The whole-order discount, ALREADY subtracted from `totalAmount`. */
   discountAmount?: number;
+  /** Why — client-facing: the documents print it under the discount row. */
   discountReason?: string;
   paidAt?: string;
   cancelReason?: string;
   serviceStart: string;
   serviceEnd: string;
+  /** The days the rental lines were BILLED for (the agreed figure, else the window's count). Absent
+   *  on a purchase-only order. Never re-derive it from the window — they differ when one was agreed. */
+  billedDays?: number;
+  /** The window's own day count, beside `billedDays` — so a screen can say when the two differ. */
+  windowDays?: number;
   lines: OrderLine[];
   extras: unknown[];
   securityDeposit?: OrderSecurityDeposit;
