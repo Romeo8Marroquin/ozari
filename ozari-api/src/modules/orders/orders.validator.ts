@@ -88,6 +88,60 @@ const parseDate = (value: unknown): Date | null => {
 };
 
 /**
+ * The two things the admin AGREES with the client beyond the catalog's prices (owner, 2026-11-19):
+ * the billed days and a whole-order discount. `null` once it has already answered the request.
+ *
+ * - **Billed days** only mean something when a pickup exists (something is rented): a purchase-only
+ *   order bills once, and a figure there would be a contract nothing can honour. Absent = the
+ *   window's own count, which is exactly what every order before this field billed.
+ * - **The discount** is a positive amount (zero is "no discount", stored as none), with a reason
+ *   only beside one — printed under the discount row, so ONE line. Whether it fits under the
+ *   order's own total is the CONTROLLER's question: only it knows the priced lines.
+ */
+function parseAgreedTerms(
+  body: Record<string, unknown>,
+  pickupAt: Date | undefined,
+  reject: RejectOrderBody,
+): Pick<CreateOrderRequestModel, "billedDays" | "discountAmount" | "discountReason"> | null {
+  const rawBilledDays = body["billedDays"];
+  let billedDays: number | undefined;
+  if (rawBilledDays !== undefined && rawBilledDays !== null) {
+    if (
+      typeof rawBilledDays !== "number" ||
+      !Number.isInteger(rawBilledDays) ||
+      rawBilledDays < 1 ||
+      rawBilledDays > appConfig.maxBilledDays
+    ) {
+      reject("invalidBilledDays", { billedDays: rawBilledDays });
+      return null;
+    }
+    if (pickupAt === undefined) {
+      reject("billedDaysForbiddenForPurchase", { billedDays: rawBilledDays });
+      return null;
+    }
+    billedDays = rawBilledDays;
+  }
+
+  const discountAmount = sanitizeOptionalMoney(body["discountAmount"]);
+  if (!discountAmount.ok) {
+    reject("invalidDiscountAmount", { discountAmount: body["discountAmount"] });
+    return null;
+  }
+  const discount =
+    discountAmount.value !== undefined && discountAmount.value > 0 ? discountAmount.value : undefined;
+  const reason = sanitizeOptionalText(body["discountReason"], appConfig.maxDiscountReasonLength);
+  if (!reason.ok || (reason.value !== undefined && /[\r\n]/.test(reason.value))) {
+    reject("invalidDiscountReason", { discountReason: body["discountReason"] });
+    return null;
+  }
+  if (reason.value !== undefined && discount === undefined) {
+    reject("discountReasonWithoutDiscount", { discountReason: reason.value });
+    return null;
+  }
+  return { billedDays, discountAmount: discount, discountReason: reason.value };
+}
+
+/**
  * The whole order-body CONTRACT, shared by CREATE and UPDATE (they describe the same order, so a
  * rule may never exist in only one of them): identity (an ACTIVE client registry — the walk-in flow;
  * the platform-user variant is a documented door that widens THIS check, never a new endpoint), an
@@ -348,6 +402,10 @@ async function parseOrderBody(
     reject("invalidDepositAmount", { depositAmount: body["depositAmount"] });
     return null;
   }
+  const agreed = parseAgreedTerms(body, pickupAt, reject);
+  if (!agreed) {
+    return null;
+  }
 
   // NOTE — the payment METHOD is deliberately NOT part of this body (owner decision 2026-08-05).
   // `services.paymentMethodId` records HOW the order was actually paid, and at create/edit time that
@@ -394,6 +452,7 @@ async function parseOrderBody(
     comment: comment.value,
     deliveryAmount: deliveryAmount.value,
     depositAmount: depositAmount.value,
+    ...agreed,
     assignedUserId,
     lines,
   };

@@ -20,6 +20,14 @@
  *             this business actually has must not spill onto a second sheet.
  *   `--quote` The cotización — the same model with a different `kind`: no order number, a validity
  *             date, and the "sujeta a cambios" notice.
+ *   `--minimal` A cotización of ONE product and nothing else (owner, 2026-11-19): no client, no
+ *             venue, no dates, no fee, no discount. No facts means no fact cards at all — the table
+ *             sits right under the letterhead, with no blank box where they would be.
+ *   `--partial` The in-between quote: a client's name and a delivery date, nothing more — ONE card
+ *             each, holding only what is known.
+ *   `--agreed` The rental billed for an AGREED figure (2 days) over a 3-day window: the "por día
+ *             iniciado" hint disappears, since it would contradict the number above it.
+ *   `--long-reason` also gives the DISCOUNT the longest reason the API accepts (60 characters).
  *   `--rows=N` the rental group's line count — walks the page break through the column.
  *   `--no-photos` every row without its product photo — the document exactly as it was before row
  *             photos (2026-10-29). By default the rows carry LOCAL images of awkward shapes (tall,
@@ -90,7 +98,11 @@ const numberOption = (name: string): number | undefined => {
 
 const long = flag('--long');
 const free = flag('--free');
-const quote = flag('--quote');
+const minimal = flag('--minimal');
+const partial = flag('--partial');
+const agreed = flag('--agreed');
+// The thin quotes are quotes by definition: an order cannot exist without a client and dates.
+const quote = flag('--quote') || minimal || partial;
 const damageReport = flag('--damage-report');
 const covered = flag('--covered');
 const clean = flag('--clean');
@@ -245,7 +257,17 @@ const withPhoto = <Line extends object>(line: Line, imageUrl: string | undefined
 const fillerPhoto = (index: number): string | undefined =>
   index % 4 === 3 ? undefined : [photos.tall, photos.wide, photos.square][index % 4];
 
-const rentalLines: DocumentLine[] = rowCount !== undefined
+/** The days the rental is billed for: the 3-day window, or the figure the admin agreed. */
+const billedDays = agreed ? 2 : 3;
+
+const rentalLines: DocumentLine[] = minimal
+  ? [
+      withPhoto(
+        { description: 'Sillas plásticas blancas', quantity: 50, unitPrice: 2, days: 1, total: 100 },
+        photos.tall,
+      ),
+    ]
+  : rowCount !== undefined
   ? Array.from({ length: rowCount }, (_, index) =>
       withPhoto(
         {
@@ -309,8 +331,12 @@ const rentalLines: DocumentLine[] = rowCount !== undefined
       ),
     ];
 
-const rentalSubtotal = rentalLines.reduce((sum, line) => sum + line.total, 0);
-const saleLines: DocumentLine[] = [
+// The fixture's rows are written for 3 days; `--agreed` re-prices them for the agreed figure.
+const billedRentalLines = agreed
+  ? rentalLines.map((line) => ({ ...line, days: billedDays, total: (line.total / 3) * billedDays }))
+  : rentalLines;
+const rentalSubtotal = billedRentalLines.reduce((sum, line) => sum + line.total, 0);
+const saleLines: DocumentLine[] = minimal ? [] : [
   // The row WITHOUT a photo — except on `--free`, which is the one-page check and so carries the
   // WORST case: a photo on every line.
   withPhoto(
@@ -324,11 +350,15 @@ const saleLines: DocumentLine[] = [
 ];
 const saleSubtotal = saleLines.reduce((sum, line) => sum + line.total, 0);
 
-const deliveryFee = free ? 0 : 75;
-const discount = free ? undefined : 100;
+const deliveryFee = minimal ? undefined : free ? 0 : 75;
+const discount = free || minimal ? undefined : 100;
+/** The longest discount reason the API accepts (`maxDiscountReasonLength`). */
+const DISCOUNT_REASON = longReason
+  ? 'Cliente frecuente: pedido grande con pago anticipado total.'.padEnd(60, '.').slice(0, 60)
+  : 'Cliente frecuente.';
 /** The ANTICIPO — `OrderDetail.depositAmount`, not the security deposit. */
-const advance = advanceOption ?? (free ? undefined : 500);
-const total = rentalSubtotal + saleSubtotal + deliveryFee - (discount ?? 0);
+const advance = advanceOption ?? (free || minimal ? undefined : 500);
+const total = rentalSubtotal + saleSubtotal + (deliveryFee ?? 0) - (discount ?? 0);
 
 /** The order, as `orderBalanceInput` would build it from an `OrderDetail`. */
 const balanceInput: OrderBalanceInput = {
@@ -389,28 +419,38 @@ const model: DocumentModel = {
     quoteValidityDays: 7,
     banks,
   },
-  client: {
-    name: 'María Fernanda Rodríguez de León',
-    contact: '4123-9876',
-    address: 'Salón del club, entrada norte, Hacienda Real, zona 16',
-  },
-  event: {
-    type: 'Boda',
-    deliveryAt: new Date('2026-08-14T14:00:00Z'),
-    pickupAt: new Date('2026-08-16T22:00:00Z'),
-    billedDays: 3,
-  },
+  // Only the facts the scenario knows — exactly what `fromOrderForm` hands a thin quote.
+  client: minimal
+    ? {}
+    : partial
+      ? { name: 'María Fernanda Rodríguez de León' }
+      : {
+          name: 'María Fernanda Rodríguez de León',
+          contact: '4123-9876',
+          address: 'Salón del club, entrada norte, Hacienda Real, zona 16',
+        },
+  event: minimal
+    ? { billedDays: 1 }
+    : partial
+      ? { deliveryAt: new Date('2026-08-14T14:00:00Z'), billedDays }
+      : {
+          type: 'Boda',
+          deliveryAt: new Date('2026-08-14T14:00:00Z'),
+          pickupAt: new Date('2026-08-16T22:00:00Z'),
+          billedDays,
+          windowDays: 3,
+        },
   groups: [
-    { kind: 'rental', lines: rentalLines, subtotal: rentalSubtotal },
-    { kind: 'sale', lines: saleLines, subtotal: saleSubtotal },
-  ],
+    { kind: 'rental' as const, lines: billedRentalLines, subtotal: rentalSubtotal },
+    { kind: 'sale' as const, lines: saleLines, subtotal: saleSubtotal },
+  ].filter((group) => group.lines.length > 0),
   totals: {
     groups: [
-      { kind: 'rental', subtotal: rentalSubtotal },
-      { kind: 'sale', subtotal: saleSubtotal },
-    ],
-    delivery: deliveryFee,
-    ...(discount !== undefined && { discount }),
+      { kind: 'rental' as const, subtotal: rentalSubtotal },
+      { kind: 'sale' as const, subtotal: saleSubtotal },
+    ].filter((group) => group.subtotal > 0),
+    ...(deliveryFee !== undefined && { delivery: deliveryFee }),
+    ...(discount !== undefined && { discount, discountReason: DISCOUNT_REASON }),
     total,
     ...advanceRows(advance, total),
     ...(paidRemainder > 0 && { paid: paidRemainder }),
@@ -571,10 +611,12 @@ const reportModel: DamageReportModel = {
   reference: 8,
   issuedAt: ISSUED_AT,
   client: model.client,
+  // A report is always about a SAVED order, so it always has these (the thin-quote flags do not
+  // apply to it).
   event: {
-    type: model.event.type,
-    deliveryAt: model.event.deliveryAt,
-    ...(model.event.pickupAt !== undefined && { pickupAt: model.event.pickupAt }),
+    type: 'Boda',
+    deliveryAt: new Date('2026-08-14T14:00:00Z'),
+    pickupAt: new Date('2026-08-16T22:00:00Z'),
   },
   // Only a RECEIVED deposit is printed as received: otherwise no table, no credit.
   deposit: received
@@ -609,6 +651,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const variant = [
   damageReport ? '-damage-report' : '',
   rowCount !== undefined ? `-rows${rowCount}` : long ? '-long' : free ? '-free' : quote ? '-quote' : '',
+  minimal ? '-minimal' : '',
+  partial ? '-partial' : '',
+  agreed ? '-agreed' : '',
   covered ? '-covered' : '',
   clean ? '-clean' : '',
   threeBanks ? '-banks3' : '',

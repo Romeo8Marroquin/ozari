@@ -667,6 +667,22 @@ const OrderDetailPage: React.FC = () => {
                     order.pickupAt ? formatMoment(order.pickupAt) : t(`${KEY}.logistics.noPickup`)
                   }
                 />
+                {/* The days the rentals were BILLED for — the API's figure, never re-derived from
+                    the dates — and, when the admin agreed a different one, what the dates alone
+                    would have said, so the difference is never a mystery on a later read. */}
+                {order.billedDays !== undefined && (
+                  <Fact
+                    label={t(`${KEY}.logistics.billedDays`)}
+                    value={
+                      order.windowDays !== undefined && order.windowDays !== order.billedDays
+                        ? `${t(`${KEY}.logistics.billedDaysValue`, { count: order.billedDays })} · ${t(
+                            `${KEY}.logistics.billedDaysAgreed`,
+                            { count: order.windowDays },
+                          )}`
+                        : t(`${KEY}.logistics.billedDaysValue`, { count: order.billedDays })
+                    }
+                  />
+                )}
                 <Fact
                   label={t(`${KEY}.logistics.assignee`)}
                   value={order.assignee?.name ?? t(`${KEY}.logistics.unassigned`)}
@@ -773,9 +789,17 @@ const OrderDetailPage: React.FC = () => {
                   </div>
                 )}
                 {order.discountAmount !== undefined && (
-                  <div className="card-item flex justify-between gap-4 text-charcoal/60">
-                    <span>{t(`${KEY}.money.discount`)}</span>
-                    <span className="tabular-nums">
+                  <div className="card-item flex items-start justify-between gap-4 text-charcoal/60">
+                    {/* The reason sits under the label exactly as the client's documents print it. */}
+                    <span className="min-w-0">
+                      {t(`${KEY}.money.discount`)}
+                      {order.discountReason !== undefined && (
+                        <span className="block break-words text-xs text-charcoal/45">
+                          {order.discountReason}
+                        </span>
+                      )}
+                    </span>
+                    <span className="shrink-0 tabular-nums">
                       −{money(order.currency.symbol, order.discountAmount)}
                     </span>
                   </div>

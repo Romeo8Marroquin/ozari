@@ -27,6 +27,19 @@ export function formatMonthLabel(monthKey: string): string {
   );
 }
 
+/** The business's own zone: a day the API counted is NAMED in it, wherever the browser is. */
+const BUSINESS_DAY = new Intl.DateTimeFormat('es-GT', {
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+  timeZone: 'America/Guatemala',
+});
+
+/** A business day's start instant (e.g. `tomorrow.period.from`) → `viernes, 20 de noviembre`. */
+export function formatBusinessDay(iso: string): string {
+  return BUSINESS_DAY.format(new Date(iso));
+}
+
 /** The three shapes a delta can take. `flat` covers an exact 0 as well as an absent comparison, and
  *  the UI words those two differently — hence `none` for "there is nothing to compare against". */
 export type DeltaTone = 'up' | 'down' | 'flat' | 'none';

@@ -184,12 +184,11 @@ exclusively **drivers**.
   remains selectable per product). The products form's pricing section copy/behavior gets
   revisited accordingly (small Epic-1 touch-up, do it inside Epic 2).
 - ✅ Billed days derive from the delivery→pickup window: `< 24h` = 1 day, then one more day per
-  started 24h block (pickup time decides).
+  started 24h block (pickup time decides). **The admin may AGREE a different figure** (owner,
+  2026-11-19 — "50 sillas por 3 días" regardless of the hours): §13.
 - ✅ **Custom discounts are admin-only and occasional** (recurrent clients, birthdays — relationship
-  management; maybe coupons someday). NOT MVP, but the DB must not make them painful later: plan a
-  nullable order-level `discountAmount`+`discountReason` (or an adjustments row) when orders land —
-  decide the cheapest shape at migration time, never a redesign. (Taken as the two nullable columns
-  in the 2026-07-16 schema.)
+  management; maybe coupons someday). Built 2026-11-19 as a whole-order discount with an optional,
+  client-facing reason: §13.
 - ✅ **Delivery fee (envío) is charged separately, per order** (owner, 2026-07-16): distance-based,
   **admin-determined for now** — free inside Hacienda Real (the owner's village), the rest by how
   far it is. `services.deliveryAmount` snapshots what was actually charged; registry addresses
@@ -481,11 +480,14 @@ fields, not more free text.
 ### 6e. THE ADMIN DASHBOARD (✅ BUILT 2026-08-04) — `/panel/inicio`, §5 item 5
 
 The panel's front door, and the answer to §9's Q-C (the "week window" question dissolved: the screen
-is built around the **next three things**, not around a week — a week view belongs to the calendar
-slice that ships with notifications).
+is built around **today's work and tomorrow's count**, not around a week — a week view belongs to the
+calendar slice that ships with notifications).
 
-**Three questions, in the order an owner asks them.** (1) *What do I do next?* — the three orders
-whose next event is soonest, each with the one action that moves it forward and a button that hands
+**Three questions, in the order an owner asks them.** (1) *What do I do next?* — every order with an
+event due TODAY, overdue included, and nothing after (owner, 2026-11-19: it was a fixed "next three",
+which a December day outgrows), shown as ONE row with the rest folded behind "Ver más", and under it
+how many orders go out TOMORROW — deliveries only, one count, never more cards (MODULES §5) — each card
+with the one action that moves it forward and a button that hands
 the address to the driver's maps app. (2) *How is today?* — deliveries, collections, what is late,
 what is open. (3) *How is the business?* — this month vs last, what is still owed, twelve months of
 revenue, what actually left the warehouse, and where the live orders are sitting.
@@ -930,3 +932,52 @@ statement each — fine on Postgres 12+). No backfill: every column is nullable 
 with no deposit/replacement lines behaves exactly as before, settlements recorded before the trail existed
 simply have no history rows, and orders delivered before the collection existed read PENDING — they hold 0
 until the admin marks them received by hand (2026-10-28: no backfill, and a report no longer stamps it).
+
+## 13. Agreed billed days + the whole-order discount (✅ BUILT, owner 2026-11-19)
+
+### Billed days — filled for the admin, never locked
+
+- **Storage:** `services.billed_days` (nullable INT). `NULL` = "bill by the window" — every order saved
+  before 2026-11-19 reads that way, so no backfill. A value is the figure the admin AGREED (1–365,
+  `appConfig.maxBilledDays` ↔ `ORDER_MAX_BILLED_DAYS`).
+- **One resolver, server-side:** `resolveBilledDays(agreed, deliveryAt, pickupAt)` — the agreed figure,
+  else `computeBilledDays` of the window. Every Día-priced rental line of the order is priced with it
+  (`priceOrderLine`); a purchase-only order has no billed days and the body may not carry them (400).
+  The detail returns `billedDays` (what was billed) AND `windowDays` (what the dates alone would
+  bill), so the UI and the PDF say "acordado" by COMPARING the two — never by re-deriving.
+- **The form** (`OrderForm`): the field sits under the dates, is ALWAYS editable, and is auto-filled:
+  - default ("Por las fechas"): every change to the delivery or pickup re-fills it with the window's
+    count — **even after a hand edit** (owner: a new window is a new question). A "Usar las fechas
+    (N días)" button puts the window's count back after a hand edit, without touching a date.
+  - a FIXED default N (the admin's own preference, below): a new order starts at N and the dates
+    never touch it.
+  - Blank is valid: the body omits it and the server bills the window (the placeholder shows that
+    count). An edit reopens on the order's own figure and only re-fills when a date moves. The fill
+    waits for the preference to load, so a fixed default is never pre-empted by the window.
+- **The per-USER default** (owner: "per admin, or per order creator — not the whole administration"):
+  `user_preferences.order_billed_days` (NULL = by the dates), read/written by the caller only at
+  `GET/PUT /api/account/preferences` (any authenticated role — it is the caller's own row, so it
+  follows them across devices). Screen: **Ajustes** (`/panel/ajustes` — *my account*, not the
+  business-wide Preferencias) → "Pedidos", shown to admins (the only order creators today). Frontend:
+  `useAccountPreferences` — React Query, user-scoped (cleared on logout with the rest of the cache).
+
+### The whole-order discount
+
+- `services.discount_amount` + `services.discount_reason` (the two §2 columns). Total = lines +
+  delivery − discount, never below zero; a discount ABOVE lines + delivery is a `400` carrying
+  `data.discountExceedsTotal.maxDiscount`, which the form lands on the discount field. The form's
+  resolver checks the same ceiling against its own estimate first, so the round trip is rare.
+- **Input:** an amount in Q, plus a "%" helper that WRITES the amount (truncated to cents, capped at
+  100 %) and steps aside once the amount is typed by hand — the amount is the only stored truth.
+  The estimate shows the discount line with its share of the order.
+- **The reason is CLIENT-FACING** (owner: "print it"): optional, one line, ≤ 60 characters
+  (`appConfig.maxDiscountReasonLength` ↔ `ORDER_DISCOUNT_REASON_MAX_LENGTH`) — 60 keeps it ONE printed
+  line under "Descuento" on the PDF (~65 fit; a second line is what spills an ordinary order onto a
+  second page). Only alongside a discount (`400 discountReasonWithoutDiscount`). Shown under the
+  discount on the order detail and printed under it on the cotización and the comprobante.
+- **Door — per-product offers** (owner: "may come later"): a line-level `discount_amount` on
+  `service_details` (the line keeps `unitary_price` as the list price; `parcial_price` = qty × price ×
+  days − line discount), summed into the line subtotals the order total already adds. Purely
+  additive: the order-level discount stays as the "whole bill" adjustment, and the documents print a
+  line's discount as a second line under its description, exactly as this reason prints. Coupons would
+  be a lookup table that WRITES one of these two amounts — never a third pricing path.

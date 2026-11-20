@@ -293,13 +293,24 @@ export interface OrderDetailResponseModel extends OrderListItemResponseModel {
   depositAmount: number | undefined;
   /** How the order is paid (Efectivo / Transferencia); absent until chosen. */
   paymentMethod: OrderLookupModel | undefined;
+  /** The whole-order discount, already subtracted from `totalAmount`; absent = none. */
   discountAmount: number | undefined;
+  /** Why it was granted — CLIENT-FACING: the documents print it under the discount row. */
   discountReason: string | undefined;
   paidAt: Date | undefined;
   cancelReason: string | undefined;
-  /** The BILLED period (whole days derived from the delivery→pickup window). */
+  /** The delivery→pickup window (the logistics period the rental occupies). */
   serviceStart: Date;
   serviceEnd: Date;
+  /**
+   * The days the rental lines were BILLED for — the admin's agreed figure when one was set, else the
+   * window's own count (`computeBilledDays`). Absent on a purchase-only order (nothing is rented).
+   * Never re-derive it from the window on a client: the two differ exactly when the admin agreed to
+   * charge fewer (or more) days than the logistics window spans.
+   */
+  billedDays: number | undefined;
+  /** The window's own day count — present with `billedDays`, so a screen can say when they differ. */
+  windowDays: number | undefined;
   lines: OrderLineResponseModel[];
   extras: OrderExtraResponseModel[];
   /** The refundable deposit + damage settlement; absent when no line can carry either. */
@@ -427,7 +438,16 @@ export interface CreateOrderRequestModel {
   deliveryAmount: number | undefined;
   /** Anticipo (partial deposit) taken at creation, when any. */
   depositAmount: number | undefined;
-  /** How it will be paid (an active seeded method); optional — payment can be settled later. */
+  /**
+   * The days the rental lines are billed for, when the admin AGREED a figure other than the window's
+   * (a pickup delayed for the business's own convenience is not more rental). Only with a pickup;
+   * absent = the window's own count. Applies to per-day (Día) products only, like the window did.
+   */
+  billedDays: number | undefined;
+  /** A whole-order discount, subtracted from lines + delivery; may never exceed them. */
+  discountAmount: number | undefined;
+  /** Why — printed on the client's documents. Only with a discount. */
+  discountReason: string | undefined;
   /**
    * The staff member the order is assigned to (an active Admin/Driver) — **required** (Q-D2, owner
    * decision 2026-07-30). The column is nullable and the API used to default it to the creating

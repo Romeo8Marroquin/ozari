@@ -14,6 +14,7 @@ import {
   SEEDED_STATUS_CATALOG,
 } from "@/tests/fixtures/lifecycleCatalog.js";
 import type { DashboardEnvelopeModel } from "./dashboard.models.js";
+import { UP_NEXT_MAX } from "./dashboard.service.js";
 
 vi.mock("@/config/logger.js", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("@/config/i18n.js", () => ({ i18next: { t: vi.fn((key: string) => key) } }));
@@ -93,8 +94,8 @@ interface DashboardMocks {
 const mockPrisma = (mocks: DashboardMocks = {}) => {
   // In `Promise.all` order: deliveries today, of which done; collections today, of which done;
   // overdue deliveries, overdue collections; active, of which to deliver, of which to collect;
-  // cancelled this month, cancelled last month.
-  const counts = mocks.counts ?? [4, 1, 2, 0, 1, 0, 9, 5, 3, 3, 5];
+  // TOMORROW's deliveries; cancelled this month, cancelled last month.
+  const counts = mocks.counts ?? [4, 1, 2, 0, 1, 0, 9, 5, 3, 4, 3, 5];
   const count = vi.fn();
   counts.forEach((value) => count.mockResolvedValueOnce(value));
   const findMany = vi
@@ -191,6 +192,24 @@ describe("getDashboard", () => {
     expect(lt.getTime() - gte.getTime()).toBe(24 * 60 * 60 * 1000);
     expect(gte.getTime()).toBeLessThanOrEqual(dashboard.generatedAt.getTime());
     expect(lt.getTime()).toBeGreaterThan(dashboard.generatedAt.getTime());
+    // "Mañana" is ONE count: the orders to DELIVER tomorrow (owner, 2026-11-20).
+    expect(dashboard.tomorrow).toEqual({ period: expect.any(Object), deliveries: 4 });
+    // …the NEXT business day, starting exactly where today ends.
+    expect(dashboard.tomorrow.period.from).toEqual(lt);
+    expect(dashboard.tomorrow.period.to.getTime() - lt.getTime()).toBe(24 * 60 * 60 * 1000);
+    const tomorrowWhere = (
+      (client.service.count as Mock).mock.calls[9]?.[0] as { where: Record<string, unknown> }
+    ).where;
+    // Scoped by the DELIVERY date and still pending; a live order. The owner's case: an order
+    // delivering and collecting tomorrow counts, one delivering tomorrow and collecting in four days
+    // counts, and one only collected tomorrow (delivered days ago) does NOT — so there is no
+    // `pickupAt` in the filter at all.
+    expect(tomorrowWhere).toEqual({
+      isActive: true,
+      cancelledAt: null,
+      deliveryAt: { gte: lt, lt: dashboard.tomorrow.period.to },
+      deliveredAt: null,
+    });
     expect(dashboard.currency).toEqual(CURRENCY);
     // Nothing open, nothing settled: the deposit corner is all zeros, never absent.
     expect(dashboard.deposits).toEqual({
@@ -303,7 +322,7 @@ describe("getDashboard", () => {
     // A pending DELIVERY at 14:00 and, on a different order, a pending COLLECTION at 09:00. The
     // collection is sooner, so it must lead — which is the whole reason the two sets are merged
     // rather than concatenated.
-    mockPrisma({
+    const client = mockPrisma({
       deliveries: [rawOrder({ id: 12, deliveryAt: new Date("2026-08-01T14:00:00.000Z") })],
       collections: [
         rawOrder({
@@ -323,6 +342,33 @@ describe("getDashboard", () => {
     // Each card carries what a driver needs and the engine's own action list.
     expect(upNext[0]?.deliveryAddress).toBe("Zona 10, 4a avenida 5-55");
     expect(upNext[0]?.actions.length).toBeGreaterThan(0);
+    // Both candidate sets are TODAY's (overdue included) — bounded in SQL by the end of the business
+    // day — read up to the safety ceiling: a heavy day shows every event due today, and nothing
+    // after it (owner, 2026-11-19).
+    expect(client.service.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({ deliveredAt: null, deliveryAt: { lt: expect.any(Date) } }),
+        take: UP_NEXT_MAX,
+        orderBy: { deliveryAt: "asc" },
+      }),
+    );
+    expect(client.service.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({ collectedAt: null, pickupAt: { lt: expect.any(Date) } }),
+        take: UP_NEXT_MAX,
+        orderBy: { pickupAt: "asc" },
+      }),
+    );
+  });
+
+  it("leaves a candidate due AFTER today out of the queue, even if the query returned it", async () => {
+    // Defence in depth: `selectUpNext` applies the same cut the SQL does.
+    const later = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    mockPrisma({ deliveries: [rawOrder({ id: 30, deliveryAt: later, pickupAt: null })] });
+    await getDashboard(req, res);
+    expect(sentDashboard().upNext).toEqual([]);
   });
 
   it("compares the month with the previous one and shapes the derived figures", async () => {

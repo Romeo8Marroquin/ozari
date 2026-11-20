@@ -22,10 +22,21 @@ They come from different places, carry different authority, and must never be co
 | Authority | A proposal. Says so on its face: "Cotización — sujeta a cambios", plus a validity note | The record of what was agreed. Carries the order's id and a **PAGADO** mark once `paidAt` is set |
 | Identity | None (no order exists yet) | The order id |
 
-**The cotización requires a VALID form** (owner decision): the button is enabled only when the same
-resolver that guards submit says the form is complete. A half-filled form has no dates, no client and
-no lines — a document made from it would be a blank page with a logo, which is worse than no button.
-It does **not** require saving: quoting on the phone before the client commits is the whole point.
+**The cotización needs as little as ONE product** (owner, 2026-11-19 — supersedes the 2026-08-05
+"valid form" gate): a client asks "how much for 50 chairs?" before there is a name, a venue or a date.
+On click, the button runs the SAME resolver that guards submit, but only on what the quote PRINTS
+(`quoteFields` in `documents/quoteGate.ts`): ALWAYS the lines and the money fields (fee, anticipo,
+billed days, discount + reason), and the dates / receiver / contact / address only WHEN FILLED — a
+half-typed date is still an error, a missing one is not. Nothing to quote (no priced line) is the only
+refusal. It does **not** require saving: quoting on the phone before the client commits is the point.
+
+**Unknown facts are ABSENT, never blank** (`fromOrderForm` → `partyOf` / `given`): every client and
+event fact is optional in the model, a whitespace-only text counts as not given, and the template
+(`knownFacts` → `FactCards`) draws only the facts it has, only the cards that have any, and — with no
+facts at all — no card row, the first table moving up under the letterhead. A rental always states its
+billed days (1 with nothing to count), so the event card is the one that survives a products-only quote.
+`pnpm doc:preview -- --minimal` (one product) and `--partial` (a name and a delivery date) are the
+renders to check; the full fixture is the third state.
 
 **Naming.** "Comprobante de pedido" rather than "Recibo" because until `paidAt` is set nothing has
 been received. Once paid it carries the PAGADO mark and reads as a receipt. If the owner prefers
@@ -43,8 +54,9 @@ result as the comprobante. It shares the template, theme and letterhead. Its ful
 | # | Decision |
 |---|---|
 | 1 | **Our palette, their format.** Keep the reference template's structure and information; restyle in the app's language (cream→blossom, charcoal, `LogoMark`) so a client's document looks like the app and the welcome email. The blue→purple of the current template is retired. |
-| 2 | **No document from an incomplete form.** Valid-form gate, above. |
-| 3 | **Billing is per started day**, already implemented by `computeBilledDays`. The document DISPLAYS the days; it never re-derives them. |
+| 2 | ~~No document from an incomplete form.~~ Superseded 2026-11-19: one product is enough, unknown facts are left out (§1). What IS filled must still be valid. |
+| 3 | **Billing is per started day**, already implemented by `computeBilledDays` — unless the admin AGREED a figure (EPIC-2-ORDERS §13). The document DISPLAYS the billed days (`DocumentModel.event.billedDays`, from the API's `billedDays` on a comprobante); it never re-derives them. The "El alquiler se cobra por día iniciado" hint prints ONLY when the billed days equal the window's count (`windowDays`) — under an agreed figure it would contradict the number above it. |
+| 3b | **A discount prints its REASON** (owner, 2026-11-19) as a caption under "Descuento" in the totals, on the cotización and the comprobante alike. One line by construction (≤ 60 characters, EPIC-2-ORDERS §13). Note: the `--free --deposit=held` one-page target was tuned with NO discount — any discount row (reason or not) spills that worst case; an ordinary order with a discount fits. |
 | 4 | **Rental and sale are separate sections**, each with its own subtotal. |
 | 5 | **The delivery fee is a totals line, not a table row** — it is not a product. |
 | 6 | **Zero-quantity lines do not exist** (validator enforces `quantity >= 1`); the reference template's zero row was manual. Quantities always show and always feed a subtotal. |
@@ -473,7 +485,8 @@ deposit/balance; `serviceExtras`, which the reference template ignores entirely;
 not GTQ (symbol from the order, per the repo-wide rule — **never a hardcoded `Q`**); a client with
 no saved address; accents and ñ (Helvetica covers Latin-1).
 
-**Refusals** — cancelled order ⇒ no action rendered; invalid form ⇒ button disabled with the reason.
+**Refusals** — cancelled order ⇒ no action rendered; a quote with no priced line, or a FILLED field
+that is invalid ⇒ the click lights up the field and warns (§1).
 
 ---
 
@@ -708,11 +721,11 @@ zero and unpaid-service cases one page each (`Saldo del servicio +` when the ser
 the summary moving whole to the last.
 What it settled:
 
-- **The valid-form gate is a CHECK ON CLICK, not a disabled button.** Decision #2 ("no document from
-  an incomplete form") is honoured either way, but a greyed control on a twenty-field form cannot say
-  WHICH field is missing and leaves the admin hunting. Clicking runs `trigger()` — the same resolver
-  that guards submit, live availability caps included — so an incomplete form lights up its own field
-  errors. It also matches the submit button beside it, which is enabled and validates on press. The
+- **The quote's gate is a CHECK ON CLICK, not a disabled button.** A greyed control on a
+  twenty-field form cannot say WHICH field is wrong and leaves the admin hunting. Clicking runs
+  `trigger(quoteFields(values))` — the same resolver that guards submit, live availability caps
+  included, scoped to what the quote prints (§1; since 2026-11-19 a missing client or date is not an
+  error a quote has) — so a bad field lights up its own error. It also matches the submit button beside it, which is enabled and validates on press. The
   one legitimate disabled state is the reference data not having loaded.
 - **CREATE only.** On an edit the order already exists, so what the client should be handed is its
   comprobante; a "cotización" for something already agreed only muddies which document is

@@ -485,7 +485,11 @@ const createBody = () => ({
   description: undefined,
   comment: undefined,
   deliveryAmount: 50,
-  depositAmount: undefined,
+  depositAmount: undefined as number | undefined,
+  // Absent = the window's own count (25h → 2 days); the admin may agree another figure.
+  billedDays: undefined as number | undefined,
+  discountAmount: undefined as number | undefined,
+  discountReason: undefined as string | undefined,
   // REQUIRED since the logistics pad became a rule about a DRIVER's day (Q-D2): every event has
   // an owner, so the validator refuses a body without one.
   assignedUserId: 1,
@@ -595,7 +599,62 @@ describe("createOrder", () => {
       pickupAt: null,
       serviceEnd: body.deliveryAt,
       totalAmount: 85, // 35 + 50 delivery
+      // Nothing is rented, so there is no billed-days figure to store.
+      billedDays: null,
     });
+  });
+
+  it("bills the AGREED days instead of the window, and stores the figure (owner 2026-11-19)", async () => {
+    // A 25h window counts 2 days, but the pickup was delayed for the business's convenience: the
+    // client agreed ONE day. Rental 6 × 25 × 1 = 150; sale 35; +50 delivery = 235.
+    const tx = mockCreateTx();
+    await createOrder(buildCreateReq({ ...createBody(), billedDays: 1 }), {} as Response);
+    const createArg = (tx.service.create as Mock).mock.calls[0]?.[0] as {
+      data: Record<string, unknown> & { serviceDetails: { create: Array<Record<string, unknown>> } };
+    };
+    expect(createArg.data).toMatchObject({ totalAmount: 235, billedDays: 1 });
+    expect(createArg.data.serviceDetails.create[0]).toMatchObject({ parcialPrice: 150 });
+  });
+
+  it("stores NULL billed days when none was agreed — the window's own count", async () => {
+    const tx = mockCreateTx();
+    await createOrder(buildCreateReq(createBody()), {} as Response);
+    const createArg = (tx.service.create as Mock).mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(createArg.data["billedDays"]).toBeNull();
+  });
+
+  it("subtracts a whole-order discount from the total and stores it with its reason", async () => {
+    const tx = mockCreateTx();
+    await createOrder(
+      buildCreateReq({ ...createBody(), discountAmount: 85, discountReason: "Cliente frecuente" }),
+      {} as Response,
+    );
+    const createArg = (tx.service.create as Mock).mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(createArg.data).toMatchObject({
+      totalAmount: 300, // 385 − 85
+      discountAmount: 85,
+      discountReason: "Cliente frecuente",
+    });
+  });
+
+  it("accepts a discount of the WHOLE order (a gift) but refuses one above it with a 400", async () => {
+    let tx = mockCreateTx();
+    await createOrder(buildCreateReq({ ...createBody(), discountAmount: 385 }), {} as Response);
+    expect((tx.service.create as Mock).mock.calls[0]?.[0]).toMatchObject({
+      data: { totalAmount: 0 },
+    });
+
+    vi.clearAllMocks();
+    tx = mockCreateTx();
+    await createOrder(buildCreateReq({ ...createBody(), discountAmount: 385.01 }), {} as Response);
+    expect(tx.service.create).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.BAD_REQUEST,
+      "orders.createOrder.discountExceedsTotal",
+      undefined,
+      { discountExceedsTotal: { maxDiscount: 385 } },
+    );
   });
 
   it("rolls back to a STRUCTURED 409 when the window lacks stock (rental) or shelves lack units (sale)", async () => {
@@ -1044,6 +1103,51 @@ describe("updateOrder", () => {
       HttpEnum.OK,
       "orders.updateOrder.orderUpdated",
       expect.objectContaining({ order: expect.objectContaining({ id: 12 }) }),
+    );
+  });
+
+  it("re-prices with the AGREED days and rewrites the discount declaratively", async () => {
+    const tx = mockUpdateTx({ order: makeRawRichOrder() });
+    await updateOrder(
+      buildUpdateReq({
+        ...createBody(),
+        billedDays: 3,
+        discountAmount: 20,
+        discountReason: "Promoción",
+      }),
+      {} as Response,
+    );
+    const updateArg = (tx.service.update as Mock).mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    // Rental 6 × 25 × 3 = 450; sale 35; +50 delivery − 20 = 515.
+    expect(updateArg.data).toMatchObject({
+      totalAmount: 515,
+      billedDays: 3,
+      discountAmount: 20,
+      discountReason: "Promoción",
+    });
+  });
+
+  it("clears a stored discount when the edit sends none (full-state save)", async () => {
+    const tx = mockUpdateTx({ order: makeRawRichOrder() });
+    await updateOrder(buildUpdateReq(createBody()), {} as Response);
+    const updateArg = (tx.service.update as Mock).mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(updateArg.data).toMatchObject({
+      discountAmount: null,
+      discountReason: null,
+      billedDays: null,
+    });
+  });
+
+  it("refuses an edit whose discount no longer fits under the order (400, nothing written)", async () => {
+    const tx = mockUpdateTx({ order: makeRawRichOrder() });
+    await updateOrder(buildUpdateReq({ ...createBody(), discountAmount: 1000 }), {} as Response);
+    expect(tx.service.update).not.toHaveBeenCalled();
+    expect(sendOzariError).toHaveBeenCalledWith(
+      expect.anything(),
+      HttpEnum.BAD_REQUEST,
+      "orders.updateOrder.discountExceedsTotal",
+      undefined,
+      { discountExceedsTotal: { maxDiscount: 385 } },
     );
   });
 

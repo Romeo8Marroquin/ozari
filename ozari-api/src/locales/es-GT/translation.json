@@ -694,6 +694,7 @@
       "stockConflict": "Algunos productos no tienen disponibilidad para las fechas solicitadas.",
       "driverConflict": "El responsable asignado ya tiene un evento demasiado cerca de ese horario.",
       "selfOverlap": "La entrega y la recolección de este pedido están demasiado cerca entre sí.",
+      "discountExceedsTotal": "El descuento es mayor que el total del pedido (productos más envío).",
       "lifecycleUnconfigured": "No hay un estado inicial configurado para los pedidos. Revise los estados del pedido en ajustes.",
       "errorCreatingOrder": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "validators": {
@@ -723,6 +724,11 @@
         "invalidComment": "El comentario del pedido debe ser válido.",
         "invalidDeliveryAmount": "El costo de envío no es válido.",
         "invalidDepositAmount": "El anticipo no es válido.",
+        "invalidBilledDays": "Los días contratados deben ser un número entero entre 1 y 365.",
+        "billedDaysForbiddenForPurchase": "Un pedido solo de compra no lleva días contratados.",
+        "invalidDiscountAmount": "El descuento no es válido.",
+        "invalidDiscountReason": "El motivo del descuento debe ser una sola línea de hasta 60 caracteres.",
+        "discountReasonWithoutDiscount": "El motivo del descuento solo se indica junto con un descuento.",
         "invalidAssignedUserId": "El responsable asignado es requerido y debe ser válido.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
@@ -752,6 +758,11 @@
           "invalidComment": "El comentario del pedido no es válido.",
           "invalidDeliveryAmount": "El costo de envío <{{-deliveryAmount}}> no es válido.",
           "invalidDepositAmount": "El anticipo <{{-depositAmount}}> no es válido.",
+          "invalidBilledDays": "Los días contratados <{{-billedDays}}> no son válidos.",
+          "billedDaysForbiddenForPurchase": "Un pedido solo de compra incluyó días contratados <{{-billedDays}}>.",
+          "invalidDiscountAmount": "El descuento <{{-discountAmount}}> no es válido.",
+          "invalidDiscountReason": "El motivo del descuento no es válido.",
+          "discountReasonWithoutDiscount": "Se envió un motivo de descuento sin descuento.",
           "invalidAssignedUserId": "El responsable asignado <{{-assignedUserId}}> no es válido.",
           "validationError": "Error validando la creación del pedido: {{-error}}."
         }
@@ -761,6 +772,7 @@
         "stockConflict": "Conflicto de disponibilidad al crear pedido: {{-conflicts}}.",
         "driverConflict": "Conflicto de agenda al crear pedido: <{{-driver}}> ya tiene un evento en <{{-conflictAt}}> (pedido <{{-orderId}}>).",
         "selfOverlap": "La entrega y la recolección del pedido a crear están a menos de <{{-gap}}> minutos.",
+        "discountExceedsTotal": "El descuento <{{-discount}}> supera el total del pedido <{{-gross}}>.",
         "lifecycleUnconfigured": "No existe un estado inicial activo en service_status; no se puede crear el pedido.",
         "errorCreatingOrder": "Error al crear el pedido: {{-error}}."
       }
@@ -771,6 +783,7 @@
       "stockConflict": "Algunos productos no tienen disponibilidad para las fechas solicitadas.",
       "driverConflict": "El responsable asignado ya tiene un evento demasiado cerca de ese horario.",
       "selfOverlap": "La entrega y la recolección de este pedido están demasiado cerca entre sí.",
+      "discountExceedsTotal": "El descuento es mayor que el total del pedido (productos más envío).",
       "settlementConflict": "Este cambio contradice el reporte de daños registrado (un producto dañado o el monto retenido del depósito). Deshaz ese registro primero.",
       "errorUpdatingOrder": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
       "validators": {
@@ -800,6 +813,11 @@
         "invalidComment": "El comentario del pedido debe ser válido.",
         "invalidDeliveryAmount": "El costo de envío no es válido.",
         "invalidDepositAmount": "El anticipo no es válido.",
+        "invalidBilledDays": "Los días contratados deben ser un número entero entre 1 y 365.",
+        "billedDaysForbiddenForPurchase": "Un pedido solo de compra no lleva días contratados.",
+        "invalidDiscountAmount": "El descuento no es válido.",
+        "invalidDiscountReason": "El motivo del descuento debe ser una sola línea de hasta 60 caracteres.",
+        "discountReasonWithoutDiscount": "El motivo del descuento solo se indica junto con un descuento.",
         "invalidAssignedUserId": "El responsable asignado es requerido y debe ser válido.",
         "validationError": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
         "logs": {
@@ -829,6 +847,11 @@
           "invalidComment": "El comentario del pedido no es válido.",
           "invalidDeliveryAmount": "El costo de envío <{{-deliveryAmount}}> no es válido.",
           "invalidDepositAmount": "El anticipo <{{-depositAmount}}> no es válido.",
+          "invalidBilledDays": "Los días contratados <{{-billedDays}}> no son válidos.",
+          "billedDaysForbiddenForPurchase": "Un pedido solo de compra incluyó días contratados <{{-billedDays}}>.",
+          "invalidDiscountAmount": "El descuento <{{-discountAmount}}> no es válido.",
+          "invalidDiscountReason": "El motivo del descuento no es válido.",
+          "discountReasonWithoutDiscount": "Se envió un motivo de descuento sin descuento.",
           "invalidAssignedUserId": "El responsable asignado <{{-assignedUserId}}> no es válido.",
           "validationError": "Error validando la actualización del pedido: {{-error}}."
         }
@@ -839,6 +862,7 @@
         "stockConflict": "Conflicto de disponibilidad al actualizar pedido: {{-conflicts}}.",
         "driverConflict": "Conflicto de agenda al actualizar pedido: <{{-driver}}> ya tiene un evento en <{{-conflictAt}}> (pedido <{{-orderId}}>).",
         "selfOverlap": "La entrega y la recolección del pedido a actualizar están a menos de <{{-gap}}> minutos.",
+        "discountExceedsTotal": "El descuento <{{-discount}}> supera el total del pedido <{{-gross}}>.",
         "settlementConflict": "La edición del pedido <{{-id}}> contradice su liquidación de garantía.",
         "errorUpdatingOrder": "Error al actualizar el pedido: {{-error}}."
       }
@@ -894,6 +918,32 @@
       "statusError": "Error al obtener la configuración de calendario: {{-error}}.",
       "disconnectError": "Error al desconectar Google Calendar: {{-error}}.",
       "feedError": "Error en el enlace de suscripción de calendario: {{-error}}."
+    }
+  },
+  "account": {
+    "getPreferences": {
+      "fetched": "Preferencias de la cuenta obtenidas exitosamente.",
+      "errorFetching": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "fetched": "Preferencias de la cuenta del usuario <{{-userId}}> obtenidas.",
+        "errorFetching": "Error al obtener las preferencias de la cuenta: {{-error}}."
+      }
+    },
+    "updatePreferences": {
+      "updated": "Preferencias de la cuenta guardadas.",
+      "errorUpdating": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "logs": {
+        "updated": "Preferencias de la cuenta del usuario <{{-userId}}> actualizadas.",
+        "errorUpdating": "Error al guardar las preferencias de la cuenta: {{-error}}."
+      }
+    },
+    "validators": {
+      "missingOrderBilledDays": "Las preferencias de la cuenta deben incluir los días contratados por defecto.",
+      "invalidOrderBilledDays": "Los días contratados por defecto deben ser un número entero entre 1 y 365, o automáticos.",
+      "logs": {
+        "missingOrderBilledDays": "Se omitió orderBilledDays en las preferencias de la cuenta.",
+        "invalidOrderBilledDays": "Días contratados por defecto <{{-orderBilledDays}}> no válidos."
+      }
     }
   },
   "legal": {

@@ -20,7 +20,7 @@ import type {
 import {
   TOP_PRODUCTS_LIMIT,
   TREND_MONTHS,
-  UP_NEXT_LIMIT,
+  UP_NEXT_MAX,
   bucketRevenueByMonth,
   compare,
   dashboardOrderInclude,
@@ -104,6 +104,23 @@ async function loadToday(
 }
 
 /**
+ * The "Mañana" line — ONE count, no cards (owner, 2026-11-19/20): the orders to DELIVER on the next
+ * BUSINESS day. Collections never count here, whether the order also comes back tomorrow or only
+ * comes back tomorrow — the day ahead is planned around what goes OUT. A delivery made early is no
+ * longer work, so it drops out. One order has one delivery, so the count is orders and deliveries.
+ */
+async function loadTomorrow(
+  prismaClient: DashboardPrismaClient,
+  now: Date,
+): Promise<DashboardResponseModel["tomorrow"]> {
+  const period = dayRange(now, 1);
+  const deliveries = await prismaClient.service.count({
+    where: { ...LIVE, deliveryAt: inRange(period.from, period.to), deliveredAt: null },
+  });
+  return { period, deliveries };
+}
+
+/**
  * `GET /dashboard` — the admin's home screen, computed in ONE round trip.
  *
  * **Every query below runs in the same `Promise.all`.** That is the whole performance design: on a
@@ -115,7 +132,7 @@ async function loadToday(
  * order's next pending event is its delivery if it hasn't been delivered, otherwise its collection,
  * and those are two different columns with two different indexes (`@@index([deliveryAt])`,
  * `@@index([pickupAt])`). Each candidate order matches exactly one of the two sets, so taking the
- * first `UP_NEXT_LIMIT` of each and merging is not an approximation — it is exact, and it never
+ * first `UP_NEXT_MAX` of each and merging is not an approximation — it is exact, and it never
  * scans the table. Ordering by `deliveryAt` alone would have been an approximation.
  */
 export const getDashboard = async (
@@ -130,6 +147,8 @@ export const getDashboard = async (
     const thisMonth = monthRange(now);
     const lastMonth = monthRange(now, -1);
     const trendFrom = monthRange(now, -(TREND_MONTHS - 1)).from;
+    // The end of the business day: the up-next queue is today's work (overdue included), nothing after.
+    const endOfToday = dayRange(now).to;
 
     const monthAggregate = (from: Date, to: Date) =>
       prismaClient.service.aggregate({
@@ -152,6 +171,7 @@ export const getDashboard = async (
       pendingDeliveries,
       pendingCollections,
       today,
+      tomorrow,
       currentMonth,
       previousMonth,
       collectedThisMonth,
@@ -172,28 +192,29 @@ export const getDashboard = async (
         userId: req.user?.userId ?? 0,
         role: req.user?.userRole ?? RolesEnum.Admin,
       }),
-      // Next event = DELIVERY: not yet delivered.
+      // Next event = DELIVERY: not yet delivered, due by the end of today.
       prismaClient.service.findMany({
-        where: { ...LIVE, deliveredAt: null },
+        where: { ...LIVE, deliveredAt: null, deliveryAt: { lt: endOfToday } },
         orderBy: { deliveryAt: "asc" },
-        take: UP_NEXT_LIMIT,
+        take: UP_NEXT_MAX,
         include: dashboardOrderInclude,
       }),
-      // Next event = COLLECTION: delivered, has a pickup, not yet collected.
+      // Next event = COLLECTION: delivered, not yet collected, due by the end of today.
       prismaClient.service.findMany({
         where: {
           ...LIVE,
           deliveredAt: { not: null },
           collectedAt: null,
-          pickupAt: { not: null },
+          pickupAt: { lt: endOfToday },
         },
         orderBy: { pickupAt: "asc" },
-        take: UP_NEXT_LIMIT,
+        take: UP_NEXT_MAX,
         include: dashboardOrderInclude,
       }),
       // "Hoy" — the business day's counts, in their own function but started HERE, inside this
       // same Promise.all, so they still run concurrently with everything else.
       loadToday(prismaClient, now),
+      loadTomorrow(prismaClient, now),
       monthAggregate(thisMonth.from, thisMonth.to),
       monthAggregate(lastMonth.from, lastMonth.to),
       collectedAggregate(thisMonth.from, thisMonth.to),
@@ -311,11 +332,11 @@ export const getDashboard = async (
       ).map((product) => [product.id, product.name]),
     );
 
-    const upNext = selectUpNext(
-      [...pendingDeliveries, ...pendingCollections],
-      nextPendingEvent,
-      UP_NEXT_LIMIT,
-    ).map(({ row, event }) => projectUpNextItem(row, event, context, now));
+    // Everything due by the end of the BUSINESS day, overdue included — and nothing after it.
+    const upNext = selectUpNext([...pendingDeliveries, ...pendingCollections], nextPendingEvent, {
+      max: UP_NEXT_MAX,
+      until: endOfToday,
+    }).map(({ row, event }) => projectUpNextItem(row, event, context, now));
 
     const revenueNow = round2(Number(currentMonth._sum.totalAmount ?? 0));
     const revenuePrev = round2(Number(previousMonth._sum.totalAmount ?? 0));
@@ -348,6 +369,7 @@ export const getDashboard = async (
         generatedAt: now,
         upNext,
         today,
+        tomorrow,
         month: {
           period: thisMonth,
           revenue: compare(revenueNow, revenuePrev),

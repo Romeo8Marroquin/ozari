@@ -46,18 +46,20 @@ import {
 } from "./logistics/logistics.service.js";
 import {
   ASSIGNABLE_ROLES,
+  OrderDiscountExceedsTotalError,
   OrderNotFoundError,
   OrderSettlementConflictError,
   OrderStockConflictError,
   assertSettlementSurvivesEdit,
   buildOrderListWhere,
   buildRentedInWindowWhere,
-  computeBilledDays,
   conflictVariantFields,
   holdsSaleStock,
   loadOrderProjectionContext,
   loadOrderTimingPreferences,
   moveSaleStock,
+  orderTotalAmount,
+  resolveBilledDays,
   saleStockDeltas,
   orderListInclude,
   orderListOrderBy,
@@ -78,6 +80,38 @@ import {
   sumByPool,
   type PricedOrderLineModel,
 } from "./orders.service.js";
+
+/**
+ * A whole-order discount larger than the order it discounts (lines + delivery), answered identically
+ * by create and edit — its own payload key, so the form can put the message on the DISCOUNT field and
+ * quote the real ceiling. Returns `true` when it answered the request.
+ */
+const sendDiscountExceedsTotal = (
+  res: Response,
+  scope: "createOrder" | "updateOrder",
+  error: unknown,
+): boolean => {
+  if (!(error instanceof OrderDiscountExceedsTotalError)) {
+    return false;
+  }
+  logger.warn(
+    i18next.t(`orders.${scope}.logs.discountExceedsTotal`, {
+      discount: error.discountAmount,
+      gross: error.grossAmount,
+    }),
+  );
+  // A `400`, not a `409`: nothing ELSE changed under the admin — the body asks for a discount
+  // larger than the very order it describes. `grossAmount` rides along so a client can say how much
+  // the discount may be without re-deriving the server's prices.
+  sendOzariError(
+    res,
+    HttpEnum.BAD_REQUEST,
+    i18next.t(`orders.${scope}.discountExceedsTotal`),
+    undefined,
+    { discountExceedsTotal: { maxDiscount: error.grossAmount } },
+  );
+  return true;
+};
 
 /**
  * The two LOGISTICS-PAD refusals, answered identically by create and edit — a `409` whose `data`
@@ -132,6 +166,14 @@ export const sendLogisticsConflict = (
   }
   return false;
 };
+
+/** Every refusal the create/edit TRANSACTION can throw beyond stock — the logistics pad and the
+ *  discount ceiling — answered in one call, so both write doors list the same set. */
+const sendOrderWriteRefusal = (
+  res: Response,
+  scope: "createOrder" | "updateOrder",
+  error: unknown,
+): boolean => sendLogisticsConflict(res, scope, error) || sendDiscountExceedsTotal(res, scope, error);
 
 /**
  * `GET /orders` — the paginated order list behind the agenda/history views. **Admin only** (route
@@ -357,7 +399,7 @@ export const createOrder = async (
 
       // Price every line from its product row. `pickupAt` exists whenever a rental line does (the
       // validator's mode-coherence rule), so billed days always have a window to derive from.
-      const billedDays = body.pickupAt ? computeBilledDays(body.deliveryAt, body.pickupAt) : 1;
+      const billedDays = resolveBilledDays(body);
       const pricedLines: PricedOrderLineModel[] = [];
       for (const line of body.lines) {
         const product = productById.get(line.productId);
@@ -449,7 +491,7 @@ export const createOrder = async (
       );
 
       const linesTotal = pricedLines.reduce((sum, line) => sum + line.parcialPrice, 0);
-      const totalAmount = Math.round((linesTotal + (body.deliveryAmount ?? 0)) * 100) / 100;
+      const totalAmount = orderTotalAmount(linesTotal, body.deliveryAmount, body.discountAmount);
       /* v8 ignore next -- the validator rejects mixed/empty currencies; the fallback is defensive */
       const currencyId = products[0]?.currencyId ?? 1;
 
@@ -479,6 +521,10 @@ export const createOrder = async (
           totalAmount,
           deliveryAmount: body.deliveryAmount ?? null,
           depositAmount: body.depositAmount ?? null,
+          discountAmount: body.discountAmount ?? null,
+          discountReason: body.discountReason ?? null,
+          // NULL = the window's own count (the default); a figure only when the admin agreed one.
+          billedDays: body.pickupAt ? (body.billedDays ?? null) : null,
           // `paymentMethodId` is deliberately NOT set here: it records how the order was actually
           // paid, which has not happened yet. It stays NULL until `POST /orders/:id/payment`.
           // Assignment: the chosen deliverable staff, REQUIRED by the validator (Q-D2) — every
@@ -559,7 +605,7 @@ export const createOrder = async (
       );
       return;
     }
-    if (sendLogisticsConflict(res, "createOrder", error)) {
+    if (sendOrderWriteRefusal(res, "createOrder", error)) {
       return;
     }
     logger.error(i18next.t("orders.createOrder.logs.errorCreatingOrder", { error }));
@@ -648,7 +694,7 @@ export const updateOrder = async (
 
       // Re-price from the NEW window: the same engine as create, so an edit that moves the dates
       // re-bills the rental days rather than carrying the old amounts forward.
-      const billedDays = body.pickupAt ? computeBilledDays(body.deliveryAt, body.pickupAt) : 1;
+      const billedDays = resolveBilledDays(body);
       const pricedLines: PricedOrderLineModel[] = [];
       for (const line of body.lines) {
         const product = productById.get(line.productId);
@@ -774,7 +820,7 @@ export const updateOrder = async (
       }
 
       const linesTotal = pricedLines.reduce((sum, line) => sum + line.parcialPrice, 0);
-      const totalAmount = Math.round((linesTotal + (body.deliveryAmount ?? 0)) * 100) / 100;
+      const totalAmount = orderTotalAmount(linesTotal, body.deliveryAmount, body.discountAmount);
       /* v8 ignore next -- the validator rejects mixed/empty currencies; the fallback is defensive */
       const currencyId = productById.get(pricedLines[0]?.productId ?? 0)?.currencyId ?? order.currencyId;
 
@@ -836,6 +882,10 @@ export const updateOrder = async (
           totalAmount,
           deliveryAmount: body.deliveryAmount ?? null,
           depositAmount: body.depositAmount ?? null,
+          discountAmount: body.discountAmount ?? null,
+          discountReason: body.discountReason ?? null,
+          // NULL = the window's own count (the default); a figure only when the admin agreed one.
+          billedDays: body.pickupAt ? (body.billedDays ?? null) : null,
           // NOTE: no `paymentMethodId`/`paidAt`/`paymentStatusId` — an edit never touches PAYMENT,
           // the same boundary it has with the lifecycle (see this function's doc comment).
           // REQUIRED (Q-D2), and the edit form always sends the order's CURRENT assignee back — so
@@ -900,7 +950,7 @@ export const updateOrder = async (
       sendOzariError(res, HttpEnum.CONFLICT, i18next.t("orders.updateOrder.settlementConflict"));
       return;
     }
-    if (sendLogisticsConflict(res, "updateOrder", error)) {
+    if (sendOrderWriteRefusal(res, "updateOrder", error)) {
       return;
     }
     logger.error(i18next.t("orders.updateOrder.logs.errorUpdatingOrder", { error }));

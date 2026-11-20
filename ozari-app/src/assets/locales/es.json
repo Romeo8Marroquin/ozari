@@ -316,9 +316,12 @@
         },
         "upNext": {
           "title": "Lo siguiente",
-          "description": "Los próximos tres pedidos que necesitan tu atención, del más urgente al menos urgente.",
-          "emptyTitle": "Nada pendiente por ahora",
-          "emptyDescription": "No hay entregas ni recolecciones en cola. Cuando crees un pedido aparecerá aquí.",
+          "description": "Todo lo que toca hoy, del más urgente al menos urgente.",
+          "showMore_one": "Ver {{count}} más",
+          "showMore_other": "Ver {{count}} más",
+          "showLess": "Ver menos",
+          "emptyTitle": "Nada pendiente para hoy",
+          "emptyDescription": "No quedan entregas ni recolecciones para hoy.",
           "emptyAction": "Crear pedido",
           "items_one": "{{count}} artículo",
           "items_other": "{{count}} artículos",
@@ -356,6 +359,12 @@
             "years_one": "Atrasado {{count}} año",
             "years_other": "Atrasado {{count}} años"
           }
+        },
+        "tomorrow": {
+          "title": "Entregas de mañana",
+          "none": "Sin entregas programadas",
+          "orders_one": "{{count}} pedido por entregar",
+          "orders_other": "{{count}} pedidos por entregar"
         },
         "today": {
           "title": "Hoy",
@@ -546,7 +555,7 @@
         },
         "errors": {
           "failed": "No fue posible generar el documento. Inténtalo de nuevo.",
-          "incompleteForm": "Completa los datos marcados para generar la cotización."
+          "incompleteQuote": "Revisa los datos marcados: la cotización necesita al menos un producto, y lo que llenes debe ser válido."
         }
       },
       "preferences": {
@@ -837,6 +846,11 @@
             "delivery": "Entrega",
             "pickup": "Recolección",
             "noPickup": "Solo entrega (sin recolección)",
+            "billedDays": "Días cobrados",
+            "billedDaysValue_one": "{{count}} día",
+            "billedDaysValue_other": "{{count}} días",
+            "billedDaysAgreed_one": "acordado; las fechas suman {{count}} día",
+            "billedDaysAgreed_other": "acordado; las fechas suman {{count}} días",
             "assignee": "Responsable",
             "unassigned": "Sin asignar",
             "delivered": "Entregado el",
@@ -1147,6 +1161,18 @@
             "deliveryAmountLabel": "Costo de envío",
             "deliveryAmountHint": "El costo depende de la zona o la distancia.",
             "depositAmountLabel": "Anticipo",
+            "billedDaysLabel": "Días a cobrar",
+            "billedDaysHintAuto": "Se calcula con las fechas cada vez que cambian; puedes ajustarlo.",
+            "billedDaysHintFixed_one": "Empieza en {{count}} día, según tus ajustes; puedes ajustarlo.",
+            "billedDaysHintFixed_other": "Empieza en {{count}} días, según tus ajustes; puedes ajustarlo.",
+            "billedDaysUseWindow_one": "Usar las fechas ({{count}} día)",
+            "billedDaysUseWindow_other": "Usar las fechas ({{count}} días)",
+            "discountAmountLabel": "Descuento",
+            "discountAmountHint": "Se resta del total del pedido (productos más envío).",
+            "discountPercentLabel": "%",
+            "discountReasonLabel": "Motivo del descuento",
+            "discountReasonPlaceholder": "Ej. Cliente frecuente",
+            "discountReasonHint": "Aparece en la cotización y el comprobante, debajo del descuento.",
             "moneyPlaceholder": "0.00",
             "savedContactLabel": "Contacto guardado",
             "savedAddressLabel": "Dirección guardada",
@@ -1158,6 +1184,8 @@
           "estimate": {
             "productsSubtotal": "Subtotal productos",
             "deliveryFee": "Envío",
+            "discount": "Descuento",
+            "discountShare": "{{percent}} %",
             "label": "Total estimado",
             "note": "Estimado según los precios y las fechas. El total definitivo se confirma al crear el pedido.",
             "securityDeposit": "Depósito",
@@ -1212,6 +1240,10 @@
             "invalidComment": "El comentario no es válido.",
             "invalidDeliveryAmount": "El costo de envío no es válido.",
             "invalidDepositAmount": "El anticipo no es válido.",
+            "invalidBilledDays": "Los días a cobrar deben ser un número entero entre 1 y 365.",
+            "invalidDiscountAmount": "El descuento no es válido.",
+            "invalidDiscountReason": "El motivo debe ser una sola línea de hasta 60 caracteres.",
+            "discountExceedsTotal": "El descuento no puede ser mayor que el total del pedido ({{max}}).",
             "submitFallback": "No pudimos crear el pedido. Revisa los datos e intenta de nuevo."
           }
         },
@@ -1927,6 +1959,22 @@
             "description": "Con qué app se abren las direcciones de los pedidos.",
             "selectLabel": "Abrir mapas con",
             "ask": "Preguntar cada vez"
+          }
+        },
+        "orders": {
+          "title": "Pedidos",
+          "description": "Cómo empiezan los pedidos que creas. Se guarda en tu cuenta y te sigue en todos tus dispositivos.",
+          "billedDays": {
+            "label": "Días a cobrar",
+            "description": "Al crear un pedido, los días a cobrar se llenan según las fechas de entrega y recolección. Si fijas un número, cada pedido nuevo empieza con ese valor. Siempre puedes cambiarlo en cada pedido.",
+            "modeLabel": "Llenar los días",
+            "range": "Según las fechas",
+            "fixed": "Número fijo",
+            "daysLabel": "Días",
+            "save": "Guardar",
+            "saved": "Preferencia guardada.",
+            "invalid": "Escribe un número entero entre 1 y 365.",
+            "failed": "No pudimos guardar la preferencia. Intenta de nuevo."
           }
         },
         "account": {

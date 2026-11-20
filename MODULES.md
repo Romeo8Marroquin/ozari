@@ -323,6 +323,20 @@ BY `(productId, variantId)` PAIR (kept rows keep their ids, dropped ones hard-de
 Frontend: `OrderForm mode="edit"` (one component; `orderToFormValues` mirrors `toCreateOrderBody`) on
 `/panel/pedidos/:id/editar`, reached from the detail page's Admin-only "Editar pedido".
 
+### Agreed billed days + the whole-order discount (2026-11-19, migration `20261119000000_billed_days_discount_user_preferences`, EPIC-2-ORDERS §13)
+
+Both ride the create/edit body (the one `parseOrderBody` contract, `parseAgreedTerms`):
+`billedDays` (1–365, rentals only — `NULL` bills the window through `resolveBilledDays`),
+`discountAmount` (> lines + delivery ⇒ `400` with `data.discountExceedsTotal.maxDiscount`) and
+`discountReason` (≤ 60, one line, only beside a discount — CLIENT-FACING: printed on the PDFs). The
+detail returns `billedDays` + `windowDays` (render "acordado" by comparing them, never by
+re-deriving). The form auto-fills the billed days from the dates on every window change and from the
+admin's own default (`GET/PUT /account/preferences` — `modules/account/`, any role, the caller's own
+`user_preferences` row; screen: Ajustes → Pedidos), and offers the discount as an amount plus a "%"
+helper that only writes the amount. Both the resolver and the server enforce the discount ceiling.
+The detail shows a "Días cobrados" fact (with the window's count beside an agreed figure) and the
+reason under the discount.
+
 ### Variation lines — backend (2026-10-29, `EPIC-1-INVENTORY.md` §3b)
 
 - **Line body.** `{ productId, variantId?: number | null, quantity }`. A product with active
@@ -785,7 +799,26 @@ destination, platform)` decides, and `openMapsLink` follows it:
   beside a counter from another — and on a scale-to-zero backend six aggregates would be six round
   trips on top of a cold start. Every query lives in ONE `Promise.all`; **never await one before
   starting the next** (same rule as `loadCatalogs`).
-- **`upNext` is three ORDERS, not three events** (owner's framing): each order is represented by the
+- **`upNext` is TODAY'S WORK, folded to one row** (owner, 2026-11-19; it was a fixed three until
+  then). The API sends every order whose next event falls before the end of the BUSINESS day —
+  overdue ones included — and NOTHING after it (a quiet day is an empty queue; the floor of three was
+  dropped the same day), bounded in SQL by the end of the day and capped by the safety ceiling
+  **`UP_NEXT_MAX` = 50** per query and on the merged queue (`selectUpNext({ max, until })`).
+  **Tomorrow is ONE count, never cards — DELIVERIES only** (owner, 2026-11-19/20): `tomorrow { period,
+  deliveries }` = live orders whose `deliveryAt` falls in the next business day (`dayRange(now, 1)`)
+  and `deliveredAt` is null. Collections are deliberately NOT counted (the owner plans the next day
+  around what goes OUT): an order only collected tomorrow is absent, one delivering tomorrow counts
+  whenever it comes back — never reintroduce a `pickupAt` filter or an OR. One order has one
+  delivery, so the figure is orders. Rendered by `TomorrowSummary` ("Entregas de mañana") as one
+  strip under the queue's "Ver más" (and under the empty state). The screen (`UpNextQueue`) shows exactly ONE ROW — as many
+  cards as fit across, which is a CONTAINER-query outcome on the section and is READ from the rendered
+  grid (`useGridColumns`: computed `grid-template-columns` + a `ResizeObserver`), never assumed from a
+  breakpoint — and folds the rest behind **"Ver N más"**, which unfolds IN PLACE (not a link to the
+  agenda). No fold ⇒ the control is not rendered at all (it eases in/out with `Collapse` as a refetch
+  or a resize changes that). Motion: `unfoldGrid` / `foldGrid` in `pageMotion` (FRONTEND-DOCTRINE §4).
+  `expanded` (the label, chevron, `aria-expanded`) answers at once; `unfolded` (whether the later
+  cards render) lags a fold by its animation; folded cards are `inert`; a reversed fold never commits.
+- **`upNext` is ORDERS, not events** (owner's framing): each order is represented by the
   single event it still has to perform, so a delivery at 14:00 with a collection at 14:30 occupies ONE
   slot — and confirming the delivery puts the same order back in the queue carrying its collection,
   re-sorted against everyone else. Built on **`pendingLogisticsEvents`**, the same predicate the driver
@@ -911,9 +944,15 @@ order** (which renders NOTHING, not a disabled button).
   phone before the client commits is the point). `kind` drives COPY only; if the two ever need
   different structure that is a new model field, never an `if` in the template. The vocabulary and the
   letterhead are shared too (`useDocumentVocabulary.ts`).
-- **The quote's valid-form gate is a check ON CLICK, not a disabled button**: clicking runs the same
-  `trigger()` that guards submit, so an incomplete form lights up which field is missing instead of
-  leaving a greyed control that cannot explain itself. Create-only.
+- **The quote needs as little as ONE product** (owner, 2026-11-19): its gate is a check ON CLICK,
+  `trigger(quoteFields(values))` (`quoteGate.ts`) — the submit resolver scoped to what the quote
+  PRINTS (lines + money always; dates/receiver/contact/address only when filled), so a bad field
+  lights up instead of a greyed control that cannot explain itself. Unknown client/event facts are
+  ABSENT from the model and the template draws only known facts and non-empty cards
+  (EPIC-2-DOCUMENTS §1). Create-only.
+- **A discount prints its reason** under "Descuento"; the billed days are the order's AGREED figure
+  when there is one, and the "por día iniciado" hint prints only when they equal the window's count
+  (EPIC-2-DOCUMENTS §2 #3/#3b).
 - **The letterhead is Preferences, never the template** (`documents.businessName|businessPhone|terms|
   conditions|freeDeliveryNote|quoteValidityDays` + the `bank-accounts` catalog). The important
   conditions are PRINTED (capped at four); a promise whose truth depends on the order is DERIVED

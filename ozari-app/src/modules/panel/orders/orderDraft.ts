@@ -109,10 +109,15 @@ export function clearOrderDraft(): void {
  * The order form's defaults are not entirely static (the assignee defaults to the signed-in admin
  * and the delivery date can be prefilled), so this compares against the SAME defaults the form was
  * seeded with rather than a frozen snapshot.
+ *
+ * The billed days are left out of the comparison: the form FILLS them by itself (from the dates, or
+ * from the admin's own default once their preferences arrive), so a figure alone is nobody's work —
+ * and counting it would leave a draft behind every untouched visit.
  */
 export function isMeaningfulOrderDraft(
   values: CreateOrderFormType,
   defaults: CreateOrderFormType = createOrderDefaultValues,
 ): boolean {
-  return JSON.stringify(values) !== JSON.stringify(defaults);
+  const comparable = (form: CreateOrderFormType): string => JSON.stringify({ ...form, billedDays: '' });
+  return comparable(values) !== comparable(defaults);
 }

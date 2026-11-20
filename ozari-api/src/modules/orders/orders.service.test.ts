@@ -28,6 +28,10 @@ import {
   canRecordDepositCollection,
   canRecordSettlement,
   computeBilledDays,
+  OrderDiscountExceedsTotalError,
+  orderTotalAmount,
+  projectBilledDays,
+  resolveBilledDays,
   computeDepositTotal,
   computeNextActionAt,
   computeSettlementMoney,
@@ -81,6 +85,7 @@ const makeListRow = (overrides: Partial<OrderListRow> = {}): OrderListRow => ({
   readyAt: null,
   serviceStart: DELIVERY_AT,
   serviceEnd: PICKUP_AT,
+  billedDays: null,
   assignedUserId: null,
   totalAmount: new Prisma.Decimal("450.00"),
   deliveryAmount: null,
@@ -480,6 +485,66 @@ describe("computeBilledDays", () => {
     const start = new Date("2026-08-01T14:00:00Z");
     expect(computeBilledDays(start, new Date("2026-08-02T14:01:00Z"))).toBe(2);
     expect(computeBilledDays(start, new Date("2026-08-04T14:00:00Z"))).toBe(3);
+  });
+});
+
+describe("resolveBilledDays", () => {
+  const deliveryAt = new Date("2026-08-01T14:00:00Z");
+  const pickupAt = new Date("2026-08-04T10:00:00Z"); // 68h → 3 days by the window
+
+  it("bills the window's own count when no figure was agreed", () => {
+    expect(resolveBilledDays({ deliveryAt, pickupAt, billedDays: undefined })).toBe(3);
+  });
+
+  it("bills the AGREED figure over the window — fewer or more", () => {
+    expect(resolveBilledDays({ deliveryAt, pickupAt, billedDays: 1 })).toBe(1);
+    expect(resolveBilledDays({ deliveryAt, pickupAt, billedDays: 5 })).toBe(5);
+  });
+
+  it("bills once on a purchase-only order, whatever a figure says", () => {
+    expect(resolveBilledDays({ deliveryAt, pickupAt: undefined, billedDays: 4 })).toBe(1);
+  });
+});
+
+describe("orderTotalAmount", () => {
+  it("is lines + delivery − discount, to the cent", () => {
+    expect(orderTotalAmount(300.1, 50.2, 0.3)).toBe(350);
+    expect(orderTotalAmount(100, undefined, undefined)).toBe(100);
+  });
+
+  it("may reach zero (a gift) but never below", () => {
+    expect(orderTotalAmount(100, 20, 120)).toBe(0);
+    expect(() => orderTotalAmount(100, 20, 120.01)).toThrow(OrderDiscountExceedsTotalError);
+    try {
+      orderTotalAmount(100, 20, 150);
+    } catch (error) {
+      expect(error).toMatchObject({ discountAmount: 150, grossAmount: 120 });
+    }
+  });
+});
+
+describe("projectBilledDays", () => {
+  const window = { serviceStart: DELIVERY_AT, serviceEnd: new Date("2026-08-03T15:00:00Z") };
+
+  it("answers both figures for a rental — the agreed one and the window's", () => {
+    expect(projectBilledDays({ ...window, pickupAt: window.serviceEnd, billedDays: 1 })).toEqual({
+      billedDays: 1,
+      windowDays: 3,
+    });
+  });
+
+  it("reads a row saved before the column (NULL) as the window it billed", () => {
+    expect(projectBilledDays({ ...window, pickupAt: window.serviceEnd, billedDays: null })).toEqual({
+      billedDays: 3,
+      windowDays: 3,
+    });
+  });
+
+  it("answers neither on a purchase-only order", () => {
+    expect(projectBilledDays({ ...window, pickupAt: null, billedDays: null })).toEqual({
+      billedDays: undefined,
+      windowDays: undefined,
+    });
   });
 });
 
