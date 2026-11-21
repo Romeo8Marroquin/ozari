@@ -13,5 +13,12 @@ declare module 'axios' {
      * caller handles the error itself (inline UI, custom toast, or a silent retry).
      */
     skipErrorNotification?: boolean;
+    /**
+     * A gateway status (502/503/504) on THIS request is not, by itself, proof the backend is down —
+     * it is one of many small background reads (a document's row photo), where a single slow answer
+     * is routine. Instead of raising the full-screen outage overlay at once, ask the health probe to
+     * CONFIRM first (the same treatment a network error gets). A real outage still surfaces.
+     */
+    confirmOutage?: boolean;
   }
 }

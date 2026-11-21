@@ -24,6 +24,7 @@ import calendarRouter, {
 } from "./modules/calendar/calendar.route.js";
 import clientRegistriesRouter from "./modules/clientRegistries/clientRegistries.route.js";
 import dashboardRouter from "./modules/dashboard/dashboard.route.js";
+import documentsRouter from "./modules/documents/documents.route.js";
 import legalRouter from "./modules/legal/legal.route.js";
 import ordersRouter from "./modules/orders/orders.route.js";
 import preferencesRouter from "./modules/preferences/preferences.route.js";
@@ -300,6 +301,11 @@ function configureRoutes(app: Express): void {
   // the lenient tier: the panel re-reads it on every focus and on a slow interval, exactly like /me,
   // and the credential tier would starve it
   apiRouter.use("/dashboard", rateLimiters["authenticated"], dashboardRouter);
+
+  // What the printed documents need from the server (the row photos) — its OWN limiter inside the
+  // router, deliberately NOT the authenticated tier: one PDF asks once per distinct photo, and must
+  // neither starve on nor drain the budget ordinary navigation spends. STRICTLY Admin inside.
+  apiRouter.use("/documents", documentsRouter);
 
   // Mount API router at base path
   app.use(appConfig.basePath, apiRouter);

@@ -1,7 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { HiOutlineChevronDown } from 'react-icons/hi2';
-import Button from '@components/Button';
 import Collapse from '@components/Collapse';
 import MorphSwap from '@components/MorphSwap';
 import { foldGrid, settleFoldedGrid, unfoldGrid } from '../pageMotion';
@@ -11,7 +10,24 @@ import UpNextCard from './UpNextCard';
 import { useGridColumns } from './useGridColumns';
 
 const KEY = 'modules.panel.dashboard.upNext';
-const SECONDARY_COLOR = '#262626';
+
+/**
+ * One of the hairlines either side of "Ver N más" (owner, 2026-11-20 — a divider marks the fold
+ * better than a filled chip, which weighed as much as the cards' own actions).
+ *
+ * Each rule is a child of the BUTTON, hung outside it (`right-full` / `left-full`): that way the
+ * button's own `hover:` / `focus-visible:` drive it (`group/fold`) — Tailwind gates `hover` to real
+ * pointers, so a tap never leaves the rules stuck long — and it rides the label's `MorphSwap` width
+ * ease instead of jumping when "Ver 3 más" becomes "Ver menos". `pointer-events-none` keeps it from
+ * widening the click target.
+ *
+ * Length is a share of the ROW (`cqw`, the row is the `@container`): 18% at full stretch, resting at
+ * ~10% (`scale-x` 0.56, anchored on the text side so it grows outward). `scale`, not `width`, so
+ * the hover never re-lays anything out — and the transition names `scale` itself (a Tailwind v4
+ * `scale-x-*` is the independent `scale` property, which `transition-transform` would not animate).
+ */
+const RULE =
+  'pointer-events-none absolute top-1/2 h-px w-[18cqw] scale-x-[0.56] bg-charcoal/15 transition-[scale,background-color] duration-[450ms] ease-[var(--ease-settle)] group-hover/fold:scale-x-100 group-hover/fold:bg-charcoal/30 group-focus-visible/fold:scale-x-100 group-focus-visible/fold:bg-charcoal/30 motion-reduce:transition-none';
 
 /** The cards after the first row — the ones the fold hides. */
 const cardsAfterFirstRow = (grid: HTMLElement, columns: number): HTMLElement[] =>
@@ -138,28 +154,31 @@ const UpNextQueue: React.FC<UpNextQueueProps> = ({ items, onOpen, onAdvance, onP
 
       <Collapse open={foldedCount > 0} closedClassName="-mt-3">
         {foldedCount > 0 && (
-          <div className="flex justify-center">
-            <Button
-              variant="soft"
-              color={SECONDARY_COLOR}
-              size="xs"
+          // `@container` so the side rules are a share of THIS row (`cqw`), not of the window. The
+          // 2px of block padding keeps the focus ring inside `Collapse`'s overflow clip.
+          <div className="@container flex justify-center py-0.5">
+            <button
+              type="button"
               aria-expanded={expanded}
               aria-controls={gridId}
               // Never null here: this button renders beside the grid, whose ref is set first.
               onClick={() => toggle(grid as HTMLDivElement)}
-              endIcon={
-                <HiOutlineChevronDown
-                  aria-hidden
-                  className={`size-3.5 transition-[rotate] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${
-                    expanded ? 'rotate-180' : ''
-                  }`}
-                />
-              }
+              // A quiet text control, not a chip: /60 ink (still AA on the panel's canvas) darkening
+              // to full charcoal on hover, keyboard focus or press; 36px tall so it stays tappable.
+              className="group/fold relative inline-flex h-9 cursor-pointer select-none items-center gap-1.5 whitespace-nowrap rounded-chip px-3 text-[13px] font-medium text-charcoal/60 outline-none transition-colors duration-200 hover:text-charcoal focus-visible:text-charcoal focus-visible:ring-2 focus-visible:ring-magenta active:text-charcoal motion-reduce:transition-none"
             >
+              <span aria-hidden className={`${RULE} right-full origin-right`} />
               <MorphSwap swapKey={expanded ? 'less' : `more-${foldedCount}`}>
                 {expanded ? t(`${KEY}.showLess`) : t(`${KEY}.showMore`, { count: foldedCount })}
               </MorphSwap>
-            </Button>
+              <HiOutlineChevronDown
+                aria-hidden
+                className={`size-3.5 shrink-0 transition-[rotate] duration-[400ms] ease-[var(--ease-settle)] motion-reduce:transition-none ${
+                  expanded ? 'rotate-180' : ''
+                }`}
+              />
+              <span aria-hidden className={`${RULE} left-full origin-left`} />
+            </button>
           </div>
         )}
       </Collapse>

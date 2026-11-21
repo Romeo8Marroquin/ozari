@@ -7,11 +7,15 @@ vi.mock('../preferences/usePreferences', () => ({ usePreferences }));
 
 const { downloadDocument } = vi.hoisted(() => ({
   // The SIGNATURE is declared so the assertions can read the MODEL the button built.
-  downloadDocument: vi.fn<(input: unknown) => Promise<void>>(() => Promise.resolve()),
+  downloadDocument: vi.fn<(input: unknown) => Promise<{ missingPhotos: number }>>(() =>
+    Promise.resolve({ missingPhotos: 0 }),
+  ),
 }));
 vi.mock('./downloadDocument', () => ({ downloadDocument }));
 
-const { notify } = vi.hoisted(() => ({ notify: { success: vi.fn(), error: vi.fn() } }));
+const { notify } = vi.hoisted(() => ({
+  notify: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
+}));
 vi.mock('@components/notifications/notify', () => ({ notify }));
 
 import OrderDocumentButton from './OrderDocumentButton';
@@ -227,6 +231,24 @@ describe('OrderDocumentButton', () => {
       accountNumber: '',
       holder: '',
     });
+  });
+
+  it('says so — once — when the file arrived without some of its photos', async () => {
+    downloadDocument.mockResolvedValueOnce({ missingPhotos: 2 });
+    render(<OrderDocumentButton order={order()} />);
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.download` }));
+    await waitFor(() =>
+      expect(notify.warning).toHaveBeenCalledWith(`${KEY}.warnings.missingPhotos`),
+    );
+    expect(notify.warning).toHaveBeenCalledTimes(1);
+    expect(notify.error).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet when every photo made it', async () => {
+    render(<OrderDocumentButton order={order()} />);
+    await userEvent.click(screen.getByRole('button', { name: `${KEY}.actions.download` }));
+    await waitFor(() => expect(downloadDocument).toHaveBeenCalled());
+    expect(notify.warning).not.toHaveBeenCalled();
   });
 
   it('TOASTS a failure — nothing on the page changed, the file simply did not arrive', async () => {

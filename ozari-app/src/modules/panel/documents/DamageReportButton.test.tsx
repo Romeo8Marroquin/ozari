@@ -7,11 +7,15 @@ vi.mock('../preferences/usePreferences', () => ({ usePreferences }));
 
 const { downloadDamageReport } = vi.hoisted(() => ({
   // The SIGNATURE is declared so the assertions can read the MODEL the button built.
-  downloadDamageReport: vi.fn<(input: unknown) => Promise<void>>(() => Promise.resolve()),
+  downloadDamageReport: vi.fn<(input: unknown) => Promise<{ missingPhotos: number }>>(() =>
+    Promise.resolve({ missingPhotos: 0 }),
+  ),
 }));
 vi.mock('./downloadDocument', () => ({ downloadDamageReport }));
 
-const { notify } = vi.hoisted(() => ({ notify: { success: vi.fn(), error: vi.fn() } }));
+const { notify } = vi.hoisted(() => ({
+  notify: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
+}));
 vi.mock('@components/notifications/notify', () => ({ notify }));
 
 import DamageReportButton from './DamageReportButton';
@@ -138,8 +142,8 @@ describe('DamageReportButton', () => {
     let finish: () => void = () => undefined;
     downloadDamageReport.mockImplementationOnce(
       () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
+        new Promise<{ missingPhotos: number }>((resolve) => {
+          finish = () => resolve({ missingPhotos: 0 });
         }),
     );
     render(<DamageReportButton order={order} settlement={settlement} />);
@@ -149,6 +153,16 @@ describe('DamageReportButton', () => {
     expect(button).toHaveAttribute('aria-busy', 'true');
     finish();
     await waitFor(() => expect(button).not.toBeDisabled());
+  });
+
+  it('warns when the report arrived without some of its photos', async () => {
+    downloadDamageReport.mockResolvedValueOnce({ missingPhotos: 1 });
+    render(<DamageReportButton order={order} settlement={settlement} />);
+    await userEvent.click(screen.getByRole('button', { name: LABEL }));
+    await waitFor(() =>
+      expect(notify.warning).toHaveBeenCalledWith(`${KEY}.warnings.missingPhotos`),
+    );
+    expect(notify.error).not.toHaveBeenCalled();
   });
 
   it('TOASTS a failure — nothing on the page changed, the file simply did not arrive', async () => {

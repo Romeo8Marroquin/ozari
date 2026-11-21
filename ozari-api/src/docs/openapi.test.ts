@@ -54,6 +54,7 @@ const EXPECTED_OPERATIONS: ReadonlyArray<readonly [string, string]> = [
   ["/calendar/feed", "delete"],
   ["/calendar/feed/{token}", "get"],
   ["/dashboard", "get"],
+  ["/documents/image", "get"],
   ["/preferences", "get"],
   ["/preferences/settings", "put"],
   ["/preferences/catalogs/{catalog}", "post"],
