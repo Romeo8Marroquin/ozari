@@ -7,6 +7,7 @@ import { downloadDamageReport } from './downloadDocument';
 import { fromDamageReport } from './documentModel';
 import { DOCUMENT_DATE, DOCUMENT_DATE_TIME, documentMoney } from './documentFormats';
 import { useDamageReportCopy, useDocumentLetterhead } from './useDocumentVocabulary';
+import { useMissingPhotosNotice } from './useMissingPhotosNotice';
 import type { OrderDepositSettlement, OrderDetail } from '../orders/order.types';
 
 const KEY = 'modules.panel.documents';
@@ -32,6 +33,7 @@ const DamageReportButton: React.FC<DamageReportButtonProps> = ({ order, settleme
   const { t } = useTranslation();
   const copy = useDamageReportCopy();
   const letterhead = useDocumentLetterhead();
+  const announceMissingPhotos = useMissingPhotosNotice();
   const [busy, setBusy] = useState(false);
 
   const download = (): void => {
@@ -43,6 +45,7 @@ const DamageReportButton: React.FC<DamageReportButtonProps> = ({ order, settleme
       date: (value) => DOCUMENT_DATE.format(value),
       dateTime: (value) => DOCUMENT_DATE_TIME.format(value),
     })
+      .then(announceMissingPhotos)
       // Ambient, like the comprobante's: nothing on the page changed, the file simply did not
       // arrive — most likely the lazy chunk on a bad connection, which a retry fixes.
       .catch(() => notify.error(t(`${KEY}.errors.failed`)))

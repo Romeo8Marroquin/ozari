@@ -1,4 +1,10 @@
-import { embedDamageReportImages, embedDocumentImages } from './documentImages';
+import {
+  embedDamageReportImages,
+  embedDocumentImages,
+  withoutDamageReportImages,
+  withoutDocumentImages,
+  type EmbeddedPhotos,
+} from './documentImages';
 import { damageReportFileName, documentFileName } from './documentModel';
 import type { DamageReportModel, DocumentModel } from './documentModel';
 import type { DamageReportCopy, DocumentCopy } from './OrderDocument';
@@ -60,26 +66,67 @@ function saveBlob(blob: Blob, fileName: string): void {
 const loadRenderer = () =>
   Promise.all([import('@react-pdf/renderer'), import('./OrderDocument')]);
 
+/** What a finished download reports back — the file itself has already been handed over. */
+export interface DocumentDownloadResult {
+  /** Distinct photos that could not be embedded; their rows printed without one. The caller tells
+   *  the admin (`announceMissingPhotos`) — the file is still correct, just less complete. */
+  missingPhotos: number;
+}
+
+type Pdf = Awaited<ReturnType<typeof loadRenderer>>[0]['pdf'];
+
+/**
+ * Render, and if the render with photos FAILS, render once more without any — a photo must never
+ * cost the admin the document. The loader already only hands over images the browser decoded and
+ * re-encoded itself, so this is the last line, for a byte stream react-pdf rejects anyway; every
+ * photo dropped here is added to the count the admin is told about. A failure WITHOUT photos is a
+ * real one and propagates (the button's error toast).
+ */
+async function renderWithPhotoFallback<Model>(
+  pdf: Pdf,
+  embedded: EmbeddedPhotos<Model>,
+  stripPhotos: (model: Model) => Model,
+  render: (model: Model) => Parameters<Pdf>[0],
+): Promise<{ blob: Blob; missingPhotos: number }> {
+  try {
+    return { blob: await pdf(render(embedded.model)).toBlob(), missingPhotos: embedded.missingPhotos };
+  } catch (error) {
+    if (embedded.embeddedPhotos === 0) throw error;
+    return {
+      blob: await pdf(render(stripPhotos(embedded.model))).toBlob(),
+      missingPhotos: embedded.missingPhotos + embedded.embeddedPhotos,
+    };
+  }
+}
+
 /**
  * The row photos are fetched WHILE the renderer chunk downloads — two waits overlapped into one —
  * and arrive embedded (or dropped, when one cannot be had: `documentImages.ts`). The template never
  * sees a network URL, so a photo can never stall or fail the file.
  */
-export async function downloadDocument(input: DownloadDocumentInput): Promise<void> {
-  const [[{ pdf }, { default: OrderDocument }], model] = await Promise.all([
+export async function downloadDocument(
+  input: DownloadDocumentInput,
+): Promise<DocumentDownloadResult> {
+  const [[{ pdf }, { default: OrderDocument }], embedded] = await Promise.all([
     loadRenderer(),
     embedDocumentImages(input.model),
   ]);
-  const blob = await pdf(
-    <OrderDocument
-      model={model}
-      copy={input.copy}
-      money={input.money}
-      date={input.date}
-      dateTime={input.dateTime}
-    />,
-  ).toBlob();
-  saveBlob(blob, documentFileName(model));
+  const { blob, missingPhotos } = await renderWithPhotoFallback(
+    pdf,
+    embedded,
+    withoutDocumentImages,
+    (model) => (
+      <OrderDocument
+        model={model}
+        copy={input.copy}
+        money={input.money}
+        date={input.date}
+        dateTime={input.dateTime}
+      />
+    ),
+  );
+  saveBlob(blob, documentFileName(embedded.model));
+  return { missingPhotos };
 }
 
 export interface DownloadDamageReportInput extends Omit<DownloadDocumentInput, 'model' | 'copy'> {
@@ -88,19 +135,27 @@ export interface DownloadDamageReportInput extends Omit<DownloadDocumentInput, '
 }
 
 /** The damage report (EPIC-2-DOCUMENTS §2c) — same machinery, same lazy chunk, its own file name. */
-export async function downloadDamageReport(input: DownloadDamageReportInput): Promise<void> {
-  const [[{ pdf }, { DamageReportDocument }], model] = await Promise.all([
+export async function downloadDamageReport(
+  input: DownloadDamageReportInput,
+): Promise<DocumentDownloadResult> {
+  const [[{ pdf }, { DamageReportDocument }], embedded] = await Promise.all([
     loadRenderer(),
     embedDamageReportImages(input.model),
   ]);
-  const blob = await pdf(
-    <DamageReportDocument
-      model={model}
-      copy={input.copy}
-      money={input.money}
-      date={input.date}
-      dateTime={input.dateTime}
-    />,
-  ).toBlob();
-  saveBlob(blob, damageReportFileName(model));
+  const { blob, missingPhotos } = await renderWithPhotoFallback(
+    pdf,
+    embedded,
+    withoutDamageReportImages,
+    (model) => (
+      <DamageReportDocument
+        model={model}
+        copy={input.copy}
+        money={input.money}
+        date={input.date}
+        dateTime={input.dateTime}
+      />
+    ),
+  );
+  saveBlob(blob, damageReportFileName(embedded.model));
+  return { missingPhotos };
 }

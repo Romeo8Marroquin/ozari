@@ -9,6 +9,7 @@ const {
   putCommandCtor,
   deleteCommandCtor,
   deleteBatchCommandCtor,
+  getCommandCtor,
   getSignedUrlMock,
 } = vi.hoisted(() => {
   const sendMock = vi.fn();
@@ -24,6 +25,9 @@ const {
   const deleteBatchCommandCtor = vi.fn(function DeleteBatchMock(input: unknown) {
     return { input };
   });
+  const getCommandCtor = vi.fn(function GetMock(input: unknown) {
+    return { input };
+  });
   const getSignedUrlMock = vi.fn();
   return {
     s3ClientCtor,
@@ -31,6 +35,7 @@ const {
     putCommandCtor,
     deleteCommandCtor,
     deleteBatchCommandCtor,
+    getCommandCtor,
     getSignedUrlMock,
   };
 });
@@ -39,6 +44,7 @@ vi.mock("@aws-sdk/client-s3", () => ({
   PutObjectCommand: putCommandCtor,
   DeleteObjectCommand: deleteCommandCtor,
   DeleteObjectsCommand: deleteBatchCommandCtor,
+  GetObjectCommand: getCommandCtor,
 }));
 vi.mock("@aws-sdk/s3-request-presigner", () => ({
   getSignedUrl: getSignedUrlMock,
@@ -183,6 +189,149 @@ describe("R2Storage", () => {
     expect(new R2Storage(CONFIG).getPublicUrl("products/x.png")).toBe(
       "https://pub.example.com/products/x.png",
     );
+  });
+
+  it("maps one of its own public URLs back to the key — the inverse of getPublicUrl", async () => {
+    const { R2Storage } = await import("./storage.js");
+    const storage = new R2Storage(CONFIG);
+    expect(storage.keyFromPublicUrl(storage.getPublicUrl("products/x.png"))).toBe("products/x.png");
+    expect(storage.keyFromPublicUrl("https://evil.example.com/products/x.png")).toBeNull();
+  });
+
+  /** A GetObject output whose body reports what was read and whether it was abandoned. */
+  const objectOutput = (bytes: number[], extra: Record<string, unknown> = {}) => {
+    const cancel = vi.fn(() => Promise.resolve());
+    return {
+      cancel,
+      output: {
+        ContentType: "image/webp",
+        ContentLength: bytes.length,
+        Body: {
+          transformToByteArray: vi.fn(async () => new Uint8Array(bytes)),
+          transformToWebStream: vi.fn(() => ({ cancel })),
+        },
+        ...extra,
+      },
+    };
+  };
+
+  it("reads an object's bytes and stored type over the S3 API", async () => {
+    const { R2Storage } = await import("./storage.js");
+    sendMock.mockResolvedValueOnce(objectOutput([1, 2, 3]).output);
+
+    const object = await new R2Storage(CONFIG).getObject("products/a.webp", 10);
+
+    expect(getCommandCtor).toHaveBeenCalledWith({ Bucket: "ozari-assets", Key: "products/a.webp" });
+    expect(object).toEqual({ body: new Uint8Array([1, 2, 3]), contentType: "image/webp" });
+    // Every read is bounded by a deadline — a stalled R2 must not hold the request open.
+    expect(sendMock).toHaveBeenCalledWith(expect.anything(), {
+      abortSignal: expect.any(AbortSignal),
+    });
+  });
+
+  it.each(["TimeoutError", "AbortError"])(
+    "turns a read that ran out of time (%s) into a StorageTimeoutError",
+    async (name) => {
+      const { R2Storage, StorageTimeoutError } = await import("./storage.js");
+      sendMock.mockRejectedValueOnce(Object.assign(new Error("slow"), { name }));
+      await expect(
+        new R2Storage(CONFIG).getObject("products/slow.webp", 10),
+      ).rejects.toBeInstanceOf(StorageTimeoutError);
+    },
+  );
+
+  it("refuses an object above the cap WITHOUT reading its body", async () => {
+    const { R2Storage, StorageValidationError } = await import("./storage.js");
+    const { output, cancel } = objectOutput([1, 2, 3, 4]);
+    sendMock.mockResolvedValueOnce(output);
+
+    await expect(new R2Storage(CONFIG).getObject("products/a.webp", 3)).rejects.toBeInstanceOf(
+      StorageValidationError,
+    );
+    expect(output.Body.transformToByteArray).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalled();
+
+    // A stream that fails to cancel changes nothing: the refusal is the answer either way.
+    const failing = objectOutput([1, 2, 3, 4]);
+    failing.cancel.mockRejectedValueOnce(new Error("already closed"));
+    sendMock.mockResolvedValueOnce(failing.output);
+    await expect(new R2Storage(CONFIG).getObject("products/a.webp", 3)).rejects.toBeInstanceOf(
+      StorageValidationError,
+    );
+  });
+
+  it("reads an object whose length is not reported", async () => {
+    const { R2Storage } = await import("./storage.js");
+    sendMock.mockResolvedValueOnce(objectOutput([9], { ContentLength: undefined }).output);
+    await expect(new R2Storage(CONFIG).getObject("products/a.webp", 10)).resolves.toMatchObject({
+      body: new Uint8Array([9]),
+    });
+  });
+
+  it("answers null for a missing object, or one with no body", async () => {
+    const { R2Storage } = await import("./storage.js");
+    const storage = new R2Storage(CONFIG);
+    sendMock.mockRejectedValueOnce(Object.assign(new Error("gone"), { name: "NoSuchKey" }));
+    await expect(storage.getObject("products/gone.webp", 10)).resolves.toBeNull();
+    sendMock.mockResolvedValueOnce({});
+    await expect(storage.getObject("products/empty.webp", 10)).resolves.toBeNull();
+  });
+
+  it("lets any other storage failure through", async () => {
+    const { R2Storage } = await import("./storage.js");
+    const storage = new R2Storage(CONFIG);
+    sendMock.mockRejectedValueOnce(new Error("R2 down"));
+    await expect(storage.getObject("products/a.webp", 10)).rejects.toThrow("R2 down");
+    sendMock.mockRejectedValueOnce(null);
+    await expect(storage.getObject("products/a.webp", 10)).rejects.toBeNull();
+  });
+});
+
+describe("assetKeyFromUrl", () => {
+  const BASE = "https://assets.example.com";
+
+  it.each([
+    ["a product photo", `${BASE}/products/3f2504e0.webp`, "products/3f2504e0.webp"],
+    ["an order evidence photo", `${BASE}/orders/evidence/9a.jpg`, "orders/evidence/9a.jpg"],
+    ["a base given with a trailing slash", `${BASE}/products/a.png`, "products/a.png"],
+  ])("accepts %s", async (_label, url, key) => {
+    const { assetKeyFromUrl } = await import("./storage.js");
+    expect(assetKeyFromUrl(`${BASE}/`, url)).toBe(key);
+  });
+
+  it("honours a base that has a path of its own", async () => {
+    const { assetKeyFromUrl } = await import("./storage.js");
+    expect(assetKeyFromUrl(`${BASE}/cdn`, `${BASE}/cdn/products/a.png`)).toBe("products/a.png");
+    expect(assetKeyFromUrl(`${BASE}/cdn`, `${BASE}/products/a.png`)).toBeNull();
+  });
+
+  // Each of these would turn the endpoint into a proxy for something that is not our asset.
+  it.each([
+    ["another host", "https://evil.example.com/products/a.png"],
+    ["another scheme", "http://assets.example.com/products/a.png"],
+    ["embedded credentials", "https://user:pw@assets.example.com/products/a.png"],
+    ["a query string", `${BASE}/products/a.png?x=1`],
+    ["a fragment", `${BASE}/products/a.png#x`],
+    ["a folder outside the app's prefixes", `${BASE}/secrets/a.png`],
+    ["a prefix without a key", `${BASE}/products/`],
+    ["the bare base", `${BASE}/`],
+    ["an encoded traversal", `${BASE}/products/%2e%2e%2fsecrets%2fa.png`],
+    ["an encoded empty segment", `${BASE}/products/%2Fa.png`],
+    // (A bare `%2E` segment is already collapsed by the URL parser; one hidden behind encoded
+    // slashes survives it and is refused here.)
+    ["an encoded dot segment", `${BASE}/products/x%2F.%2Fa.png`],
+    ["an exotic character", `${BASE}/products/a%20b.png`],
+    ["a malformed escape", `${BASE}/products/%E0%A4%A.png`],
+    ["a key that is far too long", `${BASE}/products/${"a".repeat(600)}.png`],
+    ["not a URL at all", "products/a.png"],
+  ])("refuses %s", async (_label, url) => {
+    const { assetKeyFromUrl } = await import("./storage.js");
+    expect(assetKeyFromUrl(BASE, url)).toBeNull();
+  });
+
+  it("refuses everything when the configured base is itself not a URL", async () => {
+    const { assetKeyFromUrl } = await import("./storage.js");
+    expect(assetKeyFromUrl("not a base", `${BASE}/products/a.png`)).toBeNull();
   });
 });
 

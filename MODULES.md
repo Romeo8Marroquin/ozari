@@ -815,7 +815,9 @@ destination, platform)` decides, and `openMapsLink` follows it:
   grid (`useGridColumns`: computed `grid-template-columns` + a `ResizeObserver`), never assumed from a
   breakpoint — and folds the rest behind **"Ver N más"**, which unfolds IN PLACE (not a link to the
   agenda). No fold ⇒ the control is not rendered at all (it eases in/out with `Collapse` as a refetch
-  or a resize changes that). Motion: `unfoldGrid` / `foldGrid` in `pageMotion` (FRONTEND-DOCTRINE §4).
+  or a resize changes that). The control is a quiet TEXT toggle set into a divider, never a `Button`
+  chip (owner, 2026-11-20 — the chip weighed as much as the cards' actions): hairlines either side
+  rest at ~10% of the row and stretch to 18% on hover/keyboard focus (the `RULE` note in the file). Motion: `unfoldGrid` / `foldGrid` in `pageMotion` (FRONTEND-DOCTRINE §4).
   `expanded` (the label, chevron, `aria-expanded`) answers at once; `unfolded` (whether the later
   cards render) lags a fold by its animation; folded cards are `inert`; a reversed fold never commits.
 - **`upNext` is ORDERS, not events** (owner's framing): each order is represented by the

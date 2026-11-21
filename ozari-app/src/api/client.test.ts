@@ -151,6 +151,16 @@ describe('api response interceptor', () => {
     expect(error).not.toHaveBeenCalled();
   });
 
+  it('a gateway status on a confirmOutage request only asks the probe — no overlay on its own word', async () => {
+    useAdapter(respond(504));
+    await expect(
+      api.get('/documents/image', { confirmOutage: true, skipErrorNotification: true }),
+    ).rejects.toBeDefined();
+    expect(reportOutage).not.toHaveBeenCalled();
+    expect(probeBackendMaybeOutage).toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+  });
+
   it('a network error while online triggers the confirming health probe', async () => {
     useAdapter(async (config) => Promise.reject(new AxiosError('Network Error', 'ERR_NETWORK', config)));
     await expect(api.post('/x', {}, { skipErrorNotification: true })).rejects.toBeDefined();

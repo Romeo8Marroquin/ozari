@@ -878,6 +878,29 @@
       }
     }
   },
+  "documents": {
+    "getImage": {
+      "foreign": "La imagen solicitada no pertenece a este sistema.",
+      "notFound": "La imagen solicitada no existe.",
+      "notImage": "El archivo solicitado no es una imagen que se pueda imprimir.",
+      "timeout": "La imagen tardó demasiado en responder. Intente de nuevo.",
+      "unavailable": "Ha ocurrido un error, por favor intente de nuevo más tarde.",
+      "validators": {
+        "url": "Debe indicar la dirección de la imagen.",
+        "logs": {
+          "url": "Imagen de documento rechazada: falta la dirección o no es válida."
+        }
+      },
+      "logs": {
+        "foreign": "Imagen de documento rechazada: la dirección no es un recurso propio ({{-url}}).",
+        "notFound": "Imagen de documento inexistente: {{-key}}.",
+        "notImage": "Imagen de documento rechazada: {{-key}} no es una imagen imprimible ({{-contentType}}).",
+        "tooLarge": "Imagen de documento rechazada: supera el tamaño máximo ({{-url}}).",
+        "timeout": "Imagen de documento: el almacenamiento no respondió a tiempo ({{-url}}).",
+        "error": "Error al leer la imagen de documento: {{-error}}."
+      }
+    }
+  },
   "calendar": {
     "kinds": {
       "DELIVERY": "Entrega",

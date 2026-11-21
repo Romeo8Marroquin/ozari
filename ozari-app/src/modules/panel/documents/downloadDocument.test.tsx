@@ -12,13 +12,35 @@ vi.mock('@react-pdf/renderer', () => ({ pdf }));
 vi.mock('./OrderDocument', () => ({ default: () => null, DamageReportDocument: () => null }));
 // The photo embedding has its own suite (`documentImages.test.ts`); here it only has to be shown
 // that the template receives the EMBEDDED model, never the one with network URLs.
-const { embedDocumentImages, embedDamageReportImages } = vi.hoisted(() => ({
-  embedDocumentImages: vi.fn((model: unknown) => Promise.resolve({ ...(model as object), embedded: true })),
-  embedDamageReportImages: vi.fn((model: unknown) =>
-    Promise.resolve({ ...(model as object), embedded: true }),
+const {
+  embedDocumentImages,
+  embedDamageReportImages,
+  withoutDocumentImages,
+  withoutDamageReportImages,
+} = vi.hoisted(() => ({
+  embedDocumentImages: vi.fn((model: unknown) =>
+    Promise.resolve({
+      model: { ...(model as object), embedded: true },
+      embeddedPhotos: 3,
+      missingPhotos: 0,
+    }),
   ),
+  embedDamageReportImages: vi.fn((model: unknown) =>
+    Promise.resolve({
+      model: { ...(model as object), embedded: true },
+      embeddedPhotos: 1,
+      missingPhotos: 2,
+    }),
+  ),
+  withoutDocumentImages: vi.fn((model: object) => ({ ...model, stripped: true })),
+  withoutDamageReportImages: vi.fn((model: object) => ({ ...model, stripped: true })),
 }));
-vi.mock('./documentImages', () => ({ embedDocumentImages, embedDamageReportImages }));
+vi.mock('./documentImages', () => ({
+  embedDocumentImages,
+  embedDamageReportImages,
+  withoutDocumentImages,
+  withoutDamageReportImages,
+}));
 
 import { downloadDamageReport, downloadDocument } from './downloadDocument';
 import type { DamageReportModel, DocumentModel } from './documentModel';
@@ -56,7 +78,7 @@ beforeEach(() => {
 describe('downloadDocument', () => {
   it('renders the model and hands the bytes over under the document’s own name', async () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
-    await downloadDocument(input);
+    await expect(downloadDocument(input)).resolves.toEqual({ missingPhotos: 0 });
 
     expect(pdf).toHaveBeenCalled();
     expect(toBlob).toHaveBeenCalled();
@@ -91,7 +113,13 @@ describe('downloadDocument', () => {
   it('renders the DAMAGE REPORT through the same machinery, under its own name', async () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     const report = { reference: 42 } as unknown as DamageReportModel;
-    await downloadDamageReport({ ...input, model: report, copy: {} as DamageReportCopy });
+    const result = await downloadDamageReport({
+      ...input,
+      model: report,
+      copy: {} as DamageReportCopy,
+    });
+    // The photos that could not be embedded are reported back, so the button can say so.
+    expect(result).toEqual({ missingPhotos: 2 });
     const element = pdf.mock.calls[0]?.[0] as unknown as { props: Record<string, unknown> };
     // The report's own model reaches the template — not a comprobante's — with its photos embedded.
     expect(embedDamageReportImages).toHaveBeenCalledWith(report);
@@ -101,6 +129,39 @@ describe('downloadDocument', () => {
     const anchor = click.mock.instances[0] as HTMLAnchorElement;
     expect(anchor.download).toBe('reporte-danos-ped-00042.pdf');
     click.mockRestore();
+  });
+
+  it('a render that fails WITH photos is rendered again WITHOUT them, and every photo is counted', async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    toBlob.mockRejectedValueOnce(new Error('bad image'));
+
+    // 0 missing + the 3 that were embedded and had to go: the admin is told about all of them.
+    await expect(downloadDocument(input)).resolves.toEqual({ missingPhotos: 3 });
+
+    expect(withoutDocumentImages).toHaveBeenCalledWith({ ...model, embedded: true });
+    const retried = pdf.mock.calls[1]?.[0] as unknown as { props: Record<string, unknown> };
+    expect(retried.props['model']).toEqual({ ...model, embedded: true, stripped: true });
+    // The file still arrives, under its own name.
+    expect((click.mock.instances[0] as HTMLAnchorElement).download).toBe('ped-00042.pdf');
+    click.mockRestore();
+  });
+
+  it('the damage report falls back the same way', async () => {
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    toBlob.mockRejectedValueOnce(new Error('bad image'));
+    const report = { reference: 42 } as unknown as DamageReportModel;
+    await expect(
+      downloadDamageReport({ ...input, model: report, copy: {} as DamageReportCopy }),
+    ).resolves.toEqual({ missingPhotos: 3 });
+    expect(withoutDamageReportImages).toHaveBeenCalled();
+  });
+
+  it('a render that fails with NO photos in it is a real failure and propagates', async () => {
+    embedDocumentImages.mockResolvedValueOnce({ model, embeddedPhotos: 0, missingPhotos: 0 } as never);
+    toBlob.mockRejectedValueOnce(new Error('layout'));
+    await expect(downloadDocument(input)).rejects.toThrow('layout');
+    expect(withoutDocumentImages).not.toHaveBeenCalled();
+    expect(createObjectURL).not.toHaveBeenCalled();
   });
 
   it('passes the model and the caller’s formatters through to the template', async () => {

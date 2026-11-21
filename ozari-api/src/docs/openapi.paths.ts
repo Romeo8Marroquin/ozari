@@ -2744,6 +2744,82 @@ export const paths: OpenAPIV3.PathsObject = {
     },
   },
 
+  "/documents/image": {
+    get: {
+      tags: ["Documents"],
+      summary: "One of the app's own photos, as bytes, for a printed document (admin)",
+      operationId: "getDocumentImage",
+      description:
+        "**STRICTLY Admin.** The printed documents (comprobante, cotización, damage report — and any " +
+        "document added later) are built in the browser, and each row's product photo is EMBEDDED " +
+        "into the PDF, so the browser needs the image's bytes. Reading them from the public assets " +
+        "host is a cross-origin fetch that depends on the edge's CORS headers and cache lining up; " +
+        "this route reads the object over the storage API instead, same origin as every other call, " +
+        "so a photo can never be lost to a CDN detail. The downloaded PDF holds the photos " +
+        "itself and never fetches anything again.\n\n" +
+        "**Only the app's own assets:** `url` must be one of the public URLs the API itself returns " +
+        "(an order line's `imageUrl`, a product image's `url`) — same origin as the assets host, " +
+        "inside one of the bucket's own folders (`products/`, `orders/evidence/`), no query, no " +
+        "traversal. Anything else is a `400`, so this can never act as a general proxy.\n\n" +
+        "**Bytes, not JSON:** the success body is the image itself, in its stored type (JPEG, PNG, " +
+        "WebP or AVIF — the client re-encodes it for the PDF). `Cache-Control: private, " +
+        "max-age=86400, immutable` — every stored key is a fresh UUID, so a cached copy can never " +
+        "be stale and a second download of the same document re-uses it. Errors keep the standard " +
+        "JSON envelope.\n\n" +
+        "**Its own limiter (300/min)**, NOT the shared authenticated tier: one document asks once " +
+        "per distinct photo.",
+      security: [{ ApiKeyAuth: [], BearerAuth: [] }],
+      parameters: [
+        {
+          name: "url",
+          in: "query",
+          required: true,
+          description: "The photo's public URL, exactly as the API returned it (max 2048 chars).",
+          schema: { type: "string", maxLength: 2048 },
+          example: EXAMPLE_PRODUCT_IMAGE_URL,
+        },
+      ],
+      responses: {
+        "200": {
+          description: "The image.",
+          headers: {
+            "Cache-Control": {
+              description: "`private, max-age=86400, immutable`.",
+              schema: { type: "string" },
+            },
+          },
+          content: {
+            "image/jpeg": { schema: { type: "string", format: "binary" } },
+            "image/png": { schema: { type: "string", format: "binary" } },
+            "image/webp": { schema: { type: "string", format: "binary" } },
+            "image/avif": { schema: { type: "string", format: "binary" } },
+          },
+        },
+        "400": errorResponse(
+          "`url` is missing, repeated or too long, or it is not one of the app's own assets.",
+          400,
+          "La imagen solicitada no pertenece a este sistema.",
+        ),
+        "401": unauthorized(STALE_TOKEN_401),
+        "403": adminOnly(),
+        "404": errorResponse("No object behind that URL.", 404, "La imagen solicitada no existe."),
+        "422": errorResponse(
+          "The object is not a printable image (a type the upload policy does not allow, or above " +
+            "its 5 MB cap).",
+          422,
+          "El archivo solicitado no es una imagen que se pueda imprimir.",
+        ),
+        "429": rateLimited,
+        "500": serverError,
+        "504": errorResponse(
+          "The storage read did not finish in time (6 s). Retryable — the client retries once.",
+          504,
+          "La imagen tardó demasiado en responder. Intente de nuevo.",
+        ),
+      },
+    },
+  },
+
   "/dashboard": {
     get: {
       tags: ["Dashboard"],

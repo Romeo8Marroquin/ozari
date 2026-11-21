@@ -100,9 +100,12 @@ api.interceptors.response.use(
     };
 
     // Backend down (gateway/unavailable) → raise the global outage overlay, which then polls health
-    // and recovers. Skip when this failure IS the health probe (it drives its own retry loop).
+    // and recovers. Skip when this failure IS the health probe (it drives its own retry loop). A
+    // request that opted into `confirmOutage` (a background read, e.g. a document photo) only asks
+    // the probe to confirm — one slow photo must never take over the screen.
     if (isOutageStatus(error.response?.status) && !originalRequest._isHealthCheck) {
-      reportOutage();
+      if (originalRequest.confirmOutage) void probeBackendMaybeOutage();
+      else reportOutage();
     }
 
     // A dead/unreachable backend fails as a NETWORK error (connection refused / DNS / timeout), not a

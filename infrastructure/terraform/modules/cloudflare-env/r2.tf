@@ -29,30 +29,18 @@ resource "cloudflare_r2_bucket_cors" "assets" {
     {
       id = "browser-presigned-uploads"
       allowed = {
-        # PUT only — the uploads. Reads have their own rule below.
+        # PUT only — the uploads. Reads need no rule (see below).
         methods = ["PUT"]
         origins = var.r2_cors_allowed_origins
         headers = ["content-type"]
       }
       max_age_seconds = 3600
     },
-    {
-      # The printed documents FETCH each row's product photo (ozari-app `documentImages.ts`) to
-      # re-encode it for react-pdf, which reads neither WebP nor AVIF — a CORS request, unlike the
-      # catalog's plain <img> tags. Without this rule the PDFs still generate, without photos.
-      #
-      # Any origin, deliberately: every object here is already public (a plain GET with no Origin
-      # header returns it), no credentials are involved, so a CORS allowlist on a read protects
-      # nothing. And a wildcard is what keeps the EDGE CACHE honest: R2 echoes a matching origin,
-      # so a response cached for one origin (localhost on staging) could be served to another and
-      # fail there; `*` is the same answer for everyone.
-      id = "public-reads"
-      allowed = {
-        methods = ["GET", "HEAD"]
-        origins = ["*"]
-      }
-      max_age_seconds = 3600
-    },
+    # NO read rule, deliberately (2026-11-20). Public reads are plain <img> tags (not CORS), and the
+    # printed documents take each photo's bytes from the API (`GET /documents/image`, over the S3
+    # API) — the `public-reads` rule that once served them failed through the edge cache, which hands
+    # out a copy first cached for an <img> WITHOUT its CORS header (EPIC-2-DOCUMENTS §2d #39). Never
+    # re-add one to fix a missing photo; fix the route.
   ]
 }
 

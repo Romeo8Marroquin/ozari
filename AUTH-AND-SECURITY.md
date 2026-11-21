@@ -23,6 +23,12 @@ rate-limit tiers) — **read this file before touching anything under `ozari-api
    mount/focus, and 10/min starved it (the July 2026 dev 429s). The auth router also sets
    `Cache-Control: no-store` (its responses carry PII; also = no ETag/304 there — 304s elsewhere, e.g.
    `/products/catalog`, are the browser's normal conditional caching and fine).
+   **`/documents` rides its OWN limiter instead of the authenticated tier** (300/min, in
+   `documents.route.ts`, 2026-11-20): `GET /documents/image` is called once per distinct photo of a
+   PDF, so a long order must neither starve on nor drain the 100/min the panel spends. Still
+   `verifyJwt` + Admin. It is the one route that reads a stored object THROUGH the API, and it is
+   bounded to the app's own keys (`assetKeyFromUrl`) so it can never act as a fetch-anything proxy
+   (EPIC-2-DOCUMENTS §2d #39).
 3. CORS: strict allowlist of `APP_HOST` only, `credentials: true`.
 4. Body size capped at `10kb`; 30s request/response timeout. **One exception** (variations,
    2026-10-29; raised 2026-10-30): `POST /products` and `PUT /products/:id` parse up to **`100kb`**
