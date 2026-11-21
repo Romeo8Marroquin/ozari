@@ -7,6 +7,7 @@ import { downloadDocument } from './downloadDocument';
 import { fromOrderDetail } from './documentModel';
 import { DOCUMENT_DATE, DOCUMENT_DATE_TIME, documentMoney } from './documentFormats';
 import { useDocumentCopy, useDocumentLetterhead } from './useDocumentVocabulary';
+import { useMissingPhotosNotice } from './useMissingPhotosNotice';
 import type { OrderDetail } from '../orders/order.types';
 
 const KEY = 'modules.panel.documents';
@@ -33,6 +34,7 @@ const OrderDocumentButton: React.FC<OrderDocumentButtonProps> = ({ order }) => {
   const { t } = useTranslation();
   const copy = useDocumentCopy('receipt');
   const letterhead = useDocumentLetterhead();
+  const announceMissingPhotos = useMissingPhotosNotice();
   const [busy, setBusy] = useState(false);
 
   // Cancelled ⇒ no document at all. Deliberately renders NOTHING rather than a disabled button: a
@@ -48,6 +50,7 @@ const OrderDocumentButton: React.FC<OrderDocumentButtonProps> = ({ order }) => {
       date: (value) => DOCUMENT_DATE.format(value),
       dateTime: (value) => DOCUMENT_DATE_TIME.format(value),
     })
+      .then(announceMissingPhotos)
       // A failure here is ambient — nothing on the page changed, the file simply did not arrive —
       // so it toasts rather than taking over the screen. The most likely cause by far is the lazy
       // chunk failing to load on a bad connection, which a retry fixes.

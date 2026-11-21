@@ -9,6 +9,7 @@ import { fromOrderForm } from './documentModel';
 import { quoteFields } from './quoteGate';
 import { DOCUMENT_DATE, DOCUMENT_DATE_TIME, documentMoney } from './documentFormats';
 import { useDocumentCopy, useDocumentLetterhead } from './useDocumentVocabulary';
+import { useMissingPhotosNotice } from './useMissingPhotosNotice';
 import type { CatalogOption, ClientRegistry } from '../orders/order.types';
 import type { CreateOrderFormType } from '../orders/SchemaCreateOrder';
 import type { Product } from '../products/product.types';
@@ -56,6 +57,7 @@ const QuoteDocumentButton: React.FC<QuoteDocumentButtonProps> = ({
   const { t } = useTranslation();
   const copy = useDocumentCopy('quote');
   const letterhead = useDocumentLetterhead();
+  const announceMissingPhotos = useMissingPhotosNotice();
   const { trigger, getValues } = useFormContext<CreateOrderFormType>();
   const [busy, setBusy] = useState(false);
 
@@ -98,6 +100,7 @@ const QuoteDocumentButton: React.FC<QuoteDocumentButtonProps> = ({
       date: (value) => DOCUMENT_DATE.format(value),
       dateTime: (value) => DOCUMENT_DATE_TIME.format(value),
     })
+      .then(announceMissingPhotos)
       .catch(() => notify.error(t(`${KEY}.errors.failed`)))
       .finally(() => setBusy(false));
   };

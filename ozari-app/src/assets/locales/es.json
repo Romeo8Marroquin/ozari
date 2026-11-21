@@ -556,6 +556,10 @@
         "errors": {
           "failed": "No fue posible generar el documento. Inténtalo de nuevo.",
           "incompleteQuote": "Revisa los datos marcados: la cotización necesita al menos un producto, y lo que llenes debe ser válido."
+        },
+        "warnings": {
+          "missingPhotos_one": "El documento se descargó, pero {{count}} foto no se pudo incluir. Vuelve a descargarlo para intentarlo de nuevo.",
+          "missingPhotos_other": "El documento se descargó, pero {{count}} fotos no se pudieron incluir. Vuelve a descargarlo para intentarlo de nuevo."
         }
       },
       "preferences": {

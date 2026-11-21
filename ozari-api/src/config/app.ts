@@ -185,6 +185,11 @@ export const appConfig = {
     uploadUrlTtlSeconds: 300, // 5 min: long enough to upload, short enough that a leaked URL dies fast.
     // Max upload size, bound INTO the presigned signature (ContentLength) so a client can't exceed it.
     maxUploadBytes: 5 * 1024 * 1024, // 5 MB
+    // The longest one object READ through the API may take (`Storage.getObject`, the printed
+    // documents' row photos). Under the client's per-photo timeout (8s, `documentImages.ts`) so a
+    // slow R2 answers as a clean 504 the client can retry, instead of a request left hanging until
+    // the 30s request timeout after the client has already given up on it.
+    readTimeoutMs: 6_000,
     // SHOWCASE gallery cap per product — bounds the `images` a create/update accepts (the product's
     // own photos, `option_value_id` NULL).
     //

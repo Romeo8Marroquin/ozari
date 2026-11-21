@@ -6,7 +6,9 @@ const { usePreferences } = vi.hoisted(() => ({ usePreferences: vi.fn() }));
 vi.mock('../preferences/usePreferences', () => ({ usePreferences }));
 
 const { downloadDocument } = vi.hoisted(() => ({
-  downloadDocument: vi.fn<(input: unknown) => Promise<void>>(() => Promise.resolve()),
+  downloadDocument: vi.fn<(input: unknown) => Promise<{ missingPhotos: number }>>(() =>
+    Promise.resolve({ missingPhotos: 0 }),
+  ),
 }));
 vi.mock('./downloadDocument', () => ({ downloadDocument }));
 
@@ -201,6 +203,16 @@ describe('QuoteDocumentButton', () => {
     await click();
     await waitFor(() => expect(downloadDocument).toHaveBeenCalled());
     expect(lastInput().model.client.name).toBe('Quien recibe');
+  });
+
+  it('warns when the quote arrived without some of its photos', async () => {
+    downloadDocument.mockResolvedValueOnce({ missingPhotos: 3 });
+    setup();
+    await click();
+    await waitFor(() =>
+      expect(notify.warning).toHaveBeenCalledWith(`${KEY}.warnings.missingPhotos`),
+    );
+    expect(notify.error).not.toHaveBeenCalled();
   });
 
   it('TOASTS a failure — nothing on the form changed, the file simply did not arrive', async () => {

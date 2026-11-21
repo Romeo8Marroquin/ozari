@@ -239,13 +239,13 @@ CORS is a *browser gate*, not the upload authorization — that is the presigned
 without an admin session; keeping it off production means a compromised dev machine's browser
 context can't even preflight against prod assets.
 
-Public **reads** have their OWN rule, `public-reads` (2026-10-29): GET/HEAD from **any** origin. The
-catalog's `<img>` tags never needed it, but the printed documents `fetch` each line's product photo
-(`ozari-app` `documentImages.ts`) to re-encode it for react-pdf — a CORS request. The objects are
-already public and no credentials ride along, so an allowlist would protect nothing, and `*` keeps
-the edge cache from serving one origin's CORS answer to another. Missing it (or the read host in the
-CSP `connect-src`), the PDFs still generate — **without photos**. After the first apply, purge the
-image host's cache if staging still prints none.
+Public **reads** need NO CORS rule: the catalog's `<img>` tags are not CORS requests, and the printed
+documents get each row photo's bytes from the API (`GET /documents/image`, which reads the bucket over
+the S3 API — EPIC-2-DOCUMENTS §2d #39), never from the public host. The `public-reads` rule that
+existed for documents (2026-10-29 → 2026-11-20) was removed: the edge cache served copies without
+its CORS header anyway, which is why documents printed without photos. **If documents ever print
+without photos, look at the API route and its logs — never re-add a CORS read rule or the assets host
+to the CSP.**
 
 **The CSP is the OTHER browser gate, and it is checked first.** The app's `connect-src`
 (`ozari-app/index.html`) pins the exact write host `https://<account-id>.r2.cloudflarestorage.com`,
