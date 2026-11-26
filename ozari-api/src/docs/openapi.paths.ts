@@ -1790,6 +1790,7 @@ export const paths: OpenAPIV3.PathsObject = {
               clientName: EXAMPLE_CLIENT_NAME,
               status: { id: 3, name: "Entregado", colorKey: "emerald" },
               nextStatus: { id: 4, name: "Recolectado" },
+              progress: { step: 3, total: 5 },
               deliveredAt: EXAMPLE_DELIVERY_AT,
             },
           },
@@ -2860,6 +2861,7 @@ export const paths: OpenAPIV3.PathsObject = {
                   eventType: { id: 1, name: EXAMPLE_EVENT_TYPE },
                   status: { id: 1, name: "Pendiente", colorKey: "amber" },
                   nextStatus: { id: 5, name: "En ruta" },
+                  progress: { step: 1, total: 5 },
                   actions: [
                     {
                       kind: "forward",

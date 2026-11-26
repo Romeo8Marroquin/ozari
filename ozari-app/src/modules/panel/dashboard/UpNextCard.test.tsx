@@ -199,6 +199,22 @@ describe('UpNextCard', () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
+  it('wires the rails: progress in the status colour, red once late, and the paid seam', () => {
+    const { unmount } = renderCard({ progress: { step: 3, total: 5 }, isPaid: true });
+    const rail = screen.getByTestId('order-progress-rail');
+    expect(rail.dataset.overdue).toBe('false');
+    expect(rail.querySelectorAll('[data-filled="true"]')).toHaveLength(3);
+    expect(screen.getByTestId('order-paid-edge').dataset.paid).toBe('true');
+    unmount();
+
+    renderCard({
+      progress: { step: 3, total: 5 },
+      event: { kind: 'COLLECTION', at: '2026-08-02T10:00:00.000Z', isOverdue: true, minutesUntil: -90 },
+    });
+    expect(screen.getByTestId('order-progress-rail').dataset.overdue).toBe('true');
+    expect(screen.getByTestId('order-paid-edge').dataset.paid).toBe('false');
+  });
+
   it('renders a non-lead card (the ranking is visual, not just ordering)', () => {
     renderCard({}, 2);
     expect(screen.getByText('María López')).toBeInTheDocument();

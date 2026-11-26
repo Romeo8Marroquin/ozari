@@ -6,6 +6,7 @@ import OpenInMapsButton from '@components/OpenInMapsButton';
 import { orderDestination } from '@utils/mapLinks';
 import useBreakpoint from '@hooks/useBreakpoint';
 import ActionRow from '../ActionRow';
+import { OrderPaidEdge, OrderProgressRail } from './OrderCardRails';
 import { formatShortDate, formatTime, isSameLocalDay } from './orderDayGroups';
 import { statusTone } from './statusTone';
 import useOrderLifecycle, { isTravelStep } from './useOrderLifecycle';
@@ -278,8 +279,14 @@ const OrderTicket: React.FC<{
       //
       // Pressing releases the lift instantly (75ms) — the tactile "it took the tap" that a list of
       // tappable rows needs on touch, where there is no hover to speak of.
-      className="flex cursor-pointer flex-col gap-3 rounded-card bg-white p-4 ring-1 ring-black/[0.04] outline-none transition-[translate,box-shadow] duration-300 ease-[var(--ease-settle)] hover:-translate-y-0.5 hover:shadow-[0_14px_34px_-20px_rgba(38,38,38,0.5)] hover:ring-black/[0.10] hover:duration-150 hover:ease-[cubic-bezier(0.2,0,0,1)] active:translate-y-0 active:shadow-[0_4px_14px_-10px_rgba(38,38,38,0.45)] active:duration-75 focus-visible:ring-2 focus-visible:ring-charcoal/30 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+      // `relative overflow-hidden` + the wider left padding host the two edge rails (progress left,
+      // paid right) — the same pair, same rules, as the dashboard's "Lo siguiente" cards.
+      className="relative flex cursor-pointer flex-col gap-3 overflow-hidden rounded-card bg-white py-4 pl-6 pr-4 ring-1 ring-black/[0.04] outline-none transition-[translate,box-shadow] duration-300 ease-[var(--ease-settle)] hover:-translate-y-0.5 hover:shadow-[0_14px_34px_-20px_rgba(38,38,38,0.5)] hover:ring-black/[0.10] hover:duration-150 hover:ease-[cubic-bezier(0.2,0,0,1)] active:translate-y-0 active:shadow-[0_4px_14px_-10px_rgba(38,38,38,0.45)] active:duration-75 focus-visible:ring-2 focus-visible:ring-charcoal/30 motion-reduce:transition-none motion-reduce:hover:translate-y-0"
     >
+      {/* The list has no "overdue" verdict from the API (that lives on the dashboard), so the rail
+          here is progress alone — the agenda never guesses lateness from the clock. */}
+      <OrderProgressRail progress={order.progress} colorKey={order.status.colorKey} />
+      <OrderPaidEdge isPaid={order.isPaid} />
       {compact ? (
         <>
           {/* Header: who + what beside the status. */}

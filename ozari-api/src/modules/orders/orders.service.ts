@@ -12,6 +12,7 @@ import {
   getEvidenceBounds,
   getStatusCatalog,
   nextStatus,
+  pipelineProgress,
   statusById,
 } from "./lifecycle/lifecycle.service.js";
 import type {
@@ -780,6 +781,9 @@ export function projectOrderListItem(
         undefined,
     },
     nextStatus: next ? { id: next.id, name: next.name } : undefined,
+    // The progress rail's one source — the engine counts the order's OWN pipeline, so a client never
+    // re-derives a position (it doesn't know the order's mode, and would drift as steps change).
+    progress: pipelineProgress(context.catalog, lifecycleOrder) ?? undefined,
     // The engine's moves, plus the one ORDER fact the delivery dialog needs: the deposit still to
     // confirm ("¿Se recibió el depósito?") rides on the forward DELIVERY move only.
     actions: withDepositToCollect(

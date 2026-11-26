@@ -158,6 +158,20 @@ describe('OrderTicket', () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
+  it('carries the SAME rails as the dashboard card: progress (never overdue here) and the paid seam', () => {
+    const { unmount } = render(
+      <OrderTicket order={base({ progress: { step: 2, total: 5 }, isPaid: true })} />,
+    );
+    const rail = screen.getByTestId('order-progress-rail');
+    expect(rail.dataset.overdue).toBe('false');
+    expect(rail.querySelectorAll('[data-filled="true"]')).toHaveLength(2);
+    expect(screen.getByTestId('order-paid-edge').dataset.paid).toBe('true');
+    unmount();
+
+    render(<OrderTicket order={base()} />);
+    expect(screen.getByTestId('order-paid-edge').dataset.paid).toBe('false');
+  });
+
   it('renders the client, event type, item count key, status, and formatted total', () => {
     render(<OrderTicket order={base()} />);
     expect(screen.getByText('María López')).toBeInTheDocument();

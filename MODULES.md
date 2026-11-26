@@ -274,6 +274,24 @@ a real **washing period**: **Recolectado still HOLDS the units**, only Listo ret
   an assigned Driver advance + cancel-with-reason, nobody else), and `describeActions` projects them.
   `buildRentedNowWhere` / `buildRentedInWindowWhere` read `inventoryHold`; `computeNextActionAt`
   derives from the ACTUALS.
+- **Progress + paid — ONE concept on three screens** (owner, 2026-11-25): `pipelineProgress`
+  projects `progress: {step, total}` on every list item and the detail — mode-aware (5 steps rental,
+  3 purchase-only), absent when cancelled or off-pipeline. The client never counts steps itself (it
+  doesn't know the order's mode).
+  - **Cards** (agenda ticket + dashboard up-next, `orders/OrderCardRails.tsx`): LEFT rail = one
+    segment per step, filled bottom-up in the current status' `statusFill` (same token as the chip);
+    the whole rail red when the API says `event.isOverdue` (dashboard only — the list never guesses
+    lateness) but still showing how far it got. RIGHT = a thin emerald seam when `isPaid`, nothing
+    when unpaid (not a warning).
+  - **Detail** (state card): the same segments laid out horizontally and NAMED
+    (`OrderProgressStepper` — a real `<ol>` + `aria-current`; names from `applicableSteps`, used only
+    when they match the server's count, else "Paso N"; names per segment in a wide box, one "Paso 3 de
+    5" caption in a narrow one, by `@container`), the same paid seam on the card, plus an
+    `OrderPaidChip` beside the status chip.
+  - **Motion** (`orders/orderProgress.ts`): segments recolour by CSS transition with a 60ms stagger
+    (the colour travels); a cancelled order DRAINS its segments (`useRetainedTotal` keeps the count)
+    instead of re-laying out; the seam fades and the chip eases its own `grid-cols 0fr↔1fr` column —
+    both stay mounted, so nothing ever pops in or out.
 - **`POST /orders/:id/advance` is the single mutating door** for every move (forward/rewind/cancel):
   it locks the row, re-authorises under the lock (409 stale / 403 wrong actor / 422 evidence), writes
   `service_status_history` + evidence rows, and stamps the actuals from the flags. Availability needs

@@ -14,6 +14,7 @@ import type {
   LifecycleOrderModel,
   OrderActionModel,
   OrderModeModel,
+  PipelineProgressModel,
   StatusDefinitionModel,
   TransitionKindModel,
   TransitionSetModel,
@@ -327,6 +328,25 @@ export function previousStatus(
     (status) => status.sortOrder < position,
   );
   return earlier[earlier.length - 1] ?? null;
+}
+
+/**
+ * How far along its OWN pipeline the order is — the progress bar's one source, so no client ever
+ * re-derives positions from the catalog (it would need the order's mode, which the list doesn't
+ * carry, and would drift the moment a step is inserted). `null` when the order sits OUTSIDE the
+ * pipeline: cancelled, on a disruptive off-ramp, or on a status that vanished or was unpublished
+ * while the order sat on it — a bar that guessed a position there would simply be wrong.
+ */
+export function pipelineProgress(
+  catalog: StatusDefinitionModel[],
+  order: LifecycleOrderModel,
+): PipelineProgressModel | null {
+  if (order.cancelledAt !== null) {
+    return null;
+  }
+  const steps = applicablePipeline(catalog, orderMode(order));
+  const index = steps.findIndex((status) => status.id === order.serviceStatusId);
+  return index === -1 ? null : { step: index + 1, total: steps.length };
 }
 
 /** True once the order has walked its last applicable step (what stamps `services.readyAt`). A

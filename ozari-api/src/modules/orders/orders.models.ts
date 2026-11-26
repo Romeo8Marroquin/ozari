@@ -5,7 +5,10 @@ import type {
   PaginationMeta,
   ZoneCatalogOptionModel,
 } from "../products/products.models.js";
-import type { OrderActionModel } from "./lifecycle/lifecycle.models.js";
+import type {
+  OrderActionModel,
+  PipelineProgressModel,
+} from "./lifecycle/lifecycle.models.js";
 import type { DriverAvailabilityModel } from "./logistics/logistics.models.js";
 
 /**
@@ -58,6 +61,9 @@ export interface OrderListItemResponseModel {
    *  absent when the order is finished/cancelled. Informational — what WOULD come next; whether the
    *  viewer may take it is `actions`. */
   nextStatus: OrderLookupModel | undefined;
+  /** Where the order stands on its OWN (mode-aware) pipeline — the cards' progress rail. Absent when
+   *  it sits outside the pipeline (cancelled, or on a status that no longer occupies a slot). */
+  progress: PipelineProgressModel | undefined;
   /** Every move the REQUESTING actor may make right now (forward / backward / cancel), each already
    *  carrying its evidence + reason requirements. The client renders its buttons straight from this
    *  — no lifecycle rule is duplicated there, and a role can never see an action it may not take. */
