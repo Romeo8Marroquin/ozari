@@ -47,6 +47,9 @@ import OrderDepositRefundModal from './OrderDepositRefundModal';
 import OrderPaymentUndoModal from './OrderPaymentUndoModal';
 import OrderSettlementUndoModal from './OrderSettlementUndoModal';
 import OrderStatusModal from './OrderStatusModal';
+import { OrderPaidChip, OrderPaidEdge } from './OrderCardRails';
+import OrderProgressStepper from './OrderProgressStepper';
+import { applicableSteps } from './orderStatusPath';
 import { statusTone } from './statusTone';
 import { useOrder } from './useOrder';
 import { isTravelStep } from './useOrderLifecycle';
@@ -159,8 +162,16 @@ const Section: React.FC<{
   /** This card's slot in the load cascade. */
   step?: number;
   skeleton?: React.ReactNode;
-}> = ({ title, children, aside, loading = false, step = 0, skeleton }) => (
-  <section className="reveal-item flex flex-col rounded-card bg-white p-5 ring-1 ring-black/[0.04]">
+  /** An edge decoration painted on the card's own border (the state card's paid seam) — the card
+   *  becomes `relative overflow-hidden` so its rounded corners clip it. */
+  edge?: React.ReactNode;
+}> = ({ title, children, aside, loading = false, step = 0, skeleton, edge }) => (
+  <section
+    className={`reveal-item flex flex-col rounded-card bg-white p-5 ring-1 ring-black/[0.04] ${
+      edge ? 'relative overflow-hidden' : ''
+    }`}
+  >
+    {edge}
     <SectionReveal
       loading={loading}
       delaySeconds={step * SECTION_REVEAL_STEP}
@@ -225,6 +236,18 @@ const OrderDetailPage: React.FC = () => {
   const notFound = isError && getStatus(error as AxiosError) === 404;
   const failed = isError && !notFound;
   const cold = isLoading && !order;
+
+  // The stepper's NAMES — the order's mode-aware pipeline from the catalog. Its POSITION is the API's
+  // `progress`; the stepper uses these names only when the two agree on the count. An order with NO
+  // progress gets names (an empty, "fuera del proceso" pipeline) only when it really is cancelled —
+  // an absent field on a live order (an older API mid-deploy) draws nothing rather than a false claim.
+  const stepNames = useMemo(
+    () =>
+      catalog && order && (order.progress !== undefined || order.cancelledAt !== undefined)
+        ? applicableSteps(catalog.serviceStatuses, order).map((step) => step.name)
+        : [],
+    [catalog, order],
+  );
 
   // The three regions a lifecycle move rewrites. Keyed by what actually changed, so a background
   // refetch returning identical data animates nothing.
@@ -550,6 +573,8 @@ const OrderDetailPage: React.FC = () => {
             step={0}
             skeleton={
               <SkeletonBody titleWidth="w-32" aside>
+                {/* The stepper's track, so the card doesn't grow by a row when it lands. */}
+                <Bar w="w-full" h="h-1.5" />
                 <div className="flex flex-col gap-3">
                   <Bar w="w-56" h="h-3" />
                   {/* The placeholder is the SHAPE of what lands: an admin's row is five or six
@@ -565,19 +590,39 @@ const OrderDetailPage: React.FC = () => {
                 </div>
               </SkeletonBody>
             }
+            // The same "paid" concept as the cards' right seam — on THIS card, the one about where
+            // the order stands. It fades in/out with the payment, never pops — and it is mounted from
+            // the skeleton frame on, so a paid order's seam FADES in as the card reveals its data.
+            edge={<OrderPaidEdge isPaid={order?.isPaid ?? false} />}
             aside={
               // The pill sizes itself to the morphing label inside it, and its TINT eases natively
               // — a CSS transition retargets mid-flight, so colour and word stay in step even
-              // through a rapid Pendiente → En ruta → Entregado run.
+              // through a rapid Pendiente → En ruta → Entregado run. The "Pagado" chip beside it
+              // eases its own column open/shut, so the status pill glides over rather than jumps.
               order && (
-                <span
-                  className={`inline-block shrink-0 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-[background-color,color] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${statusTone(order.status.colorKey)}`}
-                >
-                  <MorphSwap swapKey={order.status.id}>{order.status.name}</MorphSwap>
-                </span>
+                <div className="flex shrink-0 items-center">
+                  <span
+                    className={`inline-block shrink-0 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-[background-color,color] duration-300 ease-[var(--ease-settle)] motion-reduce:transition-none ${statusTone(order.status.colorKey)}`}
+                  >
+                    <MorphSwap swapKey={order.status.id}>{order.status.name}</MorphSwap>
+                  </span>
+                  <OrderPaidChip isPaid={order.isPaid} />
+                </div>
               )
             }
           >
+            {order && (
+              // The progress stepper sits OUTSIDE the morphing region on purpose: it animates its
+              // own segments, and its height never changes with a step — so a move recolours the bar
+              // in place while only the sentence and the buttons below it re-flow.
+              <div className="card-item">
+                <OrderProgressStepper
+                  progress={order.progress}
+                  colorKey={order.status.colorKey}
+                  stepNames={stepNames}
+                />
+              </div>
+            )}
             {order && (
               <div ref={stateBody} className="card-item flex flex-col gap-3">
                 {/* The line is keyed by the STATUS, so a move brings a new sentence in rather than

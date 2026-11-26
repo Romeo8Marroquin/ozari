@@ -814,6 +814,13 @@
             "description": "Revisa tu conexión e inténtalo de nuevo.",
             "retry": "Reintentar"
           },
+          "paid": "Pagado",
+          "progress": {
+            "aria": "Progreso del pedido",
+            "step": "Paso {{step}}",
+            "caption": "Paso {{step}} de {{total}}",
+            "outside": "Fuera del proceso"
+          },
           "state": {
             "title": "Estado del pedido",
             "next": "El siguiente paso es “{{status}}”.",

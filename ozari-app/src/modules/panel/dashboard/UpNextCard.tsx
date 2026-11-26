@@ -10,6 +10,7 @@ import MorphSwap from '@components/MorphSwap';
 import OpenInMapsButton from '@components/OpenInMapsButton';
 import { orderDestination } from '@utils/mapLinks';
 import ActionRow from '../ActionRow';
+import { OrderPaidEdge, OrderProgressRail } from '../orders/OrderCardRails';
 import { formatShortDate, formatTime, isSameLocalDay } from '../orders/orderDayGroups';
 import { statusTone } from '../orders/statusTone';
 import useOrderLifecycle, { isTravelStep } from '../orders/useOrderLifecycle';
@@ -122,7 +123,7 @@ const UpNextCard: React.FC<{
           onOpen(item);
         }
       }}
-      // The lead card is visually louder (a solid charcoal accent bar, a heavier surface) and the
+      // The lead card is visually louder (a firmer ring, a heavier surface, a larger name) and the
       // other two recede — the ranking has to be legible without reading a single word, because the
       // whole point of the queue is glanceability. Same hover grammar as the agenda ticket.
       className={`group relative flex cursor-pointer flex-col gap-3 overflow-hidden rounded-card bg-white p-4 outline-none transition-[translate,box-shadow] duration-300 ease-[var(--ease-settle)] hover:-translate-y-0.5 hover:shadow-[0_14px_34px_-20px_rgba(38,38,38,0.5)] hover:duration-150 hover:ease-[cubic-bezier(0.2,0,0,1)] active:translate-y-0 active:duration-75 focus-visible:ring-2 focus-visible:ring-charcoal/30 motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${
@@ -131,18 +132,15 @@ const UpNextCard: React.FC<{
           : 'ring-1 ring-black/[0.04]'
       }`}
     >
-      {/* The urgency rail: red once the event is late, brand gradient for the one in hand, quiet
-          otherwise. Colour is the ONLY thing that says "overdue" twice — the copy says it too. */}
-      <span
-        aria-hidden
-        className={`absolute inset-y-0 left-0 w-1.5 ${
-          item.event.isOverdue
-            ? 'bg-red-500'
-            : lead
-              ? 'bg-gradient-to-b from-cream to-blossom'
-              : 'bg-charcoal/10'
-        }`}
+      {/* The progress rail: how far along its pipeline the order is, in its status' colour — and
+          the whole rail in warning red once the event is late, still showing how far it got. The
+          lead card's emphasis is carried by its ring, shadow and type size, not by this rail. */}
+      <OrderProgressRail
+        progress={item.progress}
+        colorKey={item.status.colorKey}
+        overdue={item.event.isOverdue}
       />
+      <OrderPaidEdge isPaid={item.isPaid} />
 
       <div className="flex items-start justify-between gap-3 pl-2">
         <div className="min-w-0 flex-1">

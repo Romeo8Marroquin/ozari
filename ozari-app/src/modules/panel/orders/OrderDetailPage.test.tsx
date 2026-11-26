@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -280,6 +280,78 @@ beforeEach(() => {
 });
 
 describe('OrderDetailPage', () => {
+  it('carries the SAME progress + paid concept as the cards: a named stepper, the chip and the seam', () => {
+    // The catalog's mode-aware pipeline names the steps; the API's `progress` places the order.
+    const step = (id: number, name: string, sortOrder: number, appliesTo = 'ALL') => ({
+      id,
+      name,
+      sortOrder,
+      appliesTo,
+      isInitial: id === 1,
+      isDisruptive: false,
+      inventoryHold: 'NONE',
+      requiresEvidence: false,
+      minEvidence: 0,
+      maxEvidence: 0,
+    });
+    useOrdersCatalog.mockReturnValue({
+      data: {
+        serviceStatuses: [
+          step(1, 'Pendiente', 1),
+          step(5, 'En ruta', 2),
+          step(3, 'Entregado', 3),
+          step(4, 'Recolectado', 4, 'RENTAL'),
+          step(6, 'Listo', 5, 'RENTAL'),
+        ],
+      },
+    });
+    // A LIVE order arriving without `progress` (an older API mid-deploy — always a fresh load) draws
+    // no stepper at all, never an empty pipeline captioned "fuera del proceso" on an active order.
+    setOrder({ data: order() });
+    const first = renderPage();
+    expect(screen.queryByTestId('order-progress-stepper')).not.toBeInTheDocument();
+    first.unmount();
+
+    setOrder({ data: order({ progress: { step: 1, total: 5 }, isPaid: false }) });
+    const { rerender } = renderPage();
+
+    const stepper = screen.getByRole('list', { name: 'modules.panel.orders.detail.progress.aria' });
+    expect(within(stepper).getAllByRole('listitem')).toHaveLength(5);
+    expect(within(stepper).getByText('Pendiente').closest('li')).toHaveAttribute(
+      'aria-current',
+      'step',
+    );
+    expect(screen.getByTestId('order-paid-chip').dataset.paid).toBe('false');
+    expect(screen.getByTestId('order-paid-edge').dataset.paid).toBe('false');
+
+    // Paid + advanced: the chip opens, the seam fades in, the current step moves — same nodes.
+    setOrder({
+      data: order({
+        status: { id: 3, name: 'Entregado', colorKey: 'emerald' },
+        progress: { step: 3, total: 5 },
+        isPaid: true,
+      }),
+    });
+    rerender(page());
+    expect(within(stepper).getByText('Entregado').closest('li')).toHaveAttribute(
+      'aria-current',
+      'step',
+    );
+    expect(screen.getByTestId('order-paid-chip').dataset.paid).toBe('true');
+    expect(screen.getByTestId('order-paid-edge').dataset.paid).toBe('true');
+
+    // Cancelled on screen: the named pipeline stays, DRAINED, and says the order left the process.
+    setOrder({
+      data: order({
+        status: { id: 2, name: 'Cancelado', colorKey: 'red' },
+        cancelledAt: new Date('2026-07-20T10:00:00').toISOString(),
+      }),
+    });
+    rerender(page());
+    expect(screen.getByTestId('order-progress-stepper')).toBeInTheDocument();
+    expect(screen.getByText('modules.panel.orders.detail.progress.outside')).toBeInTheDocument();
+  });
+
   it('shows the whole order: client, logistics, lines, money and the trail', () => {
     setOrder({ data: order() });
     renderPage();

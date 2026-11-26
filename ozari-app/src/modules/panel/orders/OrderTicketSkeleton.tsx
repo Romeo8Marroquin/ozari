@@ -39,8 +39,11 @@ const OrderTicketSkeleton: React.FC = () => {
   return (
     <div
       aria-hidden
-      className="flex flex-col gap-3 rounded-card bg-white p-4 ring-1 ring-black/[0.04]"
+      // Same box as the ticket — including its wider left padding and the quiet empty track of its
+      // progress rail — so the swap from skeleton to card moves nothing.
+      className="relative flex flex-col gap-3 overflow-hidden rounded-card bg-white py-4 pl-6 pr-4 ring-1 ring-black/[0.04]"
     >
+      <span aria-hidden className="absolute inset-y-0 left-0 w-1.5 bg-charcoal/[0.07]" />
       {compact ? (
         <>
           <div className="flex items-start justify-between gap-3">
