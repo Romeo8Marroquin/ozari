@@ -57,6 +57,13 @@ export interface OrderAction {
   depositToCollect?: number;
 }
 
+/** `step` = 1-based position of the current status on the order's pipeline; `total` = how many steps
+ *  that pipeline has (`step === total` ⇒ the finish line). */
+export interface OrderProgress {
+  step: number;
+  total: number;
+}
+
 /** @see OrderAction.inventoryEffect */
 export type OrderInventoryEffect = 'release' | 'reclaim' | 'none';
 
@@ -84,6 +91,9 @@ export interface OrderListItem {
   /** The MODE-AWARE next pipeline step (a purchase-only order never walks the rental-only ones);
    *  absent once the order is finished or cancelled. Informational — permission lives in `actions`. */
   nextStatus?: OrderLookup;
+  /** Where the order stands on its OWN (mode-aware) pipeline — the cards' progress rail. Absent when
+   *  it sits outside the pipeline (cancelled). Counted by the API; never re-derived here. */
+  progress?: OrderProgress;
   /** Every move THIS user may make right now. Empty on another worker's order, on a finished one,
    *  or for a role without rights. */
   actions: OrderAction[];

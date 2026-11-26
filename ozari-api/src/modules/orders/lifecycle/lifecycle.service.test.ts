@@ -30,6 +30,7 @@ import {
   nextStatus,
   parseIntPreference,
   pipeline,
+  pipelineProgress,
   previousStatus,
   resolveStatusPath,
   resolveTransitions,
@@ -240,6 +241,45 @@ describe("nextStatus / previousStatus / isComplete", () => {
   it("the LAST rental step completes the order", () => {
     expect(isComplete(CATALOG, order({ serviceStatusId: 6 }))).toBe(true);
     expect(isComplete(CATALOG, order({ serviceStatusId: 4 }))).toBe(false);
+  });
+});
+
+describe("pipelineProgress", () => {
+  it("counts a RENTAL order's position on the full five-step pipeline", () => {
+    expect(pipelineProgress(CATALOG, order({ serviceStatusId: 1 }))).toEqual({ step: 1, total: 5 });
+    expect(pipelineProgress(CATALOG, order({ serviceStatusId: 3 }))).toEqual({ step: 3, total: 5 });
+    expect(pipelineProgress(CATALOG, order({ serviceStatusId: 6 }))).toEqual({ step: 5, total: 5 });
+  });
+
+  it("a purchase-only order counts only ITS steps — Entregado is its finish line", () => {
+    expect(
+      pipelineProgress(CATALOG, order({ serviceStatusId: 3, isRental: false, isSale: true })),
+    ).toEqual({ step: 3, total: 3 });
+  });
+
+  it("is null off the pipeline: cancelled, a disruptive status, an unknown or unpublished one", () => {
+    expect(
+      pipelineProgress(CATALOG, order({ serviceStatusId: 3, cancelledAt: NOW })),
+    ).toBeNull();
+    expect(pipelineProgress(CATALOG, order({ serviceStatusId: 2 }))).toBeNull();
+    expect(pipelineProgress(CATALOG, order({ serviceStatusId: 99 }))).toBeNull();
+    const retired = CATALOG.map((status) =>
+      status.id === 3 ? { ...status, isActive: false } : status,
+    );
+    expect(pipelineProgress(retired, order({ serviceStatusId: 3 }))).toBeNull();
+  });
+
+  it("re-scales when a step is added — the count is data, never a constant", () => {
+    const added: StatusDefinitionModel = {
+      ...statusOf(6),
+      id: 50,
+      name: "Inspeccionado",
+      sortOrder: 6,
+    };
+    expect(pipelineProgress([...CATALOG, added], order({ serviceStatusId: 6 }))).toEqual({
+      step: 5,
+      total: 6,
+    });
   });
 });
 

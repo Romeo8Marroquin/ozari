@@ -997,6 +997,21 @@ export const schemas: Record<string, Schema> = {
           "steps), or absent when the order is finished or cancelled. Informational — whether the " +
           "caller may take it is `actions`.",
       },
+      progress: {
+        type: "object",
+        nullable: true,
+        description:
+          "Where the order stands on its OWN (mode-aware) pipeline: `step` is the 1-based position " +
+          "of the current status, `total` the number of steps that pipeline has (`step === total` " +
+          "is the finish line — a purchase-only order counts only the steps that apply to it). " +
+          "Counted from the configured lifecycle, so adding a step re-scales it. Absent when the " +
+          "order sits outside the pipeline (cancelled, or on a status that no longer occupies a slot).",
+        required: ["step", "total"],
+        properties: {
+          step: { type: "integer", minimum: 1, example: 3 },
+          total: { type: "integer", minimum: 1, example: 5 },
+        },
+      },
       actions: {
         type: "array",
         description:

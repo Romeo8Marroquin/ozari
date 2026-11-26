@@ -353,6 +353,7 @@ describe("projectOrderListItem", () => {
     // A rental order in Pendiente: next is En ruta; the admin may advance, and cancel.
     const mine = projectOrderListItem(makeListRow(), makeProjectionContext());
     expect(mine.nextStatus).toEqual({ id: 5, name: "En ruta" });
+    expect(mine.progress).toEqual({ step: 1, total: 5 });
     expect(mine.actions.map((action) => action.kind)).toEqual([
       "forward",
       "disruptive",
@@ -378,6 +379,8 @@ describe("projectOrderListItem", () => {
       makeProjectionContext(),
     );
     expect(item.nextStatus).toBeUndefined();
+    // …and its progress reads as COMPLETE on its own three-step pipeline.
+    expect(item.progress).toEqual({ step: 3, total: 3 });
     expect(item.actions.map((action) => action.kind)).toEqual([
       "backward",
       "disruptive",
@@ -444,6 +447,7 @@ describe("projectOrderListItem", () => {
       makeProjectionContext(),
     );
     expect(item.nextStatus).toBeUndefined();
+    expect(item.progress).toBeUndefined();
     expect(item.actions).toEqual([]);
   });
 

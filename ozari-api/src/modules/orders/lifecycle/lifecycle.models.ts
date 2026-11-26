@@ -74,6 +74,17 @@ export interface InventoryHoldingsModel {
   sale: boolean;
 }
 
+/**
+ * Where an order stands on the pipeline IT walks (mode-aware: a purchase-only order counts only the
+ * steps that apply to it). `step` is the 1-based position of its current status, `total` how many
+ * steps that pipeline has — so `step === total` is the finish line. Counted from the data, so
+ * inserting or retiring a step re-scales every progress bar with no client change.
+ */
+export interface PipelineProgressModel {
+  step: number;
+  total: number;
+}
+
 /** WHO is attempting a transition. Extended (not replaced) as new flows land: a Client actor for
  *  self-service cancel, a System actor for jobs/auto-assign — each is a row in the permission
  *  matrix inside `canTransition`, never a second engine. */
